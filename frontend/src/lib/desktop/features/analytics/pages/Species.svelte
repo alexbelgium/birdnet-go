@@ -269,43 +269,41 @@
     filteredSpecies = filtered;
   }
 
-  // Compare two species by the active sort field, in ascending order, then flip
-  // the sign for descending. Mirrors the DetectionsList comparator approach.
   function compareSpecies(a: SpeciesData, b: SpeciesData): number {
-    let result = 0;
     switch (sortField) {
-      case 'species':
-        result = a.common_name.localeCompare(b.common_name);
-        break;
-      case 'count':
-        result = a.count - b.count;
-        break;
-      case 'avg_confidence':
-        result = a.avg_confidence - b.avg_confidence;
-        break;
-      case 'max_confidence':
-        result = a.max_confidence - b.max_confidence;
-        break;
+      case 'species': {
+        const cmp = a.common_name.localeCompare(b.common_name);
+        return sortDirection === 'asc' ? cmp : -cmp;
+      }
+      case 'count': {
+        const cmp = a.count - b.count;
+        return sortDirection === 'asc' ? cmp : -cmp;
+      }
+      case 'avg_confidence': {
+        const cmp = a.avg_confidence - b.avg_confidence;
+        return sortDirection === 'asc' ? cmp : -cmp;
+      }
+      case 'max_confidence': {
+        const cmp = a.max_confidence - b.max_confidence;
+        return sortDirection === 'asc' ? cmp : -cmp;
+      }
       case 'first_seen':
-        result = compareDateStrings(a.first_heard, b.first_heard);
-        break;
+        return compareDateStrings(a.first_heard, b.first_heard, sortDirection);
       case 'last_seen':
-        result = compareDateStrings(a.last_heard, b.last_heard);
-        break;
+        return compareDateStrings(a.last_heard, b.last_heard, sortDirection);
     }
-    return sortDirection === 'asc' ? result : -result;
   }
 
-  // Ascending date comparison. Unparseable/missing dates sort consistently after
-  // valid ones so the comparator stays transitive (returning 0 for them would
-  // make an empty row compare equal to every row and corrupt the ordering).
-  function compareDateStrings(a: string, b: string): number {
+  // Unparseable/missing dates always sort to the end regardless of direction so
+  // the comparator stays transitive. The valid-date comparison respects direction.
+  function compareDateStrings(a: string, b: string, dir: SortDirection): number {
     const timeA = parseLocalDateString(a)?.getTime() ?? null;
     const timeB = parseLocalDateString(b)?.getTime() ?? null;
     if (timeA === null && timeB === null) return 0;
     if (timeA === null) return 1;
     if (timeB === null) return -1;
-    return timeA - timeB;
+    const cmp = timeA - timeB;
+    return dir === 'asc' ? cmp : -cmp;
   }
 
   // Persist the current sort, sync the dropdown when representable, and re-sort.
