@@ -28,6 +28,8 @@
     onReset: () => void;
     onExport: () => void;
     onSearchInput: (_e: Event) => void;
+    /** Fired when the sort dropdown selection changes (keeps headers in sync). */
+    onSortChange?: (_value: string) => void;
   }
 
   let {
@@ -38,7 +40,12 @@
     onReset,
     onExport,
     onSearchInput,
+    onSortChange,
   }: Props = $props();
+
+  function handleSortChange(value: string | string[]) {
+    if (typeof value === 'string') onSortChange?.(value);
+  }
 
   const timePeriodOptions = [
     { value: 'all', label: t('analytics.timePeriodOptions.allTime') },
@@ -116,6 +123,7 @@
             variant="select"
             size="sm"
             menuSize="sm"
+            onChange={handleSortChange}
           />
         </FormField>
 

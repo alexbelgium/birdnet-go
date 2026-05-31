@@ -4,7 +4,9 @@
   import { downloadBlob } from '$lib/utils/fileHelpers';
   import { formatNumber, formatDateTime } from '$lib/utils/formatters';
   import { loggers } from '$lib/utils/logger';
+  import { getStoredValue, setStoredValue } from '$lib/utils/storage';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
+  import SortableHeader from '$lib/desktop/components/ui/SortableHeader.svelte';
   import { onMount } from 'svelte';
   import SpeciesFilterForm from '../components/forms/SpeciesFilterForm.svelte';
   import SpeciesDetailModal from '../components/modals/SpeciesDetailModal.svelte';
@@ -44,6 +46,92 @@
 
   type ViewMode = 'grid' | 'list';
 
+  // Sort state model — reuses the DetectionsList pattern of tracking the sort
+  // field and direction separately (simpler than the combined-string approach).
+  // The legacy combined `filters.sortOrder` is kept purely to drive the existing
+  // dropdown and is synced from this state when a matching option exists.
+  type SortField =
+    | 'species'
+    | 'count'
+    | 'avg_confidence'
+    | 'max_confidence'
+    | 'first_seen'
+    | 'last_seen';
+  type SortDirection = 'asc' | 'desc';
+
+  interface StoredSort {
+    field: SortField;
+    direction: SortDirection;
+  }
+
+  const SORT_STORAGE_KEY = 'birdnet-species-sort';
+  const DEFAULT_SORT: StoredSort = { field: 'count', direction: 'desc' };
+
+  const SORT_FIELDS: readonly SortField[] = [
+    'species',
+    'count',
+    'avg_confidence',
+    'max_confidence',
+    'first_seen',
+    'last_seen',
+  ];
+
+  function isSortField(value: unknown): value is SortField {
+    return typeof value === 'string' && SORT_FIELDS.includes(value as SortField);
+  }
+
+  function isSortDirection(value: unknown): value is SortDirection {
+    return value === 'asc' || value === 'desc';
+  }
+
+  function isStoredSort(value: unknown): value is StoredSort {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      isSortField((value as Record<string, unknown>).field) &&
+      isSortDirection((value as Record<string, unknown>).direction)
+    );
+  }
+
+  // Map the 8 dropdown values <-> { field, direction }. Only the combinations the
+  // dropdown can represent are mapped; header-only states (max confidence either
+  // direction, avg-confidence ascending, last-seen ascending) intentionally have
+  // no combo and leave the dropdown showing its previous value (partial sync).
+  function comboToFieldDir(combo: string): StoredSort | undefined {
+    switch (combo) {
+      case 'count_desc':
+        return { field: 'count', direction: 'desc' };
+      case 'count_asc':
+        return { field: 'count', direction: 'asc' };
+      case 'name_asc':
+        return { field: 'species', direction: 'asc' };
+      case 'name_desc':
+        return { field: 'species', direction: 'desc' };
+      case 'first_seen_desc':
+        return { field: 'first_seen', direction: 'desc' };
+      case 'first_seen_asc':
+        return { field: 'first_seen', direction: 'asc' };
+      case 'last_seen_desc':
+        return { field: 'last_seen', direction: 'desc' };
+      case 'confidence_desc':
+        return { field: 'avg_confidence', direction: 'desc' };
+      default:
+        return undefined;
+    }
+  }
+
+  function fieldDirToCombo(
+    field: SortField,
+    direction: SortDirection
+  ): SpeciesFilters['sortOrder'] | undefined {
+    if (field === 'count') return direction === 'desc' ? 'count_desc' : 'count_asc';
+    if (field === 'species') return direction === 'asc' ? 'name_asc' : 'name_desc';
+    if (field === 'first_seen') return direction === 'desc' ? 'first_seen_desc' : 'first_seen_asc';
+    if (field === 'last_seen') return direction === 'desc' ? 'last_seen_desc' : undefined;
+    if (field === 'avg_confidence') return direction === 'desc' ? 'confidence_desc' : undefined;
+    return undefined; // max_confidence has no dropdown option
+  }
+
   let isLoading = $state<boolean>(true);
   let speciesData = $state<SpeciesData[]>([]);
   let filteredSpecies = $state<SpeciesData[]>([]);
@@ -51,11 +139,17 @@
   let selectedSpecies = $state<SpeciesData | null>(null);
   let showDetailModal = $state(false);
 
+  // Restore persisted sort selection (field + direction is the source of truth).
+  const storedSort = getStoredValue<StoredSort>(SORT_STORAGE_KEY, DEFAULT_SORT, isStoredSort);
+  let sortField = $state<SortField>(storedSort.field);
+  let sortDirection = $state<SortDirection>(storedSort.direction);
+
   let filters = $state<SpeciesFilters>({
     timePeriod: 'all',
     startDate: '',
     endDate: '',
-    sortOrder: 'count_desc',
+    // Keep the dropdown in sync with the persisted sort when representable.
+    sortOrder: fieldDirToCombo(storedSort.field, storedSort.direction) ?? 'count_desc',
     searchTerm: '',
   });
 
@@ -169,50 +263,81 @@
       );
     }
 
-    // Apply sorting
-    switch (filters.sortOrder) {
-      case 'count_desc':
-        filtered.sort((a, b) => b.count - a.count);
-        break;
-      case 'count_asc':
-        filtered.sort((a, b) => a.count - b.count);
-        break;
-      case 'name_asc':
-        filtered.sort((a, b) => a.common_name.localeCompare(b.common_name));
-        break;
-      case 'name_desc':
-        filtered.sort((a, b) => b.common_name.localeCompare(a.common_name));
-        break;
-      case 'first_seen_desc':
-        filtered.sort((a, b) => {
-          const dateA = parseLocalDateString(a.first_heard);
-          const dateB = parseLocalDateString(b.first_heard);
-          if (!dateA || !dateB) return 0;
-          return dateB.getTime() - dateA.getTime();
-        });
-        break;
-      case 'first_seen_asc':
-        filtered.sort((a, b) => {
-          const dateA = parseLocalDateString(a.first_heard);
-          const dateB = parseLocalDateString(b.first_heard);
-          if (!dateA || !dateB) return 0;
-          return dateA.getTime() - dateB.getTime();
-        });
-        break;
-      case 'last_seen_desc':
-        filtered.sort((a, b) => {
-          const dateA = parseLocalDateString(a.last_heard);
-          const dateB = parseLocalDateString(b.last_heard);
-          if (!dateA || !dateB) return 0;
-          return dateB.getTime() - dateA.getTime();
-        });
-        break;
-      case 'confidence_desc':
-        filtered.sort((a, b) => b.avg_confidence - a.avg_confidence);
-        break;
-    }
+    // Apply sorting driven by the field + direction state.
+    filtered.sort(compareSpecies);
 
     filteredSpecies = filtered;
+  }
+
+  // Compare two species by the active sort field, in ascending order, then flip
+  // the sign for descending. Mirrors the DetectionsList comparator approach.
+  function compareSpecies(a: SpeciesData, b: SpeciesData): number {
+    let result = 0;
+    switch (sortField) {
+      case 'species':
+        result = a.common_name.localeCompare(b.common_name);
+        break;
+      case 'count':
+        result = a.count - b.count;
+        break;
+      case 'avg_confidence':
+        result = a.avg_confidence - b.avg_confidence;
+        break;
+      case 'max_confidence':
+        result = a.max_confidence - b.max_confidence;
+        break;
+      case 'first_seen':
+        result = compareDateStrings(a.first_heard, b.first_heard);
+        break;
+      case 'last_seen':
+        result = compareDateStrings(a.last_heard, b.last_heard);
+        break;
+    }
+    return sortDirection === 'asc' ? result : -result;
+  }
+
+  // Ascending date comparison. Unparseable/missing dates sort consistently after
+  // valid ones so the comparator stays transitive (returning 0 for them would
+  // make an empty row compare equal to every row and corrupt the ordering).
+  function compareDateStrings(a: string, b: string): number {
+    const timeA = parseLocalDateString(a)?.getTime() ?? null;
+    const timeB = parseLocalDateString(b)?.getTime() ?? null;
+    if (timeA === null && timeB === null) return 0;
+    if (timeA === null) return 1;
+    if (timeB === null) return -1;
+    return timeA - timeB;
+  }
+
+  // Persist the current sort, sync the dropdown when representable, and re-sort.
+  function applySort(field: SortField, direction: SortDirection) {
+    sortField = field;
+    sortDirection = direction;
+    setStoredValue<StoredSort>(SORT_STORAGE_KEY, { field, direction });
+
+    const combo = fieldDirToCombo(field, direction);
+    if (combo) filters.sortOrder = combo;
+
+    applyFilters();
+  }
+
+  // Header click: toggle direction when re-clicking the active column, otherwise
+  // apply the column's default direction (species A→Z, everything else high→low /
+  // most recent first).
+  function handleSort(field: string) {
+    if (!isSortField(field)) return;
+    let direction: SortDirection;
+    if (sortField === field) {
+      direction = sortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+      direction = field === 'species' ? 'asc' : 'desc';
+    }
+    applySort(field, direction);
+  }
+
+  // Dropdown change: map the selected combo back to field + direction and re-sort.
+  function handleSortOrderChange(value: string) {
+    const mapped = comboToFieldDir(value);
+    if (mapped) applySort(mapped.field, mapped.direction);
   }
 
   function getFilteredCount(): number {
@@ -247,6 +372,11 @@
     filters.timePeriod = 'all';
     filters.sortOrder = 'count_desc';
     filters.searchTerm = '';
+
+    // Reset the sort source-of-truth to the default and persist it.
+    sortField = DEFAULT_SORT.field;
+    sortDirection = DEFAULT_SORT.direction;
+    setStoredValue<StoredSort>(SORT_STORAGE_KEY, DEFAULT_SORT);
 
     const today = new Date();
     const lastMonth = new Date();
@@ -438,6 +568,7 @@
     onReset={resetFilters}
     onExport={exportData}
     onSearchInput={handleSearchInput}
+    onSortChange={handleSortOrderChange}
   />
 
   <!-- Species Grid/List -->
@@ -517,12 +648,48 @@
           <table class="table w-full hidden sm:table">
             <thead>
               <tr>
-                <th>{t('analytics.species.headers.species')}</th>
-                <th>{t('analytics.species.headers.detections')}</th>
-                <th>{t('analytics.species.headers.avgConfidence')}</th>
-                <th>{t('analytics.species.headers.maxConfidence')}</th>
-                <th>{t('analytics.species.headers.firstDetected')}</th>
-                <th>{t('analytics.species.headers.lastDetected')}</th>
+                <SortableHeader
+                  label={t('analytics.species.headers.species')}
+                  field="species"
+                  activeField={sortField}
+                  direction={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label={t('analytics.species.headers.detections')}
+                  field="count"
+                  activeField={sortField}
+                  direction={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label={t('analytics.species.headers.avgConfidence')}
+                  field="avg_confidence"
+                  activeField={sortField}
+                  direction={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label={t('analytics.species.headers.maxConfidence')}
+                  field="max_confidence"
+                  activeField={sortField}
+                  direction={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label={t('analytics.species.headers.firstDetected')}
+                  field="first_seen"
+                  activeField={sortField}
+                  direction={sortDirection}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label={t('analytics.species.headers.lastDetected')}
+                  field="last_seen"
+                  activeField={sortField}
+                  direction={sortDirection}
+                  onSort={handleSort}
+                />
               </tr>
             </thead>
             <tbody>

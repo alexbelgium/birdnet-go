@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { cleanup, waitFor } from '@testing-library/svelte';
+import { cleanup, waitFor, fireEvent } from '@testing-library/svelte';
 import { createComponentTestFactory } from '../../../../../test/render-helpers';
 import { setBasePath, resetBasePath } from '$lib/utils/urlHelpers';
 import Species from './Species.svelte';
@@ -124,5 +124,143 @@ describe('Species (analytics page)', () => {
     );
 
     expect(img.getAttribute('src')).toBe('/birdnet/api/v2/media/image/Cardinalis%20cardinalis');
+  });
+});
+
+const SORT_STORAGE_KEY = 'birdnet-species-sort';
+
+// Two species whose alphabetical order is the inverse of their detection count,
+// so each sort field/direction produces a distinguishable row order.
+const sortFixture: SpeciesSummary[] = [
+  {
+    common_name: 'Zebra Finch',
+    scientific_name: 'Taeniopygia guttata',
+    count: 50,
+    avg_confidence: 0.6,
+    max_confidence: 0.7,
+    first_heard: '2026-01-01',
+    last_heard: '2026-01-10',
+  },
+  {
+    common_name: 'American Robin',
+    scientific_name: 'Turdus migratorius',
+    count: 5,
+    avg_confidence: 0.9,
+    max_confidence: 0.95,
+    first_heard: '2026-03-01',
+    last_heard: '2026-05-20',
+  },
+];
+
+/** Read the common-name column from the rendered list-view table, in row order. */
+function rowNames(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('tbody tr')).map(tr => {
+    const cell = tr.querySelector('.font-bold');
+    if (!cell) return '';
+    return cell.textContent.trim();
+  });
+}
+
+/** Locate a sortable header button by field, failing loudly if it is missing. */
+function sortHeader(container: HTMLElement, field: string): HTMLElement {
+  const el = container.querySelector<HTMLElement>(`[data-testid="sort-${field}"]`);
+  if (!el) throw new Error(`sort header for "${field}" not found`);
+  return el;
+}
+
+/** Render, switch to list view, and wait until the table has rendered both rows. */
+async function renderSortableList() {
+  globalThis.fetch = mockFetchSequence({
+    '/api/v2/analytics/species/summary': () => sortFixture,
+    '/api/v2/analytics/species/thumbnails': () => ({}),
+  });
+
+  const result = speciesTest.render({});
+  const { container } = result;
+
+  // The sortable table only renders in list view; switch away from the grid.
+  // The test i18n stub returns translation keys verbatim, so match on the key.
+  const toListButton = await waitFor(() => {
+    const btn = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="analytics.species.switchToList"]'
+    );
+    if (!btn) throw new Error('list-view toggle not yet rendered');
+    return btn;
+  });
+  await fireEvent.click(toListButton);
+
+  await waitFor(() => {
+    if (rowNames(container).length < 2) throw new Error('rows not yet rendered');
+  });
+
+  return result;
+}
+
+describe('Species (analytics page) — sortable headers', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    cleanup();
+    resetBasePath();
+    globalThis.fetch = originalFetch;
+    localStorage.clear();
+  });
+
+  it('defaults to detection count descending', async () => {
+    const { container } = await renderSortableList();
+    // Zebra Finch (50) before American Robin (5).
+    expect(rowNames(container)).toEqual(['Zebra Finch', 'American Robin']);
+  });
+
+  it('sorts ascending A→Z on first click of the species header', async () => {
+    const { container } = await renderSortableList();
+
+    await fireEvent.click(sortHeader(container, 'species'));
+    await waitFor(() => {
+      expect(rowNames(container)).toEqual(['American Robin', 'Zebra Finch']);
+    });
+  });
+
+  it('toggles direction when the active header is clicked again', async () => {
+    const { container } = await renderSortableList();
+    const speciesHeader = sortHeader(container, 'species');
+
+    await fireEvent.click(speciesHeader); // asc
+    await waitFor(() => expect(rowNames(container)[0]).toBe('American Robin'));
+
+    await fireEvent.click(speciesHeader); // desc
+    await waitFor(() => expect(rowNames(container)[0]).toBe('Zebra Finch'));
+  });
+
+  it('defaults other columns to descending on first click', async () => {
+    const { container } = await renderSortableList();
+
+    // Avg confidence descending → American Robin (0.9) first.
+    await fireEvent.click(sortHeader(container, 'avg_confidence'));
+    await waitFor(() => {
+      expect(rowNames(container)).toEqual(['American Robin', 'Zebra Finch']);
+    });
+  });
+
+  it('persists the selected sort to localStorage', async () => {
+    const { container } = await renderSortableList();
+
+    await fireEvent.click(sortHeader(container, 'max_confidence'));
+    await waitFor(() => {
+      const stored = localStorage.getItem(SORT_STORAGE_KEY);
+      expect(stored).not.toBeNull();
+      expect(JSON.parse(stored as string)).toEqual({
+        field: 'max_confidence',
+        direction: 'desc',
+      });
+    });
+  });
+
+  it('restores the persisted sort on load', async () => {
+    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ field: 'species', direction: 'asc' }));
+
+    const { container } = await renderSortableList();
+    // Persisted species-ascending should win over the count-desc default.
+    expect(rowNames(container)).toEqual(['American Robin', 'Zebra Finch']);
   });
 });
