@@ -116,53 +116,6 @@ func TestParseTelegramShoutrrrURLs(t *testing.T) {
 	}
 }
 
-func TestUpsizeAviCommonsURL(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "320px AviCommons URL",
-			input: "https://static.avicommons.org/norcar-12345-320.jpg",
-			want:  "https://static.avicommons.org/norcar-12345-900.jpg",
-		},
-		{
-			name:  "already 900px",
-			input: "https://static.avicommons.org/norcar-12345-900.jpg",
-			want:  "https://static.avicommons.org/norcar-12345-900.jpg",
-		},
-		{
-			name:  "240px AviCommons URL",
-			input: "https://static.avicommons.org/norcar-12345-240.jpg",
-			want:  "https://static.avicommons.org/norcar-12345-900.jpg",
-		},
-		{
-			name:  "Wikimedia URL unchanged",
-			input: "https://upload.wikimedia.org/wikipedia/commons/thumb/abc.jpg/320px-abc.jpg",
-			want:  "https://upload.wikimedia.org/wikipedia/commons/thumb/abc.jpg/320px-abc.jpg",
-		},
-		{
-			name:  "unknown URL unchanged",
-			input: "https://example.com/bird.jpg",
-			want:  "https://example.com/bird.jpg",
-		},
-		{
-			name:  "empty string unchanged",
-			input: "",
-			want:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := upsizeAviCommonsURL(tt.input)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
 
 func TestBuildTelegramCaption(t *testing.T) {
 	t.Parallel()
@@ -229,9 +182,9 @@ func TestExtractPublicImageURL(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "AviCommons URL returned and upscaled",
+			name:     "AviCommons URL returned",
 			metadata: map[string]any{"bg_image_url": "https://static.avicommons.org/norcar-123-320.jpg"},
-			want:     "https://static.avicommons.org/norcar-123-900.jpg",
+			want:     "https://static.avicommons.org/norcar-123-320.jpg",
 		},
 		{
 			name:     "external HTTPS URL passed through",
@@ -299,7 +252,7 @@ func TestShoutrrrProvider_SendPhoto_WithTelegramURL(t *testing.T) {
 
 	req := handler.requests[0]
 	assert.Contains(t, req.path, "/sendPhoto")
-	assert.Contains(t, req.values["photo"], "-900.jpg", "image should be upscaled to 900px")
+	assert.Contains(t, req.values["photo"], "spofly-12345")
 	assert.Equal(t, "-1001234567890", req.values["chat_id"])
 	assert.Equal(t, "HTML", req.values["parse_mode"])
 	assert.Contains(t, req.values["caption"], "Spotted")
