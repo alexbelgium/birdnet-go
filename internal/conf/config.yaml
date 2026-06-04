@@ -492,6 +492,11 @@ notification:
       burst_size: 10           # Maximum burst capacity for spikes
 
     providers:
+      # Telegram notifications with full-size embedded bird photos.
+      # When a bird image is available, sends via Telegram sendPhoto API
+      # (embedded photo + caption) instead of plain text. Falls back to
+      # text-only when no image is available. AviCommons images are
+      # automatically upscaled from 320px to 900px.
       - type: shoutrrr
         enabled: false
         name: "telegram-alerts"
