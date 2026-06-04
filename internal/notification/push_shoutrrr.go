@@ -12,6 +12,7 @@ import (
 	router "github.com/nicholas-fedor/shoutrrr/pkg/router"
 	stypes "github.com/nicholas-fedor/shoutrrr/pkg/types"
 	"github.com/tphakala/birdnet-go/internal/errors"
+	"github.com/tphakala/birdnet-go/internal/httpclient"
 	"github.com/tphakala/birdnet-go/internal/privacy"
 )
 
@@ -21,22 +22,34 @@ const shoutrrrDefaultTimeout = 30 * time.Second
 
 // ShoutrrrProvider sends via nicholas-fedor/shoutrrr
 // Creates a single sender for multiple URLs.
+//
+// When Telegram URLs are present in the URL list, the provider automatically
+// enhances delivery by using Telegram's sendPhoto API (with the bird image from
+// notification metadata) instead of the plain-text sendMessage that Shoutrrr
+// normally uses. This produces full-size embedded photos in Telegram chats.
+// Falls back to Shoutrrr's text-only send when no image URL is available.
 type ShoutrrrProvider struct {
-	name    string
-	enabled bool
-	urls    []string
-	types   map[string]bool
-	sender  *router.ServiceRouter
-	timeout time.Duration
+	name           string
+	enabled        bool
+	urls           []string
+	types          map[string]bool
+	sender         *router.ServiceRouter
+	timeout        time.Duration
+	telegramChats  []parsedTelegramChat // parsed from Telegram URLs; nil for non-Telegram configs
+	telegramClient *httpclient.Client   // HTTP client for direct Telegram API calls
+	// telegramAPIBase is the Telegram Bot API base URL.
+	// Override in tests to point at a mock server.
+	telegramAPIBase string
 }
 
 func NewShoutrrrProvider(name string, enabled bool, urls, supportedTypes []string, timeout time.Duration) *ShoutrrrProvider {
 	sp := &ShoutrrrProvider{
-		name:    strings.TrimSpace(name),
-		enabled: enabled,
-		urls:    slices.Clone(urls),
-		types:   map[string]bool{},
-		timeout: timeout,
+		name:            strings.TrimSpace(name),
+		enabled:         enabled,
+		urls:            slices.Clone(urls),
+		types:           map[string]bool{},
+		timeout:         timeout,
+		telegramAPIBase: telegramAPIBase,
 	}
 	if sp.name == "" {
 		sp.name = "shoutrrr"
@@ -52,6 +65,13 @@ func NewShoutrrrProvider(name string, enabled bool, urls, supportedTypes []strin
 			sp.types[t] = true
 		}
 	}
+
+	// Parse Telegram URLs for photo-send support.
+	if chats := parseTelegramShoutrrrURLs(urls); len(chats) > 0 {
+		sp.telegramChats = chats
+		sp.telegramClient = newTelegramHTTPClient(timeout)
+	}
+
 	return sp
 }
 
@@ -84,10 +104,36 @@ func (s *ShoutrrrProvider) ValidateConfig() error {
 }
 
 func (s *ShoutrrrProvider) Send(ctx context.Context, n *Notification) error {
+	// When Telegram URLs are configured, send a photo when an image URL is available.
+	// This produces embedded photos in Telegram rather than plain-text link previews.
+	if len(s.telegramChats) > 0 {
+		if imgURL := extractPublicImageURL(n); imgURL != "" {
+			return s.sendTelegramPhotos(ctx, n, imgURL)
+		}
+	}
+	// Fall back to Shoutrrr text delivery for non-Telegram URLs or when no image URL.
+	return s.sendViaShoutrrr(n)
+}
+
+// sendTelegramPhotos sends a photo with caption to every configured Telegram chat.
+func (s *ShoutrrrProvider) sendTelegramPhotos(ctx context.Context, n *Notification, imgURL string) error {
+	caption := buildTelegramCaption(n)
+	var firstErr error
+	for _, chat := range s.telegramChats {
+		err := sendTelegramPhoto(ctx, s.telegramClient, s.telegramAPIBase, chat.token, chat.chatID, imgURL, caption)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// sendViaShoutrrr delivers the notification as a plain text message through the
+// Shoutrrr router. Used when no image URL is available or for non-Telegram URLs.
+func (s *ShoutrrrProvider) sendViaShoutrrr(n *Notification) error {
 	if s.sender == nil {
 		return errors.Newf("shoutrrr sender not initialized").Component("notification").Category(errors.CategoryIntegration).Build()
 	}
-	_ = ctx // router handles its own timeouts
 
 	body := n.Message
 	params := stypes.Params{}
