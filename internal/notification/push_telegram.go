@@ -18,8 +18,6 @@ import (
 const (
 	telegramAPIBase         = "https://api.telegram.org"
 	telegramCaptionMaxBytes = 1024
-	avicommonsHost          = "https://static.avicommons.org/"
-	avicommonsLargeSize     = "-900.jpg"
 )
 
 // telegramResponse is the minimal Telegram Bot API response envelope.
@@ -82,15 +80,6 @@ func sendTelegramPhoto(ctx context.Context, client *httpclient.Client, apiBase, 
 		"chat_id":    {chatID},
 		"photo":      {photoURL},
 		"caption":    {caption},
-		"parse_mode": {"HTML"},
-	})
-}
-
-// sendTelegramMessage sends a text message to a single Telegram chat using sendMessage.
-func sendTelegramMessage(ctx context.Context, client *httpclient.Client, apiBase, token, chatID, text string) error {
-	return callTelegramAPI(ctx, client, apiBase, token, "sendMessage", url.Values{
-		"chat_id":    {chatID},
-		"text":       {text},
 		"parse_mode": {"HTML"},
 	})
 }
@@ -165,21 +154,6 @@ func extractPublicImageURL(n *Notification) string {
 	if host == "localhost" || strings.HasPrefix(host, "127.") {
 		return ""
 	}
-	return upsizeAviCommonsURL(imgURL)
-}
-
-// upsizeAviCommonsURL replaces the size suffix in AviCommons URLs from whatever size
-// is present to 900px for better image quality in Telegram messages.
-// Returns other URLs unchanged.
-func upsizeAviCommonsURL(imgURL string) string {
-	if !strings.HasPrefix(imgURL, avicommonsHost) {
-		return imgURL
-	}
-	// AviCommons pattern: https://static.avicommons.org/<code>-<key>-<size>.jpg
-	// Replace everything after the last '-' with avicommonsLargeSize.
-	if idx := strings.LastIndex(imgURL, "-"); idx > len(avicommonsHost) {
-		return imgURL[:idx] + avicommonsLargeSize
-	}
 	return imgURL
 }
 
@@ -212,19 +186,6 @@ func buildTelegramCaption(n *Notification) string {
 		caption = string(runes) + "…"
 	}
 	return caption
-}
-
-// buildTelegramText builds the plain text (sendMessage fallback) from the notification.
-func buildTelegramText(n *Notification) string {
-	var sb strings.Builder
-	sb.WriteString("<b>")
-	sb.WriteString(htmlEscape(n.Title))
-	sb.WriteString("</b>")
-	if msg := strings.TrimSpace(n.Message); msg != "" {
-		sb.WriteString("\n")
-		sb.WriteString(htmlEscape(msg))
-	}
-	return sb.String()
 }
 
 // htmlEscape escapes the five HTML special characters required by Telegram HTML parse mode.
