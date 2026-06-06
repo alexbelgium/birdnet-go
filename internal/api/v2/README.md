@@ -86,6 +86,7 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | ------ | ------------------------------------- | -------------------------- | ---- | ---------------------------------- |
 | GET    | `/analytics/species/daily`            | `GetDailySpeciesSummary`   | ❌   | Daily species detection summary    |
 | GET    | `/analytics/species/summary`          | `GetSpeciesSummary`        | ❌   | Overall species statistics         |
+| GET    | `/analytics/species/review-stats`     | `GetSpeciesReviewStats`    | ✅   | Per-species confirmed/rejected review counts (management view) |
 | GET    | `/analytics/species/detections/new`   | `GetNewSpeciesDetections`  | ❌   | Recently detected new species      |
 | GET    | `/analytics/species/thumbnails`       | `GetSpeciesThumbnails`     | ❌   | Species thumbnail images           |
 | GET    | `/analytics/time/hourly`              | `GetHourlyAnalytics`       | ❌   | Hourly detection patterns          |
@@ -125,6 +126,7 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | POST   | `/detections/:id/lock`        | `LockDetection`         | ✅   | Lock detection from changes                |
 | POST   | `/detections/ignore`          | `IgnoreSpecies`         | ✅   | Toggle species in ignore list (add/remove) |
 | GET    | `/detections/ignored`         | `GetExcludedSpecies`    | ✅   | Get list of excluded species               |
+| POST   | `/detections/species/delete`  | `DeleteSpeciesDetections` | ✅ | Delete every detection of a species (by scientific name) + files |
 | POST   | `/detections/batch/delete`    | `BatchDeleteDetections` | ✅   | Bulk delete detections by ID               |
 | POST   | `/detections/batch/review`    | `BatchReviewDetections` | ✅   | Bulk set verification status               |
 | POST   | `/detections/batch/lock`      | `BatchLockDetections`   | ✅   | Bulk lock or unlock detections             |

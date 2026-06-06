@@ -1618,6 +1618,7 @@
       "speciesList": "Soorten lijst",
       "switchToGrid": "Wissel naar tegel overzicht",
       "switchToList": "Wissel naar lijst overzicht",
+      "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "Geen soorten gevonden voor jouw filters.",
       "headers": {
         "species": "Soort",
@@ -1625,7 +1626,21 @@
         "avgConfidence": "Gem. betrouwbaarheid",
         "maxConfidence": "Max. betrouwbaarheid",
         "firstDetected": "Eerst gehoord",
-        "lastDetected": "Laatst gehoord"
+        "lastDetected": "Laatst gehoord",
+        "reviewRatio": "Confirmed / Rejected",
+        "actions": "Actions"
+      },
+      "manage": {
+        "noReviews": "No detections of this species have been manually reviewed yet",
+        "noReviewsShort": "Not reviewed",
+        "reviewCounts": "{verified} confirmed, {rejected} rejected",
+        "deleteSpecies": "Delete all detections of {species}",
+        "confirmDeleteTitle": "Delete {species}?",
+        "confirmDeleteMessage": "This will permanently delete all {count} detections of {species}, including their audio clips and spectrogram images. Locked detections are kept. This cannot be undone.",
+        "deleteSuccess": "Deleted {deleted} detections of {species}",
+        "deletePartial": "Deleted {deleted} detections of {species}; {skipped} locked detection(s) were skipped",
+        "deleteError": "Failed to delete {species}",
+        "statsError": "Failed to load review statistics"
       },
       "card": {
         "detections": "Aantal herkend:",

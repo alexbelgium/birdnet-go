@@ -158,6 +158,7 @@ func (c *Controller) initDetectionRoutes() {
 	detectionGroup.POST("/:id/lock", c.LockDetection)
 	detectionGroup.POST("/ignore", c.IgnoreSpecies)
 	detectionGroup.GET("/ignored", c.GetExcludedSpecies)
+	detectionGroup.POST("/species/delete", c.DeleteSpeciesDetections)
 
 	// Batch operation endpoints
 	batchGroup := detectionGroup.Group("/batch")
@@ -1266,6 +1267,64 @@ func (c *Controller) DeleteDetection(ctx echo.Context) error {
 	}
 
 	return ctx.NoContent(http.StatusNoContent)
+}
+
+// DeleteSpeciesRequest is the request body for deleting every detection of a species.
+type DeleteSpeciesRequest struct {
+	ScientificName string `json:"scientific_name"`
+}
+
+// DeleteSpeciesResult reports the outcome of a whole-species deletion.
+type DeleteSpeciesResult struct {
+	ScientificName string `json:"scientific_name"`
+	Deleted        int    `json:"deleted"`
+	Skipped        int    `json:"skipped"`
+}
+
+// DeleteSpeciesDetections deletes every detection for a given scientific name along with
+// the associated audio and spectrogram files. It is intended for removing a mislabeled
+// species in one action. Locked detections are skipped and reported in the response. The
+// species is identified by scientific name in the request body (rather than a path
+// parameter) to avoid URL-encoding issues with the spaces in binomial names.
+func (c *Controller) DeleteSpeciesDetections(ctx echo.Context) error {
+	manager, ok := c.DS.(datastore.SpeciesManager)
+	if !ok {
+		return c.HandleError(ctx, fmt.Errorf("species management not supported by datastore"),
+			"Species management is not available for this database", http.StatusNotImplemented)
+	}
+
+	var req DeleteSpeciesRequest
+	if err := ctx.Bind(&req); err != nil {
+		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
+	}
+	scientificName := strings.TrimSpace(req.ScientificName)
+	if scientificName == "" {
+		return c.HandleError(ctx, fmt.Errorf("scientific_name is required"),
+			"Species name is required", http.StatusBadRequest)
+	}
+
+	ids, err := manager.GetSpeciesNoteIDs(scientificName)
+	if err != nil {
+		return c.HandleError(ctx, err, "Failed to list species detections", http.StatusInternalServerError)
+	}
+	if len(ids) == 0 {
+		return c.HandleError(ctx, fmt.Errorf("no detections for species %q", scientificName),
+			"No detections found for species", http.StatusNotFound)
+	}
+
+	result := c.deleteDetectionIDs(ids)
+	c.invalidateDetectionCache()
+
+	c.logInfoIfEnabled("Deleted species detections",
+		logger.String("scientific_name", scientificName),
+		logger.Int("deleted", result.Processed),
+		logger.Int("skipped", result.Skipped))
+
+	return ctx.JSON(http.StatusOK, DeleteSpeciesResult{
+		ScientificName: scientificName,
+		Deleted:        result.Processed,
+		Skipped:        result.Skipped,
+	})
 }
 
 // spectrogramWidths lists all valid spectrogram widths used for file naming.

@@ -231,6 +231,16 @@ type DetectionRepository interface {
 	// modelID is optional; pass nil to include all models.
 	GetSpeciesSummary(ctx context.Context, start, end int64, modelID *uint) ([]SpeciesSummaryData, error)
 
+	// GetSpeciesReviewStats returns per-species detection totals plus manual review
+	// (confirmed/rejected) counts across all detections and all time. Unlike
+	// GetSpeciesSummary it does NOT exclude false positives, so species whose detections
+	// were all rejected are still reported (the prime candidates for bulk deletion).
+	GetSpeciesReviewStats(ctx context.Context) ([]SpeciesReviewStatsData, error)
+
+	// GetDetectionIDsByLabelIDs returns the IDs of every detection whose label_id is in
+	// labelIDs. Used to enumerate all detections of a species for bulk operations.
+	GetDetectionIDsByLabelIDs(ctx context.Context, labelIDs []uint) ([]uint, error)
+
 	// GetHourlyDistribution returns detection counts by hour.
 	// labelID and modelID are optional filters.
 	GetHourlyDistribution(ctx context.Context, start, end int64, labelID, modelID *uint) ([]HourlyDistributionData, error)
