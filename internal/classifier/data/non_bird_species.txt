@@ -1,0 +1,124 @@
+# Non-bird species common name mappings for Perch v2 multi-taxa classifier.
+# Format: ScientificName_CommonName (same as BirdNET label files).
+# Used as a fallback resolver for species not covered by BirdNET labels.
+
+# Mammals - Canids
+Vulpes vulpes_Red Fox
+Canis lupus_Gray Wolf
+Canis latrans_Coyote
+Nyctereutes procyonoides_Raccoon Dog
+
+# Mammals - Felids
+Felis silvestris_Wildcat
+Lynx lynx_Eurasian Lynx
+Lynx rufus_Bobcat
+Puma concolor_Mountain Lion
+
+# Mammals - Cervids
+Cervus elaphus_Red Deer
+Cervus canadensis_Elk
+Capreolus capreolus_Roe Deer
+Alces alces_Moose
+Rangifer tarandus_Reindeer
+Dama dama_Fallow Deer
+
+# Mammals - Bovids & Suids
+Sus scrofa_Wild Boar
+Bos taurus_Domestic Cattle
+Ovis aries_Domestic Sheep
+Capra hircus_Domestic Goat
+Rupicapra rupicapra_Chamois
+
+# Mammals - Mustelids
+Meles meles_Eurasian Badger
+Taxidea taxus_American Badger
+Martes martes_European Pine Marten
+Martes foina_Stone Marten
+Mustela putorius_European Polecat
+Mustela erminea_Stoat
+Mustela nivalis_Least Weasel
+Lutra lutra_Eurasian Otter
+Lontra canadensis_North American River Otter
+Mephitis mephitis_Striped Skunk
+
+# Mammals - Bears & Procyonids
+Ursus arctos_Brown Bear
+Ursus americanus_American Black Bear
+Procyon lotor_Common Raccoon
+
+# Mammals - Lagomorphs
+Lepus europaeus_European Hare
+Lepus americanus_Snowshoe Hare
+Lepus timidus_Mountain Hare
+Oryctolagus cuniculus_European Rabbit
+Sylvilagus floridanus_Eastern Cottontail
+
+# Mammals - Rodents
+Sciurus vulgaris_Eurasian Red Squirrel
+Sciurus carolinensis_Eastern Gray Squirrel
+Tamias striatus_Eastern Chipmunk
+Castor fiber_Eurasian Beaver
+Castor canadensis_American Beaver
+Ondatra zibethicus_Muskrat
+Myocastor coypus_Coypu
+Rattus norvegicus_Brown Rat
+Mus musculus_House Mouse
+
+# Mammals - Other
+Erinaceus europaeus_Western European Hedgehog
+Talpa europaea_European Mole
+Sorex araneus_Common Shrew
+Equus caballus_Domestic Horse
+Equus asinus_Domestic Donkey
+
+# Amphibians - Frogs & Toads (Europe)
+Rana temporaria_Common Frog
+Rana arvalis_Moor Frog
+Rana dalmatina_Agile Frog
+Rana latastei_Italian Agile Frog
+Pelophylax ridibundus_Marsh Frog
+Pelophylax esculentus_Edible Frog
+Pelophylax lessonae_Pool Frog
+Bufo bufo_Common Toad
+Bufo spinosus_Spined Toad
+Epidalea calamita_Natterjack Toad
+Hyla arborea_European Tree Frog
+Pelobates fuscus_Common Spadefoot
+Bombina bombina_Fire-bellied Toad
+Bombina variegata_Yellow-bellied Toad
+Alytes obstetricans_Common Midwife Toad
+
+# Amphibians - Frogs & Toads (North America)
+Lithobates catesbeianus_American Bullfrog
+Lithobates clamitans_Green Frog
+Lithobates pipiens_Northern Leopard Frog
+Lithobates sylvaticus_Wood Frog
+Anaxyrus americanus_American Toad
+Anaxyrus woodhousii_Woodhouse's Toad
+Hyla versicolor_Gray Tree Frog
+Hyla chrysoscelis_Cope's Gray Tree Frog
+Pseudacris crucifer_Spring Peeper
+Pseudacris regilla_Pacific Tree Frog
+Pseudacris triseriata_Western Chorus Frog
+Acris crepitans_Eastern Cricket Frog
+
+# Amphibians - Salamanders
+Salamandra salamandra_Fire Salamander
+Triturus cristatus_Great Crested Newt
+Lissotriton vulgaris_Smooth Newt
+Ambystoma maculatum_Spotted Salamander
+Ambystoma tigrinum_Tiger Salamander
+Plethodon cinereus_Eastern Red-backed Salamander
+
+# Insects - Orthoptera
+Gryllus campestris_Field Cricket
+Gryllus bimaculatus_Southern Field Cricket
+Gryllotalpa gryllotalpa_European Mole Cricket
+Tettigonia viridissima_Great Green Bush-cricket
+Decticus verrucivorus_Wart-biter
+Acheta domesticus_House Cricket
+
+# Insects - Cicadas
+Lyristes plebejus_Common Cicada
+Cicada orni_Cicada
+Tibicina haematodes_Scarlet Cicada

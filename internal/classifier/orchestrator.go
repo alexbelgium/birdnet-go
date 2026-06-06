@@ -116,7 +116,7 @@ func NewOrchestrator(settings *conf.Settings) (*Orchestrator, error) {
 		TaxonomyMap:     bn.TaxonomyMap,
 		TaxonomyPath:    bn.TaxonomyPath,
 		ScientificIndex: bn.ScientificIndex,
-		nameResolvers:   []NameResolver{resolver},
+		nameResolvers:   []NameResolver{resolver, newNonBirdSpeciesResolver()},
 		models: map[string]*modelEntry{
 			bn.ModelInfo.ID: {instance: bn},
 		},

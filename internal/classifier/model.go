@@ -84,7 +84,7 @@ type ModelInstance interface {
 }
 
 // NameResolver resolves scientific names to common names.
-// Implementations form a chain: BirdNET labels (in-memory) → database/external (future).
+// Implementations form a chain: BirdNET labels → non-bird species → taxonomy.csv.
 type NameResolver interface {
 	Resolve(scientificName, locale string) string
 }
