@@ -172,9 +172,10 @@ func (c *Controller) initAnalyticsRoutes() {
 	speciesGroup.GET("/daily", c.GetDailySpeciesSummary)
 	speciesGroup.GET("/daily/batch", c.GetBatchDailySpeciesSummary) // Batch daily summaries endpoint
 	speciesGroup.GET("/summary", c.GetSpeciesSummary)
-	speciesGroup.GET("/detections/new", c.GetNewSpeciesDetections) // Renamed endpoint
-	speciesGroup.GET("/thumbnails", c.GetSpeciesThumbnails)        // Batch thumbnail endpoint
-	speciesGroup.GET("/diversity", c.GetSpeciesDiversity)          // Species diversity over time
+	speciesGroup.GET("/review-stats", c.GetSpeciesReviewStats, c.authMiddleware) // Per-species confirmed/rejected counts (management view)
+	speciesGroup.GET("/detections/new", c.GetNewSpeciesDetections)               // Renamed endpoint
+	speciesGroup.GET("/thumbnails", c.GetSpeciesThumbnails)                      // Batch thumbnail endpoint
+	speciesGroup.GET("/diversity", c.GetSpeciesDiversity)                        // Species diversity over time
 
 	// Time analytics routes (can be implemented later)
 	timeGroup := analyticsGroup.Group("/time")
@@ -687,6 +688,25 @@ func (c *Controller) GetSpeciesSummary(ctx echo.Context) error {
 	)
 
 	return ctx.JSON(http.StatusOK, response)
+}
+
+// GetSpeciesReviewStats handles GET /api/v2/analytics/species/review-stats.
+// It returns per-species detection totals and manual review (confirmed/rejected) counts,
+// including species whose detections were all rejected. These power the species
+// management view's confirmed/rejected column and the delete confirmation count.
+func (c *Controller) GetSpeciesReviewStats(ctx echo.Context) error {
+	manager, ok := c.DS.(datastore.SpeciesManager)
+	if !ok {
+		return c.HandleError(ctx, fmt.Errorf("species management not supported by datastore"),
+			"Species management is not available for this database", http.StatusNotImplemented)
+	}
+
+	stats, err := manager.GetSpeciesReviewStats(ctx.Request().Context())
+	if err != nil {
+		return c.HandleError(ctx, err, "Failed to get species review stats", http.StatusInternalServerError)
+	}
+
+	return ctx.JSON(http.StatusOK, stats)
 }
 
 // fetchSpeciesSummaryData fetches species summary data with timing

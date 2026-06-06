@@ -1770,6 +1770,7 @@
       "speciesList": "Liste des espèces",
       "switchToGrid": "Passer à la vue en grille",
       "switchToList": "Passer à la vue en liste",
+      "switchToManage": "Gérer les espèces (vérifier et supprimer)",
       "noSpeciesFound": "Aucune espèce trouvée correspondant à vos filtres.",
       "headers": {
         "species": "Espèce",
@@ -1777,7 +1778,21 @@
         "avgConfidence": "Confiance moy.",
         "maxConfidence": "Confiance max.",
         "firstDetected": "Première détection",
-        "lastDetected": "Dernière détection"
+        "lastDetected": "Dernière détection",
+        "reviewRatio": "Confirmées / Rejetées",
+        "actions": "Actions"
+      },
+      "manage": {
+        "noReviews": "Aucune détection de cette espèce n'a encore été vérifiée manuellement",
+        "noReviewsShort": "Non vérifiée",
+        "reviewCounts": "{verified} confirmées, {rejected} rejetées",
+        "deleteSpecies": "Supprimer toutes les détections de {species}",
+        "confirmDeleteTitle": "Supprimer {species} ?",
+        "confirmDeleteMessage": "Cela supprimera définitivement les {count} détections de {species}, y compris leurs extraits audio et spectrogrammes. Les détections verrouillées sont conservées. Cette action est irréversible.",
+        "deleteSuccess": "{deleted} détections de {species} supprimées",
+        "deletePartial": "{deleted} détections de {species} supprimées ; {skipped} détection(s) verrouillée(s) ignorée(s)",
+        "deleteError": "Échec de la suppression de {species}",
+        "statsError": "Échec du chargement des statistiques de vérification"
       },
       "card": {
         "detections": "Détections :",

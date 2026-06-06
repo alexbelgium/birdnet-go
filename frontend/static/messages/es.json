@@ -1770,6 +1770,7 @@
       "speciesList": "Lista de especies",
       "switchToGrid": "Cambiar a vista de cuadrícula",
       "switchToList": "Cambiar a vista de lista",
+      "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "No se encontraron especies que coincidan con tus filtros.",
       "headers": {
         "species": "Especie",
@@ -1777,7 +1778,21 @@
         "avgConfidence": "Confianza prom.",
         "maxConfidence": "Confianza máx.",
         "firstDetected": "Primera detección",
-        "lastDetected": "Última detección"
+        "lastDetected": "Última detección",
+        "reviewRatio": "Confirmed / Rejected",
+        "actions": "Actions"
+      },
+      "manage": {
+        "noReviews": "No detections of this species have been manually reviewed yet",
+        "noReviewsShort": "Not reviewed",
+        "reviewCounts": "{verified} confirmed, {rejected} rejected",
+        "deleteSpecies": "Delete all detections of {species}",
+        "confirmDeleteTitle": "Delete {species}?",
+        "confirmDeleteMessage": "This will permanently delete all {count} detections of {species}, including their audio clips and spectrogram images. Locked detections are kept. This cannot be undone.",
+        "deleteSuccess": "Deleted {deleted} detections of {species}",
+        "deletePartial": "Deleted {deleted} detections of {species}; {skipped} locked detection(s) were skipped",
+        "deleteError": "Failed to delete {species}",
+        "statsError": "Failed to load review statistics"
       },
       "card": {
         "detections": "Detecciones:",

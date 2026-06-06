@@ -9,11 +9,16 @@
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { onMount, onDestroy } from 'svelte';
   import SortableHeader from '$lib/desktop/components/ui/SortableHeader.svelte';
+  import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
   import SpeciesFilterForm from '../components/forms/SpeciesFilterForm.svelte';
   import SpeciesDetailModal from '../components/modals/SpeciesDetailModal.svelte';
   import SpeciesCard from '../components/ui/SpeciesCard.svelte';
   import SpeciesCardMobile from '../components/ui/SpeciesCardMobile.svelte';
   import StatCard from '../components/ui/StatCard.svelte';
+  import { Lock, Trash2 } from '@lucide/svelte';
+  import { toastActions } from '$lib/stores/toast';
+  import { fetchWithCSRF } from '$lib/utils/api';
+  import { isAuthenticated } from '$lib/utils/auth';
 
   const logger = loggers.analytics;
 
@@ -49,9 +54,21 @@
     first_heard: string;
     last_heard: string;
     thumbnail_url?: string;
+    // Manage-view only: number of detections manually reviewed as correct/false-positive.
+    verified_count?: number;
+    rejected_count?: number;
   }
 
-  type ViewMode = 'grid' | 'list';
+  // Per-species manual-review counts returned by /analytics/species/review-stats.
+  interface SpeciesReviewStat {
+    scientific_name: string;
+    common_name: string;
+    total: number;
+    verified: number;
+    rejected: number;
+  }
+
+  type ViewMode = 'grid' | 'list' | 'manage';
 
   // A species row paired with the visitor-localized common name, used inside
   // filteredSpecies for search + name-sort so they match what the user sees.
@@ -127,6 +144,43 @@
   let viewMode = $state<ViewMode>('grid');
   let selectedSpecies = $state<SpeciesData | null>(null);
   let showDetailModal = $state(false);
+
+  // Species management (manage view): per-species review stats + delete confirmation.
+  let reviewStats = $state<SpeciesReviewStat[]>([]);
+  let isLoadingStats = $state(false);
+  let showDeleteModal = $state(false);
+  let deleteTarget = $state<{ scientific_name: string; common_name: string; count: number } | null>(
+    null
+  );
+
+  // True while the manage view is loading its review stats.
+  let manageLoading = $derived(viewMode === 'manage' && isLoadingStats);
+
+  // Manage rows: authoritative species set from review-stats (so fully-rejected mislabels
+  // appear even though they are excluded from the false-positive-filtered summary),
+  // enriched with summary display fields (thumbnail/confidence/dates) where available.
+  let manageSpecies = $derived.by(() => {
+    const summaryByName = new Map(speciesData.map(s => [s.scientific_name, s]));
+    const rows: SpeciesData[] = reviewStats.map(stat => {
+      const summary = summaryByName.get(stat.scientific_name);
+      return {
+        common_name: stat.common_name || summary?.common_name || stat.scientific_name,
+        scientific_name: stat.scientific_name,
+        count: stat.total,
+        avg_confidence: summary?.avg_confidence ?? 0,
+        max_confidence: summary?.max_confidence ?? 0,
+        first_heard: summary?.first_heard ?? '',
+        last_heard: summary?.last_heard ?? '',
+        thumbnail_url: summary?.thumbnail_url,
+        verified_count: stat.verified,
+        rejected_count: stat.rejected,
+      };
+    });
+    return sortSpeciesList(rows.filter(matchesSearch), appliedSortOrder);
+  });
+
+  // Rows rendered by the shared list/manage table.
+  let displayedSpecies = $derived(viewMode === 'manage' ? manageSpecies : filteredSpecies);
 
   // Read once so both filters and the applied-sort indicator start at the same persisted value.
   const restoredSortOrder = getStoredValue<SortOrder>(
@@ -346,16 +400,16 @@
         filtered.sort((a, b) => b.displayName.localeCompare(a.displayName, locale));
         break;
       case 'first_seen_desc':
-        filtered.sort(makeDateComparator('first_heard', false));
+        sorted.sort(makeDateComparator('first_heard', false));
         break;
       case 'first_seen_asc':
-        filtered.sort(makeDateComparator('first_heard', true));
+        sorted.sort(makeDateComparator('first_heard', true));
         break;
       case 'last_seen_desc':
-        filtered.sort(makeDateComparator('last_heard', false));
+        sorted.sort(makeDateComparator('last_heard', false));
         break;
       case 'last_seen_asc':
-        filtered.sort(makeDateComparator('last_heard', true));
+        sorted.sort(makeDateComparator('last_heard', true));
         break;
       case 'confidence_desc':
         filtered.sort((a, b) => b.species.avg_confidence - a.species.avg_confidence);
@@ -371,13 +425,100 @@
         break;
       default: {
         // Exhaustiveness guard: adding a SortOrder value without a case is a compile error.
-        const _exhaustive: never = appliedSortOrder;
+        const _exhaustive: never = order;
         void _exhaustive;
       }
     }
+    return sorted;
+  }
 
     return filtered.map(row => row.species);
   });
+
+  // Fraction of manually reviewed detections marked correct, or null when none reviewed.
+  function reviewedRatio(species: SpeciesData): number | null {
+    const verified = species.verified_count ?? 0;
+    const rejected = species.rejected_count ?? 0;
+    const reviewed = verified + rejected;
+    return reviewed === 0 ? null : verified / reviewed;
+  }
+
+  async function fetchReviewStats() {
+    isLoadingStats = true;
+    try {
+      const response = await fetch(buildAppUrl('/api/v2/analytics/species/review-stats'));
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+      reviewStats = await response.json();
+    } catch (error) {
+      logger.error('Error fetching species review stats:', error);
+      reviewStats = [];
+      toastActions.error(t('analytics.species.manage.statsError'));
+    } finally {
+      isLoadingStats = false;
+    }
+  }
+
+  function showManageView() {
+    viewMode = 'manage';
+    void fetchReviewStats();
+  }
+
+  function requestDeleteSpecies(species: SpeciesData) {
+    deleteTarget = {
+      scientific_name: species.scientific_name,
+      common_name: species.common_name,
+      count: species.count,
+    };
+    showDeleteModal = true;
+  }
+
+  function cancelDeleteSpecies() {
+    showDeleteModal = false;
+    deleteTarget = null;
+  }
+
+  async function confirmDeleteSpecies() {
+    const target = deleteTarget;
+    if (!target) return;
+    try {
+      const resp = await fetchWithCSRF<{ deleted: number; skipped: number }>(
+        '/api/v2/detections/species/delete',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scientific_name: target.scientific_name }),
+        }
+      );
+      showDeleteModal = false;
+      deleteTarget = null;
+      if (resp.skipped > 0) {
+        toastActions.info(
+          t('analytics.species.manage.deletePartial', {
+            species: target.common_name,
+            deleted: resp.deleted,
+            skipped: resp.skipped,
+          })
+        );
+      } else {
+        toastActions.success(
+          t('analytics.species.manage.deleteSuccess', {
+            species: target.common_name,
+            deleted: resp.deleted,
+          })
+        );
+      }
+      // Refresh both data sources so the deleted species disappears from the view.
+      await fetchData();
+      await fetchReviewStats();
+    } catch (error) {
+      logger.error('Error deleting species:', error);
+      toastActions.error(
+        t('analytics.species.manage.deleteError', { species: target.common_name })
+      );
+    }
+  }
 
   function getFilteredCount(): number {
     return filteredSpecies.length;
@@ -658,11 +799,22 @@
               />
             </svg>
           </button>
+          {#if $isAuthenticated}
+            <button
+              class="btn btn-sm join-item"
+              class:btn-active={viewMode === 'manage'}
+              onclick={showManageView}
+              aria-label={t('analytics.species.switchToManage')}
+              title={t('analytics.species.switchToManage')}
+            >
+              <Lock class="h-4 w-4" />
+            </button>
+          {/if}
         </div>
       </div>
 
       <!-- Loading State -->
-      {#if isLoading}
+      {#if isLoading || manageLoading}
         <div class="flex justify-center items-center p-8">
           <span class="loading loading-spinner loading-lg text-[var(--color-primary)]"></span>
         </div>
@@ -686,8 +838,8 @@
         </div>
       {/if}
 
-      <!-- List View -->
-      {#if !isLoading && viewMode === 'list'}
+      <!-- List / Manage View (shared table; manage adds review + delete columns) -->
+      {#if !isLoading && !manageLoading && (viewMode === 'list' || viewMode === 'manage')}
         <div class="overflow-x-auto">
           <table class="table w-full hidden sm:table">
             <thead>
@@ -701,14 +853,19 @@
                     onSort={handleSort}
                   />
                 {/each}
+                {#if viewMode === 'manage'}
+                  <th>{t('analytics.species.headers.reviewRatio')}</th>
+                  <th>{t('analytics.species.headers.actions')}</th>
+                {/if}
               </tr>
             </thead>
             <tbody>
-              {#each filteredSpecies as species, index (`${species.scientific_name}_${index}`)}
+              {#each displayedSpecies as species, index (`${species.scientific_name}_${index}`)}
                 {@const displayName = localizeSpeciesName(
                   species.scientific_name,
                   species.common_name
                 )}
+                {@const ratio = reviewedRatio(species)}
                 <tr
                   class={index % 2 === 0
                     ? 'bg-[var(--color-base-100)]'
@@ -762,13 +919,57 @@
                   <td>{formatPercentage(species.max_confidence)}</td>
                   <td class="text-sm">{formatDateTime(species.first_heard)}</td>
                   <td class="text-sm">{formatDateTime(species.last_heard)}</td>
+                  {#if viewMode === 'manage'}
+                    <td>
+                      {#if ratio === null}
+                        <span
+                          class="text-sm opacity-50"
+                          title={t('analytics.species.manage.noReviews')}
+                        >
+                          {t('analytics.species.manage.noReviewsShort')}
+                        </span>
+                      {:else}
+                        <div
+                          class="flex items-center gap-2"
+                          title={t('analytics.species.manage.reviewCounts', {
+                            verified: species.verified_count ?? 0,
+                            rejected: species.rejected_count ?? 0,
+                          })}
+                        >
+                          <progress
+                            class="progress w-16 {ratio >= 0.5
+                              ? 'progress-success'
+                              : 'progress-error'}"
+                            value={ratio}
+                            max="1"
+                          ></progress>
+                          <span class="text-sm whitespace-nowrap">{formatPercentage(ratio)}</span>
+                        </div>
+                      {/if}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm text-[var(--color-error)]"
+                        onclick={() => requestDeleteSpecies(species)}
+                        aria-label={t('analytics.species.manage.deleteSpecies', {
+                          species: species.common_name,
+                        })}
+                        title={t('analytics.species.manage.deleteSpecies', {
+                          species: species.common_name,
+                        })}
+                      >
+                        <Trash2 class="h-4 w-4" />
+                      </button>
+                    </td>
+                  {/if}
                 </tr>
               {/each}
             </tbody>
           </table>
           <!-- Mobile list view -->
           <div class="sm:hidden space-y-2">
-            {#each filteredSpecies as species, index (`${species.scientific_name}_${index}`)}
+            {#each displayedSpecies as species, index (`${species.scientific_name}_${index}`)}
               <SpeciesCardMobile {species} variant="list" onClick={handleSpeciesClick} />
             {/each}
           </div>
@@ -776,7 +977,7 @@
       {/if}
 
       <!-- Empty State -->
-      {#if !isLoading && filteredSpecies.length === 0}
+      {#if !isLoading && !manageLoading && displayedSpecies.length === 0}
         <div class="text-center py-8 text-[var(--color-base-content)] opacity-50">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -802,6 +1003,24 @@
   species={selectedSpecies}
   isOpen={showDetailModal}
   onClose={handleCloseDetailModal}
+/>
+
+<!-- Delete-species confirmation (manage view) -->
+<ConfirmModal
+  isOpen={showDeleteModal}
+  title={deleteTarget
+    ? t('analytics.species.manage.confirmDeleteTitle', { species: deleteTarget.common_name })
+    : ''}
+  message={deleteTarget
+    ? t('analytics.species.manage.confirmDeleteMessage', {
+        species: deleteTarget.common_name,
+        count: deleteTarget.count,
+      })
+    : ''}
+  confirmLabel={t('common.delete')}
+  confirmVariant="error"
+  onClose={cancelDeleteSpecies}
+  onConfirm={confirmDeleteSpecies}
 />
 
 <!-- Mobile Audio Player -->

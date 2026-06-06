@@ -3,6 +3,7 @@ package v2only
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -2059,4 +2060,109 @@ func TestV2OnlyDatastore_GetSpeciesDiversityData_TimezoneBucketing(t *testing.T)
 	none, err := ds.GetSpeciesDiversityData(ctx, "2024-06-14", "2024-06-14")
 	require.NoError(t, err)
 	assert.Empty(t, none, "detection must not bucket on the UTC date when the configured zone is UTC+5")
+}
+
+// saveDetectionsForLabel inserts count detections for the given label and returns their
+// IDs. DetectedAt values are made unique per label so no index collides.
+func saveDetectionsForLabel(t *testing.T, ds *Datastore, labelID uint, count int) []uint {
+	t.Helper()
+	ids := make([]uint, count)
+	for i := range count {
+		det := &entities.Detection{
+			LabelID:    labelID,
+			ModelID:    ds.defaultModelID,
+			Confidence: 0.9,
+			DetectedAt: int64(labelID)*1_000_000 + int64(i),
+		}
+		require.NoError(t, ds.detection.Save(t.Context(), det))
+		ids[i] = det.ID
+	}
+	return ids
+}
+
+// TestV2OnlyDatastore_GetSpeciesReviewStats verifies the SpeciesManager implementation
+// returns per-species totals with confirmed/rejected counts, resolves common names from
+// the name maps, and still reports species whose detections were all rejected.
+func TestV2OnlyDatastore_GetSpeciesReviewStats(t *testing.T) {
+	ds, cleanup := setupTestDatastoreWithLabels(t, []string{
+		"Turdus merula_Eurasian Blackbird",
+		"Corvus corone_Carrion Crow",
+	})
+	defer cleanup()
+	ctx := t.Context()
+
+	blackbird, err := ds.label.GetOrCreate(ctx, "Turdus merula", ds.defaultModelID, ds.speciesLabelTypeID, ds.avesClassID)
+	require.NoError(t, err)
+	crow, err := ds.label.GetOrCreate(ctx, "Corvus corone", ds.defaultModelID, ds.speciesLabelTypeID, ds.avesClassID)
+	require.NoError(t, err)
+
+	// Blackbird: 3 detections — 1 correct, 1 rejected, 1 unreviewed.
+	bIDs := saveDetectionsForLabel(t, ds, blackbird.ID, 3)
+	require.NoError(t, ds.detection.SaveReview(ctx, &entities.DetectionReview{DetectionID: bIDs[0], Verified: entities.VerificationCorrect}))
+	require.NoError(t, ds.detection.SaveReview(ctx, &entities.DetectionReview{DetectionID: bIDs[1], Verified: entities.VerificationFalsePositive}))
+
+	// Crow: 2 detections, both rejected.
+	cIDs := saveDetectionsForLabel(t, ds, crow.ID, 2)
+	for _, id := range cIDs {
+		require.NoError(t, ds.detection.SaveReview(ctx, &entities.DetectionReview{DetectionID: id, Verified: entities.VerificationFalsePositive}))
+	}
+
+	stats, err := ds.GetSpeciesReviewStats(ctx)
+	require.NoError(t, err)
+
+	byName := make(map[string]datastore.SpeciesReviewStats, len(stats))
+	for _, s := range stats {
+		byName[s.ScientificName] = s
+	}
+
+	bb, ok := byName["Turdus merula"]
+	require.True(t, ok)
+	assert.Equal(t, "Eurasian Blackbird", bb.CommonName, "common name resolved from name maps")
+	assert.Equal(t, 3, bb.Total)
+	assert.Equal(t, 1, bb.Verified)
+	assert.Equal(t, 1, bb.Rejected)
+
+	cr, ok := byName["Corvus corone"]
+	require.True(t, ok, "all-rejected species must still be reported")
+	assert.Equal(t, "Carrion Crow", cr.CommonName)
+	assert.Equal(t, 2, cr.Total)
+	assert.Equal(t, 0, cr.Verified)
+	assert.Equal(t, 2, cr.Rejected)
+}
+
+// TestV2OnlyDatastore_GetSpeciesNoteIDs verifies the SpeciesManager implementation returns
+// the string IDs of every detection for a species across all model-specific label variants.
+func TestV2OnlyDatastore_GetSpeciesNoteIDs(t *testing.T) {
+	ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Turdus merula_Eurasian Blackbird"})
+	defer cleanup()
+	ctx := t.Context()
+
+	// Same species under two models — IDs from both variants must be returned.
+	blackbird, err := ds.label.GetOrCreate(ctx, "Turdus merula", ds.defaultModelID, ds.speciesLabelTypeID, ds.avesClassID)
+	require.NoError(t, err)
+	otherModel, err := ds.model.GetOrCreate(ctx, "Perch", "1.0", "default", entities.ModelTypeBird, nil)
+	require.NoError(t, err)
+	blackbird2, err := ds.label.GetOrCreate(ctx, "Turdus merula", otherModel.ID, ds.speciesLabelTypeID, ds.avesClassID)
+	require.NoError(t, err)
+
+	bIDs := saveDetectionsForLabel(t, ds, blackbird.ID, 2)
+	b2IDs := saveDetectionsForLabel(t, ds, blackbird2.ID, 1)
+
+	ids, err := ds.GetSpeciesNoteIDs("Turdus merula")
+	require.NoError(t, err)
+
+	want := make([]string, 0, len(bIDs)+len(b2IDs))
+	for _, id := range bIDs {
+		want = append(want, strconv.FormatUint(uint64(id), 10))
+	}
+	for _, id := range b2IDs {
+		want = append(want, strconv.FormatUint(uint64(id), 10))
+	}
+	assert.ElementsMatch(t, want, ids, "must return detection IDs across all model variants")
+
+	t.Run("unknown species returns empty without error", func(t *testing.T) {
+		none, err := ds.GetSpeciesNoteIDs("Nonexistent species")
+		require.NoError(t, err)
+		assert.Empty(t, none)
+	})
 }
