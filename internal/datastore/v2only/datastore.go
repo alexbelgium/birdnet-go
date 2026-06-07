@@ -2439,11 +2439,16 @@ func (ds *Datastore) GetSpeciesReviewStats(ctx context.Context) ([]datastore.Spe
 	return result, nil
 }
 
+// speciesNoteIDsTimeout bounds the label + detection ID enumeration so a very
+// large species cannot hang the request handler indefinitely.
+const speciesNoteIDsTimeout = 30 * time.Second
+
 // GetSpeciesNoteIDs returns the IDs (as strings) of every detection for the given
 // scientific name across all model-specific label variants. It implements
 // datastore.SpeciesManager; the string IDs plug directly into the per-ID delete pipeline.
 func (ds *Datastore) GetSpeciesNoteIDs(scientificName string) ([]string, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), speciesNoteIDsTimeout)
+	defer cancel()
 
 	labelIDs, err := ds.label.GetLabelIDsByScientificName(ctx, scientificName)
 	if err != nil {
