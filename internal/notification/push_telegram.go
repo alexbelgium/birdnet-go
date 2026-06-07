@@ -163,8 +163,10 @@ func extractPublicImageURL(n *Notification) string {
 }
 
 // buildTelegramCaption builds an HTML-formatted photo caption from the notification.
+// imageURL, when non-empty, is stripped from the message text since the photo is
+// being sent directly — showing the URL as text would be redundant.
 // Capped at telegramCaptionMaxBytes to respect Telegram API limits.
-func buildTelegramCaption(n *Notification) string {
+func buildTelegramCaption(n *Notification, imageURL string) string {
 	var sb strings.Builder
 
 	sb.WriteString("<b>")
@@ -172,8 +174,13 @@ func buildTelegramCaption(n *Notification) string {
 	sb.WriteString("</b>")
 
 	if msg := strings.TrimSpace(n.Message); msg != "" {
-		sb.WriteString("\n")
-		sb.WriteString(htmlEscape(msg))
+		if imageURL != "" {
+			msg = strings.TrimSpace(strings.ReplaceAll(msg, imageURL, ""))
+		}
+		if msg != "" {
+			sb.WriteString("\n")
+			sb.WriteString(htmlEscape(msg))
+		}
 	}
 
 	if detURL, ok := n.Metadata["bg_detection_url"].(string); ok && detURL != "" {

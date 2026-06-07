@@ -136,7 +136,7 @@ func TestBuildTelegramCaption(t *testing.T) {
 				"bg_detection_url": "http://localhost:8080/ui/detections/42",
 			},
 		}
-		caption := buildTelegramCaption(n)
+		caption := buildTelegramCaption(n, "")
 		assert.Contains(t, caption, "<b>Northern Cardinal</b>")
 		assert.Contains(t, caption, "First detection")
 		assert.Contains(t, caption, "View detection")
@@ -150,7 +150,7 @@ func TestBuildTelegramCaption(t *testing.T) {
 			Message:  "Detected",
 			Metadata: map[string]any{},
 		}
-		caption := buildTelegramCaption(n)
+		caption := buildTelegramCaption(n, "")
 		assert.Contains(t, caption, "<b>Test Bird</b>")
 		assert.NotContains(t, caption, "View detection")
 	})
@@ -162,11 +162,24 @@ func TestBuildTelegramCaption(t *testing.T) {
 			Message:  "Seen at <location>",
 			Metadata: map[string]any{},
 		}
-		caption := buildTelegramCaption(n)
+		caption := buildTelegramCaption(n, "")
 		assert.Contains(t, caption, "&amp;")
 		assert.Contains(t, caption, "&lt;")
 		assert.Contains(t, caption, "&gt;")
 		assert.NotContains(t, caption, "<location>")
+	})
+
+	t.Run("image URL stripped from message when photo is sent", func(t *testing.T) {
+		t.Parallel()
+		imgURL := "https://static.avicommons.org/norcar-12345-320.jpg"
+		n := &Notification{
+			Title:    "Northern Cardinal",
+			Message:  "Detected with 92% confidence\n" + imgURL,
+			Metadata: map[string]any{},
+		}
+		caption := buildTelegramCaption(n, imgURL)
+		assert.NotContains(t, caption, imgURL)
+		assert.Contains(t, caption, "Detected with 92% confidence")
 	})
 
 	t.Run("long caption truncated", func(t *testing.T) {
@@ -176,7 +189,7 @@ func TestBuildTelegramCaption(t *testing.T) {
 			Message:  strings.Repeat("B", 600),
 			Metadata: map[string]any{},
 		}
-		caption := buildTelegramCaption(n)
+		caption := buildTelegramCaption(n, "")
 		assert.LessOrEqual(t, len([]byte(caption)), telegramCaptionMaxBytes)
 	})
 }
