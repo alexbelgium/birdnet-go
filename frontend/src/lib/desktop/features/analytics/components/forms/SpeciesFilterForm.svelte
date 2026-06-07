@@ -20,7 +20,11 @@
       | 'confidence_desc'
       | 'confidence_asc'
       | 'max_confidence_desc'
-      | 'max_confidence_asc';
+      | 'max_confidence_asc'
+      | 'excluded_desc'
+      | 'excluded_asc'
+      | 'included_desc'
+      | 'included_asc';
     searchTerm: string;
   }
 

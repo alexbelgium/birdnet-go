@@ -1627,6 +1627,8 @@
         "maxConfidence": "Maks. sikkerhed",
         "firstDetected": "Først registreret",
         "lastDetected": "Sidst registreret",
+        "excluded": "Excluded",
+        "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",
         "actions": "Actions"
       },
@@ -1640,7 +1642,16 @@
         "deleteSuccess": "Deleted {deleted} detections of {species}",
         "deletePartial": "Deleted {deleted} detections of {species}; {skipped} locked detection(s) were skipped",
         "deleteError": "Failed to delete {species}",
-        "statsError": "Failed to load review statistics"
+        "statsError": "Failed to load review statistics",
+        "addToExcludedTooltip": "Add {species} to exclusion list",
+        "removeFromExcludedTooltip": "Remove {species} from exclusion list",
+        "addToWhitelistTooltip": "Add {species} to always-include list",
+        "removeFromWhitelistTooltip": "Remove {species} from always-include list",
+        "addedToExcluded": "{species} added to exclusion list",
+        "removedFromExcluded": "{species} removed from exclusion list",
+        "addedToWhitelist": "{species} added to always-include list",
+        "removedFromWhitelist": "{species} removed from always-include list",
+        "toggleError": "Failed to update species list"
       },
       "card": {
         "detections": "Registreringer:",
