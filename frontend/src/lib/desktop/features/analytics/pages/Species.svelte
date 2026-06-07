@@ -671,6 +671,9 @@
             skipped: resp.skipped,
           })
         );
+        // Some detections couldn't be deleted — refresh to show accurate remaining count.
+        await fetchData();
+        await fetchReviewStats();
       } else {
         toastActions.success(
           t('analytics.species.manage.deleteSuccess', {
@@ -678,10 +681,10 @@
             deleted: resp.deleted,
           })
         );
+        // All detections deleted — remove the row from local state without a round-trip.
+        speciesData = speciesData.filter(s => s.scientific_name !== target.scientific_name);
+        reviewStats = reviewStats.filter(s => s.scientific_name !== target.scientific_name);
       }
-      // Refresh both data sources so the deleted species disappears from the view.
-      await fetchData();
-      await fetchReviewStats();
     } catch (error) {
       logger.error('Error deleting species:', error);
       toastActions.error(
