@@ -101,6 +101,7 @@ export interface DetectionQueryParams {
   numResults?: number;
   offset?: number;
   sortBy?: DetectionSortBy;
+  locked?: boolean;
 }
 
 export interface DetectionReviewRequest {

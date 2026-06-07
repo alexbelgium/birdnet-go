@@ -90,6 +90,9 @@
       params.get('date')?.trim() ||
       (queryType !== 'search' && queryType !== 'species' ? getLocalDateString() : undefined);
 
+    const lockedParam = params.get('locked');
+    const locked = lockedParam === 'true' ? true : lockedParam === 'false' ? false : undefined;
+
     return {
       queryType,
       date,
@@ -100,6 +103,7 @@
       numResults,
       offset: parseInt(params.get('offset') || '0'),
       sortBy,
+      locked,
     };
   }
 
@@ -130,7 +134,6 @@
           : getSavedResultsPerPage();
 
       const allDates = queryParams.queryType === 'species' && !queryParams.date;
-      const urlParams = new URLSearchParams(window.location.search);
 
       // Transform API response to match our expected format
       detectionsData = {
@@ -152,7 +155,7 @@
         dashboardSettings: data.dashboardSettings,
         allDates,
         sortBy: queryParams.sortBy,
-        locked: queryParams.locked,
+        locked: queryParams.locked ?? false,
       };
     } catch (err) {
       error = err instanceof Error ? err.message : t('detections.errors.fetchFailed');
