@@ -148,7 +148,7 @@ func (s *ShoutrrrProvider) Send(ctx context.Context, n *Notification) error {
 
 // sendTelegramPhotos sends a photo with caption to every configured Telegram chat.
 func (s *ShoutrrrProvider) sendTelegramPhotos(ctx context.Context, n *Notification, imgURL string) error {
-	caption := buildTelegramCaption(n)
+	caption := buildTelegramCaption(n, imgURL)
 	var firstErr error
 	for _, chat := range s.telegramChats {
 		err := sendTelegramPhoto(ctx, s.telegramClient, s.telegramAPIBase, chat.token, chat.chatID, imgURL, caption)
