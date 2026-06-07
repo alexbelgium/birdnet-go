@@ -49,9 +49,13 @@ func parseTelegramShoutrrrURLs(urls []string) []parsedTelegramChat {
 		if !strings.EqualFold(parsed.Scheme, "telegram") {
 			continue
 		}
-		token := parsed.User.Username()
-		if token == "" {
+		username := parsed.User.Username()
+		if username == "" {
 			continue
+		}
+		token := username
+		if pass, hasPass := parsed.User.Password(); hasPass {
+			token += ":" + pass
 		}
 		for _, chatID := range strings.Split(parsed.Query().Get("chats"), ",") {
 			chatID = strings.TrimSpace(chatID)
@@ -180,7 +184,9 @@ func buildTelegramCaption(n *Notification) string {
 	caption := sb.String()
 	runes := []rune(caption)
 	if len([]byte(caption)) > telegramCaptionMaxBytes {
-		for len([]byte(string(runes))) > telegramCaptionMaxBytes && len(runes) > 0 {
+		// "…" is 3 bytes; trim to limit-3 so the suffix keeps us within the limit.
+		limit := telegramCaptionMaxBytes - 3
+		for len([]byte(string(runes))) > limit && len(runes) > 0 {
 			runes = runes[:len(runes)-1]
 		}
 		caption = string(runes) + "…"
