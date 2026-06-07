@@ -15,7 +15,7 @@
   import SpeciesCard from '../components/ui/SpeciesCard.svelte';
   import SpeciesCardMobile from '../components/ui/SpeciesCardMobile.svelte';
   import StatCard from '../components/ui/StatCard.svelte';
-  import { Lock, Trash2 } from '@lucide/svelte';
+  import { Lock, Trash2, CheckCircle2, XCircle, Circle } from '@lucide/svelte';
   import { toastActions } from '$lib/stores/toast';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { isAuthenticated } from '$lib/utils/auth';
@@ -39,7 +39,11 @@
       | 'confidence_desc'
       | 'confidence_asc'
       | 'max_confidence_desc'
-      | 'max_confidence_asc';
+      | 'max_confidence_asc'
+      | 'excluded_desc'
+      | 'excluded_asc'
+      | 'included_desc'
+      | 'included_asc';
     searchTerm: string;
   }
 
@@ -57,6 +61,9 @@
     // Manage-view only: number of detections manually reviewed as correct/false-positive.
     verified_count?: number;
     rejected_count?: number;
+    // Manage-view list membership flags (populated from fetched exclude/include lists).
+    is_excluded?: boolean;
+    is_included?: boolean;
   }
 
   // Per-species manual-review counts returned by /analytics/species/review-stats.
@@ -123,13 +130,37 @@
     },
   ];
 
+  // Manage-view-only sortable columns (excluded/whitelisted membership toggles).
+  const MANAGE_SORTABLE_COLUMNS: {
+    field: string;
+    labelKey: TranslationKey;
+    asc: SortOrder;
+    desc: SortOrder;
+  }[] = [
+    {
+      field: 'excluded',
+      labelKey: 'analytics.species.headers.excluded',
+      asc: 'excluded_asc',
+      desc: 'excluded_desc',
+    },
+    {
+      field: 'included',
+      labelKey: 'analytics.species.headers.whitelisted',
+      asc: 'included_asc',
+      desc: 'included_desc',
+    },
+  ];
+
+  // Combined column list for sort handling (used by handleSort and activeColumn).
+  const ALL_SORTABLE_COLUMNS = [...SORTABLE_COLUMNS, ...MANAGE_SORTABLE_COLUMNS];
+
   // Default sort and persistence (survives a page refresh).
   const DEFAULT_SORT_ORDER: SortOrder = 'count_desc';
   const SORT_STORAGE_KEY = 'analytics.species.sortOrder';
   // Only the species-name column defaults to ascending (A→Z) on first click.
   const SPECIES_COLUMN_FIELD = 'species';
   const VALID_SORT_ORDERS: Set<string> = new Set<string>(
-    SORTABLE_COLUMNS.flatMap(column => [column.asc, column.desc])
+    ALL_SORTABLE_COLUMNS.flatMap(column => [column.asc, column.desc])
   );
 
   function isSortOrder(value: unknown): value is SortOrder {
@@ -145,6 +176,18 @@
   let selectedSpecies = $state<SpeciesData | null>(null);
   let showDetailModal = $state(false);
 
+  // Toggle response types for the exclude/include list endpoints.
+  interface ExcludeToggleResponse {
+    common_name: string;
+    action: string;
+    is_excluded: boolean;
+  }
+  interface IncludeToggleResponse {
+    common_name: string;
+    action: string;
+    is_included: boolean;
+  }
+
   // Species management (manage view): per-species review stats + delete confirmation.
   let reviewStats = $state<SpeciesReviewStat[]>([]);
   let isLoadingStats = $state(false);
@@ -153,18 +196,27 @@
     null
   );
 
+  // Manage-view exclude/include list state. Sets contain common names (matching the API).
+  let excludedSpecies = $state<Set<string>>(new Set());
+  let includedSpecies = $state<Set<string>>(new Set());
+  // Tracks species whose toggle is in-flight (prevents double-click races).
+  let togglingExclude = $state<Set<string>>(new Set());
+  let togglingInclude = $state<Set<string>>(new Set());
+
   // True while the manage view is loading its review stats.
   let manageLoading = $derived(viewMode === 'manage' && isLoadingStats);
 
   // Manage rows: authoritative species set from review-stats (so fully-rejected mislabels
   // appear even though they are excluded from the false-positive-filtered summary),
-  // enriched with summary display fields (thumbnail/confidence/dates) where available.
+  // enriched with summary display fields (thumbnail/confidence/dates) where available,
+  // and with list-membership flags for the sortable Excluded/Whitelisted columns.
   let manageSpecies = $derived.by(() => {
     const summaryByName = new Map(speciesData.map(s => [s.scientific_name, s]));
     const rows: SpeciesData[] = reviewStats.map(stat => {
       const summary = summaryByName.get(stat.scientific_name);
+      const commonName = stat.common_name || summary?.common_name || stat.scientific_name;
       return {
-        common_name: stat.common_name || summary?.common_name || stat.scientific_name,
+        common_name: commonName,
         scientific_name: stat.scientific_name,
         count: stat.total,
         avg_confidence: summary?.avg_confidence ?? 0,
@@ -174,6 +226,8 @@
         thumbnail_url: summary?.thumbnail_url,
         verified_count: stat.verified,
         rejected_count: stat.rejected,
+        is_excluded: excludedSpecies.has(commonName),
+        is_included: includedSpecies.has(commonName),
       };
     });
     return sortSpeciesList(rows.filter(matchesSearch), appliedSortOrder);
@@ -207,7 +261,7 @@
   // Active column + direction for the header indicators, derived from the
   // applied sort (not the pending dropdown selection).
   let activeColumn = $derived(
-    SORTABLE_COLUMNS.find(
+    ALL_SORTABLE_COLUMNS.find(
       column => column.asc === appliedSortOrder || column.desc === appliedSortOrder
     )
   );
@@ -219,7 +273,7 @@
   // Clicking a header: re-clicking the active column toggles direction; a new
   // column starts at its default (ascending for species name, descending else).
   function handleSort(field: string) {
-    const column = SORTABLE_COLUMNS.find(c => c.field === field);
+    const column = ALL_SORTABLE_COLUMNS.find(c => c.field === field);
     if (!column) return;
     const next =
       sortField === field
@@ -423,6 +477,18 @@
       case 'max_confidence_asc':
         filtered.sort((a, b) => a.species.max_confidence - b.species.max_confidence);
         break;
+      case 'excluded_desc':
+        sorted.sort((a, b) => Number(b.is_excluded ?? false) - Number(a.is_excluded ?? false));
+        break;
+      case 'excluded_asc':
+        sorted.sort((a, b) => Number(a.is_excluded ?? false) - Number(b.is_excluded ?? false));
+        break;
+      case 'included_desc':
+        sorted.sort((a, b) => Number(b.is_included ?? false) - Number(a.is_included ?? false));
+        break;
+      case 'included_asc':
+        sorted.sort((a, b) => Number(a.is_included ?? false) - Number(b.is_included ?? false));
+        break;
       default: {
         // Exhaustiveness guard: adding a SortOrder value without a case is a compile error.
         const _exhaustive: never = order;
@@ -462,7 +528,143 @@
 
   function showManageView() {
     viewMode = 'manage';
-    void fetchReviewStats();
+    void fetchManageData();
+  }
+
+  async function fetchManageData() {
+    await Promise.all([fetchReviewStats(), fetchExcludedSpecies(), fetchIncludedSpecies()]);
+  }
+
+  async function fetchExcludedSpecies() {
+    try {
+      const response = await fetch(buildAppUrl('/api/v2/detections/ignored'));
+      if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+      const data = (await response.json()) as { species: string[] };
+      excludedSpecies = new Set(data.species);
+    } catch (error) {
+      logger.error('Error fetching excluded species:', error);
+    }
+  }
+
+  async function fetchIncludedSpecies() {
+    try {
+      const response = await fetch(buildAppUrl('/api/v2/detections/included'));
+      if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+      const data = (await response.json()) as { species: string[] };
+      includedSpecies = new Set(data.species);
+    } catch (error) {
+      logger.error('Error fetching included species:', error);
+    }
+  }
+
+  async function toggleExcluded(species: SpeciesData) {
+    const name = species.common_name;
+    if (togglingExclude.has(name)) return;
+
+    // Optimistic update.
+    const newToggling = new Set(togglingExclude);
+    newToggling.add(name);
+    togglingExclude = newToggling;
+
+    const wasExcluded = excludedSpecies.has(name);
+    const optimistic = new Set(excludedSpecies);
+    if (wasExcluded) {
+      optimistic.delete(name);
+    } else {
+      optimistic.add(name);
+    }
+    excludedSpecies = optimistic;
+
+    try {
+      const resp = await fetchWithCSRF<ExcludeToggleResponse>('/api/v2/detections/ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ common_name: name }),
+      });
+      // Reconcile with authoritative server state.
+      const confirmed = new Set(excludedSpecies);
+      if (resp.is_excluded) {
+        confirmed.add(name);
+      } else {
+        confirmed.delete(name);
+      }
+      excludedSpecies = confirmed;
+      toastActions.success(
+        resp.action === 'added'
+          ? t('analytics.species.manage.addedToExcluded', { species: name })
+          : t('analytics.species.manage.removedFromExcluded', { species: name })
+      );
+    } catch (error) {
+      // Revert optimistic update on failure.
+      const reverted = new Set(excludedSpecies);
+      if (wasExcluded) {
+        reverted.add(name);
+      } else {
+        reverted.delete(name);
+      }
+      excludedSpecies = reverted;
+      logger.error('Error toggling excluded species:', error);
+      toastActions.error(t('analytics.species.manage.toggleError'));
+    } finally {
+      const done = new Set(togglingExclude);
+      done.delete(name);
+      togglingExclude = done;
+    }
+  }
+
+  async function toggleIncluded(species: SpeciesData) {
+    const name = species.common_name;
+    if (togglingInclude.has(name)) return;
+
+    // Optimistic update.
+    const newToggling = new Set(togglingInclude);
+    newToggling.add(name);
+    togglingInclude = newToggling;
+
+    const wasIncluded = includedSpecies.has(name);
+    const optimistic = new Set(includedSpecies);
+    if (wasIncluded) {
+      optimistic.delete(name);
+    } else {
+      optimistic.add(name);
+    }
+    includedSpecies = optimistic;
+
+    try {
+      const resp = await fetchWithCSRF<IncludeToggleResponse>('/api/v2/detections/include', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ common_name: name }),
+      });
+      // Reconcile with authoritative server state.
+      const confirmed = new Set(includedSpecies);
+      if (resp.is_included) {
+        confirmed.add(name);
+      } else {
+        confirmed.delete(name);
+      }
+      includedSpecies = confirmed;
+      toastActions.success(
+        resp.action === 'added'
+          ? t('analytics.species.manage.addedToWhitelist', { species: name })
+          : t('analytics.species.manage.removedFromWhitelist', { species: name })
+      );
+    } catch (error) {
+      // Revert optimistic update on failure.
+      const reverted = new Set(includedSpecies);
+      if (wasIncluded) {
+        reverted.add(name);
+      } else {
+        reverted.delete(name);
+      }
+      includedSpecies = reverted;
+      logger.error('Error toggling included species:', error);
+      toastActions.error(t('analytics.species.manage.toggleError'));
+    } finally {
+      const done = new Set(togglingInclude);
+      done.delete(name);
+      togglingInclude = done;
+    }
   }
 
   function requestDeleteSpecies(species: SpeciesData) {
@@ -854,6 +1056,15 @@
                   />
                 {/each}
                 {#if viewMode === 'manage'}
+                  {#each MANAGE_SORTABLE_COLUMNS as { field, labelKey } (field)}
+                    <SortableHeader
+                      label={t(labelKey)}
+                      {field}
+                      activeField={sortField}
+                      direction={sortDirection}
+                      onSort={handleSort}
+                    />
+                  {/each}
                   <th>{t('analytics.species.headers.reviewRatio')}</th>
                   <th>{t('analytics.species.headers.actions')}</th>
                 {/if}
@@ -920,6 +1131,70 @@
                   <td class="text-sm">{formatDateTime(species.first_heard)}</td>
                   <td class="text-sm">{formatDateTime(species.last_heard)}</td>
                   {#if viewMode === 'manage'}
+                    {@const isExcluded = species.is_excluded ?? false}
+                    {@const isIncluded = species.is_included ?? false}
+                    <td>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs"
+                        class:text-[var(--color-error)]={isExcluded}
+                        class:opacity-30={!isExcluded}
+                        disabled={togglingExclude.has(species.common_name)}
+                        onclick={() => void toggleExcluded(species)}
+                        title={isExcluded
+                          ? t('analytics.species.manage.removeFromExcludedTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.addToExcludedTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-label={isExcluded
+                          ? t('analytics.species.manage.removeFromExcludedTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.addToExcludedTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-pressed={isExcluded}
+                      >
+                        {#if isExcluded}
+                          <XCircle class="h-5 w-5" />
+                        {:else}
+                          <Circle class="h-5 w-5" />
+                        {/if}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs"
+                        class:text-[var(--color-success)]={isIncluded}
+                        class:opacity-30={!isIncluded}
+                        disabled={togglingInclude.has(species.common_name)}
+                        onclick={() => void toggleIncluded(species)}
+                        title={isIncluded
+                          ? t('analytics.species.manage.removeFromWhitelistTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.addToWhitelistTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-label={isIncluded
+                          ? t('analytics.species.manage.removeFromWhitelistTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.addToWhitelistTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-pressed={isIncluded}
+                      >
+                        {#if isIncluded}
+                          <CheckCircle2 class="h-5 w-5" />
+                        {:else}
+                          <Circle class="h-5 w-5" />
+                        {/if}
+                      </button>
+                    </td>
                     <td>
                       {#if ratio === null}
                         <span

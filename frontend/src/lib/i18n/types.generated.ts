@@ -1377,6 +1377,7 @@ export type TranslationKey =
   | 'analytics.species.speciesList'
   | 'analytics.species.switchToGrid'
   | 'analytics.species.switchToList'
+  | 'analytics.species.switchToManage'
   | 'analytics.species.noSpeciesFound'
   | 'analytics.species.headers.species'
   | 'analytics.species.headers.detections'
@@ -1384,6 +1385,29 @@ export type TranslationKey =
   | 'analytics.species.headers.maxConfidence'
   | 'analytics.species.headers.firstDetected'
   | 'analytics.species.headers.lastDetected'
+  | 'analytics.species.headers.excluded'
+  | 'analytics.species.headers.whitelisted'
+  | 'analytics.species.headers.reviewRatio'
+  | 'analytics.species.headers.actions'
+  | 'analytics.species.manage.noReviews'
+  | 'analytics.species.manage.noReviewsShort'
+  | 'analytics.species.manage.reviewCounts' // params: verified, rejected
+  | 'analytics.species.manage.deleteSpecies' // params: species
+  | 'analytics.species.manage.confirmDeleteTitle' // params: species
+  | 'analytics.species.manage.confirmDeleteMessage' // params: count, species
+  | 'analytics.species.manage.deleteSuccess' // params: deleted, species
+  | 'analytics.species.manage.deletePartial' // params: deleted, species, skipped
+  | 'analytics.species.manage.deleteError' // params: species
+  | 'analytics.species.manage.statsError'
+  | 'analytics.species.manage.addToExcludedTooltip' // params: species
+  | 'analytics.species.manage.removeFromExcludedTooltip' // params: species
+  | 'analytics.species.manage.addToWhitelistTooltip' // params: species
+  | 'analytics.species.manage.removeFromWhitelistTooltip' // params: species
+  | 'analytics.species.manage.addedToExcluded' // params: species
+  | 'analytics.species.manage.removedFromExcluded' // params: species
+  | 'analytics.species.manage.addedToWhitelist' // params: species
+  | 'analytics.species.manage.removedFromWhitelist' // params: species
+  | 'analytics.species.manage.toggleError'
   | 'analytics.species.card.detections'
   | 'analytics.species.card.confidence'
   | 'analytics.species.card.first'
@@ -3925,6 +3949,28 @@ export type TranslationParams = {
   'system.database.migration.prerequisites.warningCount': { count: string | number };
   'system.inference.coDetectedHelp': { seconds: string | number };
   'analytics.hub.card.notEnoughDataHint': { min: string | number };
+  'analytics.species.manage.reviewCounts': { verified: string | number; rejected: string | number };
+  'analytics.species.manage.deleteSpecies': { species: string | number };
+  'analytics.species.manage.confirmDeleteTitle': { species: string | number };
+  'analytics.species.manage.confirmDeleteMessage': {
+    count: string | number;
+    species: string | number;
+  };
+  'analytics.species.manage.deleteSuccess': { deleted: string | number; species: string | number };
+  'analytics.species.manage.deletePartial': {
+    deleted: string | number;
+    species: string | number;
+    skipped: string | number;
+  };
+  'analytics.species.manage.deleteError': { species: string | number };
+  'analytics.species.manage.addToExcludedTooltip': { species: string | number };
+  'analytics.species.manage.removeFromExcludedTooltip': { species: string | number };
+  'analytics.species.manage.addToWhitelistTooltip': { species: string | number };
+  'analytics.species.manage.removeFromWhitelistTooltip': { species: string | number };
+  'analytics.species.manage.addedToExcluded': { species: string | number };
+  'analytics.species.manage.removedFromExcluded': { species: string | number };
+  'analytics.species.manage.addedToWhitelist': { species: string | number };
+  'analytics.species.manage.removedFromWhitelist': { species: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
   'analytics.advanced.detections': { count: string | number };
   'settings.notFound.message': { section: string | number };
