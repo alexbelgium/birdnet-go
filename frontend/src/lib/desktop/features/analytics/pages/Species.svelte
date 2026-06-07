@@ -4,6 +4,7 @@
   import { downloadBlob } from '$lib/utils/fileHelpers';
   import { formatNumber, formatDate, formatDateTime } from '$lib/utils/formatters';
   import { loggers } from '$lib/utils/logger';
+  import { navigation } from '$lib/stores/navigation.svelte';
   import { getStoredValue, setStoredValue } from '$lib/utils/storage';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
@@ -1032,6 +1033,12 @@
     showDetailModal = false;
     selectedSpecies = null;
   }
+
+  function handleDesktopSpeciesClick(species: SpeciesData) {
+    navigation.navigate(
+      `/ui/detections?queryType=species&species=${encodeURIComponent(species.scientific_name)}&sortBy=confidence_desc`
+    );
+  }
 </script>
 
 <!-- Manage-view membership toggle cell (excluded / whitelisted / confirmed). Driven by a
@@ -1206,7 +1213,7 @@
       {#if !isLoading && viewMode === 'grid' && filteredSpecies.length > 0}
         <div class="species-grid hidden sm:grid">
           {#each filteredSpecies as species, index (`${species.scientific_name}_${index}`)}
-            <SpeciesCard {species} />
+            <SpeciesCard {species} onclick={handleDesktopSpeciesClick} />
           {/each}
         </div>
       {/if}
@@ -1258,17 +1265,22 @@
                     ? 'bg-[var(--color-base-100)]'
                     : 'bg-[var(--color-base-200)]'}
                 >
-                  <td>
+                  <td class="p-0">
                     {#if viewMode === 'manage'}
                       <!-- Manage view is text-only (no thumbnail) to keep the wider table compact. -->
-                      <div>
+                      <div class="px-4 py-3">
                         <div class="font-bold">
                           {displayName}
                         </div>
                         <div class="text-sm opacity-50 italic">{species.scientific_name}</div>
                       </div>
                     {:else}
-                      <div class="flex items-center gap-3">
+                      <button
+                        type="button"
+                        class="flex items-center gap-3 w-full px-4 py-3 hover:bg-[var(--color-base-300)] transition-colors text-left"
+                        onclick={() => handleDesktopSpeciesClick(species)}
+                        title={t('analytics.species.viewRecordings')}
+                      >
                         <div class="avatar">
                           <div
                             class="mask mask-squircle w-12 h-12"
@@ -1293,7 +1305,7 @@
                           <div class="font-bold">{displayName}</div>
                           <div class="text-sm opacity-50 italic">{species.scientific_name}</div>
                         </div>
-                      </div>
+                      </button>
                     {/if}
                   </td>
                   <td class="font-semibold">{species.count}</td>

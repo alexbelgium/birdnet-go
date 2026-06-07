@@ -791,8 +791,14 @@
       "hourly": "Stündliche Ergebnisse für {hour}:00 Uhr am {date}",
       "hourlyRange": "Stündliche Ergebnisse von {startHour}:00 bis {endHour}:00 Uhr am {date}",
       "species": "Ergebnisse für {species} am {date}",
+      "allSpeciesDetections": "All recordings of {species}",
       "search": "Suchergebnisse für \"{query}\"",
       "allDetections": "Alle Erkennungen vom {date}"
+    },
+    "speciesSort": {
+      "maxConfidence": "Max Confidence",
+      "date": "Most Recent",
+      "locked": "Locked Only"
     },
     "detail": {
       "species": "Art",
@@ -1772,6 +1778,7 @@
       "switchToList": "Zur Listenansicht wechseln",
       "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "Keine Arten gefunden, die Ihren Filtern entsprechen.",
+      "viewRecordings": "View all recordings of this species",
       "headers": {
         "species": "Art",
         "detections": "Erkennungen",

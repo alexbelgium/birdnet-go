@@ -791,8 +791,14 @@
       "hourly": "Stundu rezultāti plkst. {hour}:00, {date}",
       "hourlyRange": "Stundu rezultāti no {startHour}:00 līdz {endHour}:00, {date}",
       "species": "Rezultāti sugai {species}, {date}",
+      "allSpeciesDetections": "All recordings of {species}",
       "search": "Meklēšanas rezultāti vaicājumam \"{query}\"",
       "allDetections": "Visas atklāšanas datumā {date}"
+    },
+    "speciesSort": {
+      "maxConfidence": "Max Confidence",
+      "date": "Most Recent",
+      "locked": "Locked Only"
     },
     "detail": {
       "species": "Suga",
@@ -1772,6 +1778,7 @@
       "switchToList": "Pārslēgt uz saraksta skatu",
       "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "Sugas, kas atbilst jūsu filtriem, nav atrastas.",
+      "viewRecordings": "View all recordings of this species",
       "headers": {
         "species": "Suga",
         "detections": "Atpazīšanas",

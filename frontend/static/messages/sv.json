@@ -791,8 +791,14 @@
       "hourly": "Timresultat för {hour}:00 den {date}",
       "hourlyRange": "Timresultat från {startHour}:00 till {endHour}:00 den {date}",
       "species": "Resultat för {species} den {date}",
+      "allSpeciesDetections": "All recordings of {species}",
       "search": "Sökresultat för \"{query}\"",
       "allDetections": "Alla detekteringar för {date}"
+    },
+    "speciesSort": {
+      "maxConfidence": "Max Confidence",
+      "date": "Most Recent",
+      "locked": "Locked Only"
     },
     "detail": {
       "species": "Art",
@@ -1772,6 +1778,7 @@
       "switchToList": "Byt till listvy",
       "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "Inga arter hittades som matchar dina filter.",
+      "viewRecordings": "View all recordings of this species",
       "headers": {
         "species": "Art",
         "detections": "Detektioner",

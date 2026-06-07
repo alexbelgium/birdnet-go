@@ -75,6 +75,9 @@ export interface DetectionsListData {
       summary?: boolean;
     };
   };
+  allDates?: boolean;
+  sortBy?: string;
+  locked?: boolean;
 }
 
 export type DetectionSortBy =

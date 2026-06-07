@@ -791,8 +791,14 @@
       "hourly": "Herkend om {hour}:00 uur op {date}",
       "hourlyRange": "Herkend tussen {startHour}:00 en {endHour}:00 uur op {date}",
       "species": "{species}, herkend op {date}",
+      "allSpeciesDetections": "All recordings of {species}",
       "search": "Gevonden voor \"{query}\"",
       "allDetections": "Alles herkend op {date}"
+    },
+    "speciesSort": {
+      "maxConfidence": "Max Confidence",
+      "date": "Most Recent",
+      "locked": "Locked Only"
     },
     "detail": {
       "species": "Soort",
@@ -1772,6 +1778,7 @@
       "switchToList": "Wissel naar lijst overzicht",
       "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "Geen soorten gevonden voor jouw filters.",
+      "viewRecordings": "View all recordings of this species",
       "headers": {
         "species": "Soort",
         "detections": "Aantal",

@@ -791,8 +791,14 @@
       "hourly": "Resultados por hora às {hour}:00 em {date}",
       "hourlyRange": "Resultados por hora de {startHour}:00 a {endHour}:00 em {date}",
       "species": "Resultados para {species} em {date}",
+      "allSpeciesDetections": "All recordings of {species}",
       "search": "Resultados da pesquisa para \"{query}\"",
       "allDetections": "Todas as detecções em {date}"
+    },
+    "speciesSort": {
+      "maxConfidence": "Max Confidence",
+      "date": "Most Recent",
+      "locked": "Locked Only"
     },
     "detail": {
       "species": "Espécie",
@@ -1772,6 +1778,7 @@
       "switchToList": "Mudar para visualização em lista",
       "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "Nenhuma espécie encontrada que corresponda aos seus filtros.",
+      "viewRecordings": "View all recordings of this species",
       "headers": {
         "species": "Espécie",
         "detections": "Detecções",

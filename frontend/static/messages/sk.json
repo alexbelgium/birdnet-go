@@ -791,8 +791,14 @@
       "hourly": "Hodinové výsledky pre {hour}:00 dňa {date}",
       "hourlyRange": "Hodinové výsledky od {startHour}:00 do {endHour}:00 dňa {date}",
       "species": "Výsledky pre druh {species} dňa {date}",
+      "allSpeciesDetections": "All recordings of {species}",
       "search": "Výsledky vyhľadávania pre \"{query}\"",
       "allDetections": "Všetky detekcie pre dátum {date}"
+    },
+    "speciesSort": {
+      "maxConfidence": "Max Confidence",
+      "date": "Most Recent",
+      "locked": "Locked Only"
     },
     "detail": {
       "species": "Druh",
@@ -1772,6 +1778,7 @@
       "switchToList": "Prepnúť na zoznam",
       "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "Nenašli sa žiadne druhy zodpovedajúce vašim filtrom.",
+      "viewRecordings": "View all recordings of this species",
       "headers": {
         "species": "Druh",
         "detections": "Detekcie",

@@ -791,8 +791,14 @@
       "hourly": "Órási eredmények {date}-án {hour}:00-kor",
       "hourlyRange": "Órási eredmények {date}-án {startHour}:00 - {endHour}:00 között",
       "species": "{species} eredményei {date}-án",
+      "allSpeciesDetections": "All recordings of {species}",
       "search": "\"{query}\" keresési eredményei",
       "allDetections": "Összes detektálás {date}-án"
+    },
+    "speciesSort": {
+      "maxConfidence": "Max Confidence",
+      "date": "Most Recent",
+      "locked": "Locked Only"
     },
     "detail": {
       "species": "Faj",
@@ -1772,6 +1778,7 @@
       "switchToList": "Lista nézetre váltás",
       "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "A szűrőknek megfelelő faj nem található.",
+      "viewRecordings": "View all recordings of this species",
       "headers": {
         "species": "Faj",
         "detections": "Detektálások",

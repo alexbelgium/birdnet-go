@@ -75,6 +75,7 @@
     onRefresh?: () => void;
     onNumResultsChange?: (_numResults: number) => void;
     onSortChange?: (_sortBy: DetectionSortBy) => void;
+    onLockedFilterChange?: (_locked: boolean) => void;
     className?: string;
   }
 
@@ -87,6 +88,7 @@
     onRefresh,
     onNumResultsChange,
     onSortChange,
+    onLockedFilterChange,
     className = '',
   }: Props = $props();
 
@@ -106,6 +108,9 @@
         return t('detections.titles.hourly', { hour: data.hour, date: data.date });
 
       case 'species':
+        if (data.allDates) {
+          return t('detections.titles.allSpeciesDetections', { species: data.species });
+        }
         return t('detections.titles.species', { species: data.species, date: data.date });
 
       case 'search':
@@ -115,6 +120,24 @@
         return t('detections.titles.allDetections', { date: data.date });
     }
   });
+
+  // Which species sort/filter mode is active (only shown in all-dates species view)
+  type SpeciesSortMode = 'confidence' | 'date' | 'locked';
+  const speciesSortMode = $derived.by((): SpeciesSortMode => {
+    if (data?.locked) return 'locked';
+    if (data?.sortBy === 'confidence_desc') return 'confidence';
+    return 'date';
+  });
+
+  function handleSpeciesSort(mode: SpeciesSortMode) {
+    if (mode === 'locked') {
+      onLockedFilterChange?.(true);
+    } else if (mode === 'confidence') {
+      onSortChange?.('confidence_desc');
+    } else {
+      onSortChange?.('date_desc');
+    }
+  }
 
   function handlePageChange(page: number) {
     selection.clear();
@@ -461,6 +484,50 @@
             >
               <CheckSquare class="size-4" />
               <span>{t('detections.selection.select')}</span>
+            </button>
+          </div>
+        {/if}
+
+        <!-- Species sort controls: only shown in all-dates species view -->
+        {#if data?.allDates && data?.queryType === 'species'}
+          <div
+            class="hidden md:flex items-center rounded-lg border border-[var(--color-base-300)] overflow-hidden"
+          >
+            <button
+              type="button"
+              class={cn(
+                'px-3 py-1.5 text-sm font-medium transition-colors',
+                speciesSortMode === 'confidence'
+                  ? 'bg-[var(--color-primary)] text-[var(--color-primary-content)]'
+                  : 'text-[var(--color-base-content)] hover:bg-[var(--color-base-200)]'
+              )}
+              onclick={() => handleSpeciesSort('confidence')}
+            >
+              {t('detections.speciesSort.maxConfidence')}
+            </button>
+            <button
+              type="button"
+              class={cn(
+                'px-3 py-1.5 text-sm font-medium transition-colors border-l border-[var(--color-base-300)]',
+                speciesSortMode === 'date'
+                  ? 'bg-[var(--color-primary)] text-[var(--color-primary-content)]'
+                  : 'text-[var(--color-base-content)] hover:bg-[var(--color-base-200)]'
+              )}
+              onclick={() => handleSpeciesSort('date')}
+            >
+              {t('detections.speciesSort.date')}
+            </button>
+            <button
+              type="button"
+              class={cn(
+                'px-3 py-1.5 text-sm font-medium transition-colors border-l border-[var(--color-base-300)]',
+                speciesSortMode === 'locked'
+                  ? 'bg-[var(--color-primary)] text-[var(--color-primary-content)]'
+                  : 'text-[var(--color-base-content)] hover:bg-[var(--color-base-200)]'
+              )}
+              onclick={() => handleSpeciesSort('locked')}
+            >
+              {t('detections.speciesSort.locked')}
             </button>
           </div>
         {/if}

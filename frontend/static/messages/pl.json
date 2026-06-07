@@ -791,8 +791,14 @@
       "hourly": "Wyniki Godzinowe dla {hour}:00 dnia {date}",
       "hourlyRange": "Wyniki Godzinowe od {startHour}:00 do {endHour}:00 dnia {date}",
       "species": "Wyniki dla {species} dnia {date}",
+      "allSpeciesDetections": "All recordings of {species}",
       "search": "Wyniki Wyszukiwania dla \"{query}\"",
       "allDetections": "Wszystkie Detekcje dla {date}"
+    },
+    "speciesSort": {
+      "maxConfidence": "Max Confidence",
+      "date": "Most Recent",
+      "locked": "Locked Only"
     },
     "detail": {
       "species": "Gatunek",
@@ -1772,6 +1778,7 @@
       "switchToList": "Przełącz na widok listy",
       "switchToManage": "Manage species (review and delete)",
       "noSpeciesFound": "Nie znaleziono gatunków pasujących do twoich filtrów.",
+      "viewRecordings": "View all recordings of this species",
       "headers": {
         "species": "Gatunek",
         "detections": "Detekcje",

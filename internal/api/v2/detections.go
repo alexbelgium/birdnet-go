@@ -649,6 +649,12 @@ func (p *detectionQueryParams) needsAdvancedRouting() bool {
 		}
 	}
 
+	// species queryType without a date must use advanced routing because
+	// SpeciesDetections() always filters on date=?, returning nothing for "".
+	if p.QueryType == queryTypeSpecies && p.Date == "" {
+		return true
+	}
+
 	return false
 }
 

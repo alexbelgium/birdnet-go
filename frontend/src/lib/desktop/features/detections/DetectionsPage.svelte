@@ -82,12 +82,13 @@
       }
     }
 
-    // Only default to today's date for non-search query types.
+    // Only default to today's date for non-search, non-species query types.
     // For search queries, omitting the date allows searching across all dates.
-    // When date is included, the backend restricts results to that single day,
-    // which causes search to return no results for species detected on other days.
+    // For species queries without a date, omitting defaults to all-dates mode
+    // (shows every recording of the species sorted by the requested sort order).
     const date =
-      params.get('date')?.trim() || (queryType !== 'search' ? getLocalDateString() : undefined);
+      params.get('date')?.trim() ||
+      (queryType !== 'search' && queryType !== 'species' ? getLocalDateString() : undefined);
 
     return {
       queryType,
@@ -128,11 +129,14 @@
           ? queryParams.numResults
           : getSavedResultsPerPage();
 
+      const allDates = queryParams.queryType === 'species' && !queryParams.date;
+      const urlParams = new URLSearchParams(window.location.search);
+
       // Transform API response to match our expected format
       detectionsData = {
         notes: data.data || [],
         queryType: queryParams.queryType || 'all',
-        date: queryParams.date?.trim() || getLocalDateString(),
+        date: queryParams.date?.trim() ?? '',
         hour: queryParams.hour ? parseInt(queryParams.hour) : undefined,
         duration: queryParams.duration,
         species: queryParams.species,
@@ -146,6 +150,9 @@
         showingFrom: (queryParams.offset || 0) + 1,
         showingTo: Math.min((queryParams.offset || 0) + (data.data?.length || 0), data.total || 0),
         dashboardSettings: data.dashboardSettings,
+        allDates,
+        sortBy: queryParams.sortBy,
+        locked: urlParams.get('locked') === 'true',
       };
     } catch (err) {
       error = err instanceof Error ? err.message : t('detections.errors.fetchFailed');
@@ -212,8 +219,23 @@
     } else {
       params.delete('sortBy');
     }
-    params.set('offset', '0'); // Reset to first page
+    // Changing sort clears any locked-only filter
+    params.delete('locked');
+    params.set('offset', '0');
 
+    window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+    fetchDetections();
+  }
+
+  // Handle locked filter toggle from species sort controls
+  function handleLockedFilterChange(locked: boolean) {
+    const params = new URLSearchParams(window.location.search);
+    if (locked) {
+      params.set('locked', 'true');
+    } else {
+      params.delete('locked');
+    }
+    params.set('offset', '0');
     window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
     fetchDetections();
   }
@@ -281,5 +303,6 @@
     onRefresh={fetchDetections}
     onNumResultsChange={handleNumResultsChange}
     onSortChange={handleSortChange}
+    onLockedFilterChange={handleLockedFilterChange}
   />
 </div>
