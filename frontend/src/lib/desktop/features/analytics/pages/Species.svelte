@@ -2,7 +2,7 @@
   import { t, getLocale, type TranslationKey } from '$lib/i18n';
   import { getLocalDateString, parseLocalDateString } from '$lib/utils/date';
   import { downloadBlob } from '$lib/utils/fileHelpers';
-  import { formatNumber, formatDateTime } from '$lib/utils/formatters';
+  import { formatNumber, formatDate, formatDateTime } from '$lib/utils/formatters';
   import { loggers } from '$lib/utils/logger';
   import { getStoredValue, setStoredValue } from '$lib/utils/storage';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
@@ -15,7 +15,15 @@
   import SpeciesCard from '../components/ui/SpeciesCard.svelte';
   import SpeciesCardMobile from '../components/ui/SpeciesCardMobile.svelte';
   import StatCard from '../components/ui/StatCard.svelte';
-  import { Lock, Trash2, CheckCircle2, XCircle, Circle } from '@lucide/svelte';
+  import {
+    Lock,
+    Trash2,
+    CheckCircle2,
+    XCircle,
+    Circle,
+    ChevronUp,
+    ChevronDown,
+  } from '@lucide/svelte';
   import { toastActions } from '$lib/stores/toast';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { isAuthenticated } from '$lib/utils/auth';
@@ -313,6 +321,12 @@
   // Increments on every fetchData so an in-flight thumbnail loop from a previous
   // fetch can detect it has been superseded and stop mutating speciesData.
   let thumbnailFetchSeq = 0;
+
+  // Manage view packs more columns in, so dates drop the clock time to save
+  // horizontal space; the list view keeps the full date+time.
+  function formatColumnDate(value: string): string {
+    return viewMode === 'manage' ? formatDate(value) : formatDateTime(value);
+  }
 
   async function fetchData() {
     isLoading = true;
@@ -1045,6 +1059,18 @@
 
       <!-- List / Manage View (shared table; manage adds review + delete columns) -->
       {#if !isLoading && !manageLoading && (viewMode === 'list' || viewMode === 'manage')}
+        <!-- Sort-direction arrow for the merged "Lists" header's per-icon sort toggles. -->
+        {#snippet sortChevron(field: string)}
+          <span class="inline-block w-3" aria-hidden="true">
+            {#if sortField === field}
+              {#if sortDirection === 'asc'}
+                <ChevronUp class="size-3" />
+              {:else}
+                <ChevronDown class="size-3" />
+              {/if}
+            {/if}
+          </span>
+        {/snippet}
         <div class="overflow-x-auto">
           <table class="table w-full hidden sm:table">
             <thead>
@@ -1059,15 +1085,48 @@
                   />
                 {/each}
                 {#if viewMode === 'manage'}
-                  {#each MANAGE_SORTABLE_COLUMNS as { field, labelKey } (field)}
-                    <SortableHeader
-                      label={t(labelKey)}
-                      {field}
-                      activeField={sortField}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                  {/each}
+                  <!-- Merged Excluded + Whitelisted column; each icon sorts its own list. -->
+                  <th
+                    scope="col"
+                    class="text-center"
+                    aria-sort={sortField === 'excluded' || sortField === 'included'
+                      ? sortDirection === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'}
+                  >
+                    <div class="inline-flex items-center gap-1.5">
+                      <span>{t('analytics.species.headers.lists')}</span>
+                      <button
+                        type="button"
+                        class="inline-flex items-center hover:text-[var(--color-primary)] transition-colors"
+                        class:text-[var(--color-primary)]={sortField === 'excluded'}
+                        onclick={() => handleSort('excluded')}
+                        title={t('analytics.species.headers.excluded')}
+                        aria-label={t('dataDisplay.table.sortBy', {
+                          column: t('analytics.species.headers.excluded'),
+                        })}
+                        data-testid="sort-excluded"
+                      >
+                        <XCircle class="size-4" />
+                        {@render sortChevron('excluded')}
+                      </button>
+                      <button
+                        type="button"
+                        class="inline-flex items-center hover:text-[var(--color-primary)] transition-colors"
+                        class:text-[var(--color-primary)]={sortField === 'included'}
+                        onclick={() => handleSort('included')}
+                        title={t('analytics.species.headers.whitelisted')}
+                        aria-label={t('dataDisplay.table.sortBy', {
+                          column: t('analytics.species.headers.whitelisted'),
+                        })}
+                        data-testid="sort-included"
+                      >
+                        <CheckCircle2 class="size-4" />
+                        {@render sortChevron('included')}
+                      </button>
+                    </div>
+                  </th>
                   <th>{t('analytics.species.headers.reviewRatio')}</th>
                   <th>{t('analytics.species.headers.actions')}</th>
                 {/if}
@@ -1131,72 +1190,72 @@
                     </div>
                   </td>
                   <td>{formatPercentage(species.max_confidence)}</td>
-                  <td class="text-sm">{formatDateTime(species.first_heard)}</td>
-                  <td class="text-sm">{formatDateTime(species.last_heard)}</td>
+                  <td class="text-sm whitespace-nowrap">{formatColumnDate(species.first_heard)}</td>
+                  <td class="text-sm whitespace-nowrap">{formatColumnDate(species.last_heard)}</td>
                   {#if viewMode === 'manage'}
                     {@const isExcluded = species.is_excluded ?? false}
                     {@const isIncluded = species.is_included ?? false}
                     <td>
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs"
-                        class:text-[var(--color-error)]={isExcluded}
-                        class:opacity-30={!isExcluded}
-                        disabled={togglingExclude.has(species.common_name)}
-                        onclick={() => void toggleExcluded(species)}
-                        title={isExcluded
-                          ? t('analytics.species.manage.removeFromExcludedTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.addToExcludedTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-label={isExcluded
-                          ? t('analytics.species.manage.removeFromExcludedTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.addToExcludedTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-pressed={isExcluded}
-                      >
-                        {#if isExcluded}
-                          <XCircle class="h-5 w-5" />
-                        {:else}
-                          <Circle class="h-5 w-5" />
-                        {/if}
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs"
-                        class:text-[var(--color-success)]={isIncluded}
-                        class:opacity-30={!isIncluded}
-                        disabled={togglingInclude.has(species.common_name)}
-                        onclick={() => void toggleIncluded(species)}
-                        title={isIncluded
-                          ? t('analytics.species.manage.removeFromWhitelistTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.addToWhitelistTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-label={isIncluded
-                          ? t('analytics.species.manage.removeFromWhitelistTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.addToWhitelistTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-pressed={isIncluded}
-                      >
-                        {#if isIncluded}
-                          <CheckCircle2 class="h-5 w-5" />
-                        {:else}
-                          <Circle class="h-5 w-5" />
-                        {/if}
-                      </button>
+                      <div class="flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs"
+                          class:text-[var(--color-error)]={isExcluded}
+                          class:opacity-30={!isExcluded}
+                          disabled={togglingExclude.has(species.common_name)}
+                          onclick={() => void toggleExcluded(species)}
+                          title={isExcluded
+                            ? t('analytics.species.manage.removeFromExcludedTooltip', {
+                                species: species.common_name,
+                              })
+                            : t('analytics.species.manage.addToExcludedTooltip', {
+                                species: species.common_name,
+                              })}
+                          aria-label={isExcluded
+                            ? t('analytics.species.manage.removeFromExcludedTooltip', {
+                                species: species.common_name,
+                              })
+                            : t('analytics.species.manage.addToExcludedTooltip', {
+                                species: species.common_name,
+                              })}
+                          aria-pressed={isExcluded}
+                        >
+                          {#if isExcluded}
+                            <XCircle class="h-5 w-5" />
+                          {:else}
+                            <Circle class="h-5 w-5" />
+                          {/if}
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs"
+                          class:text-[var(--color-success)]={isIncluded}
+                          class:opacity-30={!isIncluded}
+                          disabled={togglingInclude.has(species.common_name)}
+                          onclick={() => void toggleIncluded(species)}
+                          title={isIncluded
+                            ? t('analytics.species.manage.removeFromWhitelistTooltip', {
+                                species: species.common_name,
+                              })
+                            : t('analytics.species.manage.addToWhitelistTooltip', {
+                                species: species.common_name,
+                              })}
+                          aria-label={isIncluded
+                            ? t('analytics.species.manage.removeFromWhitelistTooltip', {
+                                species: species.common_name,
+                              })
+                            : t('analytics.species.manage.addToWhitelistTooltip', {
+                                species: species.common_name,
+                              })}
+                          aria-pressed={isIncluded}
+                        >
+                          {#if isIncluded}
+                            <CheckCircle2 class="h-5 w-5" />
+                          {:else}
+                            <Circle class="h-5 w-5" />
+                          {/if}
+                        </button>
+                      </div>
                     </td>
                     <td>
                       {#if ratio === null}

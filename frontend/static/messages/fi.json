@@ -1779,6 +1779,7 @@
         "maxConfidence": "Maks. luottamus",
         "firstDetected": "Ensihavainto",
         "lastDetected": "Viimeinen havainto",
+        "lists": "Lists",
         "excluded": "Excluded",
         "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",

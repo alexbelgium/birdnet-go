@@ -1385,6 +1385,7 @@ export type TranslationKey =
   | 'analytics.species.headers.maxConfidence'
   | 'analytics.species.headers.firstDetected'
   | 'analytics.species.headers.lastDetected'
+  | 'analytics.species.headers.lists'
   | 'analytics.species.headers.excluded'
   | 'analytics.species.headers.whitelisted'
   | 'analytics.species.headers.reviewRatio'

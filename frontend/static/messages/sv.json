@@ -1779,6 +1779,7 @@
         "maxConfidence": "Maxkonfidens",
         "firstDetected": "Först detekterad",
         "lastDetected": "Senast detekterad",
+        "lists": "Lists",
         "excluded": "Excluded",
         "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",

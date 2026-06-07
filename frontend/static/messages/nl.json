@@ -1779,6 +1779,7 @@
         "maxConfidence": "Max. betrouwbaarheid",
         "firstDetected": "Eerst gehoord",
         "lastDetected": "Laatst gehoord",
+        "lists": "Lists",
         "excluded": "Excluded",
         "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",

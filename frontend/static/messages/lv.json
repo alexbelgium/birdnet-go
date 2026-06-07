@@ -1779,6 +1779,7 @@
         "maxConfidence": "Maks. ticamība",
         "firstDetected": "Pirmo reizi atpazīta",
         "lastDetected": "Pēdējo reizi atpazīta",
+        "lists": "Lists",
         "excluded": "Excluded",
         "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",

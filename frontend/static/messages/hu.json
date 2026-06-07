@@ -1779,6 +1779,7 @@
         "maxConfidence": "Max. megbízhatóság",
         "firstDetected": "Először észlelve",
         "lastDetected": "Utoljára észlelve",
+        "lists": "Lists",
         "excluded": "Excluded",
         "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",

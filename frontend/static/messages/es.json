@@ -1779,6 +1779,7 @@
         "maxConfidence": "Confianza máx.",
         "firstDetected": "Primera detección",
         "lastDetected": "Última detección",
+        "lists": "Lists",
         "excluded": "Excluded",
         "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",
