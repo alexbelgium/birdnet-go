@@ -1627,6 +1627,7 @@
         "maxConfidence": "Maximálna istota",
         "firstDetected": "Prvýkrát zistené",
         "lastDetected": "Naposledy zistené",
+        "lists": "Lists",
         "excluded": "Excluded",
         "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",
