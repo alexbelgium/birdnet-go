@@ -82,6 +82,13 @@ func TestParseTelegramShoutrrrURLs(t *testing.T) {
 			wantChat:  "-100111222333",
 		},
 		{
+			name:      "real bot token with colon",
+			urls:      []string{"telegram://123456789:AAFfGGhh@telegram?chats=-100111222333"},
+			wantLen:   1,
+			wantToken: "123456789:AAFfGGhh",
+			wantChat:  "-100111222333",
+		},
+		{
 			name:    "multiple chats in one URL",
 			urls:    []string{"telegram://tok@telegram?chats=-100111,-100222"},
 			wantLen: 2,
@@ -170,7 +177,7 @@ func TestBuildTelegramCaption(t *testing.T) {
 			Metadata: map[string]any{},
 		}
 		caption := buildTelegramCaption(n)
-		assert.LessOrEqual(t, len([]byte(caption)), telegramCaptionMaxBytes+4)
+		assert.LessOrEqual(t, len([]byte(caption)), telegramCaptionMaxBytes)
 	})
 }
 
