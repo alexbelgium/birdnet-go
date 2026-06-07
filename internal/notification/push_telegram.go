@@ -81,10 +81,11 @@ func newTelegramHTTPClient(timeout time.Duration) *httpclient.Client {
 // photoURL must be a publicly reachable HTTPS URL — Telegram fetches it directly.
 func sendTelegramPhoto(ctx context.Context, client *httpclient.Client, apiBase, token, chatID, photoURL, caption string) error {
 	return callTelegramAPI(ctx, client, apiBase, token, "sendPhoto", url.Values{
-		"chat_id":    {chatID},
-		"photo":      {photoURL},
-		"caption":    {caption},
-		"parse_mode": {"HTML"},
+		"chat_id":                  {chatID},
+		"photo":                    {photoURL},
+		"caption":                  {caption},
+		"parse_mode":               {"HTML"},
+		"show_caption_above_media": {"true"},
 	})
 }
 
