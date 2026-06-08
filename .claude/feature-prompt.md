@@ -15,6 +15,7 @@ I want to implement: **[FEATURE — describe clearly what it should do and where
 
 Before writing a single line of code, read every applicable guidance file:
 
+- Always read **`AGENTS.md`** (root)
 - Always read **`CLAUDE.md`** (root)
 - Go code → also read **`internal/CLAUDE.md`**
 - Frontend code → also read **`frontend/CLAUDE.md`**
