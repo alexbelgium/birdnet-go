@@ -404,14 +404,15 @@ func BuildFFmpegArgs(cfg *StreamConfig, ffmpegParameters []string) []string {
 }
 
 // buildOutputArgs appends the post-input FFmpeg flags: the input URL, decode
-// format, channel selection, conditional output resampling, and the stdout pipe.
+// format, channel selection, output resampling, and the stdout pipe.
 // It is shared by BuildFFmpegArgs and Stream.startProcess so the unit-tested
 // argument construction matches the runtime path exactly.
 //
 // -ac (channel count) is always emitted via appendChannelArgs so multi-channel
-// sources are downmixed to mono. -ar (sample rate) is only emitted when the
-// source rate is unknown or differs from the target, avoiding a needless
-// resample when the source already matches.
+// sources are downmixed to mono. -ar (sample rate) is always emitted so that
+// FFmpeg resamples to the target rate even when the source frequency changes
+// between reconnects (e.g. camera reboot at a different rate). When source and
+// target rates are equal, FFmpeg uses a passthrough with no extra overhead.
 func buildOutputArgs(args []string, cfg *StreamConfig) []string {
 	sampleRate, numChannels, format := GetFFmpegFormat(cfg.SampleRate, cfg.Channels, cfg.BitDepth)
 
@@ -427,9 +428,7 @@ func buildOutputArgs(args []string, cfg *StreamConfig) []string {
 		"-f", format,
 	)
 	args = appendChannelArgs(args, cfg.ChannelMode, cfg.SourceChannels, numChannels)
-	if cfg.needsOutputResampling() {
-		args = append(args, "-ar", sampleRate)
-	}
+	args = append(args, "-ar", sampleRate)
 	args = append(args, "-hide_banner", "pipe:1")
 
 	return args

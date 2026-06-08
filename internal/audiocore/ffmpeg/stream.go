@@ -271,12 +271,11 @@ func (c *StreamConfig) sourceType() audiocore.SourceType {
 	}
 }
 
-// needsOutputResampling reports whether FFmpeg should resample the decoded
-// audio to the configured sample rate via -ar/-ac output flags.
-// When the source rate is known (probed) and matches the target, no
-// resampling is needed. When unknown (probe failed) or different from
-// the target, FFmpeg must resample to ensure the pipeline gets the
-// expected rate.
+// needsOutputResampling reports whether the source and target sample rates
+// differ, indicating that FFmpeg will perform computational resampling (rather
+// than a passthrough). Used only for diagnostic logging; -ar is always emitted
+// in buildOutputArgs regardless of this value to handle source frequency
+// changes between reconnects.
 func (c *StreamConfig) needsOutputResampling() bool {
 	if c.SourceSampleRate == 0 {
 		return true
