@@ -833,6 +833,10 @@ type SpeciesManager interface {
 	GetSpeciesNoteIDs(scientificName string) ([]string, error)
 }
 
+// Compile-time assertion that the legacy datastore satisfies SpeciesManager, so a
+// future signature drift fails the build instead of silently degrading to HTTP 501.
+var _ SpeciesManager = (*DataStore)(nil)
+
 // GetSpeciesReviewStats returns detection totals and manual review counts grouped by
 // species (scientific name) across all detections. Unlike GetSpeciesSummaryData it does
 // NOT exclude false positives, so species whose detections were all rejected are still

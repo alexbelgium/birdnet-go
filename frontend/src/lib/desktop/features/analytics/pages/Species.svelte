@@ -167,12 +167,17 @@
   const SORT_STORAGE_KEY = 'analytics.species.sortOrder';
   // Only the species-name column defaults to ascending (A→Z) on first click.
   const SPECIES_COLUMN_FIELD = 'species';
-  const VALID_SORT_ORDERS: Set<string> = new Set<string>(
-    ALL_SORTABLE_COLUMNS.flatMap(column => [column.asc, column.desc])
+  // Sort orders backed by columns shown in every view. The manage-only orders
+  // (excluded/included) are deliberately excluded here so they are never persisted
+  // to or restored from storage — they apply only while the manage view is open and
+  // would otherwise order the grid/list view by an invisible column and blank the
+  // sort dropdown (which only offers these list orders).
+  const LIST_SORT_ORDERS: Set<string> = new Set<string>(
+    SORTABLE_COLUMNS.flatMap(column => [column.asc, column.desc])
   );
 
-  function isSortOrder(value: unknown): value is SortOrder {
-    return typeof value === 'string' && VALID_SORT_ORDERS.has(value);
+  function isListSortOrder(value: unknown): value is SortOrder {
+    return typeof value === 'string' && LIST_SORT_ORDERS.has(value);
   }
 
   let isLoading = $state<boolean>(true);
@@ -248,7 +253,7 @@
   const restoredSortOrder = getStoredValue<SortOrder>(
     SORT_STORAGE_KEY,
     DEFAULT_SORT_ORDER,
-    isSortOrder
+    isListSortOrder
   );
 
   let filters = $state<SpeciesFilters>({
@@ -293,7 +298,10 @@
           : column.desc;
     filters.sortOrder = next;
     appliedSortOrder = next;
-    setStoredValue<SortOrder>(SORT_STORAGE_KEY, next);
+    // Persist only list/grid orders; manage-only sorts are session-scoped.
+    if (isListSortOrder(next)) {
+      setStoredValue<SortOrder>(SORT_STORAGE_KEY, next);
+    }
     // filteredSpecies is $derived and re-sorts automatically on appliedSortOrder.
   }
 
@@ -333,7 +341,9 @@
     const fetchSeq = ++thumbnailFetchSeq;
     // Apply Filters (and mount/reset) commit the pending dropdown selection.
     appliedSortOrder = filters.sortOrder;
-    setStoredValue<SortOrder>(SORT_STORAGE_KEY, filters.sortOrder);
+    if (isListSortOrder(filters.sortOrder)) {
+      setStoredValue<SortOrder>(SORT_STORAGE_KEY, filters.sortOrder);
+    }
     // Commit the search term immediately too, cancelling any pending debounce so
     // a just-typed term is not re-applied a moment later.
     clearTimeout(searchDebounce);
@@ -526,11 +536,9 @@
   async function fetchReviewStats() {
     isLoadingStats = true;
     try {
-      const response = await fetch(buildAppUrl('/api/v2/analytics/species/review-stats'));
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-      reviewStats = await response.json();
+      reviewStats = await fetchWithCSRF<SpeciesReviewStat[]>(
+        '/api/v2/analytics/species/review-stats'
+      );
     } catch (error) {
       logger.error('Error fetching species review stats:', error);
       reviewStats = [];
@@ -545,15 +553,30 @@
     void fetchManageData();
   }
 
+  // Returning to grid/list from manage: if the active sort is a manage-only order
+  // (excluded/included), fall back to the persisted list sort so the table isn't
+  // ordered by a now-hidden column and the sort dropdown isn't left blank.
+  function setListView(mode: 'grid' | 'list') {
+    if (!isListSortOrder(appliedSortOrder)) {
+      const restored = getStoredValue<SortOrder>(
+        SORT_STORAGE_KEY,
+        DEFAULT_SORT_ORDER,
+        isListSortOrder
+      );
+      appliedSortOrder = restored;
+      filters.sortOrder = restored;
+      applyFilters();
+    }
+    viewMode = mode;
+  }
+
   async function fetchManageData() {
     await Promise.all([fetchReviewStats(), fetchExcludedSpecies(), fetchIncludedSpecies()]);
   }
 
   async function fetchExcludedSpecies() {
     try {
-      const response = await fetch(buildAppUrl('/api/v2/detections/ignored'));
-      if (!response.ok) throw new Error(`Server responded with ${response.status}`);
-      const data = (await response.json()) as { species: string[] };
+      const data = await fetchWithCSRF<{ species: string[] }>('/api/v2/detections/ignored');
       excludedSpecies = new Set(data.species);
     } catch (error) {
       logger.error('Error fetching excluded species:', error);
@@ -562,9 +585,7 @@
 
   async function fetchIncludedSpecies() {
     try {
-      const response = await fetch(buildAppUrl('/api/v2/detections/included'));
-      if (!response.ok) throw new Error(`Server responded with ${response.status}`);
-      const data = (await response.json()) as { species: string[] };
+      const data = await fetchWithCSRF<{ species: string[] }>('/api/v2/detections/included');
       includedSpecies = new Set(data.species);
     } catch (error) {
       logger.error('Error fetching included species:', error);
@@ -985,7 +1006,7 @@
           <button
             class="btn btn-sm join-item"
             class:btn-active={viewMode === 'grid'}
-            onclick={() => (viewMode = 'grid')}
+            onclick={() => setListView('grid')}
             aria-label={t('analytics.species.switchToGrid')}
           >
             <svg
@@ -1002,7 +1023,7 @@
           <button
             class="btn btn-sm join-item"
             class:btn-active={viewMode === 'list'}
-            onclick={() => (viewMode = 'list')}
+            onclick={() => setListView('list')}
             aria-label={t('analytics.species.switchToList')}
           >
             <svg
