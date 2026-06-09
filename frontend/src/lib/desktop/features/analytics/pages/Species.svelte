@@ -14,15 +14,7 @@
   import SpeciesCard from '../components/ui/SpeciesCard.svelte';
   import SpeciesCardMobile from '../components/ui/SpeciesCardMobile.svelte';
   import StatCard from '../components/ui/StatCard.svelte';
-  import {
-    Lock,
-    Trash2,
-    CheckCircle2,
-    XCircle,
-    Circle,
-    ChevronUp,
-    ChevronDown,
-  } from '@lucide/svelte';
+  import { Lock, Trash2, CheckCircle2, XCircle, Circle, BadgeCheck } from '@lucide/svelte';
   import { toastActions } from '$lib/stores/toast';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { isAuthenticated } from '$lib/utils/auth';
@@ -50,7 +42,13 @@
       | 'excluded_desc'
       | 'excluded_asc'
       | 'included_desc'
-      | 'included_asc';
+      | 'included_asc'
+      | 'review_ratio_desc'
+      | 'review_ratio_asc'
+      | 'range_score_desc'
+      | 'range_score_asc'
+      | 'confirmed_desc'
+      | 'confirmed_asc';
     searchTerm: string;
   }
 
@@ -71,6 +69,10 @@
     // Manage-view list membership flags (populated from fetched exclude/include lists).
     is_excluded?: boolean;
     is_included?: boolean;
+    // Manage-view only: range-filter geomodel occurrence probability (0–1) for the active location/week.
+    range_score?: number;
+    // Manage-view only: species manually flagged as a genuine, confirmed occurrence.
+    is_confirmed?: boolean;
   }
 
   // Per-species manual-review counts returned by /analytics/species/review-stats.
@@ -130,7 +132,9 @@
     },
   ];
 
-  // Manage-view-only sortable columns (excluded/whitelisted membership toggles).
+  // Manage-view-only sortable columns. Each maps to a dedicated table column that
+  // is rendered with a SortableHeader (excluded/whitelisted/confirmed toggles,
+  // review ratio, and range-filter probability).
   const MANAGE_SORTABLE_COLUMNS: {
     field: string;
     labelKey: TranslationKey;
@@ -148,6 +152,24 @@
       labelKey: 'analytics.species.headers.whitelisted',
       asc: 'included_asc',
       desc: 'included_desc',
+    },
+    {
+      field: 'review_ratio',
+      labelKey: 'analytics.species.headers.reviewRatio',
+      asc: 'review_ratio_asc',
+      desc: 'review_ratio_desc',
+    },
+    {
+      field: 'range_score',
+      labelKey: 'analytics.species.headers.probability',
+      asc: 'range_score_asc',
+      desc: 'range_score_desc',
+    },
+    {
+      field: 'confirmed',
+      labelKey: 'analytics.species.headers.confirmed',
+      asc: 'confirmed_asc',
+      desc: 'confirmed_desc',
     },
   ];
 
@@ -190,6 +212,11 @@
     action: string;
     is_included: boolean;
   }
+  interface ConfirmToggleResponse {
+    common_name: string;
+    action: string;
+    is_confirmed: boolean;
+  }
 
   // Species management (manage view): per-species review stats + delete confirmation.
   let reviewStats = $state<SpeciesReviewStat[]>([]);
@@ -199,12 +226,16 @@
     null
   );
 
-  // Manage-view exclude/include list state. Sets contain common names (matching the API).
+  // Manage-view exclude/include/confirmed list state. Sets contain common names (matching the API).
   let excludedSpecies = $state<Set<string>>(new Set());
   let includedSpecies = $state<Set<string>>(new Set());
+  let confirmedSpecies = $state<Set<string>>(new Set());
+  // Range-filter geomodel probabilities keyed by scientific name (manage view only).
+  let rangeScores = $state<Map<string, number>>(new Map());
   // Tracks species whose toggle is in-flight (prevents double-click races).
   let togglingExclude = $state<Set<string>>(new Set());
   let togglingInclude = $state<Set<string>>(new Set());
+  let togglingConfirmed = $state<Set<string>>(new Set());
 
   // True while the manage view is loading its review stats.
   let manageLoading = $derived(viewMode === 'manage' && isLoadingStats);
@@ -231,6 +262,8 @@
         rejected_count: stat.rejected,
         is_excluded: excludedSpecies.has(commonName),
         is_included: includedSpecies.has(commonName),
+        range_score: rangeScores.get(stat.scientific_name),
+        is_confirmed: confirmedSpecies.has(commonName),
       };
     });
     return sortSpeciesList(rows.filter(matchesSearch), appliedSortOrder);
@@ -480,6 +513,26 @@
       case 'included_asc':
         sorted.sort((a, b) => Number(a.is_included ?? false) - Number(b.is_included ?? false));
         break;
+      case 'review_ratio_desc':
+        // Unreviewed species (null ratio) sort last in both directions via the -1 sentinel.
+        sorted.sort((a, b) => (reviewedRatio(b) ?? -1) - (reviewedRatio(a) ?? -1));
+        break;
+      case 'review_ratio_asc':
+        sorted.sort((a, b) => (reviewedRatio(a) ?? -1) - (reviewedRatio(b) ?? -1));
+        break;
+      case 'range_score_desc':
+        // Species with no geomodel score (undefined) sort last via the -1 sentinel.
+        sorted.sort((a, b) => (b.range_score ?? -1) - (a.range_score ?? -1));
+        break;
+      case 'range_score_asc':
+        sorted.sort((a, b) => (a.range_score ?? -1) - (b.range_score ?? -1));
+        break;
+      case 'confirmed_desc':
+        sorted.sort((a, b) => Number(b.is_confirmed ?? false) - Number(a.is_confirmed ?? false));
+        break;
+      case 'confirmed_asc':
+        sorted.sort((a, b) => Number(a.is_confirmed ?? false) - Number(b.is_confirmed ?? false));
+        break;
       default: {
         // Exhaustiveness guard: adding a SortOrder value without a case is a compile error.
         const _exhaustive: never = order;
@@ -539,7 +592,13 @@
   }
 
   async function fetchManageData() {
-    await Promise.all([fetchReviewStats(), fetchExcludedSpecies(), fetchIncludedSpecies()]);
+    await Promise.all([
+      fetchReviewStats(),
+      fetchExcludedSpecies(),
+      fetchIncludedSpecies(),
+      fetchConfirmedSpecies(),
+      fetchRangeScores(),
+    ]);
   }
 
   async function fetchExcludedSpecies() {
@@ -557,6 +616,34 @@
       includedSpecies = new Set(data.species);
     } catch (error) {
       logger.error('Error fetching included species:', error);
+    }
+  }
+
+  async function fetchConfirmedSpecies() {
+    try {
+      const data = await fetchWithCSRF<{ species: string[] }>('/api/v2/detections/confirmed');
+      confirmedSpecies = new Set(data.species);
+    } catch (error) {
+      logger.error('Error fetching confirmed species:', error);
+    }
+  }
+
+  // Loads the range-filter geomodel probability for every species at the current
+  // location/week. Failures are non-fatal: the Probability column simply shows "—".
+  async function fetchRangeScores() {
+    try {
+      const data = await fetchWithCSRF<{
+        species: Array<{ scientificName: string; score?: number }>;
+      }>('/api/v2/range/species/scores');
+      const next = new Map<string, number>();
+      for (const entry of data.species) {
+        if (typeof entry.score === 'number') {
+          next.set(entry.scientificName, entry.score);
+        }
+      }
+      rangeScores = next;
+    } catch (error) {
+      logger.error('Error fetching range filter scores:', error);
     }
   }
 
@@ -667,6 +754,61 @@
       const done = new Set(togglingInclude);
       done.delete(name);
       togglingInclude = done;
+    }
+  }
+
+  async function toggleConfirmed(species: SpeciesData) {
+    const name = species.common_name;
+    if (togglingConfirmed.has(name)) return;
+
+    // Optimistic update.
+    const newToggling = new Set(togglingConfirmed);
+    newToggling.add(name);
+    togglingConfirmed = newToggling;
+
+    const wasConfirmed = confirmedSpecies.has(name);
+    const optimistic = new Set(confirmedSpecies);
+    if (wasConfirmed) {
+      optimistic.delete(name);
+    } else {
+      optimistic.add(name);
+    }
+    confirmedSpecies = optimistic;
+
+    try {
+      const resp = await fetchWithCSRF<ConfirmToggleResponse>('/api/v2/detections/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ common_name: name }),
+      });
+      // Reconcile with authoritative server state.
+      const confirmed = new Set(confirmedSpecies);
+      if (resp.is_confirmed) {
+        confirmed.add(name);
+      } else {
+        confirmed.delete(name);
+      }
+      confirmedSpecies = confirmed;
+      toastActions.success(
+        resp.action === 'added'
+          ? t('analytics.species.manage.addedToConfirmed', { species: name })
+          : t('analytics.species.manage.removedFromConfirmed', { species: name })
+      );
+    } catch (error) {
+      // Revert optimistic update on failure.
+      const reverted = new Set(confirmedSpecies);
+      if (wasConfirmed) {
+        reverted.add(name);
+      } else {
+        reverted.delete(name);
+      }
+      confirmedSpecies = reverted;
+      logger.error('Error toggling confirmed species:', error);
+      toastActions.error(t('analytics.species.manage.toggleError'));
+    } finally {
+      const done = new Set(togglingConfirmed);
+      done.delete(name);
+      togglingConfirmed = done;
     }
   }
 
@@ -1038,18 +1180,7 @@
 
       <!-- List / Manage View (shared table; manage adds review + delete columns) -->
       {#if !isLoading && !manageLoading && (viewMode === 'list' || viewMode === 'manage')}
-        <!-- Sort-direction arrow for the merged "Lists" header's per-icon sort toggles. -->
-        {#snippet sortChevron(field: string)}
-          <span class="inline-block w-3" aria-hidden="true">
-            {#if sortField === field}
-              {#if sortDirection === 'asc'}
-                <ChevronUp class="size-3" />
-              {:else}
-                <ChevronDown class="size-3" />
-              {/if}
-            {/if}
-          </span>
-        {/snippet}
+        <!-- Manage view widens the table; horizontal scroll keeps every column readable. -->
         <div class="overflow-x-auto">
           <table class="table w-full hidden sm:table">
             <thead>
@@ -1064,49 +1195,18 @@
                   />
                 {/each}
                 {#if viewMode === 'manage'}
-                  <!-- Merged Excluded + Whitelisted column; each icon sorts its own list. -->
-                  <th
-                    scope="col"
-                    class="text-center"
-                    aria-sort={sortField === 'excluded' || sortField === 'included'
-                      ? sortDirection === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'}
-                  >
-                    <div class="inline-flex items-center gap-1.5">
-                      <span>{t('analytics.species.headers.lists')}</span>
-                      <button
-                        type="button"
-                        class="inline-flex items-center hover:text-[var(--color-primary)] transition-colors"
-                        class:text-[var(--color-primary)]={sortField === 'excluded'}
-                        onclick={() => handleSort('excluded')}
-                        title={t('analytics.species.headers.excluded')}
-                        aria-label={t('dataDisplay.table.sortBy', {
-                          column: t('analytics.species.headers.excluded'),
-                        })}
-                        data-testid="sort-excluded"
-                      >
-                        <XCircle class="size-4" />
-                        {@render sortChevron('excluded')}
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex items-center hover:text-[var(--color-primary)] transition-colors"
-                        class:text-[var(--color-primary)]={sortField === 'included'}
-                        onclick={() => handleSort('included')}
-                        title={t('analytics.species.headers.whitelisted')}
-                        aria-label={t('dataDisplay.table.sortBy', {
-                          column: t('analytics.species.headers.whitelisted'),
-                        })}
-                        data-testid="sort-included"
-                      >
-                        <CheckCircle2 class="size-4" />
-                        {@render sortChevron('included')}
-                      </button>
-                    </div>
-                  </th>
-                  <th>{t('analytics.species.headers.reviewRatio')}</th>
+                  <!-- Excluded, Whitelisted, Review Ratio, Probability, Confirmed: each a
+                       dedicated sortable column with a full-text label and sort icon. -->
+                  {#each MANAGE_SORTABLE_COLUMNS as { field, labelKey } (field)}
+                    <SortableHeader
+                      label={t(labelKey)}
+                      {field}
+                      activeField={sortField}
+                      direction={sortDirection}
+                      onSort={handleSort}
+                      className="text-center"
+                    />
+                  {/each}
                   <th>{t('analytics.species.headers.actions')}</th>
                 {/if}
               </tr>
@@ -1120,47 +1220,60 @@
                     : 'bg-[var(--color-base-200)]'}
                 >
                   <td>
-                    <div class="flex items-center gap-3">
-                      <div class="avatar">
-                        <div
-                          class="mask mask-squircle w-12 h-12"
-                          class:bg-[var(--color-base-300)]={!species.thumbnail_url}
-                        >
-                          {#if species.thumbnail_url}
-                            <img
-                              src={species.thumbnail_url}
-                              alt={species.common_name}
-                              onerror={e => {
-                                const img = e.target as HTMLImageElement;
-                                if (img) {
-                                  img.style.display = 'none';
-                                  img.parentElement?.classList.add('bg-[var(--color-base-300)]');
-                                }
-                              }}
-                            />
-                          {/if}
-                        </div>
-                      </div>
+                    {#if viewMode === 'manage'}
+                      <!-- Manage view is text-only (no thumbnail) to keep the wider table compact. -->
                       <div>
                         <div class="font-bold">{species.common_name}</div>
                         <div class="text-sm opacity-50 italic">{species.scientific_name}</div>
                       </div>
-                    </div>
+                    {:else}
+                      <div class="flex items-center gap-3">
+                        <div class="avatar">
+                          <div
+                            class="mask mask-squircle w-12 h-12"
+                            class:bg-[var(--color-base-300)]={!species.thumbnail_url}
+                          >
+                            {#if species.thumbnail_url}
+                              <img
+                                src={species.thumbnail_url}
+                                alt={species.common_name}
+                                onerror={e => {
+                                  const img = e.target as HTMLImageElement;
+                                  if (img) {
+                                    img.style.display = 'none';
+                                    img.parentElement?.classList.add('bg-[var(--color-base-300)]');
+                                  }
+                                }}
+                              />
+                            {/if}
+                          </div>
+                        </div>
+                        <div>
+                          <div class="font-bold">{species.common_name}</div>
+                          <div class="text-sm opacity-50 italic">{species.scientific_name}</div>
+                        </div>
+                      </div>
+                    {/if}
                   </td>
                   <td class="font-semibold">{species.count}</td>
                   <td>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress w-20 {species.avg_confidence >= 0.8
-                          ? 'progress-success'
-                          : species.avg_confidence >= 0.4
-                            ? 'progress-warning'
-                            : 'progress-error'}"
-                        value={species.avg_confidence}
-                        max="1"
-                      ></progress>
+                    {#if viewMode === 'manage'}
+                      <!-- Manage view shows the confidence value as plain text (no progress bar). -->
                       <span class="text-sm">{formatPercentage(species.avg_confidence)}</span>
-                    </div>
+                    {:else}
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress w-20 {species.avg_confidence >= 0.8
+                            ? 'progress-success'
+                            : species.avg_confidence >= 0.4
+                              ? 'progress-warning'
+                              : 'progress-error'}"
+                          value={species.avg_confidence}
+                          max="1"
+                        ></progress>
+                        <span class="text-sm">{formatPercentage(species.avg_confidence)}</span>
+                      </div>
+                    {/if}
                   </td>
                   <td>{formatPercentage(species.max_confidence)}</td>
                   <td class="text-sm whitespace-nowrap">{formatColumnDate(species.first_heard)}</td>
@@ -1168,68 +1281,72 @@
                   {#if viewMode === 'manage'}
                     {@const isExcluded = species.is_excluded ?? false}
                     {@const isIncluded = species.is_included ?? false}
-                    <td>
-                      <div class="flex items-center justify-center gap-1">
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs"
-                          class:text-[var(--color-error)]={isExcluded}
-                          class:opacity-30={!isExcluded}
-                          disabled={togglingExclude.has(species.common_name)}
-                          onclick={() => void toggleExcluded(species)}
-                          title={isExcluded
-                            ? t('analytics.species.manage.removeFromExcludedTooltip', {
-                                species: species.common_name,
-                              })
-                            : t('analytics.species.manage.addToExcludedTooltip', {
-                                species: species.common_name,
-                              })}
-                          aria-label={isExcluded
-                            ? t('analytics.species.manage.removeFromExcludedTooltip', {
-                                species: species.common_name,
-                              })
-                            : t('analytics.species.manage.addToExcludedTooltip', {
-                                species: species.common_name,
-                              })}
-                          aria-pressed={isExcluded}
-                        >
-                          {#if isExcluded}
-                            <XCircle class="h-5 w-5" />
-                          {:else}
-                            <Circle class="h-5 w-5" />
-                          {/if}
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs"
-                          class:text-[var(--color-success)]={isIncluded}
-                          class:opacity-30={!isIncluded}
-                          disabled={togglingInclude.has(species.common_name)}
-                          onclick={() => void toggleIncluded(species)}
-                          title={isIncluded
-                            ? t('analytics.species.manage.removeFromWhitelistTooltip', {
-                                species: species.common_name,
-                              })
-                            : t('analytics.species.manage.addToWhitelistTooltip', {
-                                species: species.common_name,
-                              })}
-                          aria-label={isIncluded
-                            ? t('analytics.species.manage.removeFromWhitelistTooltip', {
-                                species: species.common_name,
-                              })
-                            : t('analytics.species.manage.addToWhitelistTooltip', {
-                                species: species.common_name,
-                              })}
-                          aria-pressed={isIncluded}
-                        >
-                          {#if isIncluded}
-                            <CheckCircle2 class="h-5 w-5" />
-                          {:else}
-                            <Circle class="h-5 w-5" />
-                          {/if}
-                        </button>
-                      </div>
+                    {@const isConfirmed = species.is_confirmed ?? false}
+                    <!-- Excluded -->
+                    <td class="text-center">
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs"
+                        class:text-[var(--color-error)]={isExcluded}
+                        class:opacity-30={!isExcluded}
+                        disabled={togglingExclude.has(species.common_name)}
+                        onclick={() => void toggleExcluded(species)}
+                        title={isExcluded
+                          ? t('analytics.species.manage.removeFromExcludedTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.addToExcludedTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-label={isExcluded
+                          ? t('analytics.species.manage.removeFromExcludedTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.addToExcludedTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-pressed={isExcluded}
+                      >
+                        {#if isExcluded}
+                          <XCircle class="h-5 w-5" />
+                        {:else}
+                          <Circle class="h-5 w-5" />
+                        {/if}
+                      </button>
                     </td>
+                    <!-- Whitelisted -->
+                    <td class="text-center">
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs"
+                        class:text-[var(--color-success)]={isIncluded}
+                        class:opacity-30={!isIncluded}
+                        disabled={togglingInclude.has(species.common_name)}
+                        onclick={() => void toggleIncluded(species)}
+                        title={isIncluded
+                          ? t('analytics.species.manage.removeFromWhitelistTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.addToWhitelistTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-label={isIncluded
+                          ? t('analytics.species.manage.removeFromWhitelistTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.addToWhitelistTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-pressed={isIncluded}
+                      >
+                        {#if isIncluded}
+                          <CheckCircle2 class="h-5 w-5" />
+                        {:else}
+                          <Circle class="h-5 w-5" />
+                        {/if}
+                      </button>
+                    </td>
+                    <!-- Review ratio (confirmed / rejected) -->
                     <td>
                       {#if ratio === null}
                         <span
@@ -1257,6 +1374,52 @@
                         </div>
                       {/if}
                     </td>
+                    <!-- Probability (range-filter geomodel score, 3 decimals) -->
+                    <td class="text-right tabular-nums whitespace-nowrap">
+                      {#if species.range_score !== undefined}
+                        <span title={t('analytics.species.manage.probabilityTooltip')}>
+                          {species.range_score.toFixed(3)}
+                        </span>
+                      {:else}
+                        <span
+                          class="opacity-40"
+                          title={t('analytics.species.manage.probabilityNone')}>—</span
+                        >
+                      {/if}
+                    </td>
+                    <!-- Confirmed (manually verified as a genuine occurrence) -->
+                    <td class="text-center">
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs"
+                        class:text-[var(--color-primary)]={isConfirmed}
+                        class:opacity-30={!isConfirmed}
+                        disabled={togglingConfirmed.has(species.common_name)}
+                        onclick={() => void toggleConfirmed(species)}
+                        title={isConfirmed
+                          ? t('analytics.species.manage.unconfirmSpeciesTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.confirmSpeciesTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-label={isConfirmed
+                          ? t('analytics.species.manage.unconfirmSpeciesTooltip', {
+                              species: species.common_name,
+                            })
+                          : t('analytics.species.manage.confirmSpeciesTooltip', {
+                              species: species.common_name,
+                            })}
+                        aria-pressed={isConfirmed}
+                      >
+                        {#if isConfirmed}
+                          <BadgeCheck class="h-5 w-5" />
+                        {:else}
+                          <Circle class="h-5 w-5" />
+                        {/if}
+                      </button>
+                    </td>
+                    <!-- Actions -->
                     <td>
                       <button
                         type="button"

@@ -1253,10 +1253,11 @@ export type TranslationKey =
   | 'analytics.species.headers.maxConfidence'
   | 'analytics.species.headers.firstDetected'
   | 'analytics.species.headers.lastDetected'
-  | 'analytics.species.headers.lists'
   | 'analytics.species.headers.excluded'
   | 'analytics.species.headers.whitelisted'
   | 'analytics.species.headers.reviewRatio'
+  | 'analytics.species.headers.probability'
+  | 'analytics.species.headers.confirmed'
   | 'analytics.species.headers.actions'
   | 'analytics.species.manage.noReviews'
   | 'analytics.species.manage.noReviewsShort'
@@ -1277,6 +1278,12 @@ export type TranslationKey =
   | 'analytics.species.manage.addedToWhitelist' // params: species
   | 'analytics.species.manage.removedFromWhitelist' // params: species
   | 'analytics.species.manage.toggleError'
+  | 'analytics.species.manage.confirmSpeciesTooltip' // params: species
+  | 'analytics.species.manage.unconfirmSpeciesTooltip' // params: species
+  | 'analytics.species.manage.addedToConfirmed' // params: species
+  | 'analytics.species.manage.removedFromConfirmed' // params: species
+  | 'analytics.species.manage.probabilityTooltip'
+  | 'analytics.species.manage.probabilityNone'
   | 'analytics.species.card.detections'
   | 'analytics.species.card.confidence'
   | 'analytics.species.card.first'
@@ -3808,6 +3815,10 @@ export type TranslationParams = {
   'analytics.species.manage.removedFromExcluded': { species: string | number };
   'analytics.species.manage.addedToWhitelist': { species: string | number };
   'analytics.species.manage.removedFromWhitelist': { species: string | number };
+  'analytics.species.manage.confirmSpeciesTooltip': { species: string | number };
+  'analytics.species.manage.unconfirmSpeciesTooltip': { species: string | number };
+  'analytics.species.manage.addedToConfirmed': { species: string | number };
+  'analytics.species.manage.removedFromConfirmed': { species: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
   'analytics.advanced.detections': { count: string | number };
   'settings.notFound.message': { section: string | number };

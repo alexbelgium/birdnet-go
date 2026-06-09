@@ -24,7 +24,13 @@
       | 'excluded_desc'
       | 'excluded_asc'
       | 'included_desc'
-      | 'included_asc';
+      | 'included_asc'
+      | 'review_ratio_desc'
+      | 'review_ratio_asc'
+      | 'range_score_desc'
+      | 'range_score_asc'
+      | 'confirmed_desc'
+      | 'confirmed_asc';
     searchTerm: string;
   }
 
