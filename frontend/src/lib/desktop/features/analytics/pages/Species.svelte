@@ -1431,7 +1431,9 @@
                             value={ratio}
                             max="1"
                           ></progress>
-                          <span class="text-sm whitespace-nowrap">{formatPercentage(ratio * 100)}</span>
+                          <span class="text-sm whitespace-nowrap"
+                            >{formatPercentage(ratio * 100)}</span
+                          >
                         </div>
                       {/if}
                     </td>
