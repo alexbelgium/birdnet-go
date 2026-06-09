@@ -650,7 +650,8 @@
       "controls": {
         "show": "Mostra:",
         "refresh": "Aggiorna rilevamenti",
-        "refreshPaused": "Aggiornamento in pausa durante l'interazione"
+        "refreshPaused": "Aggiornamento in pausa durante l'interazione",
+        "openEbirdSpecies": "Apri {species} su eBird"
       },
       "headers": {
         "dateTime": "Data e Ora",
@@ -2849,7 +2850,23 @@
           "apiKeyRequired": "La chiave API è obbligatoria",
           "inProgress": "Test in corso...",
           "description": "Testa la connettività e l'autenticazione dell'API eBird"
+        },
+        "speciesLinks": {
+          "enable": "Mostra i link alle pagine specie di eBird negli overlay dei rilevamenti",
+          "region": {
+            "label": "Regione della pagina specie",
+            "helpText": "Facoltativamente apre le pagine specie per una regione eBird specifica."
+          },
+          "regions": {
+            "none": "Nessuna regione specifica",
+            "beWal": "Belgio - Vallonia (BE-WAL)",
+            "beVlg": "Belgio - Fiandre (BE-VLG)",
+            "beBru": "Belgio - Bruxelles (BE-BRU)"
+          }
         }
+      },
+      "aria": {
+        "configuration": "Configurazione delle integrazioni"
       }
     },
     "audio": {

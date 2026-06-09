@@ -16,6 +16,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { ExternalLink } from '@lucide/svelte';
   import type { Detection } from '$lib/types/detection.types';
   import ConfidenceBadge from './ConfidenceBadge.svelte';
   import WeatherBadge from './WeatherBadge.svelte';
@@ -29,7 +30,9 @@
   import { createSpectrogramLoader } from '$lib/utils/spectrogramLoader.svelte';
   import { DEFAULT_PLAYBACK_SPEED } from '$lib/utils/audio';
   import { get } from 'svelte/store';
-  import { dashboardSettings } from '$lib/stores/settings';
+  import { dashboardSettings, integrationSettings } from '$lib/stores/settings';
+  import { t } from '$lib/i18n';
+  import { getLocale } from '$lib/i18n/store.svelte';
 
   // Configuration constants — use helper to read current default gain at call time
   // (cards are recycled via keyed {#each}, so a one-time const would go stale)
@@ -95,6 +98,22 @@
 
   function handleAudioContextAvailable(available: boolean) {
     audioContextAvailable = available;
+  }
+
+  const showEBirdSpeciesLink = $derived(
+    Boolean($integrationSettings.ebird?.speciesLinksEnabled && detection.speciesCode)
+  );
+
+  const ebirdSpeciesHref = $derived(
+    showEBirdSpeciesLink
+      ? buildAppUrl(
+          `/api/v2/integrations/ebird/species/${encodeURIComponent(detection.speciesCode)}?language=${encodeURIComponent(getLocale())}`
+        )
+      : ''
+  );
+
+  function handleSpeciesLinkClick(event: MouseEvent) {
+    event.stopPropagation();
   }
 
   function handleAudioSettingsOpen() {
@@ -245,6 +264,23 @@
 
   <!-- Top-Right Controls - OUTSIDE overflow-hidden container -->
   <div class="absolute top-2 right-2 z-50 flex items-center gap-1.5">
+    {#if showEBirdSpeciesLink}
+      <a
+        href={ebirdSpeciesHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="relative flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition-colors hover:bg-slate-700/80"
+        aria-label={t('dashboard.recentDetections.controls.openEbirdSpecies', {
+          species: detection.commonName,
+        })}
+        title={t('dashboard.recentDetections.controls.openEbirdSpecies', {
+          species: detection.commonName,
+        })}
+        onclick={handleSpeciesLinkClick}
+      >
+        <ExternalLink class="size-5" />
+      </a>
+    {/if}
     <AudioSettingsButton
       gainValue={audioGainValue}
       filterFreq={audioFilterFreq}

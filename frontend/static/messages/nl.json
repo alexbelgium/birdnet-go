@@ -650,7 +650,8 @@
       "controls": {
         "show": "Toon",
         "refresh": "Ververs herkeningen",
-        "refreshPaused": "Ververs gepauzeerd tijdens interactie"
+        "refreshPaused": "Ververs gepauzeerd tijdens interactie",
+        "openEbirdSpecies": "{species} openen op eBird"
       },
       "headers": {
         "dateTime": "Datum/Tijd",
@@ -2849,7 +2850,23 @@
           "apiKeyRequired": "API-sleutel is vereist",
           "inProgress": "Test wordt uitgevoerd...",
           "description": "Test eBird API-connectiviteit en authenticatie"
+        },
+        "speciesLinks": {
+          "enable": "Links naar eBird-soortenpagina’s tonen op detectie-overlays",
+          "region": {
+            "label": "Regio van soortenpagina",
+            "helpText": "Open soortenpagina’s optioneel voor een specifieke eBird-regio."
+          },
+          "regions": {
+            "none": "Geen specifieke regio",
+            "beWal": "België - Wallonië (BE-WAL)",
+            "beVlg": "België - Vlaanderen (BE-VLG)",
+            "beBru": "België - Brussel (BE-BRU)"
+          }
         }
+      },
+      "aria": {
+        "configuration": "Integratie-instellingen configureren"
       }
     },
     "audio": {

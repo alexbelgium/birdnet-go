@@ -504,6 +504,18 @@
     });
   }
 
+  function updateEBirdSpeciesLinksEnabled(speciesLinksEnabled: boolean) {
+    settingsActions.updateSection('realtime', {
+      ebird: { ...settings.ebird!, speciesLinksEnabled },
+    });
+  }
+
+  function updateEBirdSpeciesLinkRegion(speciesLinkRegion: string) {
+    settingsActions.updateSection('realtime', {
+      ebird: { ...settings.ebird!, speciesLinkRegion },
+    });
+  }
+
   // eBird locale options
   const ebirdLocaleOptions = [
     { value: 'en', label: 'English' },
@@ -517,6 +529,37 @@
     { value: 'pt', label: 'Português' },
     { value: 'sk', label: 'Slovenčina' },
   ];
+
+  const EBIRD_NO_REGION_CODE = '';
+  const EBIRD_BELGIUM_WALLONIA_REGION_CODE = 'BE-WAL';
+  const EBIRD_BELGIUM_FLANDERS_REGION_CODE = 'BE-VLG';
+  const EBIRD_BELGIUM_BRUSSELS_REGION_CODE = 'BE-BRU';
+
+  const eBirdSpeciesLinkRegionDefinitions = [
+    {
+      value: EBIRD_NO_REGION_CODE,
+      labelKey: 'settings.integration.ebird.speciesLinks.regions.none',
+    },
+    {
+      value: EBIRD_BELGIUM_WALLONIA_REGION_CODE,
+      labelKey: 'settings.integration.ebird.speciesLinks.regions.beWal',
+    },
+    {
+      value: EBIRD_BELGIUM_FLANDERS_REGION_CODE,
+      labelKey: 'settings.integration.ebird.speciesLinks.regions.beVlg',
+    },
+    {
+      value: EBIRD_BELGIUM_BRUSSELS_REGION_CODE,
+      labelKey: 'settings.integration.ebird.speciesLinks.regions.beBru',
+    },
+  ] as const;
+
+  const ebirdSpeciesLinkRegionOptions = $derived(
+    eBirdSpeciesLinkRegionDefinitions.map(option => ({
+      value: option.value,
+      label: t(option.labelKey),
+    }))
+  );
 
   // Test functions with multi-stage operations
   async function testBirdWeather() {
@@ -1640,6 +1683,26 @@
           onchange={updateEBirdEnabled}
         />
 
+        <div class="space-y-4">
+          <Checkbox
+            checked={settings.ebird!.speciesLinksEnabled}
+            label={t('settings.integration.ebird.speciesLinks.enable')}
+            disabled={store.isLoading || store.isSaving}
+            onchange={updateEBirdSpeciesLinksEnabled}
+          />
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <SelectDropdown
+              value={settings.ebird!.speciesLinkRegion}
+              options={ebirdSpeciesLinkRegionOptions}
+              label={t('settings.integration.ebird.speciesLinks.region.label')}
+              helpText={t('settings.integration.ebird.speciesLinks.region.helpText')}
+              disabled={!settings.ebird?.speciesLinksEnabled || store.isLoading || store.isSaving}
+              onChange={value => updateEBirdSpeciesLinkRegion(value as string)}
+            />
+          </div>
+        </div>
+
         <!-- Fieldset for accessible disabled state -->
         <fieldset
           disabled={!settings.ebird?.enabled || store.isLoading || store.isSaving}
@@ -1743,6 +1806,6 @@
 {/snippet}
 
 <!-- Main Content -->
-<main class="settings-page-content" aria-label="Integration settings configuration">
+<main class="settings-page-content" aria-label={t('settings.integration.aria.configuration')}>
   <SettingsTabs {tabs} bind:activeTab />
 </main>

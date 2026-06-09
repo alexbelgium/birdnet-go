@@ -650,7 +650,8 @@
       "controls": {
         "show": "Visa:",
         "refresh": "Uppdatera detekteringar",
-        "refreshPaused": "Uppdatering pausad medan interaktion pågår"
+        "refreshPaused": "Uppdatering pausad medan interaktion pågår",
+        "openEbirdSpecies": "Öppna {species} på eBird"
       },
       "headers": {
         "dateTime": "Datum och tid",
@@ -2849,7 +2850,23 @@
           "apiKeyRequired": "API-nyckel krävs",
           "inProgress": "Test pågår...",
           "description": "Testa eBird API-anslutning och autentisering"
+        },
+        "speciesLinks": {
+          "enable": "Visa länkar till eBird-artsidor i detektionsöverlägg",
+          "region": {
+            "label": "Artsidans region",
+            "helpText": "Öppna artssidor valfritt för en specifik eBird-region."
+          },
+          "regions": {
+            "none": "Ingen specifik region",
+            "beWal": "Belgien - Vallonien (BE-WAL)",
+            "beVlg": "Belgien - Flandern (BE-VLG)",
+            "beBru": "Belgien - Bryssel (BE-BRU)"
+          }
         }
+      },
+      "aria": {
+        "configuration": "Konfiguration av integrationsinställningar"
       }
     },
     "audio": {

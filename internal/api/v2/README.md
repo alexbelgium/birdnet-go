@@ -144,6 +144,7 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | POST   | `/integrations/birdweather/test`             | `TestBirdWeatherConnection`     | ✅   | Test BirdWeather connection                    |
 | POST   | `/integrations/weather/test`                 | `TestWeatherConnection`         | ✅   | Test weather provider connection               |
 | POST   | `/integrations/ebird/test`                   | `TestEBirdConnection`           | ✅   | Test eBird API connectivity and authentication |
+| GET    | `/integrations/ebird/species/:code`          | `RedirectEBirdSpeciesPage`      | ✅   | Redirect to configured eBird species page      |
 
 ### Media (`media.go`)
 

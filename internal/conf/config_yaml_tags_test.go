@@ -109,6 +109,8 @@ func TestSettingsYAMLRoundTrip(t *testing.T) {
 	original.Realtime.EBird.Locale = "en-uk"
 	original.Realtime.EBird.CacheTTL = 48
 	original.Realtime.EBird.APIKey = "test-key"
+	original.Realtime.EBird.SpeciesLinksEnabled = true
+	original.Realtime.EBird.SpeciesLinkRegion = "BE-WAL"
 	// Retention (5 previously-mismatched fields)
 	original.Realtime.Audio.Export.Retention.MaxAge = "30d"
 	original.Realtime.Audio.Export.Retention.MaxUsage = "80%"
@@ -142,6 +144,8 @@ func TestSettingsYAMLRoundTrip(t *testing.T) {
 	assert.Equal(t, "en-uk", restored.Realtime.EBird.Locale)
 	assert.Equal(t, 48, restored.Realtime.EBird.CacheTTL)
 	assert.Equal(t, "test-key", restored.Realtime.EBird.APIKey)
+	assert.True(t, restored.Realtime.EBird.SpeciesLinksEnabled)
+	assert.Equal(t, "BE-WAL", restored.Realtime.EBird.SpeciesLinkRegion)
 	assert.Equal(t, "30d", restored.Realtime.Audio.Export.Retention.MaxAge)
 	assert.Equal(t, "80%", restored.Realtime.Audio.Export.Retention.MaxUsage)
 	assert.Equal(t, 10, restored.Realtime.Audio.Export.Retention.MinClips)

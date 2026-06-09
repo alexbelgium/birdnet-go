@@ -15,6 +15,11 @@ import (
 	"github.com/tphakala/birdnet-go/internal/templatefuncs"
 )
 
+const (
+	ebirdMaximumRegionCodeLen = 32
+	ebirdRegionSeparator      = "-"
+)
+
 // ValidateBirdNETSettings performs BirdNET validation without side effects.
 // Returns normalized settings and any errors/warnings.
 // This pure function enables testing without log output or settings mutation.
@@ -93,6 +98,43 @@ func ValidateBirdweatherSettings(settings *BirdweatherSettings) ValidationResult
 			result.Valid = false
 			result.Errors = append(result.Errors, "birdweather location accuracy must be non-negative")
 		}
+	}
+
+	result.Normalized = &normalized
+	return result
+}
+
+// IsValidEBirdRegionCode reports whether code is empty or an eBird-style region code.
+func IsValidEBirdRegionCode(code string) bool {
+	if code == "" {
+		return true
+	}
+	if len(code) > ebirdMaximumRegionCodeLen ||
+		strings.HasPrefix(code, ebirdRegionSeparator) ||
+		strings.HasSuffix(code, ebirdRegionSeparator) ||
+		strings.Contains(code, ebirdRegionSeparator+ebirdRegionSeparator) {
+		return false
+	}
+	for _, r := range code {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateEBirdSettings performs eBird validation without side effects.
+func ValidateEBirdSettings(settings *EBirdSettings) ValidationResult {
+	if settings == nil {
+		return ValidationResult{Valid: false, Errors: []string{"eBird settings is nil"}}
+	}
+	result := ValidationResult{Valid: true, Warnings: []string{}}
+	normalized := *settings
+	normalized.SpeciesLinkRegion = strings.TrimSpace(settings.SpeciesLinkRegion)
+
+	if !IsValidEBirdRegionCode(normalized.SpeciesLinkRegion) {
+		result.Valid = false
+		result.Errors = append(result.Errors, "Invalid eBird species link region: use an uppercase eBird region code such as BE-WAL")
 	}
 
 	result.Normalized = &normalized
@@ -434,6 +476,26 @@ func validateMQTTSettings(settings *MQTTSettings) error {
 // This function uses ValidateTelemetrySettings internally and handles error formatting.
 func validateTelemetrySettings(settings *TelemetrySettings) error {
 	return firstValidationError(ValidateTelemetrySettings(settings), "telemetry-listen-address")
+}
+
+// validateEBirdSettings validates the eBird-specific settings.
+func validateEBirdSettings(settings *EBirdSettings) error {
+	result := ValidateEBirdSettings(settings)
+
+	normalized, err := extractNormalized[EBirdSettings](result, "ValidateEBirdSettings")
+	if err != nil {
+		return err
+	}
+	*settings = *normalized
+
+	if !result.Valid {
+		return errors.Newf("%s", strings.Join(result.Errors, "; ")).
+			Category(errors.CategoryValidation).
+			Context("validation_type", "ebird-settings").
+			Build()
+	}
+
+	return nil
 }
 
 // validateBirdweatherSettings validates the Birdweather-specific settings.

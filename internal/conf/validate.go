@@ -213,6 +213,11 @@ func ValidateSettings(settings *Settings) error {
 		ve.Errors = append(ve.Errors, err.Error())
 	}
 
+	// Validate eBird settings
+	if err := validateEBirdSettings(&settings.Realtime.EBird); err != nil {
+		ve.Errors = append(ve.Errors, err.Error())
+	}
+
 	// Validate Audio settings
 	if err := validateAudioSettings(&settings.Realtime.Audio); err != nil {
 		ve.Errors = append(ve.Errors, err.Error())

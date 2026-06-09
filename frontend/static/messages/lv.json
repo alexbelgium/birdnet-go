@@ -650,7 +650,8 @@
       "controls": {
         "show": "Rādīt:",
         "refresh": "Atjaunināt atklāšanas",
-        "refreshPaused": "Atjaunināšana apturēta, kamēr notiek mijiedarbība"
+        "refreshPaused": "Atjaunināšana apturēta, kamēr notiek mijiedarbība",
+        "openEbirdSpecies": "Atvērt {species} eBird"
       },
       "headers": {
         "dateTime": "Datums un laiks",
@@ -2849,7 +2850,23 @@
           "apiKeyRequired": "API atslēga ir nepieciešama",
           "inProgress": "Pārbaude noris...",
           "description": "Pārbaudīt eBird API savienojamību un autentifikāciju"
+        },
+        "speciesLinks": {
+          "enable": "Rādīt eBird sugu lapu saites noteikšanas pārklājumos",
+          "region": {
+            "label": "Sugas lapas reģions",
+            "helpText": "Pēc izvēles atver sugu lapas konkrētam eBird reģionam."
+          },
+          "regions": {
+            "none": "Nav konkrēta reģiona",
+            "beWal": "Beļģija - Valonija (BE-WAL)",
+            "beVlg": "Beļģija - Flandrija (BE-VLG)",
+            "beBru": "Beļģija - Brisele (BE-BRU)"
+          }
         }
+      },
+      "aria": {
+        "configuration": "Integrāciju iestatījumu konfigurācija"
       }
     },
     "audio": {

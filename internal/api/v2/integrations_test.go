@@ -131,6 +131,7 @@ func TestInitIntegrationsRoutesRegistration(t *testing.T) {
 		"GET /api/v2/integrations/birdweather/status",
 		"POST /api/v2/integrations/birdweather/test",
 		"POST /api/v2/integrations/ebird/test",
+		"GET /api/v2/integrations/ebird/species/:code",
 	})
 }
 
@@ -488,6 +489,170 @@ func TestTestEBirdConnection(t *testing.T) {
 			assert.Equal(t, tc.expectedStatus, rec.Code)
 
 			tc.validateResult(t, strings.TrimSpace(rec.Body.String()))
+		})
+	}
+}
+
+func TestBuildEBirdSpeciesPageURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		speciesCode string
+		regionCode  string
+		language    string
+		want        string
+	}{
+		{
+			name:        "with region",
+			speciesCode: "euptit1",
+			regionCode:  "BE-WAL",
+			language:    "fr",
+			want:        "https://ebird.org/species/euptit1/BE-WAL?siteLanguage=fr",
+		},
+		{
+			name:        "without region",
+			speciesCode: "amerob",
+			language:    "en",
+			want:        "https://ebird.org/species/amerob?siteLanguage=en",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := buildEBirdSpeciesPageURL(tt.speciesCode, tt.regionCode, tt.language)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNormalizeEBirdSiteLanguage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		language string
+		want     string
+	}{
+		{name: "empty defaults", want: "en"},
+		{name: "simple language", language: "fr", want: "fr"},
+		{name: "regional language uses base", language: "fr-BE", want: "fr"},
+		{name: "uppercase normalized", language: "FR", want: "fr"},
+		{name: "invalid digit", language: "f1", want: ""},
+		{name: "too long", language: "fra", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := normalizeEBirdSiteLanguage(tt.language)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsValidEBirdSpeciesCode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		code string
+		want bool
+	}{
+		{name: "valid", code: "euptit1", want: true},
+		{name: "too short", code: "a"},
+		{name: "uppercase invalid", code: "EUPTIT1"},
+		{name: "separator invalid", code: "eup-tit1"},
+		{name: "too long", code: "abcdefghijklmnopq"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := isValidEBirdSpeciesCode(tt.code)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRedirectEBirdSpeciesPage(t *testing.T) {
+	tests := []struct {
+		name             string
+		speciesCode      string
+		language         string
+		linksEnabled     bool
+		region           string
+		expectedStatus   int
+		expectedLocation string
+	}{
+		{
+			name:             "enabled with region and language",
+			speciesCode:      "euptit1",
+			language:         "fr",
+			linksEnabled:     true,
+			region:           "BE-WAL",
+			expectedStatus:   http.StatusFound,
+			expectedLocation: "https://ebird.org/species/euptit1/BE-WAL?siteLanguage=fr",
+		},
+		{
+			name:             "enabled without region defaults language",
+			speciesCode:      "amerob",
+			linksEnabled:     true,
+			expectedStatus:   http.StatusFound,
+			expectedLocation: "https://ebird.org/species/amerob?siteLanguage=en",
+		},
+		{
+			name:           "disabled",
+			speciesCode:    "euptit1",
+			linksEnabled:   false,
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "invalid species code",
+			speciesCode:    "bad-code",
+			linksEnabled:   true,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "invalid configured region",
+			speciesCode:    "euptit1",
+			linksEnabled:   true,
+			region:         "be wal",
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e, _, controller := setupTestEnvironment(t)
+			settings := controller.Settings.Load()
+			settings.Realtime.EBird.SpeciesLinksEnabled = tc.linksEnabled
+			settings.Realtime.EBird.SpeciesLinkRegion = tc.region
+
+			endpoint := "/api/v2/integrations/ebird/species/" + tc.speciesCode
+			if tc.language != "" {
+				endpoint += "?language=" + tc.language
+			}
+			req := httptest.NewRequest(http.MethodGet, endpoint, http.NoBody)
+			rec := httptest.NewRecorder()
+			ctx := e.NewContext(req, rec)
+			ctx.SetParamNames("code")
+			ctx.SetParamValues(tc.speciesCode)
+
+			err := controller.RedirectEBirdSpeciesPage(ctx)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectedStatus, rec.Code)
+			if tc.expectedLocation != "" {
+				assert.Equal(t, tc.expectedLocation, rec.Header().Get(echo.HeaderLocation))
+			}
 		})
 	}
 }

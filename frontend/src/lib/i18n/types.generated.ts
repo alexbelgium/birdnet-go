@@ -485,6 +485,7 @@ export type TranslationKey =
   | 'dashboard.recentDetections.controls.show'
   | 'dashboard.recentDetections.controls.refresh'
   | 'dashboard.recentDetections.controls.refreshPaused'
+  | 'dashboard.recentDetections.controls.openEbirdSpecies' // params: species
   | 'dashboard.recentDetections.headers.dateTime'
   | 'dashboard.recentDetections.headers.time'
   | 'dashboard.recentDetections.headers.commonName'
@@ -1854,6 +1855,13 @@ export type TranslationKey =
   | 'settings.integration.ebird.apiKey.label'
   | 'settings.integration.ebird.apiKey.helpText'
   | 'settings.integration.ebird.locale.label'
+  | 'settings.integration.ebird.speciesLinks.enable'
+  | 'settings.integration.ebird.speciesLinks.region.label'
+  | 'settings.integration.ebird.speciesLinks.region.helpText'
+  | 'settings.integration.ebird.speciesLinks.regions.none'
+  | 'settings.integration.ebird.speciesLinks.regions.beWal'
+  | 'settings.integration.ebird.speciesLinks.regions.beVlg'
+  | 'settings.integration.ebird.speciesLinks.regions.beBru'
   | 'settings.integration.ebird.cacheTTL.label'
   | 'settings.integration.ebird.cacheTTL.helpText'
   | 'settings.integration.ebird.note'
@@ -3072,6 +3080,7 @@ export type TranslationParams = {
     startHour: string | number;
     endHour: string | number;
   };
+  'dashboard.recentDetections.controls.openEbirdSpecies': { species: string | number };
   'dashboard.recentDetections.modals.showSpecies': { species: string | number };
   'dashboard.recentDetections.modals.ignoreSpecies': { species: string | number };
   'dashboard.recentDetections.modals.showSpeciesConfirm': { species: string | number };

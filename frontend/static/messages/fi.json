@@ -650,7 +650,8 @@
       "controls": {
         "show": "Näytä:",
         "refresh": "Päivitä havainnot",
-        "refreshPaused": "Päivitys keskeytetty vuorovaikutuksen ajaksi"
+        "refreshPaused": "Päivitys keskeytetty vuorovaikutuksen ajaksi",
+        "openEbirdSpecies": "Avaa {species} eBirdissä"
       },
       "headers": {
         "dateTime": "Päivä ja aika",
@@ -2849,7 +2850,23 @@
           "apiKeyRequired": "API-avain vaaditaan",
           "inProgress": "Testi käynnissä...",
           "description": "Testaa eBird API:n yhteyttä ja tunnistautumista"
+        },
+        "speciesLinks": {
+          "enable": "Näytä eBird-lajisivujen linkit havaintojen peittokuvissa",
+          "region": {
+            "label": "Lajisivun alue",
+            "helpText": "Avaa lajisivut halutessasi tietylle eBird-alueelle."
+          },
+          "regions": {
+            "none": "Ei tiettyä aluetta",
+            "beWal": "Belgia - Vallonia (BE-WAL)",
+            "beVlg": "Belgia - Flanderi (BE-VLG)",
+            "beBru": "Belgia - Bryssel (BE-BRU)"
+          }
         }
+      },
+      "aria": {
+        "configuration": "Integraatioasetusten määritys"
       }
     },
     "audio": {

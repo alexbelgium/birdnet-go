@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestValidateBirdNETSettings_Valid verifies valid BirdNET configurations pass.
@@ -569,6 +570,74 @@ func TestValidateWebhookProvider_Invalid(t *testing.T) {
 				}
 			}
 			assert.True(t, found, "expected error containing %q, got errors: %v", tt.expectError, result.Errors)
+		})
+	}
+}
+
+// TestValidateEBirdSettings_Valid verifies valid eBird configurations.
+func TestValidateEBirdSettings_Valid(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		settings EBirdSettings
+		want     string
+	}{
+		{
+			name:     "empty region",
+			settings: EBirdSettings{SpeciesLinksEnabled: true},
+		},
+		{
+			name:     "subnational region",
+			settings: EBirdSettings{SpeciesLinksEnabled: true, SpeciesLinkRegion: "BE-WAL"},
+			want:     "BE-WAL",
+		},
+		{
+			name:     "trim region whitespace",
+			settings: EBirdSettings{SpeciesLinksEnabled: true, SpeciesLinkRegion: " BE-WAL "},
+			want:     "BE-WAL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := ValidateEBirdSettings(&tt.settings)
+
+			require.True(t, result.Valid)
+			require.Empty(t, result.Errors)
+			normalized, ok := result.Normalized.(*EBirdSettings)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, normalized.SpeciesLinkRegion)
+		})
+	}
+}
+
+// TestValidateEBirdSettings_Invalid verifies invalid eBird configurations.
+func TestValidateEBirdSettings_Invalid(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		settings *EBirdSettings
+	}{
+		{name: "nil settings"},
+		{name: "lowercase region", settings: &EBirdSettings{SpeciesLinkRegion: "be-wal"}},
+		{name: "space in region", settings: &EBirdSettings{SpeciesLinkRegion: "BE WAL"}},
+		{name: "leading separator", settings: &EBirdSettings{SpeciesLinkRegion: "-BE-WAL"}},
+		{name: "trailing separator", settings: &EBirdSettings{SpeciesLinkRegion: "BE-WAL-"}},
+		{name: "double separator", settings: &EBirdSettings{SpeciesLinkRegion: "BE--WAL"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := ValidateEBirdSettings(tt.settings)
+
+			require.False(t, result.Valid)
+			require.NotEmpty(t, result.Errors)
 		})
 	}
 }

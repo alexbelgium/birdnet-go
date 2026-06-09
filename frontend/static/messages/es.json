@@ -650,7 +650,8 @@
       "controls": {
         "show": "Mostrar:",
         "refresh": "Actualizar detecciones",
-        "refreshPaused": "Actualización pausada durante la interacción"
+        "refreshPaused": "Actualización pausada durante la interacción",
+        "openEbirdSpecies": "Abrir {species} en eBird"
       },
       "headers": {
         "dateTime": "Fecha y hora",
@@ -2849,7 +2850,23 @@
           "apiKeyRequired": "Se requiere la clave de API",
           "inProgress": "Prueba en progreso...",
           "description": "Probar la conectividad y autenticación con la API de eBird"
+        },
+        "speciesLinks": {
+          "enable": "Mostrar enlaces a páginas de especies de eBird en las superposiciones de detección",
+          "region": {
+            "label": "Región de la página de especie",
+            "helpText": "Opcionalmente abre las páginas de especies para una región específica de eBird."
+          },
+          "regions": {
+            "none": "Sin región específica",
+            "beWal": "Bélgica - Valonia (BE-WAL)",
+            "beVlg": "Bélgica - Flandes (BE-VLG)",
+            "beBru": "Bélgica - Bruselas (BE-BRU)"
+          }
         }
+      },
+      "aria": {
+        "configuration": "Configuración de integraciones"
       }
     },
     "audio": {

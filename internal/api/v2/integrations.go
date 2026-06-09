@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/tphakala/birdnet-go/internal/birdweather"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/mqtt"
 	"github.com/tphakala/birdnet-go/internal/notification"
@@ -28,6 +29,16 @@ const (
 	integrationMediumTimeout  = 20  // Medium timeout in seconds
 	integrationLongTimeout    = 30  // Long timeout in seconds
 	integrationStageDelay     = 200 // Delay between stages in milliseconds
+
+	ebirdSpeciesPageScheme       = "https"
+	ebirdSpeciesPageHost         = "ebird.org"
+	ebirdSpeciesPagePathPrefix   = "/species/"
+	ebirdSiteLanguageParam       = "siteLanguage"
+	ebirdDefaultSiteLanguage     = "en"
+	ebirdMinimumSpeciesCodeLen   = 2
+	ebirdMaximumSpeciesCodeLen   = 16
+	ebirdSiteLanguageCodeLen     = 2
+	ebirdTemporaryRedirectStatus = http.StatusFound
 )
 
 // IntegrationTestClient defines the interface for integration test clients.
@@ -242,6 +253,7 @@ func (c *Controller) initIntegrationsRoutes() {
 	// eBird routes
 	ebirdGroup := integrationsGroup.Group("/ebird")
 	ebirdGroup.POST("/test", c.TestEBirdConnection)
+	ebirdGroup.GET("/species/:code", c.RedirectEBirdSpeciesPage)
 
 	c.logInfoIfEnabled("Integrations routes initialized successfully")
 }
@@ -484,6 +496,101 @@ type BirdWeatherTestRequest struct {
 	Threshold        float64 `json:"threshold"`
 	LocationAccuracy float64 `json:"locationAccuracy"`
 	Debug            bool    `json:"debug"`
+}
+
+// RedirectEBirdSpeciesPage handles GET /api/v2/integrations/ebird/species/:code.
+func (c *Controller) RedirectEBirdSpeciesPage(ctx echo.Context) error {
+	settings := c.currentSettings()
+	if settings == nil || !settings.Realtime.EBird.SpeciesLinksEnabled {
+		return c.HandleError(ctx, errors.Newf("eBird species links are not enabled").
+			Category(errors.CategoryConfiguration).
+			Component("ebird").
+			Build(), "eBird species links are not enabled", http.StatusNotFound)
+	}
+
+	speciesCode := strings.TrimSpace(ctx.Param("code"))
+	if !isValidEBirdSpeciesCode(speciesCode) {
+		return c.HandleError(ctx, errors.Newf("invalid eBird species code").
+			Category(errors.CategoryValidation).
+			Context("species_code", speciesCode).
+			Component("ebird").
+			Build(), "Invalid eBird species code", http.StatusBadRequest)
+	}
+
+	regionCode := strings.TrimSpace(settings.Realtime.EBird.SpeciesLinkRegion)
+	if !conf.IsValidEBirdRegionCode(regionCode) {
+		return c.HandleError(ctx, errors.Newf("invalid eBird species link region").
+			Category(errors.CategoryValidation).
+			Context("region", regionCode).
+			Component("ebird").
+			Build(), "Invalid eBird species link region", http.StatusBadRequest)
+	}
+
+	language := normalizeEBirdSiteLanguage(ctx.QueryParam("language"))
+	if language == "" {
+		return c.HandleError(ctx, errors.Newf("invalid eBird site language").
+			Category(errors.CategoryValidation).
+			Context("language", ctx.QueryParam("language")).
+			Component("ebird").
+			Build(), "Invalid eBird site language", http.StatusBadRequest)
+	}
+
+	redirectURL := buildEBirdSpeciesPageURL(speciesCode, regionCode, language)
+	c.logAPIRequest(ctx, logger.LogLevelInfo, "Redirecting to eBird species page",
+		logger.String("species_code", speciesCode),
+		logger.String("region", regionCode),
+		logger.String("language", language))
+
+	return ctx.Redirect(ebirdTemporaryRedirectStatus, redirectURL)
+}
+
+func buildEBirdSpeciesPageURL(speciesCode, regionCode, language string) string {
+	path := ebirdSpeciesPagePathPrefix + neturl.PathEscape(speciesCode)
+	if regionCode != "" {
+		path += "/" + neturl.PathEscape(regionCode)
+	}
+
+	pageURL := neturl.URL{
+		Scheme: ebirdSpeciesPageScheme,
+		Host:   ebirdSpeciesPageHost,
+		Path:   path,
+	}
+	query := pageURL.Query()
+	query.Set(ebirdSiteLanguageParam, language)
+	pageURL.RawQuery = query.Encode()
+
+	return pageURL.String()
+}
+
+func normalizeEBirdSiteLanguage(language string) string {
+	language = strings.ToLower(strings.TrimSpace(language))
+	if language == "" {
+		return ebirdDefaultSiteLanguage
+	}
+
+	baseLanguage, _, _ := strings.Cut(language, "-")
+	if len(baseLanguage) != ebirdSiteLanguageCodeLen {
+		return ""
+	}
+	for _, r := range baseLanguage {
+		if r < 'a' || r > 'z' {
+			return ""
+		}
+	}
+
+	return baseLanguage
+}
+
+func isValidEBirdSpeciesCode(code string) bool {
+	if len(code) < ebirdMinimumSpeciesCodeLen || len(code) > ebirdMaximumSpeciesCodeLen {
+		return false
+	}
+	for _, r := range code {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // EBirdTestRequest represents a request to test eBird API connectivity

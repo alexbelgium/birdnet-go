@@ -650,7 +650,8 @@
       "controls": {
         "show": "Megjelenítés:",
         "refresh": "Detektálások frissítése",
-        "refreshPaused": "Frissítés szüneteltetve interakció közben"
+        "refreshPaused": "Frissítés szüneteltetve interakció közben",
+        "openEbirdSpecies": "{species} megnyitása az eBirdön"
       },
       "headers": {
         "dateTime": "Dátum és idő",
@@ -2849,7 +2850,23 @@
           "apiKeyRequired": "Az API kulcs szükséges",
           "inProgress": "Teszt folyamatban...",
           "description": "eBird API kapcsolat és hitelesítés tesztelése"
+        },
+        "speciesLinks": {
+          "enable": "eBird fajoldalhivatkozások megjelenítése az észlelési átfedéseken",
+          "region": {
+            "label": "Fajoldal régiója",
+            "helpText": "Opcionálisan egy adott eBird-régió fajoldalait nyitja meg."
+          },
+          "regions": {
+            "none": "Nincs megadott régió",
+            "beWal": "Belgium - Vallónia (BE-WAL)",
+            "beVlg": "Belgium - Flandria (BE-VLG)",
+            "beBru": "Belgium - Brüsszel (BE-BRU)"
+          }
         }
+      },
+      "aria": {
+        "configuration": "Integrációs beállítások konfigurálása"
       }
     },
     "audio": {

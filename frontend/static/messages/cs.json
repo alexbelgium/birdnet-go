@@ -650,7 +650,8 @@
       "controls": {
         "show": "Zobrazit:",
         "refresh": "Obnovit detekce",
-        "refreshPaused": "Obnovování pozastaveno během aktivní interakce"
+        "refreshPaused": "Obnovování pozastaveno během aktivní interakce",
+        "openEbirdSpecies": "Otevřít {species} na eBird"
       },
       "headers": {
         "dateTime": "Datum a čas",
@@ -2849,7 +2850,23 @@
           "apiKeyRequired": "API klíč je povinný",
           "inProgress": "Test probíhá...",
           "description": "Otestovat připojení a ověření API eBird"
+        },
+        "speciesLinks": {
+          "enable": "Zobrazovat odkazy na stránky druhů eBird v překryvných panelech detekcí",
+          "region": {
+            "label": "Oblast stránky druhu",
+            "helpText": "Volitelně otevírat stránky druhů pro konkrétní oblast eBird."
+          },
+          "regions": {
+            "none": "Žádná konkrétní oblast",
+            "beWal": "Belgie - Valonsko (BE-WAL)",
+            "beVlg": "Belgie - Vlámsko (BE-VLG)",
+            "beBru": "Belgie - Brusel (BE-BRU)"
+          }
         }
+      },
+      "aria": {
+        "configuration": "Nastavení integrací"
       }
     },
     "audio": {
