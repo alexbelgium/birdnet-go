@@ -184,6 +184,10 @@
   // Combined column list for sort handling (used by handleSort and activeColumn).
   const ALL_SORTABLE_COLUMNS = [...SORTABLE_COLUMNS, ...MANAGE_SORTABLE_COLUMNS];
 
+  // Manage view only: pin the header row while the (bounded-height) table body scrolls.
+  // An opaque background keeps scrolled rows from showing through the sticky cells.
+  const STICKY_HEADER_CLASS = 'sticky top-0 z-10 bg-[var(--color-base-100)]';
+
   // Default sort and persistence (survives a page refresh).
   const DEFAULT_SORT_ORDER: SortOrder = 'count_desc';
   const SORT_STORAGE_KEY = 'analytics.species.sortOrder';
@@ -1008,6 +1012,12 @@
   }
 
   function exportData() {
+    // Manage view exports its richer, management-focused column set.
+    if (viewMode === 'manage') {
+      exportManageData();
+      return;
+    }
+
     // Generate CSV content
     const headers = [
       'Common Name',
@@ -1039,6 +1049,55 @@
     // Create and download file
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     downloadBlob(blob, `birdnet-species-${getLocalDateString()}.csv`);
+  }
+
+  // Manage-view CSV: the currently displayed (filtered + sorted) rows with the
+  // management columns (list membership, review counts, probability, confirmed).
+  function exportManageData() {
+    const headers = [
+      'Common Name',
+      'Scientific Name',
+      'Count',
+      'Avg Confidence',
+      'Max Confidence',
+      'First Detected',
+      'Last Detected',
+      'Excluded',
+      'Whitelisted',
+      'Confirmed Reviews',
+      'Rejected Reviews',
+      'Review Ratio',
+      'Probability',
+      'Confirmed',
+    ];
+    const yesNo = (value?: boolean) => (value ? 'Yes' : 'No');
+    const rows = manageSpecies.map(species => {
+      const ratio = reviewedRatio(species);
+      return [
+        species.common_name,
+        species.scientific_name,
+        species.count,
+        (species.avg_confidence * 100).toFixed(1) + '%',
+        (species.max_confidence * 100).toFixed(1) + '%',
+        species.first_heard ? formatDateTime(species.first_heard) : '',
+        species.last_heard ? formatDateTime(species.last_heard) : '',
+        yesNo(species.is_excluded),
+        yesNo(species.is_included),
+        species.verified_count ?? 0,
+        species.rejected_count ?? 0,
+        ratio === null ? '' : (ratio * 100).toFixed(1) + '%',
+        species.range_score !== undefined ? species.range_score.toFixed(3) : '',
+        yesNo(species.is_confirmed),
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    downloadBlob(blob, `birdnet-species-manage-${getLocalDateString()}.csv`);
   }
 
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -1222,8 +1281,9 @@
 
       <!-- List / Manage View (shared table; manage adds review + delete columns) -->
       {#if !isLoading && !manageLoading && (viewMode === 'list' || viewMode === 'manage')}
-        <!-- Manage view widens the table; horizontal scroll keeps every column readable. -->
-        <div class="overflow-x-auto">
+        <!-- Manage view widens the table; horizontal scroll keeps every column readable.
+             Manage also bounds the height so the sticky header can pin while rows scroll. -->
+        <div class={viewMode === 'manage' ? 'overflow-auto max-h-[70vh]' : 'overflow-x-auto'}>
           <table class="table w-full hidden sm:table">
             <thead>
               <tr>
@@ -1234,6 +1294,7 @@
                     activeField={sortField}
                     direction={sortDirection}
                     onSort={handleSort}
+                    className={viewMode === 'manage' ? STICKY_HEADER_CLASS : ''}
                   />
                 {/each}
                 {#if viewMode === 'manage'}
@@ -1246,10 +1307,10 @@
                       activeField={sortField}
                       direction={sortDirection}
                       onSort={handleSort}
-                      className="text-center"
+                      className={`text-center ${STICKY_HEADER_CLASS}`}
                     />
                   {/each}
-                  <th>{t('analytics.species.headers.actions')}</th>
+                  <th class={STICKY_HEADER_CLASS}>{t('analytics.species.headers.actions')}</th>
                 {/if}
               </tr>
             </thead>
