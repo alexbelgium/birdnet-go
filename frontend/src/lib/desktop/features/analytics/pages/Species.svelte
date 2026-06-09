@@ -215,21 +215,35 @@
   let selectedSpecies = $state<SpeciesData | null>(null);
   let showDetailModal = $state(false);
 
-  // Toggle response types for the exclude/include list endpoints.
-  interface ExcludeToggleResponse {
+  // Shared response shape for the exclude/include/confirm list-toggle endpoints.
+  // Each endpoint sets only its own membership flag; the others stay undefined.
+  interface SpeciesToggleResponse {
     common_name: string;
     action: string;
-    is_excluded: boolean;
+    is_excluded?: boolean;
+    is_included?: boolean;
+    is_confirmed?: boolean;
   }
-  interface IncludeToggleResponse {
-    common_name: string;
-    action: string;
-    is_included: boolean;
-  }
-  interface ConfirmToggleResponse {
-    common_name: string;
-    action: string;
-    is_confirmed: boolean;
+
+  // Describes one manage-view membership column (excluded / whitelisted / confirmed):
+  // the API list it toggles, how to read and write its local state, the response flag,
+  // and the toast/tooltip copy plus button appearance. One descriptor per list lets
+  // toggleSpeciesList and the toggle-cell snippet stay generic instead of triplicated.
+  interface ManageListDescriptor {
+    endpoint: string;
+    activeClass: string;
+    activeIcon: typeof Circle;
+    getMembers: () => Set<string>;
+    setMembers: (_next: Set<string>) => void;
+    getToggling: () => Set<string>;
+    setToggling: (_next: Set<string>) => void;
+    isMember: (_resp: SpeciesToggleResponse) => boolean;
+    // i18n keys passed straight to t(); typed as string (not TranslationKey) so these
+    // manage-view keys need not be carried in the generated TranslationKey union.
+    addedKey: string;
+    removedKey: string;
+    activeTooltipKey: string;
+    inactiveTooltipKey: string;
   }
 
   // Species management (manage view): per-species review stats + delete confirmation.
@@ -250,6 +264,63 @@
   let togglingExclude = $state<Set<string>>(new Set());
   let togglingInclude = $state<Set<string>>(new Set());
   let togglingConfirmed = $state<Set<string>>(new Set());
+
+  // Manage-view membership columns, in display order (Excluded, Whitelisted, Confirmed).
+  // Each descriptor wires its API endpoint to the matching local state + UI affordances.
+  const excludedList: ManageListDescriptor = {
+    endpoint: '/api/v2/detections/ignore',
+    activeClass: 'text-[var(--color-error)]',
+    activeIcon: XCircle,
+    getMembers: () => excludedSpecies,
+    setMembers: next => {
+      excludedSpecies = next;
+    },
+    getToggling: () => togglingExclude,
+    setToggling: next => {
+      togglingExclude = next;
+    },
+    isMember: resp => resp.is_excluded ?? false,
+    addedKey: 'analytics.species.manage.addedToExcluded',
+    removedKey: 'analytics.species.manage.removedFromExcluded',
+    activeTooltipKey: 'analytics.species.manage.removeFromExcludedTooltip',
+    inactiveTooltipKey: 'analytics.species.manage.addToExcludedTooltip',
+  };
+  const includedList: ManageListDescriptor = {
+    endpoint: '/api/v2/detections/include',
+    activeClass: 'text-[var(--color-success)]',
+    activeIcon: CheckCircle2,
+    getMembers: () => includedSpecies,
+    setMembers: next => {
+      includedSpecies = next;
+    },
+    getToggling: () => togglingInclude,
+    setToggling: next => {
+      togglingInclude = next;
+    },
+    isMember: resp => resp.is_included ?? false,
+    addedKey: 'analytics.species.manage.addedToWhitelist',
+    removedKey: 'analytics.species.manage.removedFromWhitelist',
+    activeTooltipKey: 'analytics.species.manage.removeFromWhitelistTooltip',
+    inactiveTooltipKey: 'analytics.species.manage.addToWhitelistTooltip',
+  };
+  const confirmedList: ManageListDescriptor = {
+    endpoint: '/api/v2/detections/confirm',
+    activeClass: 'text-[var(--color-primary)]',
+    activeIcon: BadgeCheck,
+    getMembers: () => confirmedSpecies,
+    setMembers: next => {
+      confirmedSpecies = next;
+    },
+    getToggling: () => togglingConfirmed,
+    setToggling: next => {
+      togglingConfirmed = next;
+    },
+    isMember: resp => resp.is_confirmed ?? false,
+    addedKey: 'analytics.species.manage.addedToConfirmed',
+    removedKey: 'analytics.species.manage.removedFromConfirmed',
+    activeTooltipKey: 'analytics.species.manage.unconfirmSpeciesTooltip',
+    inactiveTooltipKey: 'analytics.species.manage.confirmSpeciesTooltip',
+  };
 
   // True while the manage view is loading its review stats.
   let manageLoading = $derived(viewMode === 'manage' && isLoadingStats);
@@ -683,168 +754,63 @@
     }
   }
 
-  async function toggleExcluded(species: SpeciesData) {
+  // Toggle a species in one of the manage-view membership lists (excluded / whitelisted /
+  // confirmed). Optimistically flips local state, POSTs to the list endpoint, reconciles
+  // with the authoritative response, and reverts on failure. The descriptor supplies the
+  // endpoint, state accessors, response flag, and toast copy.
+  async function toggleSpeciesList(species: SpeciesData, list: ManageListDescriptor) {
     const name = species.common_name;
-    if (togglingExclude.has(name)) return;
+    if (list.getToggling().has(name)) return;
+
+    // Mark in-flight (prevents double-click races).
+    const inFlight = new Set(list.getToggling());
+    inFlight.add(name);
+    list.setToggling(inFlight);
 
     // Optimistic update.
-    const newToggling = new Set(togglingExclude);
-    newToggling.add(name);
-    togglingExclude = newToggling;
-
-    const wasExcluded = excludedSpecies.has(name);
-    const optimistic = new Set(excludedSpecies);
-    if (wasExcluded) {
+    const wasMember = list.getMembers().has(name);
+    const optimistic = new Set(list.getMembers());
+    if (wasMember) {
       optimistic.delete(name);
     } else {
       optimistic.add(name);
     }
-    excludedSpecies = optimistic;
+    list.setMembers(optimistic);
 
     try {
-      const resp = await fetchWithCSRF<ExcludeToggleResponse>('/api/v2/detections/ignore', {
+      const resp = await fetchWithCSRF<SpeciesToggleResponse>(list.endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ common_name: name }),
       });
       // Reconcile with authoritative server state.
-      const confirmed = new Set(excludedSpecies);
-      if (resp.is_excluded) {
-        confirmed.add(name);
+      const reconciled = new Set(list.getMembers());
+      if (list.isMember(resp)) {
+        reconciled.add(name);
       } else {
-        confirmed.delete(name);
+        reconciled.delete(name);
       }
-      excludedSpecies = confirmed;
+      list.setMembers(reconciled);
       toastActions.success(
         resp.action === 'added'
-          ? t('analytics.species.manage.addedToExcluded', { species: name })
-          : t('analytics.species.manage.removedFromExcluded', { species: name })
+          ? t(list.addedKey, { species: name })
+          : t(list.removedKey, { species: name })
       );
     } catch (error) {
       // Revert optimistic update on failure.
-      const reverted = new Set(excludedSpecies);
-      if (wasExcluded) {
+      const reverted = new Set(list.getMembers());
+      if (wasMember) {
         reverted.add(name);
       } else {
         reverted.delete(name);
       }
-      excludedSpecies = reverted;
-      logger.error('Error toggling excluded species:', error);
+      list.setMembers(reverted);
+      logger.error('Error toggling species list membership:', error);
       toastActions.error(t('analytics.species.manage.toggleError'));
     } finally {
-      const done = new Set(togglingExclude);
+      const done = new Set(list.getToggling());
       done.delete(name);
-      togglingExclude = done;
-    }
-  }
-
-  async function toggleIncluded(species: SpeciesData) {
-    const name = species.common_name;
-    if (togglingInclude.has(name)) return;
-
-    // Optimistic update.
-    const newToggling = new Set(togglingInclude);
-    newToggling.add(name);
-    togglingInclude = newToggling;
-
-    const wasIncluded = includedSpecies.has(name);
-    const optimistic = new Set(includedSpecies);
-    if (wasIncluded) {
-      optimistic.delete(name);
-    } else {
-      optimistic.add(name);
-    }
-    includedSpecies = optimistic;
-
-    try {
-      const resp = await fetchWithCSRF<IncludeToggleResponse>('/api/v2/detections/include', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ common_name: name }),
-      });
-      // Reconcile with authoritative server state.
-      const confirmed = new Set(includedSpecies);
-      if (resp.is_included) {
-        confirmed.add(name);
-      } else {
-        confirmed.delete(name);
-      }
-      includedSpecies = confirmed;
-      toastActions.success(
-        resp.action === 'added'
-          ? t('analytics.species.manage.addedToWhitelist', { species: name })
-          : t('analytics.species.manage.removedFromWhitelist', { species: name })
-      );
-    } catch (error) {
-      // Revert optimistic update on failure.
-      const reverted = new Set(includedSpecies);
-      if (wasIncluded) {
-        reverted.add(name);
-      } else {
-        reverted.delete(name);
-      }
-      includedSpecies = reverted;
-      logger.error('Error toggling included species:', error);
-      toastActions.error(t('analytics.species.manage.toggleError'));
-    } finally {
-      const done = new Set(togglingInclude);
-      done.delete(name);
-      togglingInclude = done;
-    }
-  }
-
-  async function toggleConfirmed(species: SpeciesData) {
-    const name = species.common_name;
-    if (togglingConfirmed.has(name)) return;
-
-    // Optimistic update.
-    const newToggling = new Set(togglingConfirmed);
-    newToggling.add(name);
-    togglingConfirmed = newToggling;
-
-    const wasConfirmed = confirmedSpecies.has(name);
-    const optimistic = new Set(confirmedSpecies);
-    if (wasConfirmed) {
-      optimistic.delete(name);
-    } else {
-      optimistic.add(name);
-    }
-    confirmedSpecies = optimistic;
-
-    try {
-      const resp = await fetchWithCSRF<ConfirmToggleResponse>('/api/v2/detections/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ common_name: name }),
-      });
-      // Reconcile with authoritative server state.
-      const confirmed = new Set(confirmedSpecies);
-      if (resp.is_confirmed) {
-        confirmed.add(name);
-      } else {
-        confirmed.delete(name);
-      }
-      confirmedSpecies = confirmed;
-      toastActions.success(
-        resp.action === 'added'
-          ? t('analytics.species.manage.addedToConfirmed', { species: name })
-          : t('analytics.species.manage.removedFromConfirmed', { species: name })
-      );
-    } catch (error) {
-      // Revert optimistic update on failure.
-      const reverted = new Set(confirmedSpecies);
-      if (wasConfirmed) {
-        reverted.add(name);
-      } else {
-        reverted.delete(name);
-      }
-      confirmedSpecies = reverted;
-      logger.error('Error toggling confirmed species:', error);
-      toastActions.error(t('analytics.species.manage.toggleError'));
-    } finally {
-      const done = new Set(togglingConfirmed);
-      done.delete(name);
-      togglingConfirmed = done;
+      list.setToggling(done);
     }
   }
 
@@ -1072,6 +1038,32 @@
     selectedSpecies = null;
   }
 </script>
+
+<!-- Manage-view membership toggle cell (excluded / whitelisted / confirmed). Driven by a
+     ManageListDescriptor so the three columns share one button definition. -->
+{#snippet toggleCell(species: SpeciesData, active: boolean, list: ManageListDescriptor)}
+  {@const tooltip = t(active ? list.activeTooltipKey : list.inactiveTooltipKey, {
+    species: species.common_name,
+  })}
+  <td class="text-center">
+    <button
+      type="button"
+      class="btn btn-ghost btn-xs {active ? list.activeClass : 'opacity-30'}"
+      disabled={list.getToggling().has(species.common_name)}
+      onclick={() => void toggleSpeciesList(species, list)}
+      title={tooltip}
+      aria-label={tooltip}
+      aria-pressed={active}
+    >
+      {#if active}
+        {@const ActiveIcon = list.activeIcon}
+        <ActiveIcon class="h-5 w-5" />
+      {:else}
+        <Circle class="h-5 w-5" />
+      {/if}
+    </button>
+  </td>
+{/snippet}
 
 <div class="col-span-12 space-y-4" role="region" aria-label={t('analytics.species.title')}>
   <!-- Page Header -->
@@ -1336,70 +1328,9 @@
                     {@const isExcluded = species.is_excluded ?? false}
                     {@const isIncluded = species.is_included ?? false}
                     {@const isConfirmed = species.is_confirmed ?? false}
-                    <!-- Excluded -->
-                    <td class="text-center">
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs"
-                        class:text-[var(--color-error)]={isExcluded}
-                        class:opacity-30={!isExcluded}
-                        disabled={togglingExclude.has(species.common_name)}
-                        onclick={() => void toggleExcluded(species)}
-                        title={isExcluded
-                          ? t('analytics.species.manage.removeFromExcludedTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.addToExcludedTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-label={isExcluded
-                          ? t('analytics.species.manage.removeFromExcludedTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.addToExcludedTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-pressed={isExcluded}
-                      >
-                        {#if isExcluded}
-                          <XCircle class="h-5 w-5" />
-                        {:else}
-                          <Circle class="h-5 w-5" />
-                        {/if}
-                      </button>
-                    </td>
-                    <!-- Whitelisted -->
-                    <td class="text-center">
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs"
-                        class:text-[var(--color-success)]={isIncluded}
-                        class:opacity-30={!isIncluded}
-                        disabled={togglingInclude.has(species.common_name)}
-                        onclick={() => void toggleIncluded(species)}
-                        title={isIncluded
-                          ? t('analytics.species.manage.removeFromWhitelistTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.addToWhitelistTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-label={isIncluded
-                          ? t('analytics.species.manage.removeFromWhitelistTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.addToWhitelistTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-pressed={isIncluded}
-                      >
-                        {#if isIncluded}
-                          <CheckCircle2 class="h-5 w-5" />
-                        {:else}
-                          <Circle class="h-5 w-5" />
-                        {/if}
-                      </button>
-                    </td>
+                    <!-- Excluded / Whitelisted membership toggles -->
+                    {@render toggleCell(species, isExcluded, excludedList)}
+                    {@render toggleCell(species, isIncluded, includedList)}
                     <!-- Review ratio (confirmed / rejected) -->
                     <td>
                       {#if ratio === null}
@@ -1444,37 +1375,7 @@
                       {/if}
                     </td>
                     <!-- Confirmed (manually verified as a genuine occurrence) -->
-                    <td class="text-center">
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs"
-                        class:text-[var(--color-primary)]={isConfirmed}
-                        class:opacity-30={!isConfirmed}
-                        disabled={togglingConfirmed.has(species.common_name)}
-                        onclick={() => void toggleConfirmed(species)}
-                        title={isConfirmed
-                          ? t('analytics.species.manage.unconfirmSpeciesTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.confirmSpeciesTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-label={isConfirmed
-                          ? t('analytics.species.manage.unconfirmSpeciesTooltip', {
-                              species: species.common_name,
-                            })
-                          : t('analytics.species.manage.confirmSpeciesTooltip', {
-                              species: species.common_name,
-                            })}
-                        aria-pressed={isConfirmed}
-                      >
-                        {#if isConfirmed}
-                          <BadgeCheck class="h-5 w-5" />
-                        {:else}
-                          <Circle class="h-5 w-5" />
-                        {/if}
-                      </button>
-                    </td>
+                    {@render toggleCell(species, isConfirmed, confirmedList)}
                     <!-- Actions -->
                     <td>
                       <button
