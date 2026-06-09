@@ -216,13 +216,11 @@
   let showDetailModal = $state(false);
 
   // Shared response shape for the exclude/include/confirm list-toggle endpoints.
-  // Each endpoint sets only its own membership flag; the others stay undefined.
+  // The server returns action and the membership flag in lockstep, so 'added'/'removed'
+  // is the single source of truth for both the toast and the reconcile step below.
   interface SpeciesToggleResponse {
     common_name: string;
     action: string;
-    is_excluded?: boolean;
-    is_included?: boolean;
-    is_confirmed?: boolean;
   }
 
   // Describes one manage-view membership column (excluded / whitelisted / confirmed):
@@ -237,7 +235,6 @@
     setMembers: (_next: Set<string>) => void;
     getToggling: () => Set<string>;
     setToggling: (_next: Set<string>) => void;
-    isMember: (_resp: SpeciesToggleResponse) => boolean;
     // i18n keys passed straight to t(); typed as string (not TranslationKey) so these
     // manage-view keys need not be carried in the generated TranslationKey union.
     addedKey: string;
@@ -279,7 +276,6 @@
     setToggling: next => {
       togglingExclude = next;
     },
-    isMember: resp => resp.is_excluded ?? false,
     addedKey: 'analytics.species.manage.addedToExcluded',
     removedKey: 'analytics.species.manage.removedFromExcluded',
     activeTooltipKey: 'analytics.species.manage.removeFromExcludedTooltip',
@@ -297,7 +293,6 @@
     setToggling: next => {
       togglingInclude = next;
     },
-    isMember: resp => resp.is_included ?? false,
     addedKey: 'analytics.species.manage.addedToWhitelist',
     removedKey: 'analytics.species.manage.removedFromWhitelist',
     activeTooltipKey: 'analytics.species.manage.removeFromWhitelistTooltip',
@@ -315,7 +310,6 @@
     setToggling: next => {
       togglingConfirmed = next;
     },
-    isMember: resp => resp.is_confirmed ?? false,
     addedKey: 'analytics.species.manage.addedToConfirmed',
     removedKey: 'analytics.species.manage.removedFromConfirmed',
     activeTooltipKey: 'analytics.species.manage.unconfirmSpeciesTooltip',
@@ -783,9 +777,10 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ common_name: name }),
       });
-      // Reconcile with authoritative server state.
+      // Reconcile with authoritative server state ('added' or 'removed' — the server sets
+      // action and membership in lockstep, so action is the single source of truth here).
       const reconciled = new Set(list.getMembers());
-      if (list.isMember(resp)) {
+      if (resp.action === 'added') {
         reconciled.add(name);
       } else {
         reconciled.delete(name);
