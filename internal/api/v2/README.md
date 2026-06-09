@@ -128,6 +128,8 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | GET    | `/detections/ignored`         | `GetExcludedSpecies`    | ✅   | Get list of excluded species               |
 | POST   | `/detections/include`         | `IncludeSpecies`        | ✅   | Toggle species in always-include list      |
 | GET    | `/detections/included`        | `GetIncludedSpecies`    | ✅   | Get list of always-included species        |
+| POST   | `/detections/confirm`         | `ConfirmSpecies`        | ✅   | Toggle species in confirmed (verified) list |
+| GET    | `/detections/confirmed`       | `GetConfirmedSpecies`   | ✅   | Get list of manually confirmed species      |
 | POST   | `/detections/species/delete`  | `DeleteSpeciesDetections` | ✅ | Delete every detection of a species (by scientific name) + files |
 | POST   | `/detections/batch/delete`    | `BatchDeleteDetections` | ✅   | Bulk delete detections by ID               |
 | POST   | `/detections/batch/review`    | `BatchReviewDetections` | ✅   | Bulk set verification status               |

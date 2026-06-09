@@ -160,6 +160,8 @@ func (c *Controller) initDetectionRoutes() {
 	detectionGroup.GET("/ignored", c.GetExcludedSpecies)
 	detectionGroup.POST("/include", c.IncludeSpecies)
 	detectionGroup.GET("/included", c.GetIncludedSpecies)
+	detectionGroup.POST("/confirm", c.ConfirmSpecies)
+	detectionGroup.GET("/confirmed", c.GetConfirmedSpecies)
 	detectionGroup.POST("/species/delete", c.DeleteSpeciesDetections)
 
 	// Batch operation endpoints
@@ -1616,6 +1618,24 @@ type IncludedSpeciesResponse struct {
 	Count   int      `json:"count"`
 }
 
+// ConfirmSpeciesRequest represents the request body for toggling a species in the confirmed list.
+type ConfirmSpeciesRequest struct {
+	CommonName string `json:"common_name"`
+}
+
+// ConfirmSpeciesResponse represents the response for the confirm-species toggle endpoint.
+type ConfirmSpeciesResponse struct {
+	CommonName  string `json:"common_name"`
+	Action      string `json:"action"` // "added" or "removed"
+	IsConfirmed bool   `json:"is_confirmed"`
+}
+
+// ConfirmedSpeciesResponse represents the response for the get-confirmed-species endpoint.
+type ConfirmedSpeciesResponse struct {
+	Species []string `json:"species"`
+	Count   int      `json:"count"`
+}
+
 // IgnoreSpecies toggles a species in the ignored list (adds if not present, removes if present)
 func (c *Controller) IgnoreSpecies(ctx echo.Context) error {
 	// Parse request body
@@ -1701,6 +1721,49 @@ func (c *Controller) GetIncludedSpecies(ctx echo.Context) error {
 	})
 }
 
+// ConfirmSpecies toggles a species in the confirmed list (adds if absent, removes if present).
+// The confirmed list flags species that the user has manually verified as a genuine
+// occurrence; it has no effect on detection processing and is surfaced only in analytics.
+func (c *Controller) ConfirmSpecies(ctx echo.Context) error {
+	req := &ConfirmSpeciesRequest{}
+	if err := ctx.Bind(req); err != nil {
+		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
+	}
+	if req.CommonName == "" {
+		return c.HandleError(ctx, nil, "Missing species name", http.StatusBadRequest)
+	}
+
+	action, isConfirmed, err := c.toggleSpeciesInConfirmedList(req.CommonName)
+	if err != nil {
+		return c.HandleError(ctx, err, "Failed to update confirmed species", http.StatusInternalServerError)
+	}
+
+	c.logInfoIfEnabled("Species confirmation toggled",
+		logger.String("species", req.CommonName),
+		logger.String("action", action),
+		logger.Bool("is_confirmed", isConfirmed),
+		logger.String("ip", ctx.RealIP()),
+	)
+
+	return ctx.JSON(http.StatusOK, ConfirmSpeciesResponse{
+		CommonName:  req.CommonName,
+		Action:      action,
+		IsConfirmed: isConfirmed,
+	})
+}
+
+// GetConfirmedSpecies returns the list of manually confirmed species.
+func (c *Controller) GetConfirmedSpecies(ctx echo.Context) error {
+	c.settingsMutex.RLock()
+	species := slices.Clone(c.getSettingsOrFallback().Realtime.Species.Confirmed)
+	c.settingsMutex.RUnlock()
+
+	return ctx.JSON(http.StatusOK, ConfirmedSpeciesResponse{
+		Species: species,
+		Count:   len(species),
+	})
+}
+
 // addToIgnoredSpecies handles the logic for adding species to the ignore list
 func (c *Controller) addToIgnoredSpecies(verified, ignoreSpecies string) error {
 	if verified == "false_positive" && ignoreSpecies != "" {
@@ -1780,6 +1843,17 @@ func (c *Controller) toggleSpeciesInIncludeList(species string) (action string, 
 		species,
 		func(s *conf.Settings) []string { return s.Realtime.Species.Include },
 		func(s *conf.Settings, list []string) { s.Realtime.Species.Include = list },
+	)
+}
+
+// toggleSpeciesInConfirmedList toggles a species in the confirmed (manually verified) list.
+// If the species is already confirmed, it removes it. If not confirmed, it adds it.
+// Returns the action taken ("added" or "removed"), the new confirmed state, and any error.
+func (c *Controller) toggleSpeciesInConfirmedList(species string) (action string, isConfirmed bool, err error) {
+	return c.toggleSpeciesInSettingsList(
+		species,
+		func(s *conf.Settings) []string { return s.Realtime.Species.Confirmed },
+		func(s *conf.Settings, list []string) { s.Realtime.Species.Confirmed = list },
 	)
 }
 

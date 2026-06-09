@@ -1779,10 +1779,11 @@
         "maxConfidence": "Maxkonfidens",
         "firstDetected": "Först detekterad",
         "lastDetected": "Senast detekterad",
-        "lists": "Lists",
         "excluded": "Excluded",
         "whitelisted": "Whitelisted",
         "reviewRatio": "Confirmed / Rejected",
+        "probability": "Probability",
+        "confirmed": "Confirmed",
         "actions": "Actions"
       },
       "manage": {
@@ -1804,7 +1805,13 @@
         "removedFromExcluded": "{species} removed from exclusion list",
         "addedToWhitelist": "{species} added to always-include list",
         "removedFromWhitelist": "{species} removed from always-include list",
-        "toggleError": "Failed to update species list"
+        "toggleError": "Failed to update species list",
+        "confirmSpeciesTooltip": "Mark {species} as a confirmed species",
+        "unconfirmSpeciesTooltip": "Remove {species} from confirmed species",
+        "addedToConfirmed": "{species} marked as confirmed",
+        "removedFromConfirmed": "{species} removed from confirmed",
+        "probabilityTooltip": "Range filter occurrence probability for the current location and week",
+        "probabilityNone": "No range filter score available"
       },
       "card": {
         "detections": "Detektioner:",
