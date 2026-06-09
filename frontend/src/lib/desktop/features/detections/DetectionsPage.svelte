@@ -152,7 +152,7 @@
         dashboardSettings: data.dashboardSettings,
         allDates,
         sortBy: queryParams.sortBy,
-        locked: urlParams.get('locked') === 'true',
+        locked: queryParams.locked,
       };
     } catch (err) {
       error = err instanceof Error ? err.message : t('detections.errors.fetchFailed');

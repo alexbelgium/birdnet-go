@@ -489,7 +489,7 @@
         {/if}
 
         <!-- Species sort controls: only shown in all-dates species view -->
-        {#if data?.allDates && data?.queryType === 'species'}
+        {#if data?.allDates}
           <div
             class="hidden md:flex items-center rounded-lg border border-[var(--color-base-300)] overflow-hidden"
           >
