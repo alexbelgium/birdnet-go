@@ -1012,12 +1012,6 @@
   }
 
   function exportData() {
-    // Manage view exports its richer, management-focused column set.
-    if (viewMode === 'manage') {
-      exportManageData();
-      return;
-    }
-
     // Generate CSV content
     const headers = [
       'Common Name',
@@ -1049,55 +1043,6 @@
     // Create and download file
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     downloadBlob(blob, `birdnet-species-${getLocalDateString()}.csv`);
-  }
-
-  // Manage-view CSV: the currently displayed (filtered + sorted) rows with the
-  // management columns (list membership, review counts, probability, confirmed).
-  function exportManageData() {
-    const headers = [
-      'Common Name',
-      'Scientific Name',
-      'Count',
-      'Avg Confidence',
-      'Max Confidence',
-      'First Detected',
-      'Last Detected',
-      'Excluded',
-      'Whitelisted',
-      'Confirmed Reviews',
-      'Rejected Reviews',
-      'Review Ratio',
-      'Probability',
-      'Confirmed',
-    ];
-    const yesNo = (value?: boolean) => (value ? 'Yes' : 'No');
-    const rows = manageSpecies.map(species => {
-      const ratio = reviewedRatio(species);
-      return [
-        species.common_name,
-        species.scientific_name,
-        species.count,
-        (species.avg_confidence * 100).toFixed(1) + '%',
-        (species.max_confidence * 100).toFixed(1) + '%',
-        species.first_heard ? formatDateTime(species.first_heard) : '',
-        species.last_heard ? formatDateTime(species.last_heard) : '',
-        yesNo(species.is_excluded),
-        yesNo(species.is_included),
-        species.verified_count ?? 0,
-        species.rejected_count ?? 0,
-        ratio === null ? '' : (ratio * 100).toFixed(1) + '%',
-        species.range_score !== undefined ? species.range_score.toFixed(3) : '',
-        yesNo(species.is_confirmed),
-      ];
-    });
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    downloadBlob(blob, `birdnet-species-manage-${getLocalDateString()}.csv`);
   }
 
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
