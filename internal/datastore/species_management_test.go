@@ -18,7 +18,7 @@ func TestGetSpeciesReviewStats(t *testing.T) {
 	t.Parallel()
 
 	ds := setupTestDB(t)
-	seedTestData(t, ds) // 2x Turdus migratorius, 2x Cyanocitta cristata, 1x Cardinalis cardinalis
+	seedTestData(t, ds) // 2x Turdus migratorius, 2x Cyanocitta cristata, 1x Cardinalis cardinalis //nolint:misspell // scientific genus name
 
 	// Robin: one confirmed, one rejected. Blue Jay: both rejected (pure mislabel).
 	// Cardinal: no manual review at all.
