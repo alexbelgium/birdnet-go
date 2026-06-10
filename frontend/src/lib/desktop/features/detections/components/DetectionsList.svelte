@@ -355,6 +355,7 @@
             search: data.search,
             hour: data.hour !== undefined ? String(data.hour) : undefined,
             duration: data.duration !== undefined ? data.duration : undefined,
+            locked: data.locked || undefined,
           }),
         }
       );

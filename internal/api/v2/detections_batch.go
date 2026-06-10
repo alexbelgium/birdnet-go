@@ -50,6 +50,7 @@ type BatchResolveRequest struct {
 	Search    string `json:"search,omitempty"`
 	Hour      string `json:"hour,omitempty"`
 	Duration  int    `json:"duration,omitempty"`
+	Locked    bool   `json:"locked,omitempty"`
 }
 
 // BatchResult represents the outcome of a batch operation.
@@ -255,6 +256,9 @@ func (c *Controller) BatchResolveDetections(ctx echo.Context) error {
 		Duration:   duration,
 		NumResults: maxBatchSize + 1,
 		Offset:     0,
+	}
+	if req.Locked {
+		params.Locked = QueryValueTrue
 	}
 
 	notes, totalCount, err := c.getDetectionsByQueryType(params)
