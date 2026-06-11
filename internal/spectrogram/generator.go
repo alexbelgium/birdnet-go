@@ -89,10 +89,8 @@ func WithDuration(seconds float64) GenerateOption {
 }
 
 // WithFrequencyProfile sets the frequency profile for spectrogram generation.
-// BatProfile() applies no resample and a high-pass at 18 kHz; BirdProfile()
-// resamples to 24 kHz. When not set, defaults to BirdProfile(). Note that the
-// automatic bat gating in ProfileForModelType is temporarily disabled, so all
-// detections currently resolve to BirdProfile().
+// BatProfile() resamples to 240 kHz (0-120 kHz display); BirdProfile()
+// resamples to 24 kHz. When not set, defaults to BirdProfile().
 func WithFrequencyProfile(fp FrequencyProfile) GenerateOption {
 	return func(o *generateOptions) {
 		o.freqProfile = &fp

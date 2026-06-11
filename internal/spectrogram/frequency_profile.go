@@ -1,18 +1,15 @@
 package spectrogram
 
 // FrequencyProfile controls spectrogram frequency range and resampling
-// per detection. The gate is the detection's model type: normally bat models
-// get bat settings (no resample, high-pass at 18 kHz) and everything else gets
-// bird defaults (resample to 24 kHz, full range). Bat gating is temporarily
-// disabled (see ProfileForModelType), so all detections currently use bird
-// defaults.
+// per detection. Bat detections resample to 240 kHz (Nyquist = 120 kHz,
+// full range 0-120 kHz); bird detections resample to 24 kHz.
 type FrequencyProfile struct {
 	ResampleRate int // Target sample rate in Hz; 0 means keep native rate
 	HighPassHz   int // High-pass filter cutoff in Hz; 0 means no filter
 }
 
 const (
-	batHighPassHz  = 18000
+	batResampleHz  = 240000
 	birdResampleHz = 24000
 )
 
@@ -24,21 +21,20 @@ func BirdProfile() FrequencyProfile {
 	}
 }
 
-// BatProfile returns the frequency profile for bat detections captured
-// at 256 kHz. No resampling is applied (keeps native rate), and a
-// high-pass filter at 18 kHz removes content below the bat echolocation
-// floor.
+// BatProfile returns the frequency profile for bat detections. Audio is
+// resampled to 240 kHz so the spectrogram displays the full 0-120 kHz range.
 func BatProfile() FrequencyProfile {
 	return FrequencyProfile{
-		ResampleRate: 0,
-		HighPassHz:   batHighPassHz,
+		ResampleRate: batResampleHz,
+		HighPassHz:   0,
 	}
 }
 
 // ProfileForModelType selects the appropriate frequency profile based on
 // the AI model's type string (as stored in ai_models.model_type).
-// Bat profile is temporarily disabled due to spectrogram generation bugs;
-// all detections use bird defaults until the issues are resolved.
 func ProfileForModelType(modelType string) FrequencyProfile {
+	if modelType == "Bat" {
+		return BatProfile()
+	}
 	return BirdProfile()
 }
