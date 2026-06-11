@@ -12,8 +12,8 @@ const (
 	batResampleHz  = 240000
 	birdResampleHz = 24000
 
-	// modelTypeBat mirrors classifier.RegistryIDBat; keep in sync if that value changes.
-	modelTypeBat = "Bat"
+	// modelTypeBat mirrors entities.ModelTypeBat ("bat") from internal/datastore/v2/entities/ai_model.go.
+	modelTypeBat = "bat"
 )
 
 // BirdProfile returns the default frequency profile for bird detections.

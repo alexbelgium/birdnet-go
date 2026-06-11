@@ -761,7 +761,7 @@ func TestProfileForModelType(t *testing.T) {
 		wantHighPass int
 	}{
 		{"bird model", "bird", 24000, 0},
-		{"bat model uses 240 kHz for 0-120 kHz range", "Bat", 240000, 0},
+		{"bat model uses 240 kHz for 0-120 kHz range", "bat", 240000, 0},
 		{"multi model defaults to bird", "multi", 24000, 0},
 		{"empty defaults to bird", "", 24000, 0},
 	}
