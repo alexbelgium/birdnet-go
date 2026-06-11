@@ -289,7 +289,7 @@ func (g *Generator) GenerateFromFile(ctx context.Context, audioPath, outputPath 
 		logger.Int("width", width),
 		logger.Bool("raw", raw),
 		logger.Float64("pre_validated_duration", options.preValidatedDuration),
-		logger.Bool("bat_profile", profile.HighPassHz > 0))
+		logger.Bool("bat_profile", profile.ResampleRate == batResampleHz))
 
 	// Validate inputs before filesystem operations
 	if outputPath == "" {
@@ -399,7 +399,7 @@ func (g *Generator) GenerateFromPCM(ctx context.Context, pcmData []byte, outputP
 		logger.Int("pcm_bytes", len(pcmData)),
 		logger.Int("width", width),
 		logger.Bool("raw", raw),
-		logger.Bool("bat_profile", profile.HighPassHz > 0))
+		logger.Bool("bat_profile", profile.ResampleRate == batResampleHz))
 
 	// Validate inputs before filesystem operations
 	if outputPath == "" {
@@ -858,8 +858,10 @@ func (g *Generator) generateWithFFmpeg(ctx context.Context, settings *conf.Setti
 	filterStr := fmt.Sprintf("showspectrumpic=s=%dx%d:legend=%d:gain=%s:drange=%s:color=%s",
 		width, height, legendFlag, ffmpegGain, ffmpegDrange, colorMode)
 
-	// Bat profile: prepend high-pass filter to remove sub-ultrasonic content
-	if profile.HighPassHz > 0 {
+	// Bat profile: prepend resample filter for 0-120 kHz display range
+	if profile.ResampleRate > 0 {
+		filterStr = fmt.Sprintf("aresample=%d,%s", profile.ResampleRate, filterStr)
+	} else if profile.HighPassHz > 0 {
 		filterStr = fmt.Sprintf("highpass=f=%d,%s", profile.HighPassHz, filterStr)
 	}
 
@@ -932,7 +934,7 @@ func (g *Generator) getSoxSpectrogramArgs(ctx context.Context, settings *conf.Se
 	heightStr := strconv.Itoa(fftFriendlyHeight(width))
 	widthStr := strconv.Itoa(width)
 
-	// Build base args: either resample (bird) or high-pass filter (bat)
+	// Build base args: resample (bird/bat) or high-pass sinc filter (custom profile)
 	var args []string
 	switch {
 	case profile.HighPassHz > 0:

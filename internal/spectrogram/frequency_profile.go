@@ -11,6 +11,9 @@ type FrequencyProfile struct {
 const (
 	batResampleHz  = 240000
 	birdResampleHz = 24000
+
+	// modelTypeBat mirrors classifier.RegistryIDBat; keep in sync if that value changes.
+	modelTypeBat = "Bat"
 )
 
 // BirdProfile returns the default frequency profile for bird detections.
@@ -33,7 +36,7 @@ func BatProfile() FrequencyProfile {
 // ProfileForModelType selects the appropriate frequency profile based on
 // the AI model's type string (as stored in ai_models.model_type).
 func ProfileForModelType(modelType string) FrequencyProfile {
-	if modelType == "Bat" {
+	if modelType == modelTypeBat {
 		return BatProfile()
 	}
 	return BirdProfile()
