@@ -33,6 +33,9 @@ func BatProfile() FrequencyProfile {
 	}
 }
 
+// IsBat reports whether this profile was built for bat detections.
+func (fp FrequencyProfile) IsBat() bool { return fp.ResampleRate == batResampleHz }
+
 // ProfileForModelType selects the appropriate frequency profile based on
 // the AI model's type string (as stored in ai_models.model_type).
 func ProfileForModelType(modelType string) FrequencyProfile {

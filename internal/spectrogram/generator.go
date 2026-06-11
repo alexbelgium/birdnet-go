@@ -289,7 +289,7 @@ func (g *Generator) GenerateFromFile(ctx context.Context, audioPath, outputPath 
 		logger.Int("width", width),
 		logger.Bool("raw", raw),
 		logger.Float64("pre_validated_duration", options.preValidatedDuration),
-		logger.Bool("bat_profile", profile.ResampleRate == batResampleHz))
+		logger.Bool("bat_profile", profile.IsBat()))
 
 	// Validate inputs before filesystem operations
 	if outputPath == "" {
@@ -399,7 +399,7 @@ func (g *Generator) GenerateFromPCM(ctx context.Context, pcmData []byte, outputP
 		logger.Int("pcm_bytes", len(pcmData)),
 		logger.Int("width", width),
 		logger.Bool("raw", raw),
-		logger.Bool("bat_profile", profile.ResampleRate == batResampleHz))
+		logger.Bool("bat_profile", profile.IsBat()))
 
 	// Validate inputs before filesystem operations
 	if outputPath == "" {
