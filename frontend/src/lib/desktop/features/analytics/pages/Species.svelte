@@ -1438,6 +1438,11 @@
   species={selectedSpecies}
   isOpen={showDetailModal}
   onClose={handleCloseDetailModal}
+  onNavigate={selectedSpecies
+    ? () => {
+        if (selectedSpecies) handleDesktopSpeciesClick(selectedSpecies);
+      }
+    : undefined}
 />
 
 <!-- Delete-species confirmation (manage view) -->
