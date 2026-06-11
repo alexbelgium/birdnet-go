@@ -636,8 +636,12 @@ export type TranslationKey =
   | 'detections.titles.hourly' // params: hour, date
   | 'detections.titles.hourlyRange' // params: startHour, endHour, date
   | 'detections.titles.species' // params: species, date
+  | 'detections.titles.allSpeciesDetections' // params: species
   | 'detections.titles.search' // params: query
   | 'detections.titles.allDetections' // params: date
+  | 'detections.speciesSort.maxConfidence'
+  | 'detections.speciesSort.date'
+  | 'detections.speciesSort.locked'
   | 'detections.detail.species'
   | 'detections.detail.observation'
   | 'detections.detail.aria.downloadAudioClip' // params: name
@@ -1379,6 +1383,7 @@ export type TranslationKey =
   | 'analytics.species.switchToList'
   | 'analytics.species.switchToManage'
   | 'analytics.species.noSpeciesFound'
+  | 'analytics.species.viewRecordings'
   | 'analytics.species.headers.species'
   | 'analytics.species.headers.detections'
   | 'analytics.species.headers.avgConfidence'
@@ -3879,6 +3884,7 @@ export type TranslationParams = {
     date: string | number;
   };
   'detections.titles.species': { species: string | number; date: string | number };
+  'detections.titles.allSpeciesDetections': { species: string | number };
   'detections.titles.search': { query: string | number };
   'detections.titles.allDetections': { date: string | number };
   'detections.detail.aria.downloadAudioClip': { name: string | number };
