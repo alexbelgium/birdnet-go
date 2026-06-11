@@ -713,7 +713,7 @@ func TestGetSoxSpectrogramArgs_RawFlag(t *testing.T) {
 }
 
 // TestGetSoxSpectrogramArgs_BatProfile verifies that the bat frequency profile
-// produces a high-pass sinc filter instead of rate resampling.
+// resamples to 240 kHz for a 0-120 kHz spectrogram.
 func TestGetSoxSpectrogramArgs_BatProfile(t *testing.T) {
 	env := setupTestEnv(t)
 	env.Settings.Realtime.Audio.Export.Length = 15
@@ -725,10 +725,10 @@ func TestGetSoxSpectrogramArgs_BatProfile(t *testing.T) {
 
 	args := gen.getSoxSpectrogramArgs(t.Context(), gen.currentSettings(), audioPath, outputPath, 400, false, 0, BatProfile())
 
-	// Bat profile: sinc high-pass filter, no rate resampling
-	assert.Contains(t, args, "sinc", "bat profile should use sinc high-pass filter")
-	assert.Contains(t, args, "18000-", "bat profile should filter at 18 kHz")
-	assert.NotContains(t, args, "rate", "bat profile should not resample")
+	// Bat profile: resample to 240 kHz, no high-pass filter
+	assert.Contains(t, args, "rate", "bat profile should resample")
+	assert.Contains(t, args, "240000", "bat profile should resample to 240 kHz")
+	assert.NotContains(t, args, "sinc", "bat profile should not high-pass filter")
 }
 
 // TestGetSoxSpectrogramArgs_BirdProfile verifies that the bird frequency profile
@@ -751,10 +751,6 @@ func TestGetSoxSpectrogramArgs_BirdProfile(t *testing.T) {
 }
 
 // TestProfileForModelType verifies model type to frequency profile mapping.
-// The bat profile is temporarily disabled (see ProfileForModelType and commit
-// e2edab6d2): every model type, including "bat", resolves to bird defaults
-// until the bat spectrogram generation bugs are fixed. Restore the bat case to
-// {wantResample: 0, wantHighPass: 18000} when the bat profile is re-enabled.
 func TestProfileForModelType(t *testing.T) {
 	t.Parallel()
 
@@ -765,7 +761,8 @@ func TestProfileForModelType(t *testing.T) {
 		wantHighPass int
 	}{
 		{"bird model", "bird", 24000, 0},
-		{"bat model disabled, falls back to bird", "bat", 24000, 0},
+		{"bat model uses 0-120 kHz range", "bat", 240000, 0},
+		{"bat model is case-insensitive", "Bat", 240000, 0},
 		{"multi model defaults to bird", "multi", 24000, 0},
 		{"empty defaults to bird", "", 24000, 0},
 	}

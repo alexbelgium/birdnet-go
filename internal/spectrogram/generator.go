@@ -89,10 +89,8 @@ func WithDuration(seconds float64) GenerateOption {
 }
 
 // WithFrequencyProfile sets the frequency profile for spectrogram generation.
-// BatProfile() applies no resample and a high-pass at 18 kHz; BirdProfile()
-// resamples to 24 kHz. When not set, defaults to BirdProfile(). Note that the
-// automatic bat gating in ProfileForModelType is temporarily disabled, so all
-// detections currently resolve to BirdProfile().
+// BatProfile() resamples to 240 kHz for a 0-120 kHz spectrogram; BirdProfile()
+// resamples to 24 kHz. When not set, defaults to BirdProfile().
 func WithFrequencyProfile(fp FrequencyProfile) GenerateOption {
 	return func(o *generateOptions) {
 		o.freqProfile = &fp
@@ -761,7 +759,7 @@ func (g *Generator) generateWithSoxPCM(ctx context.Context, settings *conf.Setti
 		"-n", // No audio output (null output)
 	}
 
-	// Frequency-dependent effects: resample (bird) or high-pass filter (bat).
+	// Frequency-dependent effects: resample or high-pass filter.
 	// Guard: sinc filter requires sample rate > 2*cutoff (Nyquist constraint).
 	if profile.HighPassHz > 0 && effectiveRate > 2*profile.HighPassHz {
 		args = append(args, "sinc", strconv.Itoa(profile.HighPassHz)+"-")
@@ -860,9 +858,11 @@ func (g *Generator) generateWithFFmpeg(ctx context.Context, settings *conf.Setti
 	filterStr := fmt.Sprintf("showspectrumpic=s=%dx%d:legend=%d:gain=%s:drange=%s:color=%s",
 		width, height, legendFlag, ffmpegGain, ffmpegDrange, colorMode)
 
-	// Bat profile: prepend high-pass filter to remove sub-ultrasonic content
+	// Apply frequency profile before rendering the spectrogram.
 	if profile.HighPassHz > 0 {
 		filterStr = fmt.Sprintf("highpass=f=%d,%s", profile.HighPassHz, filterStr)
+	} else if profile.ResampleRate > 0 {
+		filterStr = fmt.Sprintf("aresample=%d,%s", profile.ResampleRate, filterStr)
 	}
 
 	ffmpegArgs := []string{
@@ -934,7 +934,7 @@ func (g *Generator) getSoxSpectrogramArgs(ctx context.Context, settings *conf.Se
 	heightStr := strconv.Itoa(fftFriendlyHeight(width))
 	widthStr := strconv.Itoa(width)
 
-	// Build base args: either resample (bird) or high-pass filter (bat)
+	// Build base args with the selected frequency profile.
 	var args []string
 	switch {
 	case profile.HighPassHz > 0:
