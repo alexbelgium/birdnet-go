@@ -224,7 +224,8 @@
   // and the toast/tooltip copy plus button appearance. One descriptor per list lets
   // toggleSpeciesList and the toggle-cell snippet stay generic instead of triplicated.
   interface ManageListDescriptor {
-    endpoint: string;
+    endpoint: string; // POST toggle endpoint
+    listEndpoint: string; // GET endpoint returning current members
     activeClass: string;
     activeIcon: typeof Circle;
     getMembers: () => Set<string>;
@@ -263,6 +264,7 @@
   // Each descriptor wires its API endpoint to the matching local state + UI affordances.
   const excludedList: ManageListDescriptor = {
     endpoint: '/api/v2/detections/ignore',
+    listEndpoint: '/api/v2/detections/ignored',
     activeClass: 'text-[var(--color-error)]',
     activeIcon: XCircle,
     getMembers: () => excludedSpecies,
@@ -280,6 +282,7 @@
   };
   const includedList: ManageListDescriptor = {
     endpoint: '/api/v2/detections/include',
+    listEndpoint: '/api/v2/detections/included',
     activeClass: 'text-[var(--color-success)]',
     activeIcon: CheckCircle2,
     getMembers: () => includedSpecies,
@@ -297,6 +300,7 @@
   };
   const confirmedList: ManageListDescriptor = {
     endpoint: '/api/v2/detections/confirm',
+    listEndpoint: '/api/v2/detections/confirmed',
     activeClass: 'text-[var(--color-primary)]',
     activeIcon: BadgeCheck,
     getMembers: () => confirmedSpecies,
@@ -392,14 +396,14 @@
   function handleSort(field: string) {
     const column = SORTABLE_COLUMNS.find(c => c.field === field);
     if (!column) return;
-    const next =
-      sortField === field
-        ? appliedSortOrder === column.asc
-          ? column.desc
-          : column.asc
-        : field === SPECIES_COLUMN_FIELD
-          ? column.asc
-          : column.desc;
+    let next: SortOrder;
+    if (sortField === field) {
+      // Re-clicking the active column flips its current direction.
+      next = appliedSortOrder === column.asc ? column.desc : column.asc;
+    } else {
+      // A new column starts at its default (ascending for species name, descending else).
+      next = field === SPECIES_COLUMN_FIELD ? column.asc : column.desc;
+    }
     filters.sortOrder = next;
     appliedSortOrder = next;
     // Persist only list/grid orders; manage-only sorts are session-scoped.
@@ -671,37 +675,21 @@
   async function fetchManageData() {
     await Promise.all([
       fetchReviewStats(),
-      fetchExcludedSpecies(),
-      fetchIncludedSpecies(),
-      fetchConfirmedSpecies(),
+      fetchListMembers(excludedList),
+      fetchListMembers(includedList),
+      fetchListMembers(confirmedList),
       fetchRangeScores(),
     ]);
   }
 
-  async function fetchExcludedSpecies() {
+  // Loads the current members of one manage-view list (excluded / whitelisted / confirmed)
+  // into its descriptor's state. On failure the existing membership is left untouched.
+  async function fetchListMembers(list: ManageListDescriptor) {
     try {
-      const data = await fetchWithCSRF<{ species: string[] }>('/api/v2/detections/ignored');
-      excludedSpecies = new Set(data.species);
+      const data = await fetchWithCSRF<{ species: string[] }>(list.listEndpoint);
+      list.setMembers(new Set(data.species));
     } catch (error) {
-      logger.error('Error fetching excluded species:', error);
-    }
-  }
-
-  async function fetchIncludedSpecies() {
-    try {
-      const data = await fetchWithCSRF<{ species: string[] }>('/api/v2/detections/included');
-      includedSpecies = new Set(data.species);
-    } catch (error) {
-      logger.error('Error fetching included species:', error);
-    }
-  }
-
-  async function fetchConfirmedSpecies() {
-    try {
-      const data = await fetchWithCSRF<{ species: string[] }>('/api/v2/detections/confirmed');
-      confirmedSpecies = new Set(data.species);
-    } catch (error) {
-      logger.error('Error fetching confirmed species:', error);
+      logger.error('Error fetching species list members:', error);
     }
   }
 
@@ -834,8 +822,8 @@
           })
         );
         // Some detections couldn't be deleted — refresh to show accurate remaining count.
-        await fetchData();
-        await fetchReviewStats();
+        // The summary and review-stats endpoints are independent, so fetch them together.
+        await Promise.all([fetchData(), fetchReviewStats()]);
       } else {
         toastActions.success(
           t('analytics.species.manage.deleteSuccess', {
