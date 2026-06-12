@@ -247,6 +247,7 @@
   let confirmedSpecies = $state<Set<string>>(new Set());
   // Range-filter geomodel probabilities keyed by scientific name (manage view only).
   let rangeScores = $state<Map<string, number>>(new Map());
+  let isLoadingScores = $state(false);
   // Tracks species whose toggle is in-flight (prevents double-click races).
   let togglingExclude = $state<Set<string>>(new Set());
   let togglingInclude = $state<Set<string>>(new Set());
@@ -308,6 +309,14 @@
 
   // True while the manage view is loading its review stats.
   let manageLoading = $derived(viewMode === 'manage' && isLoadingStats);
+
+  // Shared columns hidden in manage view to keep only management-relevant fields.
+  const MANAGE_HIDDEN_FIELDS = new Set(['avg_confidence', 'first_seen']);
+  let sharedColumns = $derived(
+    viewMode === 'manage'
+      ? SORTABLE_COLUMNS.filter(column => !MANAGE_HIDDEN_FIELDS.has(column.field))
+      : SORTABLE_COLUMNS
+  );
 
   // Manage rows: authoritative species set from review-stats (so fully-rejected mislabels
   // appear even though they are excluded from the false-positive-filtered summary),
@@ -700,6 +709,10 @@
   // Loads the range-filter geomodel probability for every species at the current
   // location/week. Failures are non-fatal: the Probability column simply shows "—".
   async function fetchRangeScores() {
+    // Geomodel inference is the slowest manage-view call and its output only changes
+    // with location/week, so reuse the scores for the rest of the session.
+    if (rangeScores.size > 0) return;
+    isLoadingScores = true;
     try {
       const data = await fetchWithCSRF<{
         species: Array<{ scientificName: string; score?: number }>;
@@ -713,6 +726,8 @@
       rangeScores = next;
     } catch (error) {
       logger.error('Error fetching range filter scores:', error);
+    } finally {
+      isLoadingScores = false;
     }
   }
 
@@ -1177,7 +1192,7 @@
           <table class="table w-full hidden sm:table">
             <thead>
               <tr>
-                {#each SORTABLE_COLUMNS as { field, labelKey } (field)}
+                {#each sharedColumns as { field, labelKey } (field)}
                   <SortableHeader
                     label={t(labelKey)}
                     {field}
@@ -1249,11 +1264,8 @@
                     {/if}
                   </td>
                   <td class="font-semibold">{species.count}</td>
-                  <td>
-                    {#if viewMode === 'manage'}
-                      <!-- Manage view shows the confidence value as plain text (no progress bar). -->
-                      <span class="text-sm">{formatPercentage(species.avg_confidence)}</span>
-                    {:else}
+                  {#if viewMode !== 'manage'}
+                    <td>
                       <div class="flex items-center gap-2">
                         <progress
                           class="progress w-20 {species.avg_confidence >= 0.8
@@ -1266,10 +1278,14 @@
                         ></progress>
                         <span class="text-sm">{formatPercentage(species.avg_confidence)}</span>
                       </div>
-                    {/if}
-                  </td>
+                    </td>
+                  {/if}
                   <td>{formatPercentage(species.max_confidence)}</td>
-                  <td class="text-sm whitespace-nowrap">{formatColumnDate(species.first_heard)}</td>
+                  {#if viewMode !== 'manage'}
+                    <td class="text-sm whitespace-nowrap">
+                      {formatColumnDate(species.first_heard)}
+                    </td>
+                  {/if}
                   <td class="text-sm whitespace-nowrap">{formatColumnDate(species.last_heard)}</td>
                   {#if viewMode === 'manage'}
                     {@const isExcluded = species.is_excluded ?? false}
@@ -1314,6 +1330,12 @@
                         <span title={t('analytics.species.manage.probabilityTooltip')}>
                           {species.range_score.toFixed(3)}
                         </span>
+                      {:else if isLoadingScores}
+                        <span
+                          class="loading loading-dots loading-xs"
+                          title={t('common.loading')}
+                          aria-label={t('common.loading')}
+                        ></span>
                       {:else}
                         <span
                           class="opacity-40"
