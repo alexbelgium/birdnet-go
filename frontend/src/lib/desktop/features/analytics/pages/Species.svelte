@@ -7,6 +7,7 @@
   import { getStoredValue, setStoredValue } from '$lib/utils/storage';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import SortableHeader from '$lib/desktop/components/ui/SortableHeader.svelte';
   import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
   import SpeciesFilterForm from '../components/forms/SpeciesFilterForm.svelte';
@@ -16,8 +17,9 @@
   import StatCard from '../components/ui/StatCard.svelte';
   import { Lock, Trash2, CheckCircle2, XCircle, Circle, BadgeCheck } from '@lucide/svelte';
   import { toastActions } from '$lib/stores/toast';
-  import { fetchWithCSRF } from '$lib/utils/api';
+  import { api, fetchWithCSRF } from '$lib/utils/api';
   import { isAuthenticated } from '$lib/utils/auth';
+  import { settingsActions, settingsStore } from '$lib/stores/settings';
 
   const logger = loggers.analytics;
 
@@ -26,33 +28,35 @@
     timePeriod: 'all' | 'today' | 'week' | 'month' | '90days' | 'year' | 'custom';
     startDate: string;
     endDate: string;
-    sortOrder:
-      | 'count_desc'
-      | 'count_asc'
-      | 'name_asc'
-      | 'name_desc'
-      | 'first_seen_desc'
-      | 'first_seen_asc'
-      | 'last_seen_desc'
-      | 'last_seen_asc'
-      | 'confidence_desc'
-      | 'confidence_asc'
-      | 'max_confidence_desc'
-      | 'max_confidence_asc'
-      | 'excluded_desc'
-      | 'excluded_asc'
-      | 'included_desc'
-      | 'included_asc'
-      | 'review_ratio_desc'
-      | 'review_ratio_asc'
-      | 'range_score_desc'
-      | 'range_score_asc'
-      | 'confirmed_desc'
-      | 'confirmed_asc';
+    sortOrder: ListSortOrder;
     searchTerm: string;
   }
 
-  type SortOrder = SpeciesFilters['sortOrder'];
+  type ListSortOrder =
+    | 'count_desc'
+    | 'count_asc'
+    | 'name_asc'
+    | 'name_desc'
+    | 'first_seen_desc'
+    | 'first_seen_asc'
+    | 'last_seen_desc'
+    | 'last_seen_asc'
+    | 'confidence_desc'
+    | 'confidence_asc'
+    | 'max_confidence_desc'
+    | 'max_confidence_asc';
+  type ManageSortOrder =
+    | 'excluded_desc'
+    | 'excluded_asc'
+    | 'included_desc'
+    | 'included_asc'
+    | 'review_ratio_desc'
+    | 'review_ratio_asc'
+    | 'range_score_desc'
+    | 'range_score_asc'
+    | 'confirmed_desc'
+    | 'confirmed_asc';
+  type SortOrder = ListSortOrder | ManageSortOrder;
 
   interface SpeciesData {
     common_name: string;
@@ -82,6 +86,11 @@
     total: number;
     verified: number;
     rejected: number;
+  }
+
+  interface RangeTestSpecies {
+    scientificName: string;
+    score?: number;
   }
 
   type ViewMode = 'grid' | 'list' | 'manage';
@@ -181,21 +190,18 @@
   const STICKY_HEADER_CLASS = 'sticky top-0 z-10 bg-[var(--color-base-100)]';
 
   // Default sort and persistence (survives a page refresh).
-  const DEFAULT_SORT_ORDER: SortOrder = 'count_desc';
+  const DEFAULT_SORT_ORDER: ListSortOrder = 'count_desc';
   const SORT_STORAGE_KEY = 'analytics.species.sortOrder';
   // Only the species-name column defaults to ascending (A→Z) on first click.
   const SPECIES_COLUMN_FIELD = 'species';
-  // Sort orders backed by columns shown in every view. The manage-only orders
-  // (excluded/included) are deliberately excluded here so they are never persisted
-  // to or restored from storage — they apply only while the manage view is open and
-  // would otherwise order the grid/list view by an invisible column and blank the
-  // sort dropdown (which only offers these list orders).
-  const LIST_SORT_ORDERS: Set<string> = new Set<string>(
+  // Valid persisted sort orders: manage-only orders are session-scoped because
+  // the filter dropdown only offers list/grid columns.
+  const VALID_SORT_ORDERS: Set<string> = new Set<string>(
     SORTABLE_COLUMNS.flatMap(column => [column.asc, column.desc])
   );
 
-  function isListSortOrder(value: unknown): value is SortOrder {
-    return typeof value === 'string' && LIST_SORT_ORDERS.has(value);
+  function isSortOrder(value: unknown): value is ListSortOrder {
+    return typeof value === 'string' && VALID_SORT_ORDERS.has(value);
   }
 
   let isLoading = $state<boolean>(true);
@@ -351,10 +357,10 @@
   let displayedSpecies = $derived(viewMode === 'manage' ? manageSpecies : filteredSpecies);
 
   // Read once so both filters and the applied-sort indicator start at the same persisted value.
-  const restoredSortOrder = getStoredValue<SortOrder>(
+  const restoredSortOrder = getStoredValue<ListSortOrder>(
     SORT_STORAGE_KEY,
     DEFAULT_SORT_ORDER,
-    isListSortOrder
+    isSortOrder
   );
 
   let filters = $state<SpeciesFilters>({
@@ -397,11 +403,11 @@
         : field === SPECIES_COLUMN_FIELD
           ? column.asc
           : column.desc;
-    filters.sortOrder = next;
     appliedSortOrder = next;
     // Persist only list/grid orders; manage-only sorts are session-scoped.
-    if (isListSortOrder(next)) {
-      setStoredValue<SortOrder>(SORT_STORAGE_KEY, next);
+    if (isSortOrder(next)) {
+      filters.sortOrder = next;
+      setStoredValue<ListSortOrder>(SORT_STORAGE_KEY, next);
     }
     applyFilters();
   }
@@ -437,9 +443,7 @@
     isLoading = true;
     // Apply Filters (and mount/reset) commit the pending dropdown selection.
     appliedSortOrder = filters.sortOrder;
-    if (isListSortOrder(filters.sortOrder)) {
-      setStoredValue<SortOrder>(SORT_STORAGE_KEY, filters.sortOrder);
-    }
+    setStoredValue<ListSortOrder>(SORT_STORAGE_KEY, filters.sortOrder);
 
     try {
       // Determine date range based on time period
@@ -656,11 +660,11 @@
   // (excluded/included), fall back to the persisted list sort so the table isn't
   // ordered by a now-hidden column and the sort dropdown isn't left blank.
   function setListView(mode: 'grid' | 'list') {
-    if (!isListSortOrder(appliedSortOrder)) {
-      const restored = getStoredValue<SortOrder>(
+    if (!isSortOrder(appliedSortOrder)) {
+      const restored = getStoredValue<ListSortOrder>(
         SORT_STORAGE_KEY,
         DEFAULT_SORT_ORDER,
-        isListSortOrder
+        isSortOrder
       );
       appliedSortOrder = restored;
       filters.sortOrder = restored;
@@ -714,12 +718,15 @@
     if (rangeScores.size > 0) return;
     isLoadingScores = true;
     try {
-      // names=false skips per-species localized common-name resolution server-side: this
-      // view keys purely on scientific name, and resolving names for the full geomodel
-      // label set otherwise pushes the request past the request timeout on slow hosts.
-      const data = await fetchWithCSRF<{
-        species: Array<{ scientificName: string; score?: number }>;
-      }>('/api/v2/range/species/scores?names=false');
+      if (!get(settingsStore).dataLoaded) {
+        await settingsActions.loadSettings();
+      }
+      const birdnet = get(settingsStore).formData.birdnet;
+      const data = await api.post<{ species: RangeTestSpecies[] }>('/api/v2/range/species/test', {
+        latitude: birdnet.latitude,
+        longitude: birdnet.longitude,
+        threshold: birdnet.rangeFilter.threshold,
+      });
       const next = new Map<string, number>();
       for (const entry of data.species) {
         if (typeof entry.score === 'number') {
@@ -1321,9 +1328,7 @@
                             value={ratio}
                             max="1"
                           ></progress>
-                          <span class="text-sm whitespace-nowrap"
-                            >{formatPercentage(ratio)}</span
-                          >
+                          <span class="text-sm whitespace-nowrap">{formatPercentage(ratio)}</span>
                         </div>
                       {/if}
                     </td>
