@@ -3,7 +3,6 @@ package v2only
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"testing"
 	"time"

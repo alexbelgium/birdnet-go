@@ -16,8 +16,10 @@
   import StatCard from '../components/ui/StatCard.svelte';
   import { Lock, Trash2, CheckCircle2, XCircle, Circle, BadgeCheck } from '@lucide/svelte';
   import { toastActions } from '$lib/stores/toast';
+  import { settingsActions, settingsStore } from '$lib/stores/settings';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { isAuthenticated } from '$lib/utils/auth';
+  import { get } from 'svelte/store';
 
   const logger = loggers.analytics;
 
@@ -86,14 +88,23 @@
 
   type ViewMode = 'grid' | 'list' | 'manage';
 
-  // Species name defaults to ascending (A→Z); every other column defaults to
-  // descending (most/highest/most recent first) on first click.
-  const SORTABLE_COLUMNS: {
+  // One table-column descriptor drives both the sortable headers and the sort
+  // handling. Species name defaults to ascending (A→Z); every other column defaults
+  // to descending (most/highest/most recent first) on first click. Per-column flags:
+  //   manageOnly  – rendered/sortable only in the manage view (and never persisted,
+  //                 so a manage-only sort like review ratio doesn't leak into the
+  //                 grid/list views, which can't show that column).
+  //   hideInManage – hidden in the manage view to free horizontal space for the
+  //                 management columns (avg confidence, first detection date).
+  type SortableColumn = {
     field: string;
     labelKey: TranslationKey;
     asc: SortOrder;
     desc: SortOrder;
-  }[] = [
+    manageOnly?: boolean;
+    hideInManage?: boolean;
+  };
+  const SORTABLE_COLUMNS: SortableColumn[] = [
     {
       field: 'species',
       labelKey: 'analytics.species.headers.species',
@@ -111,6 +122,7 @@
       labelKey: 'analytics.species.headers.avgConfidence',
       asc: 'confidence_asc',
       desc: 'confidence_desc',
+      hideInManage: true,
     },
     {
       field: 'max_confidence',
@@ -123,6 +135,7 @@
       labelKey: 'analytics.species.headers.firstDetected',
       asc: 'first_seen_asc',
       desc: 'first_seen_desc',
+      hideInManage: true,
     },
     {
       field: 'last_seen',
@@ -130,51 +143,42 @@
       asc: 'last_seen_asc',
       desc: 'last_seen_desc',
     },
-  ];
-
-  // Manage-view-only sortable columns. Each maps to a dedicated table column that
-  // is rendered with a SortableHeader (excluded/whitelisted/confirmed toggles,
-  // review ratio, and range-filter probability).
-  const MANAGE_SORTABLE_COLUMNS: {
-    field: string;
-    labelKey: TranslationKey;
-    asc: SortOrder;
-    desc: SortOrder;
-  }[] = [
     {
       field: 'excluded',
       labelKey: 'analytics.species.headers.excluded',
       asc: 'excluded_asc',
       desc: 'excluded_desc',
+      manageOnly: true,
     },
     {
       field: 'included',
       labelKey: 'analytics.species.headers.whitelisted',
       asc: 'included_asc',
       desc: 'included_desc',
+      manageOnly: true,
     },
     {
       field: 'review_ratio',
       labelKey: 'analytics.species.headers.reviewRatio',
       asc: 'review_ratio_asc',
       desc: 'review_ratio_desc',
+      manageOnly: true,
     },
     {
       field: 'range_score',
       labelKey: 'analytics.species.headers.probability',
       asc: 'range_score_asc',
       desc: 'range_score_desc',
+      manageOnly: true,
     },
     {
       field: 'confirmed',
       labelKey: 'analytics.species.headers.confirmed',
       asc: 'confirmed_asc',
       desc: 'confirmed_desc',
+      manageOnly: true,
     },
   ];
-
-  // Combined column list for sort handling (used by handleSort and activeColumn).
-  const ALL_SORTABLE_COLUMNS = [...SORTABLE_COLUMNS, ...MANAGE_SORTABLE_COLUMNS];
 
   // Manage view only: pin the header row while the (bounded-height) table body scrolls.
   // An opaque background keeps scrolled rows from showing through the sticky cells.
@@ -185,17 +189,19 @@
   const SORT_STORAGE_KEY = 'analytics.species.sortOrder';
   // Only the species-name column defaults to ascending (A→Z) on first click.
   const SPECIES_COLUMN_FIELD = 'species';
-  // Sort orders backed by columns shown in every view. The manage-only orders
-  // (excluded/included) are deliberately excluded here so they are never persisted
-  // to or restored from storage — they apply only while the manage view is open and
-  // would otherwise order the grid/list view by an invisible column and blank the
-  // sort dropdown (which only offers these list orders).
-  const LIST_SORT_ORDERS: Set<string> = new Set<string>(
+
+  const SORT_ORDERS: Set<string> = new Set<string>(
     SORTABLE_COLUMNS.flatMap(column => [column.asc, column.desc])
   );
 
-  function isListSortOrder(value: unknown): value is SortOrder {
-    return typeof value === 'string' && LIST_SORT_ORDERS.has(value);
+  function isSortOrder(value: unknown): value is SortOrder {
+    return typeof value === 'string' && SORT_ORDERS.has(value);
+  }
+
+  // Look up the column backing a sort order (used to resolve its field/direction
+  // and whether it is manage-only, so manage sorts stay out of persistent storage).
+  function columnForSortOrder(order: SortOrder): SortableColumn | undefined {
+    return SORTABLE_COLUMNS.find(c => c.asc === order || c.desc === order);
   }
 
   let isLoading = $state<boolean>(true);
@@ -310,12 +316,13 @@
   // True while the manage view is loading its review stats.
   let manageLoading = $derived(viewMode === 'manage' && isLoadingStats);
 
-  // Shared columns hidden in manage view to keep only management-relevant fields.
-  const MANAGE_HIDDEN_FIELDS = new Set(['avg_confidence', 'first_seen']);
-  let sharedColumns = $derived(
-    viewMode === 'manage'
-      ? SORTABLE_COLUMNS.filter(column => !MANAGE_HIDDEN_FIELDS.has(column.field))
-      : SORTABLE_COLUMNS
+  // Columns shown for the current view: the manage view drops the hideInManage
+  // columns (avg confidence, first detection) to make room and adds the manageOnly
+  // management columns; grid/list views show neither set of manage extras.
+  let visibleColumns = $derived(
+    SORTABLE_COLUMNS.filter(column =>
+      viewMode === 'manage' ? !column.hideInManage : !column.manageOnly
+    )
   );
 
   // Manage rows: authoritative species set from review-stats (so fully-rejected mislabels
@@ -354,7 +361,7 @@
   const restoredSortOrder = getStoredValue<SortOrder>(
     SORT_STORAGE_KEY,
     DEFAULT_SORT_ORDER,
-    isListSortOrder
+    isSortOrder
   );
 
   let filters = $state<SpeciesFilters>({
@@ -374,11 +381,7 @@
 
   // Active column + direction for the header indicators, derived from the
   // applied sort (not the pending dropdown selection).
-  let activeColumn = $derived(
-    ALL_SORTABLE_COLUMNS.find(
-      column => column.asc === appliedSortOrder || column.desc === appliedSortOrder
-    )
-  );
+  let activeColumn = $derived(columnForSortOrder(appliedSortOrder));
   let sortField = $derived(activeColumn?.field ?? '');
   let sortDirection: 'asc' | 'desc' = $derived(
     activeColumn?.desc === appliedSortOrder ? 'desc' : 'asc'
@@ -387,7 +390,7 @@
   // Clicking a header: re-clicking the active column toggles direction; a new
   // column starts at its default (ascending for species name, descending else).
   function handleSort(field: string) {
-    const column = ALL_SORTABLE_COLUMNS.find(c => c.field === field);
+    const column = SORTABLE_COLUMNS.find(c => c.field === field);
     if (!column) return;
     const next =
       sortField === field
@@ -400,7 +403,7 @@
     filters.sortOrder = next;
     appliedSortOrder = next;
     // Persist only list/grid orders; manage-only sorts are session-scoped.
-    if (isListSortOrder(next)) {
+    if (!column.manageOnly) {
       setStoredValue<SortOrder>(SORT_STORAGE_KEY, next);
     }
     applyFilters();
@@ -437,7 +440,7 @@
     isLoading = true;
     // Apply Filters (and mount/reset) commit the pending dropdown selection.
     appliedSortOrder = filters.sortOrder;
-    if (isListSortOrder(filters.sortOrder)) {
+    if (!columnForSortOrder(filters.sortOrder)?.manageOnly) {
       setStoredValue<SortOrder>(SORT_STORAGE_KEY, filters.sortOrder);
     }
 
@@ -656,12 +659,8 @@
   // (excluded/included), fall back to the persisted list sort so the table isn't
   // ordered by a now-hidden column and the sort dropdown isn't left blank.
   function setListView(mode: 'grid' | 'list') {
-    if (!isListSortOrder(appliedSortOrder)) {
-      const restored = getStoredValue<SortOrder>(
-        SORT_STORAGE_KEY,
-        DEFAULT_SORT_ORDER,
-        isListSortOrder
-      );
+    if (columnForSortOrder(appliedSortOrder)?.manageOnly) {
+      const restored = getStoredValue<SortOrder>(SORT_STORAGE_KEY, DEFAULT_SORT_ORDER, isSortOrder);
       appliedSortOrder = restored;
       filters.sortOrder = restored;
       applyFilters();
@@ -706,23 +705,26 @@
     }
   }
 
-  // Loads the range-filter geomodel probability for every species at the current
-  // location/week. Failures are non-fatal: the Probability column simply shows "—".
+  // Loads range-filter geomodel probabilities for the configured location/threshold,
+  // reusing the same POST /api/v2/range/species/test path the Active Species settings
+  // page uses (via settingsActions.loadRangeFilterSpecies) — no new backend endpoint.
+  // Species below the configured threshold aren't returned and show "—". Failures are
+  // non-fatal: the Probability column simply shows "—".
   async function fetchRangeScores() {
-    // Geomodel inference is the slowest manage-view call and its output only changes
-    // with location/week, so reuse the scores for the rest of the session.
+    // The geomodel output only changes with location/threshold, so reuse the scores for
+    // the rest of the session.
     if (rangeScores.size > 0) return;
     isLoadingScores = true;
     try {
-      // names=false skips per-species localized common-name resolution server-side: this
-      // view keys purely on scientific name, and resolving names for the full geomodel
-      // label set otherwise pushes the request past the request timeout on slow hosts.
-      const data = await fetchWithCSRF<{
-        species: Array<{ scientificName: string; score?: number }>;
-      }>('/api/v2/range/species/scores?names=false');
+      // loadRangeFilterSpecies reads coordinates + threshold from the settings store, so
+      // make sure settings are loaded (the analytics page may not have fetched them yet).
+      if (!get(settingsStore).dataLoaded) {
+        await settingsActions.loadSettings();
+      }
+      const result = await settingsActions.loadRangeFilterSpecies();
       const next = new Map<string, number>();
-      for (const entry of data.species) {
-        if (typeof entry.score === 'number') {
+      for (const entry of result.species) {
+        if (entry.scientificName && typeof entry.score === 'number') {
           next.set(entry.scientificName, entry.score);
         }
       }
@@ -1195,29 +1197,20 @@
           <table class="table w-full hidden sm:table">
             <thead>
               <tr>
-                {#each sharedColumns as { field, labelKey } (field)}
+                <!-- One loop drives every header. In the manage view the manageOnly
+                     columns (Excluded, Whitelisted, Review Ratio, Probability, Confirmed)
+                     are centered and the header row is pinned. -->
+                {#each visibleColumns as { field, labelKey, manageOnly } (field)}
                   <SortableHeader
                     label={t(labelKey)}
                     {field}
                     activeField={sortField}
                     direction={sortDirection}
                     onSort={handleSort}
-                    className={viewMode === 'manage' ? STICKY_HEADER_CLASS : ''}
+                    className={`${manageOnly ? 'text-center ' : ''}${viewMode === 'manage' ? STICKY_HEADER_CLASS : ''}`}
                   />
                 {/each}
                 {#if viewMode === 'manage'}
-                  <!-- Excluded, Whitelisted, Review Ratio, Probability, Confirmed: each a
-                       dedicated sortable column with a full-text label and sort icon. -->
-                  {#each MANAGE_SORTABLE_COLUMNS as { field, labelKey } (field)}
-                    <SortableHeader
-                      label={t(labelKey)}
-                      {field}
-                      activeField={sortField}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                      className={`text-center ${STICKY_HEADER_CLASS}`}
-                    />
-                  {/each}
                   <th class={STICKY_HEADER_CLASS}>{t('analytics.species.headers.actions')}</th>
                 {/if}
               </tr>
@@ -1321,9 +1314,7 @@
                             value={ratio}
                             max="1"
                           ></progress>
-                          <span class="text-sm whitespace-nowrap"
-                            >{formatPercentage(ratio)}</span
-                          >
+                          <span class="text-sm whitespace-nowrap">{formatPercentage(ratio)}</span>
                         </div>
                       {/if}
                     </td>
