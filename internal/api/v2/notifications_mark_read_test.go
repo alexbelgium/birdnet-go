@@ -14,9 +14,12 @@ import (
 	"github.com/tphakala/birdnet-go/internal/notification"
 )
 
-// setupNotificationTestService initializes a notification service for testing
-// and returns a cleanup function.
-func setupNotificationTestService(t *testing.T) *notification.Service {
+// newNotificationTestController builds a controller wired to an isolated, per-test
+// notification service injected through the controller's DI seam. The service is
+// stopped via t.Cleanup so its cleanupLoop goroutine does not leak (TestMain runs
+// a goleak gate). Because no process-global state is touched, tests using this
+// helper are safe to run with t.Parallel().
+func newNotificationTestController(t *testing.T) (*Controller, *notification.Service) {
 	t.Helper()
 
 	config := &notification.ServiceConfig{
@@ -28,45 +31,50 @@ func setupNotificationTestService(t *testing.T) *notification.Service {
 	}
 
 	service := notification.NewService(config)
-	err := notification.SetServiceForTesting(service)
-	if err != nil {
-		// Service already exists, use it
-		service = notification.GetService()
-		require.NotNil(t, service, "Expected notification service to be available")
-	}
+	t.Cleanup(service.Stop)
 
-	return service
+	controller := &Controller{notificationService: service}
+	controller.Settings.Store(&conf.Settings{})
+
+	return controller, service
 }
 
-func TestMarkNotificationRead_NotFound(t *testing.T) {
-	service := setupNotificationTestService(t)
-	require.NotNil(t, service)
+// runMarkNotificationNotFoundTest exercises a mark-state handler against a
+// missing notification ID and asserts the idempotent 200 response with the
+// handler's confirmation message. Shared by the read and acknowledge NotFound
+// cases, which are identical apart from the path suffix, handler, and message.
+func runMarkNotificationNotFoundTest(t *testing.T, pathSuffix, expectedMessage string, handler func(*Controller, echo.Context) error) {
+	t.Helper()
+
+	controller, _ := newNotificationTestController(t)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPut, "/api/v2/notifications/non-existent-id/read", http.NoBody)
+	req := httptest.NewRequest(http.MethodPut, "/api/v2/notifications/non-existent-id/"+pathSuffix, http.NoBody)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("non-existent-id")
 
-	controller := &Controller{
-		Settings: &conf.Settings{},
-	}
-
-	err := controller.MarkNotificationRead(ctx)
+	err := handler(controller, ctx)
 	require.NoError(t, err, "handler should return nil")
 
-	assert.Equal(t, http.StatusOK, rec.Code, "mark-as-read is idempotent: missing notification returns 200")
+	assert.Equal(t, http.StatusOK, rec.Code, "missing notification returns 200 (idempotent)")
 
 	var body map[string]any
 	err = json.Unmarshal(rec.Body.Bytes(), &body)
 	require.NoError(t, err)
-	assert.Contains(t, body["message"], "Notification marked as read")
+	assert.Contains(t, body["message"], expectedMessage)
+}
+
+func TestMarkNotificationRead_NotFound(t *testing.T) {
+	t.Parallel()
+	runMarkNotificationNotFoundTest(t, "read", "Notification marked as read",
+		(*Controller).MarkNotificationRead)
 }
 
 func TestMarkNotificationRead_EmptyID(t *testing.T) {
-	service := setupNotificationTestService(t)
-	require.NotNil(t, service)
+	t.Parallel()
+	controller, _ := newNotificationTestController(t)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPut, "/api/v2/notifications//read", http.NoBody)
@@ -75,10 +83,6 @@ func TestMarkNotificationRead_EmptyID(t *testing.T) {
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("")
 
-	controller := &Controller{
-		Settings: &conf.Settings{},
-	}
-
 	err := controller.MarkNotificationRead(ctx)
 	require.NoError(t, err)
 
@@ -86,8 +90,8 @@ func TestMarkNotificationRead_EmptyID(t *testing.T) {
 }
 
 func TestMarkNotificationRead_Success(t *testing.T) {
-	service := setupNotificationTestService(t)
-	require.NotNil(t, service)
+	t.Parallel()
+	controller, service := newNotificationTestController(t)
 
 	// Create a notification first
 	notif := notification.NewNotification(notification.TypeInfo, notification.PriorityMedium, "Test", "Test message")
@@ -101,10 +105,6 @@ func TestMarkNotificationRead_Success(t *testing.T) {
 	ctx.SetParamNames("id")
 	ctx.SetParamValues(notif.ID)
 
-	controller := &Controller{
-		Settings: &conf.Settings{},
-	}
-
 	err = controller.MarkNotificationRead(ctx)
 	require.NoError(t, err)
 
@@ -112,27 +112,7 @@ func TestMarkNotificationRead_Success(t *testing.T) {
 }
 
 func TestMarkNotificationAcknowledged_NotFound(t *testing.T) {
-	service := setupNotificationTestService(t)
-	require.NotNil(t, service)
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPut, "/api/v2/notifications/non-existent-id/acknowledge", http.NoBody)
-	rec := httptest.NewRecorder()
-	ctx := e.NewContext(req, rec)
-	ctx.SetParamNames("id")
-	ctx.SetParamValues("non-existent-id")
-
-	controller := &Controller{
-		Settings: &conf.Settings{},
-	}
-
-	err := controller.MarkNotificationAcknowledged(ctx)
-	require.NoError(t, err, "handler should return nil")
-
-	assert.Equal(t, http.StatusOK, rec.Code, "mark-as-acknowledged is idempotent: missing notification returns 200")
-
-	var body map[string]any
-	err = json.Unmarshal(rec.Body.Bytes(), &body)
-	require.NoError(t, err)
-	assert.Contains(t, body["message"], "Notification marked as acknowledged")
+	t.Parallel()
+	runMarkNotificationNotFoundTest(t, "acknowledge", "Notification marked as acknowledged",
+		(*Controller).MarkNotificationAcknowledged)
 }

@@ -486,7 +486,8 @@
       "confidenceMax": "Maximální procento spolehlivosti",
       "verifiedStatus": "Stav ověření",
       "lockedStatus": "Stav uzamčení",
-      "timeOfDay": "Denní doba"
+      "timeOfDay": "Denní doba",
+      "source": "Zdroj zvuku"
     },
     "advancedFilters": "Pokročilé filtry",
     "showAdvancedFilters": "Zobrazit pokročilé filtry",
@@ -508,6 +509,9 @@
       "sunrise": "Východ slunce +/- 30 min",
       "sunset": "Západ slunce +/- 30 min"
     },
+    "sourceOptions": {
+      "any": "Všechny zdroje"
+    },
     "sortOptions": {
       "dateDesc": "Datum (od nejnovějších)",
       "dateAsc": "Datum (od nejstarších)",
@@ -519,6 +523,7 @@
       "timeOfDay": "Denní doba",
       "species": "Druh",
       "confidence": "Spolehlivost",
+      "source": "Zdroj",
       "status": "Stav",
       "actions": "Akce"
     },
@@ -592,6 +597,18 @@
       "empty": "Vše je v klidu — momentálně nejsou detekováni žádní ptáci"
     },
     "rejected": "Zamítnuto",
+    "newSpeciesHighlights": {
+      "title": "Nové a vracející se druhy",
+      "subtitle": "První pozorování a nedávné návraty",
+      "trackingDisabled": "Chcete-li tuto funkci používat, aktivujte „Povolit sledování druhů“.",
+      "categoryLifetime": "Nový druh",
+      "categoryYear": "Nový letos",
+      "categorySeason": "Nový tuto sezónu",
+      "categorySeasonNamed": "Nový toto {season}",
+      "maxConfidenceShort": "Max {confidence} %",
+      "detections": "{count, plural, one {# detekce} few {# detekce} other {# detekcí}}",
+      "lastSeen": "Naposledy: {days, plural, =0 {dnes} one {před # dnem} few {před # dny} other {před # dny}}"
+    },
     "dailySummary": {
       "title": "Denní aktivita",
       "subtitle": "Detekce druhů podle hodin",
@@ -758,6 +775,7 @@
     "elements": {
       "banner": "Banner Dashboardu",
       "dailySummary": "Denní souhrn",
+      "newSpeciesHighlights": "Nové druhy – přehled",
       "currentlyHearing": "Právě slyšíme",
       "detectionsGrid": "Nedávné detekce",
       "liveSpectrogram": "Živý spektrogram",
@@ -1606,6 +1624,7 @@
         "dateTime": "Datum a čas",
         "species": "Druh",
         "confidence": "Spolehlivost",
+        "source": "Zdroj",
         "timeOfDay": "Denní doba"
       },
       "noRecentDetections": "Nebyly nalezeny žádné nedávné detekce",
@@ -2186,12 +2205,15 @@
         },
         "githubRequired": {
           "title": "Vyžadováno: GitHub issue pro nahrání podpory",
-          "description": "<strong>Nahrání podpory vyžaduje číslo GitHub issue.</strong> Prosím <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"underline font-semibold\">vytvořte GitHub issue</a> popisující váš problém <strong>před</strong> vygenerováním zprávy podpory. Bez propojené issue nemohou vývojáři s vašimi daty podpory pracovat."
+          "description": "<strong>Nahrání podpory vyžaduje číslo GitHub issue.</strong> Prosím {createIssueLink} popisující váš problém <strong>před</strong> vygenerováním zprávy podpory. Bez propojené issue nemohou vývojáři s vašimi daty podpory pracovat.",
+          "createGithubIssue": "vytvořte GitHub issue"
         },
         "githubIssue": {
           "label": "Číslo GitHub issue",
           "placeholder": "např. 123 nebo #123",
-          "helper": "<a href=\"https://github.com/tphakala/birdnet-go/issues\" target=\"_blank\" class=\"link link-primary\">Zobrazit existující issue</a> nebo nejprve <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"link link-primary\">vytvořte novou issue</a>"
+          "helper": "{viewIssuesLink} nebo nejprve {createIssueLink}",
+          "viewExistingIssues": "Zobrazit existující issue",
+          "createNewIssue": "vytvořte novou issue"
         },
         "whatsIncluded": {
           "title": "Co je ve zprávě zahrnuto:",
@@ -3313,10 +3335,11 @@
       "hostLabel": "Adresa hostitele (Host)",
       "hostHelp": "Veřejný název hostitele nebo IP adresa vašeho serveru (např. birdnet.example.com). Vyžadováno pro přihlášení přes OAuth a TLS certifikáty. Pokud používáte reverzní proxy, použijte místo toho Base URL.",
       "allowSubnetBypassLabel": "Povolit přístup z podsítě k obejití autentizace",
+      "subnetBypassLocalNote": "Když je tato možnost zapnutá, klientům ve stejné místní síti jako tento server se automaticky důvěřuje a přihlášení přeskočí. Pole níže použijte pouze k rozšíření této důvěry na další sítě (například samostatnou VLAN nebo směrovanou podsíť).",
       "allowedSubnetsLabel": "Povolené podsítě",
-      "allowedSubnetsHelp": "Povolené síťové rozsahy k obejití přihlášení (notace CIDR, seznam oddělený čárkami)",
+      "allowedSubnetsHelp": "Další síťové rozsahy, které mohou obejít přihlášení, nad rámec vlastní místní sítě tohoto serveru. Notace CIDR, oddělené čárkami.",
       "securityWarningTitle": "Bezpečnostní upozornění:",
-      "subnetWarningText": "Zařízení z těchto podsítí budou mít neomezený přístup. Zahrňte pouze důvěryhodné interní sítě.",
+      "subnetWarningText": "Místní síť tohoto serveru a všechny zde uvedené podsítě získají plný přístup bez přihlášení. Zahrňte pouze sítě, kterým plně důvěřujete.",
       "httpsSettingsTitle": "Nastavení HTTPS",
       "httpsSettingsDescription": "Zabezpečený přístup pomocí šifrování SSL/TLS",
       "basicAuthTitle": "Základní autentizace (Basic Auth)",
@@ -4559,7 +4582,8 @@
         "invalidUrl": "Neplatný formát URL. Zadejte úplnou URL, např. rtsp://host:port/cesta",
         "unsupportedScheme": "Nepodporované schéma URL \"{scheme}\". Použijte rtsp, rtsps, http, https, rtmp nebo udp",
         "blockedDestination": "Tento cíl je z bezpečnostních důvodů blokován",
-        "connectionFailed": "Nelze se připojit ke streamu. Zkontrolujte, zda je URL správná a stream je dostupný"
+        "connectionFailed": "Nelze se připojit ke streamu. Zkontrolujte, zda je URL správná a stream je dostupný",
+        "noAudioTrack": "Stream neobsahuje žádnou zvukovou stopu. Lze použít pouze streamy obsahující zvuk"
       }
     },
     "debug": {

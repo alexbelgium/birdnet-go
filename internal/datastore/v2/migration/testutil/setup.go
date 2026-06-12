@@ -673,10 +673,7 @@ func (s *testLegacyInterface) GetAllNotes() ([]datastore.Note, error)           
 func (s *testLegacyInterface) GetTopBirdsData(_ string, _ float64, _ int) ([]datastore.Note, error) {
 	return nil, nil
 }
-func (s *testLegacyInterface) GetHourlyOccurrences(_, _ string, _ float64) ([24]int, error) {
-	return [24]int{}, nil
-}
-func (s *testLegacyInterface) GetBatchHourlyOccurrences(_ string, _ []string, _ float64) (map[string][24]int, error) {
+func (s *testLegacyInterface) GetBatchHourlyOccurrences(_ context.Context, _ string, _ []string, _ float64) (map[string][24]int, error) {
 	return make(map[string][24]int), nil
 }
 func (s *testLegacyInterface) SpeciesDetections(_, _, _ string, _ int, _ bool, _, _ int) ([]datastore.Note, error) {
@@ -794,8 +791,9 @@ func (s *testLegacyInterface) GetNotificationHistory(_, _ string) (*datastore.No
 func (s *testLegacyInterface) DeleteExpiredNotificationHistory(_ time.Time) (int64, error) {
 	return 0, nil
 }
-func (s *testLegacyInterface) SchemaVersion() string     { return datastore.SchemaVersionLegacy }
-func (s *testLegacyInterface) UpdateNameMaps(_ []string) {}
+func (s *testLegacyInterface) SchemaVersion() string                           { return datastore.SchemaVersionLegacy }
+func (s *testLegacyInterface) UpdateNameMaps(_ []string)                       {}
+func (s *testLegacyInterface) SetNameResolver(_ datastore.SpeciesNameResolver) {}
 func (s *testLegacyInterface) GetDatabaseStats(_ context.Context) (*datastore.DatabaseStats, error) {
 	return nil, nil //nolint:nilnil // stub
 }

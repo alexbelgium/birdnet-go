@@ -486,7 +486,8 @@
       "confidenceMax": "Maksymalny procent pewności",
       "verifiedStatus": "Status Weryfikacji",
       "lockedStatus": "Status Blokady",
-      "timeOfDay": "Pora Dnia"
+      "timeOfDay": "Pora Dnia",
+      "source": "Źródło dźwięku"
     },
     "advancedFilters": "Zaawansowane Filtry",
     "showAdvancedFilters": "Pokaż Zaawansowane Filtry",
@@ -508,6 +509,9 @@
       "sunrise": "Wschód Słońca +/- 30min",
       "sunset": "Zachód Słońca +/- 30min"
     },
+    "sourceOptions": {
+      "any": "Wszystkie źródła"
+    },
     "sortOptions": {
       "dateDesc": "Data (Najnowsze Najpierw)",
       "dateAsc": "Data (Najstarsze Najpierw)",
@@ -519,6 +523,7 @@
       "timeOfDay": "Pora Dnia",
       "species": "Gatunek",
       "confidence": "Pewność",
+      "source": "Źródło",
       "status": "Status",
       "actions": "Akcje"
     },
@@ -592,6 +597,18 @@
       "empty": "Cisza — nie wykryto żadnych ptaków w tej chwili"
     },
     "rejected": "Odrzucone",
+    "newSpeciesHighlights": {
+      "title": "Nowe i powracające gatunki",
+      "subtitle": "Pierwsze obserwacje i niedawne powroty",
+      "trackingDisabled": "Aby korzystać z tej funkcji, włącz „Włącz śledzenie gatunków”.",
+      "categoryLifetime": "Nowy gatunek",
+      "categoryYear": "Nowy w tym roku",
+      "categorySeason": "Nowy w tym sezonie",
+      "categorySeasonNamed": "Nowy w tym {season}",
+      "maxConfidenceShort": "Maks {confidence}%",
+      "detections": "{count, plural, one {# wykrycie} few {# wykrycia} many {# wykryć} other {# wykrycia}}",
+      "lastSeen": "Ostatnio: {days, plural, =0 {dzisiaj} one {# dzień temu} few {# dni temu} many {# dni temu} other {# dnia temu}}"
+    },
     "dailySummary": {
       "title": "Dzienna Aktywność",
       "subtitle": "Wykrycia według godziny",
@@ -758,6 +775,7 @@
     "elements": {
       "banner": "Baner pulpitu",
       "dailySummary": "Podsumowanie dnia",
+      "newSpeciesHighlights": "Nowe gatunki – przegląd",
       "currentlyHearing": "Aktualnie słyszane",
       "detectionsGrid": "Ostatnie detekcje",
       "liveSpectrogram": "Spektrogram na żywo",
@@ -1606,6 +1624,7 @@
         "dateTime": "Data i Czas",
         "species": "Gatunek",
         "confidence": "Pewność",
+        "source": "Źródło",
         "timeOfDay": "Pora Dnia"
       },
       "noRecentDetections": "Nie znaleziono ostatnich detekcji",
@@ -2186,12 +2205,15 @@
         },
         "githubRequired": {
           "title": "Wymagane: Problem GitHub do Przesyłania Wsparcia",
-          "description": "<strong>Przesyłanie wsparcia wymaga numeru problemu GitHub.</strong> Proszę <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"underline font-semibold\">utwórz problem GitHub</a> opisujący twój problem <strong>przed</strong> wygenerowaniem raportu wsparcia. Bez powiązanego problemu programiści nie mogą działać na twoich danych wsparcia."
+          "description": "<strong>Przesyłanie wsparcia wymaga numeru problemu GitHub.</strong> Proszę {createIssueLink} opisujący twój problem <strong>przed</strong> wygenerowaniem raportu wsparcia. Bez powiązanego problemu programiści nie mogą działać na twoich danych wsparcia.",
+          "createGithubIssue": "utwórz problem GitHub"
         },
         "githubIssue": {
           "label": "Numer Problemu GitHub",
           "placeholder": "np. 123 lub #123",
-          "helper": "<a href=\"https://github.com/tphakala/birdnet-go/issues\" target=\"_blank\" class=\"link link-primary\">Wyświetl istniejące problemy</a> lub <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"link link-primary\">utwórz nowy problem</a> najpierw"
+          "helper": "{viewIssuesLink} lub {createIssueLink} najpierw",
+          "viewExistingIssues": "Wyświetl istniejące problemy",
+          "createNewIssue": "utwórz nowy problem"
         },
         "whatsIncluded": {
           "title": "Co jest zawarte w raporcie:",
@@ -3313,10 +3335,11 @@
       "hostLabel": "Adres Hosta",
       "hostHelp": "Publiczna nazwa hosta lub adres IP serwera (np. birdnet.example.com). Wymagane do logowania OAuth i certyfikatów TLS. Jeśli korzystasz z odwrotnego proxy, użyj zamiast tego Base URL.",
       "allowSubnetBypassLabel": "Zezwól na Dostęp z Podsieci Omijając Uwierzytelnianie",
+      "subnetBypassLocalNote": "Po włączeniu klienci w tej samej sieci lokalnej co ten serwer są automatycznie zaufani i pomijają logowanie. Pole poniżej służy wyłącznie do rozszerzenia tego zaufania na dodatkowe sieci (na przykład osobną sieć VLAN lub trasowaną podsieć).",
       "allowedSubnetsLabel": "Dozwolone Podsieci",
-      "allowedSubnetsHelp": "Dozwolone zakresy sieci do ominięcia logowania (notacja CIDR, lista oddzielona przecinkami)",
+      "allowedSubnetsHelp": "Dodatkowe zakresy sieci, które mogą pominąć logowanie, oprócz własnej sieci lokalnej tego serwera. Notacja CIDR, oddzielone przecinkami.",
       "securityWarningTitle": "Ostrzeżenie Bezpieczeństwa:",
-      "subnetWarningText": "Urządzenia z tych podsieci będą miały nieograniczony dostęp. Uwzględnij tylko zaufane sieci wewnętrzne.",
+      "subnetWarningText": "Sieć lokalna tego serwera oraz wszystkie wymienione tutaj podsieci uzyskują pełny dostęp bez logowania. Uwzględniaj tylko sieci, którym w pełni ufasz.",
       "httpsSettingsTitle": "Ustawienia HTTPS",
       "httpsSettingsDescription": "Bezpieczny dostęp z szyfrowaniem SSL/TLS",
       "basicAuthTitle": "Podstawowe Uwierzytelnianie",
@@ -4559,7 +4582,8 @@
         "invalidUrl": "Nieprawidłowy format URL. Wprowadź pełny URL, np. rtsp://host:port/ścieżka",
         "unsupportedScheme": "Nieobsługiwany schemat URL \"{scheme}\". Użyj rtsp, rtsps, http, https, rtmp lub udp",
         "blockedDestination": "Ten cel jest zablokowany ze względów bezpieczeństwa",
-        "connectionFailed": "Nie udało się połączyć ze strumieniem. Sprawdź, czy URL jest poprawny i strumień jest dostępny"
+        "connectionFailed": "Nie udało się połączyć ze strumieniem. Sprawdź, czy URL jest poprawny i strumień jest dostępny",
+        "noAudioTrack": "Strumień nie zawiera ścieżki dźwiękowej. Można używać tylko strumieni zawierających dźwięk"
       }
     },
     "debug": {

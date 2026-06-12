@@ -486,7 +486,8 @@
       "confidenceMax": "Porcentaje máximo de confianza",
       "verifiedStatus": "Estado verificado",
       "lockedStatus": "Estado bloqueado",
-      "timeOfDay": "Hora del día"
+      "timeOfDay": "Hora del día",
+      "source": "Fuente de audio"
     },
     "advancedFilters": "Filtros avanzados",
     "showAdvancedFilters": "Mostrar filtros avanzados",
@@ -508,6 +509,9 @@
       "sunrise": "Amanecer +/- 30min",
       "sunset": "Atardecer +/- 30min"
     },
+    "sourceOptions": {
+      "any": "Todas las fuentes"
+    },
     "sortOptions": {
       "dateDesc": "Fecha (Más reciente primero)",
       "dateAsc": "Fecha (Más antiguo primero)",
@@ -519,6 +523,7 @@
       "timeOfDay": "Hora del día",
       "species": "Especie",
       "confidence": "Confianza",
+      "source": "Fuente",
       "status": "Estado",
       "actions": "Acciones"
     },
@@ -592,6 +597,18 @@
       "empty": "Todo tranquilo — no se detectan aves en este momento"
     },
     "rejected": "Rechazado",
+    "newSpeciesHighlights": {
+      "title": "Especies nuevas y de regreso",
+      "subtitle": "Primeras observaciones y regresos recientes",
+      "trackingDisabled": "Active \"Habilitar seguimiento de especies\" para usar esta función.",
+      "categoryLifetime": "Especie nueva",
+      "categoryYear": "Nueva este año",
+      "categorySeason": "Nueva esta temporada",
+      "categorySeasonNamed": "Nueva esta {season}",
+      "maxConfidenceShort": "Máx {confidence} %",
+      "detections": "{count, plural, one {# detección} other {# detecciones}}",
+      "lastSeen": "Último: {days, plural, =0 {hoy} one {hace # día} other {hace # días}}"
+    },
     "dailySummary": {
       "title": "Actividad Diaria",
       "subtitle": "Detecciones por hora",
@@ -758,6 +775,7 @@
     "elements": {
       "banner": "Banner del panel",
       "dailySummary": "Resumen diario",
+      "newSpeciesHighlights": "Nuevas especies destacadas",
       "currentlyHearing": "Escuchando actualmente",
       "detectionsGrid": "Detecciones recientes",
       "liveSpectrogram": "Espectrograma en vivo",
@@ -1606,6 +1624,7 @@
         "dateTime": "Fecha y hora",
         "species": "Especie",
         "confidence": "Confianza",
+        "source": "Fuente",
         "timeOfDay": "Hora del día"
       },
       "noRecentDetections": "No se encontraron detecciones recientes",
@@ -2186,12 +2205,15 @@
         },
         "githubRequired": {
           "title": "Requerido: Issue de GitHub para cargas de soporte",
-          "description": "<strong>Las cargas de soporte requieren un número de issue de GitHub.</strong> Por favor <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"underline font-semibold\">crea un issue de GitHub</a> describiendo tu problema <strong>antes</strong> de generar un informe de soporte. Sin un issue vinculado, los desarrolladores no pueden actuar sobre tus datos de soporte."
+          "description": "<strong>Las cargas de soporte requieren un número de issue de GitHub.</strong> Por favor {createIssueLink} describiendo tu problema <strong>antes</strong> de generar un informe de soporte. Sin un issue vinculado, los desarrolladores no pueden actuar sobre tus datos de soporte.",
+          "createGithubIssue": "crea un issue de GitHub"
         },
         "githubIssue": {
           "label": "Número de issue de GitHub",
           "placeholder": "p.ej., 123 o #123",
-          "helper": "<a href=\"https://github.com/tphakala/birdnet-go/issues\" target=\"_blank\" class=\"link link-primary\">Ver issues existentes</a> o <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"link link-primary\">crear un nuevo issue</a> primero"
+          "helper": "{viewIssuesLink} o {createIssueLink} primero",
+          "viewExistingIssues": "Ver issues existentes",
+          "createNewIssue": "crear un nuevo issue"
         },
         "whatsIncluded": {
           "title": "Qué incluye el informe:",
@@ -3313,10 +3335,11 @@
       "hostLabel": "Dirección del host",
       "hostHelp": "El nombre de host público o la dirección IP de su servidor (p. ej., birdnet.example.com). Necesario para el inicio de sesión OAuth y los certificados TLS. Si está detrás de un proxy inverso, use la URL base en su lugar.",
       "allowSubnetBypassLabel": "Permitir acceso desde subred para omitir autenticación",
+      "subnetBypassLocalNote": "Cuando está activado, los clientes en la misma red local que este servidor se consideran de confianza automáticamente y omiten el inicio de sesión. Usa el campo de abajo solo para extender esa confianza a redes adicionales (por ejemplo, una VLAN independiente o una subred enrutada).",
       "allowedSubnetsLabel": "Subredes permitidas",
-      "allowedSubnetsHelp": "Rangos de red permitidos para omitir el inicio de sesión (notación CIDR, lista separada por comas)",
+      "allowedSubnetsHelp": "Rangos de red adicionales que pueden omitir el inicio de sesión, además de la propia red local de este servidor. Notación CIDR, separados por comas.",
       "securityWarningTitle": "Advertencia de seguridad:",
-      "subnetWarningText": "Los dispositivos de estas subredes tendrán acceso sin restricciones. Solo incluye redes internas de confianza.",
+      "subnetWarningText": "La red local de este servidor y todas las subredes indicadas aquí obtienen acceso completo sin iniciar sesión. Incluye solo redes en las que confíes plenamente.",
       "httpsSettingsTitle": "Configuración HTTPS",
       "httpsSettingsDescription": "Acceso seguro con cifrado SSL/TLS",
       "basicAuthTitle": "Autenticación básica",
@@ -4559,7 +4582,8 @@
         "invalidUrl": "Formato de URL no válido. Introduzca una URL completa como rtsp://host:puerto/ruta",
         "unsupportedScheme": "Esquema de URL no compatible \"{scheme}\". Use rtsp, rtsps, http, https, rtmp o udp",
         "blockedDestination": "Este destino está bloqueado por razones de seguridad",
-        "connectionFailed": "No se pudo conectar al stream. Compruebe que la URL es correcta y que el stream es accesible"
+        "connectionFailed": "No se pudo conectar al stream. Compruebe que la URL es correcta y que el stream es accesible",
+        "noAudioTrack": "El stream no tiene pista de audio. Solo se pueden usar streams que contengan audio"
       }
     },
     "debug": {

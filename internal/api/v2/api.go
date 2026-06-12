@@ -35,6 +35,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/health"
 	"github.com/tphakala/birdnet-go/internal/imageprovider"
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"github.com/tphakala/birdnet-go/internal/notification"
 	"github.com/tphakala/birdnet-go/internal/observability"
 	"github.com/tphakala/birdnet-go/internal/securefs"
 	"github.com/tphakala/birdnet-go/internal/spectrogram"
@@ -52,19 +53,19 @@ const apiV2Prefix = "/api/v2"
 
 // Controller manages the API routes and handlers
 type Controller struct {
-	Echo     *echo.Echo
-	Group    *echo.Group
-	DS       datastore.Interface           // Deprecated: Use Repo for new detection operations
-	Repo     datastore.DetectionRepository // New: Preferred for detection CRUD operations
-	Settings *conf.Settings
-	// settingsAtomic mirrors Settings as a lock-free per-controller snapshot.
-	// The settings update handlers publish it alongside the Settings field on
-	// every save (under settingsMutex), so reads that must stay per-controller
-	// but cannot take the mutex (newErrorResponse is reached from HandleError
-	// while UpdateSettings holds the write lock, so an RLock would deadlock) read
-	// it via controllerSettings() instead of the bare Settings field, which would
-	// race the reassignment. See controllerSettings.
-	settingsAtomic    atomic.Pointer[conf.Settings]
+	Echo  *echo.Echo
+	Group *echo.Group
+	DS    datastore.Interface           // Deprecated: Use Repo for new detection operations
+	Repo  datastore.DetectionRepository // New: Preferred for detection CRUD operations
+	// Settings holds this controller's settings snapshot as a lock-free atomic
+	// pointer (copy-on-write). Update handlers publish a fresh *conf.Settings via
+	// Settings.Store under settingsMutex; every reader Loads it, directly or
+	// through the currentSettings()/controllerSettings() accessors. Storing it
+	// atomically (rather than as a plain *conf.Settings field) is what lets
+	// newErrorResponse read it from HandleError while UpdateSettings holds
+	// settingsMutex.Lock without deadlocking on a non-reentrant RLock. The sibling
+	// engine and audioWatchdog fields use the same atomic-pointer pattern.
+	Settings          atomic.Pointer[conf.Settings]
 	BirdImageCache    *imageprovider.BirdImageCache
 	SunCalc           *suncalc.SunCalc
 	Processor         *processor.Processor
@@ -79,17 +80,25 @@ type Controller struct {
 	// Thread-safe: should be set before controller initialization.
 	DisableSaveSettings  bool         // disables disk persistence of settings
 	isGlobalOwner        bool         // true when this controller owns the global settings singleton
-	settingsMutex        sync.RWMutex // Mutex for settings operations
+	settingsMutex        sync.RWMutex // Serializes the read-modify-write in settings update handlers; reads are lock-free via the atomic Settings pointer
 	detectionCache       *cache.Cache // Cache for detection queries
 	startTime            *time.Time
 	SFS                  *securefs.SecureFS     // Add SecureFS instance
 	apiLogger            logger.Logger          // Structured logger for API operations
+	securityLogger       logger.Logger          // Logger scoped to the "security" module for authentication events
 	metrics              *observability.Metrics // Shared metrics instance
 	spectrogramGenerator *spectrogram.Generator // Shared spectrogram generator (initialized after SFS)
 
 	// Auth related fields (injected from server via functional options)
 	authService    auth.Service        // Authentication service (injected from server)
 	authMiddleware echo.MiddlewareFunc // Authentication middleware function (injected from server)
+
+	// notificationService is the notification service this controller uses. It is
+	// nil in production, where getNotificationService() falls back to the
+	// process-global singleton (notification.GetService()). Tests inject an
+	// isolated per-test instance via WithNotificationService so each test gets its
+	// own config and store without touching the global singleton.
+	notificationService *notification.Service
 
 	// Metrics history store for sparkline data
 	metricsStore observability.MetricsStore
@@ -129,6 +138,9 @@ type Controller struct {
 	// Insights fields (initialized lazily in initInsightsRoutes)
 	insightsRepo repository.InsightsRepository
 	nameMaps     atomic.Value // stores *nameMaps; see internal/api/v2/insights.go
+	// nameResolver is the authoritative localized name source shared with the
+	// classifier orchestrator. Overrides label-derived names in the cached maps.
+	nameResolver atomic.Pointer[datastore.SpeciesNameResolver]
 
 	// Model gallery fields
 	ModelManager *classifier.ModelManager
@@ -136,6 +148,11 @@ type Controller struct {
 	// Audio processing fields
 	processingCache     *processingCache
 	processingSemaphore chan struct{}
+
+	// probeStreamInfo probes a live stream's audio characteristics for the
+	// stream-test endpoint. Nil in production, where TestStream falls back to
+	// ffmpeg.ProbeStreamInfo; tests set it to stub probing without ffprobe.
+	probeStreamInfo probeStreamInfoFunc
 
 	// Legacy cleanup state tracker
 	cleanupStatus *CleanupStatus
@@ -175,54 +192,34 @@ type ShutdownRequester interface {
 // take effect in API responses without restarting the service.
 //
 // It resolves the lock-free global atomic snapshot first and only falls back
-// to c.Settings when no snapshot has been published (standalone unit-test
-// controllers). The fallback is read lazily, so in production (where a
-// snapshot is always published) c.Settings is never dereferenced here. That
-// keeps the accessor race-free against the c.Settings reassignment the
-// settings update handlers perform under c.settingsMutex: the equivalent
-// conf.CurrentOrFallback(c.Settings) would evaluate c.Settings eagerly and
-// race that write.
+// to this controller's own snapshot when no global snapshot has been published
+// (standalone unit-test controllers). Both reads are lock-free (the per-controller
+// fallback is an atomic Load), so the accessor is race-free against the
+// Settings.Store the update handlers perform under c.settingsMutex.
 func (c *Controller) currentSettings() *conf.Settings {
 	if latest := conf.GetSettings(); latest != nil {
 		return latest
 	}
-	return c.Settings
+	return c.Settings.Load()
 }
 
 // controllerSettings returns this controller's own settings snapshot, read
-// lock-free from the settingsAtomic mirror that the settings update handlers
-// publish alongside c.Settings on every save. Unlike currentSettings(), it
-// deliberately does NOT consult the process-global atomic snapshot: use it for
-// reads whose result is asserted per-controller (e.g. debug-gated response
-// verbosity), where the shared global snapshot would couple otherwise-independent
-// parallel tests.
+// lock-free from the atomic Settings pointer that the update handlers publish on
+// every save. Unlike currentSettings(), it deliberately does NOT consult the
+// process-global atomic snapshot: use it for reads whose result is asserted
+// per-controller (e.g. debug-gated response verbosity), where the shared global
+// snapshot would couple otherwise-independent parallel tests.
 //
-// Reading the atomic mirror (rather than the bare c.Settings field under
+// Loading the atomic pointer (rather than reading a plain field under
 // settingsMutex.RLock) is what makes this safe to call from newErrorResponse,
 // which is reached from HandleError while UpdateSettings already holds
-// settingsMutex.Lock: a non-reentrant RLock there would deadlock. The mirror is
-// published under that same write lock, so the read sees a consistent snapshot.
-//
-// The c.Settings fallback only runs for standalone test controllers that never
-// published the mirror; production always publishes it at construction, so the
-// fallback never races a concurrent write. The returned snapshot is immutable
-// (copy-on-write), so callers may dereference its fields freely.
+// settingsMutex.Lock: a non-reentrant RLock there would deadlock. The snapshot is
+// published under that same write lock, so the read sees a consistent value. The
+// returned snapshot is immutable (copy-on-write), so callers may dereference its
+// fields freely. Returns nil only on a controller that never stored settings
+// (standalone tests); callers that may hit that path nil-check or fall back.
 func (c *Controller) controllerSettings() *conf.Settings {
-	if s := c.settingsAtomic.Load(); s != nil {
-		return s
-	}
-	return c.Settings
-}
-
-// publishSettings repoints this controller's settings snapshot to s, updating
-// both the c.Settings field and the lock-free settingsAtomic mirror together so
-// per-controller readers (controllerSettings) never observe a mirror that has
-// drifted from the field. It is the single write path for the snapshot: routing
-// every save and rollback through it keeps the dual-write invariant in one place.
-// Callers must hold c.settingsMutex (the field write is not itself synchronized).
-func (c *Controller) publishSettings(s *conf.Settings) {
-	c.Settings = s
-	c.settingsAtomic.Store(s)
+	return c.Settings.Load()
 }
 
 // Option is a functional option for configuring the Controller.
@@ -239,6 +236,16 @@ func WithAuthMiddleware(mw echo.MiddlewareFunc) Option {
 func WithAuthService(svc auth.Service) Option {
 	return func(c *Controller) {
 		c.authService = svc
+	}
+}
+
+// WithNotificationService injects the notification service the controller should
+// use, overriding the process-global singleton. Production leaves this unset and
+// falls back to notification.GetService(); tests use it to give each test an
+// isolated service instance.
+func WithNotificationService(svc *notification.Service) Option {
+	return func(c *Controller) {
+		c.notificationService = svc
 	}
 }
 
@@ -300,46 +307,6 @@ func parseIPFromHeader(headerValue string) string {
 	return ""
 }
 
-// parseFirstIPFromXFF extracts the first valid IP from X-Forwarded-For header.
-func parseFirstIPFromXFF(xff string) string {
-	if xff == "" {
-		return ""
-	}
-	parts := strings.SplitSeq(xff, ",")
-	for part := range parts {
-		if ip := parseIPFromHeader(strings.TrimSpace(part)); ip != "" {
-			return ip
-		}
-	}
-	return ""
-}
-
-// Custom IP Extractor prioritizing CF-Connecting-IP
-func ipExtractorFromCloudflareHeader(req *http.Request) string {
-	// 1. Check CF-Connecting-IP
-	if ip := parseIPFromHeader(req.Header.Get("CF-Connecting-IP")); ip != "" {
-		return ip
-	}
-
-	// 2. Check X-Forwarded-For (taking the first valid IP)
-	if ip := parseFirstIPFromXFF(req.Header.Get(echo.HeaderXForwardedFor)); ip != "" {
-		return ip
-	}
-
-	// 3. Check X-Real-IP
-	if ip := parseIPFromHeader(req.Header.Get(echo.HeaderXRealIP)); ip != "" {
-		return ip
-	}
-
-	// 4. Fallback to Remote Address (might be proxy)
-	remoteAddr, _, _ := net.SplitHostPort(req.RemoteAddr)
-	if ip := parseIPFromHeader(remoteAddr); ip != "" {
-		return ip
-	}
-
-	return remoteAddr
-}
-
 // TunnelDetectionMiddleware inspects headers to determine if the request is likely proxied
 // and sets context values for logging.
 func (c *Controller) TunnelDetectionMiddleware() echo.MiddlewareFunc {
@@ -349,14 +316,21 @@ func (c *Controller) TunnelDetectionMiddleware() echo.MiddlewareFunc {
 			tunneled := false
 			provider := tunnelProviderUnknown
 
-			// Check Cloudflare header first
-			if req.Header.Get("CF-Connecting-IP") != "" {
-				tunneled = true
-				provider = "cloudflare"
-			} else if req.Header.Get(echo.HeaderXForwardedFor) != "" || req.Header.Get(echo.HeaderXRealIP) != "" {
-				// If other proxy headers exist, mark as tunneled but provider is generic
-				tunneled = true
-				provider = "generic"
+			// Only classify the request as tunneled when the IP extractor actually
+			// honored a forwarded header, i.e. the resolved client IP differs from
+			// the immediate connection peer. That happens only for a trusted proxy,
+			// so a directly-connected client cannot spoof a "tunneled" label by
+			// sending forwarded headers from an untrusted address.
+			if peerIP, _ := peerAddrFromRequest(req); peerIP != nil && peerIP.String() != ctx.RealIP() {
+				switch {
+				case req.Header.Get(headerCFConnectingIP) != "":
+					tunneled = true
+					provider = "cloudflare"
+				case req.Header.Get(echo.HeaderXForwardedFor) != "" || req.Header.Get(echo.HeaderXRealIP) != "":
+					// Other proxy headers present: tunneled, but provider is generic.
+					tunneled = true
+					provider = "generic"
+				}
 			}
 
 			ctx.Set("is_tunneled", tunneled)
@@ -448,10 +422,6 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	controlChan chan string,
 	metrics *observability.Metrics, initializeRoutes bool, opts ...Option) (*Controller, error) {
 
-	// Configure IP extractor for Cloudflare proxy support
-	e.IPExtractor = ipExtractorFromCloudflareHeader
-	GetLogger().Info("Configured custom IP extractor prioritizing CF-Connecting-IP")
-
 	// Validate and resolve media export path
 	mediaPath, err := resolveAndValidateMediaPath(settings.Realtime.Audio.Export.Path)
 	if err != nil {
@@ -477,7 +447,6 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 		Echo:                 e,
 		DS:                   ds,
 		Repo:                 repo, // Bridge to new domain model (nil if datastore disabled)
-		Settings:             settings,
 		isGlobalOwner:        settings == conf.GetSettings(),
 		BirdImageCache:       birdImageCache,
 		SunCalc:              sunCalc,
@@ -490,10 +459,20 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 		spectrogramGenerator: spectrogram.NewGenerator(settings, sfs, getSpectrogramLogger()),
 		detectionRateCache:   datastore.NewDetectionRateCache(detectionRateCacheTTL),
 	}
-	// Publish the per-controller settings mirror so controllerSettings() reads it
-	// lock-free. Kept in sync with the c.Settings field on every save; see the
-	// settingsAtomic field doc and the settings update handlers.
-	c.settingsAtomic.Store(settings)
+	// Publish the initial settings snapshot so controllerSettings() reads it
+	// lock-free. Every save republishes via Settings.Store; see the Settings
+	// field doc and the settings update handlers.
+	c.Settings.Store(settings)
+
+	// Configure the trusted-proxy-gated IP extractor. Forwarded client-IP headers
+	// (CF-Connecting-IP, X-Forwarded-For, X-Real-IP) are honored only when the
+	// connection peer is a trusted proxy (loopback/link-local/private by default,
+	// plus Security.TrustedProxies); otherwise the real peer address is used. It
+	// reads this controller's own settings snapshot per request (published above
+	// and on every save), so it honors the controller's TrustedProxies and
+	// hot-reloads without a restart.
+	e.IPExtractor = newTrustedProxyIPExtractor(c.controllerSettings)
+	GetLogger().Info("Configured trusted-proxy-gated IP extractor (forwarded client IP honored only from trusted proxies)")
 
 	// Propagate the derived FFprobe path from config validation to the
 	// ffmpeg package so executeFFprobe can find it without PATH lookup.
@@ -521,6 +500,11 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 
 	// Initialize structured logger for API requests
 	c.apiLogger = logger.Global().Module("api")
+
+	// Authentication events (form login/logout, OAuth callback) log to the
+	// "security" module so they are co-located with the OAuth and provider-init
+	// logging, where admins look when debugging auth.
+	c.securityLogger = logger.Global().Module("security")
 
 	// Load local taxonomy database for fast species lookups
 	taxonomyDB, err := classifier.LoadTaxonomyDatabase()
@@ -649,7 +633,7 @@ func (c *Controller) LoggingMiddleware() echo.MiddlewareFunc {
 					status = he.Code
 				} else if status < http.StatusBadRequest {
 					// Non-HTTP errors (e.g. database errors) won't have a
-					// status set yet — Echo's error handler runs after this
+					// status set yet; Echo's error handler runs after this
 					// middleware. Default to 500 to avoid logging failures
 					// as successes.
 					status = http.StatusInternalServerError
@@ -907,9 +891,12 @@ func (c *Controller) Shutdown() {
 		backupJobManager.Shutdown()
 	}
 
-	// Flush the API logger
-	if err := c.apiLogger.Flush(); err != nil {
-		GetLogger().Error("Error flushing API log", logger.Error(err))
+	// Flush all log writers (the main writer plus every module writer, including
+	// the security module added for auth events). A module logger's Flush is a
+	// no-op, so flush the central logger to actually persist buffered logs on
+	// shutdown.
+	if err := logger.Global().Flush(); err != nil {
+		GetLogger().Error("Error flushing logs", logger.Error(err))
 	}
 
 	// TODO: The go-cache library's janitor goroutine cannot be stopped.
@@ -956,7 +943,7 @@ func (c *Controller) newErrorResponse(err error, message string, code int) *Erro
 	// paths, SQL errors, stack traces, etc. In production, use the
 	// sanitized message parameter instead.
 	var errorStr string
-	// Read the controller's own debug flag via the lock-free atomic mirror: this
+	// Read the controller's own debug flag via the lock-free atomic Settings pointer: this
 	// is reached from HandleError while UpdateSettings holds c.settingsMutex, so
 	// it must not acquire the lock (a non-reentrant RLock would deadlock), and the
 	// flag must remain per-controller (handlers assert debug-gated error verbosity
@@ -1037,7 +1024,7 @@ func (c *Controller) handleErrorInternal(ctx echo.Context, err error, message st
 	c.logErrorIfEnabled("API Error", fields...)
 
 	// Report server-side errors (5xx) to Sentry telemetry.
-	// 4xx errors are client mistakes (bad input, not found) — not bugs — and are excluded.
+	// 4xx errors are client mistakes (bad input, not found), not bugs, and are excluded.
 	if code >= http.StatusInternalServerError {
 		c.reportErrorToTelemetry(ctx, err, message, code)
 	}
@@ -1106,19 +1093,16 @@ func (c *Controller) HandleErrorForTest(ctx echo.Context, err error, message str
 
 // Debug logs debug messages when debug mode is enabled.
 //
-// Reads the debug flag via conf.GetSettings() rather than c.Settings so the
-// check is race-free against concurrent c.Settings writes in the settings
-// handlers: c.Settings is a plain *conf.Settings field with no locking on
-// the Debug read path, while conf.GetSettings() is a lock-free atomic.Load.
-// Returns silently when the global snapshot has not been set (e.g. in unit
-// tests with a standalone Controller).
+// Reads the debug flag from the process-global snapshot via conf.GetSettings()
+// (a lock-free atomic.Load), so process-wide debug logging follows the latest
+// published global settings. Returns silently when the global snapshot has not
+// been set (e.g. in unit tests with a standalone Controller); the per-controller
+// c.Settings snapshot is deliberately not consulted here.
 func (c *Controller) Debug(format string, v ...any) {
 	settings := conf.GetSettings()
 	if settings == nil {
 		// Skip debug logging when the global snapshot hasn't been set
-		// (e.g. in unit tests with a standalone Controller). Reading
-		// c.Settings here would race with concurrent writes in the
-		// settings update handlers.
+		// (e.g. in unit tests with a standalone Controller).
 		return
 	}
 	if settings.WebServer.Debug {

@@ -78,6 +78,15 @@ func (c *Controller) HandleSearch(ctx echo.Context) error {
 			logger.String("path", path),
 			logger.String("ip", ip),
 		)
+	} else if originalSpecies != "" {
+		// The species term did not map to a known scientific name; the query falls
+		// back to substring/LIKE. Log it so "unresolvable name" is distinguishable
+		// from "resolved but no detections" when triaging an empty result.
+		c.logDebugIfEnabled("Species query did not resolve to a scientific name, using substring search",
+			logger.String("input", originalSpecies),
+			logger.String("path", path),
+			logger.String("ip", ip),
+		)
 	}
 
 	// Log validated request parameters
@@ -96,6 +105,16 @@ func (c *Controller) HandleSearch(ctx echo.Context) error {
 	if err != nil {
 		c.logErrorIfEnabled("Search query failed", logger.Error(err), logger.String("filters", fmt.Sprintf("%+v", filters)), logger.String("path", path), logger.String("ip", ip))
 		return c.HandleError(ctx, err, "Search failed", http.StatusInternalServerError)
+	}
+
+	// Source display names can embed internal host details for stream sources
+	// without a user-configured name. This endpoint is public, so hide the
+	// source from unauthenticated clients, matching the anonymization done by
+	// the audio source listing endpoints.
+	if !c.isClientAuthenticated(ctx) {
+		for i := range results {
+			results[i].Source = ""
+		}
 	}
 
 	// Build and return response

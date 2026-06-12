@@ -486,7 +486,8 @@
       "confidenceMax": "Maksimālā ticamības procentuālā vērtība",
       "verifiedStatus": "Verifikācijas statuss",
       "lockedStatus": "Bloķēšanas statuss",
-      "timeOfDay": "Diennakts laiks"
+      "timeOfDay": "Diennakts laiks",
+      "source": "Audio avots"
     },
     "advancedFilters": "Papildu filtri",
     "showAdvancedFilters": "Rādīt papildu filtrus",
@@ -508,6 +509,9 @@
       "sunrise": "Saullēkts +/- 30 min",
       "sunset": "Saulriets +/- 30 min"
     },
+    "sourceOptions": {
+      "any": "Visi avoti"
+    },
     "sortOptions": {
       "dateDesc": "Datums (jaunākie vispirms)",
       "dateAsc": "Datums (vecākie vispirms)",
@@ -519,6 +523,7 @@
       "timeOfDay": "Diennakts laiks",
       "species": "Suga",
       "confidence": "Ticamība",
+      "source": "Avots",
       "status": "Statuss",
       "actions": "Darbības"
     },
@@ -592,6 +597,18 @@
       "empty": "Viss kluss — pašlaik nav atklāts neviens putns"
     },
     "rejected": "Noraidīts",
+    "newSpeciesHighlights": {
+      "title": "Jaunās un atgriezušās sugas",
+      "subtitle": "Pirmie novērojumi un nesenās atgriešanās",
+      "trackingDisabled": "Lai izmantotu šo funkciju, aktivizējiet \"Iespējot sugu izsekošanu\".",
+      "categoryLifetime": "Jauna suga",
+      "categoryYear": "Jauna šogad",
+      "categorySeason": "Jauna šosezon",
+      "categorySeasonNamed": "Jauna šajā {season}",
+      "maxConfidenceShort": "Maks {confidence} %",
+      "detections": "{count, plural, zero {# noteikšanu} one {# noteikšana} other {# noteikšanas}}",
+      "lastSeen": "Pēdējoreiz: {days, plural, =0 {šodien} one {pirms # dienas} other {pirms # dienām}}"
+    },
     "dailySummary": {
       "title": "Dienas aktivitāte",
       "subtitle": "Sugu atklāšanas pa stundām",
@@ -758,6 +775,7 @@
     "elements": {
       "banner": "Informācijas paneļa baneris",
       "dailySummary": "Dienas kopsavilkums",
+      "newSpeciesHighlights": "Jaunu sugu apskats",
       "currentlyHearing": "Pašlaik dzirdams",
       "detectionsGrid": "Nesenās atklāšanas",
       "liveSpectrogram": "Tiešraides spektrogramma",
@@ -1606,6 +1624,7 @@
         "dateTime": "Datums un laiks",
         "species": "Suga",
         "confidence": "Ticamība",
+        "source": "Avots",
         "timeOfDay": "Diennakts laiks"
       },
       "noRecentDetections": "Nesenas atpazīšanas nav atrastas",
@@ -2186,12 +2205,15 @@
         },
         "githubRequired": {
           "title": "Nepieciešams: GitHub problēma atbalsta augšupielādēm",
-          "description": "<strong>Atbalsta augšupielādēm nepieciešams GitHub problēmas numurs.</strong> Lūdzu, <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"underline font-semibold\">izveidojiet GitHub problēmu</a>, aprakstot savu problēmu, <strong>pirms</strong> ģenerējat atbalsta ziņojumu. Bez saistītās problēmas izstrādātāji nevar rīkoties ar jūsu atbalsta datiem."
+          "description": "<strong>Atbalsta augšupielādēm nepieciešams GitHub problēmas numurs.</strong> Lūdzu, {createIssueLink}, aprakstot savu problēmu, <strong>pirms</strong> ģenerējat atbalsta ziņojumu. Bez saistītās problēmas izstrādātāji nevar rīkoties ar jūsu atbalsta datiem.",
+          "createGithubIssue": "izveidojiet GitHub problēmu"
         },
         "githubIssue": {
           "label": "GitHub problēmas numurs",
           "placeholder": "piem., 123 vai #123",
-          "helper": "<a href=\"https://github.com/tphakala/birdnet-go/issues\" target=\"_blank\" class=\"link link-primary\">Skatīt esošās problēmas</a> vai <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"link link-primary\">vispirms izveidojiet jaunu problēmu</a>"
+          "helper": "{viewIssuesLink} vai {createIssueLink}",
+          "viewExistingIssues": "Skatīt esošās problēmas",
+          "createNewIssue": "vispirms izveidojiet jaunu problēmu"
         },
         "whatsIncluded": {
           "title": "Kas ir iekļauts ziņojumā:",
@@ -3313,10 +3335,11 @@
       "hostLabel": "Resursdatora adrese",
       "hostHelp": "Jūsu servera publiskais resursdatora nosaukums vai IP adrese (piem., birdnet.example.com). Nepieciešams OAuth pieteikšanās un TLS sertifikātiem. Ja izmantojat reverso starpniekserveri, tā vietā izmantojiet Base URL.",
       "allowSubnetBypassLabel": "Atļaut piekļuvi no apakštīkla, apejot autentifikāciju",
+      "subnetBypassLocalNote": "Kad iespējots, klienti tajā pašā lokālajā tīklā kā šis serveris tiek automātiski uzskatīti par uzticamiem un izlaiž pieteikšanos. Izmantojiet zemāk esošo lauku tikai tam, lai paplašinātu šo uzticību uz papildu tīkliem (piemēram, atsevišķu VLAN vai maršrutētu apakštīklu).",
       "allowedSubnetsLabel": "Atļautie apakštīkli",
-      "allowedSubnetsHelp": "Atļautie tīkla diapazoni, lai apietu pieteikšanos (CIDR notācija, ar komatiem atdalīts saraksts)",
+      "allowedSubnetsHelp": "Papildu tīkla diapazoni, kas drīkst apiet pieteikšanos, papildus šī servera paša lokālajam tīklam. CIDR notācija, atdalīti ar komatiem.",
       "securityWarningTitle": "Drošības brīdinājums:",
-      "subnetWarningText": "Ierīcēm no šiem apakštīkliem būs neierobežota piekļuve. Iekļaujiet tikai uzticamus iekšējos tīklus.",
+      "subnetWarningText": "Šī servera lokālais tīkls un visi šeit norādītie apakštīkli iegūst pilnu piekļuvi bez pieteikšanās. Iekļaujiet tikai tīklus, kuriem pilnībā uzticaties.",
       "httpsSettingsTitle": "HTTPS iestatījumi",
       "httpsSettingsDescription": "Droša piekļuve ar SSL/TLS šifrēšanu",
       "basicAuthTitle": "Pamata autentifikācija",
@@ -4559,7 +4582,8 @@
         "invalidUrl": "Nederīgs URL formāts. Ievadiet pilnu URL, piem., rtsp://resursdators:ports/ceļš",
         "unsupportedScheme": "Neatbalstīta URL shēma \"{scheme}\". Izmantojiet rtsp, rtsps, http, https, rtmp vai udp",
         "blockedDestination": "Šis galamērķis ir bloķēts drošības apsvērumu dēļ",
-        "connectionFailed": "Nevarēja izveidot savienojumu ar straumi. Pārbaudiet, vai URL ir pareizs un straume ir pieejama"
+        "connectionFailed": "Nevarēja izveidot savienojumu ar straumi. Pārbaudiet, vai URL ir pareizs un straume ir pieejama",
+        "noAudioTrack": "Straumē nav audio celiņa. Var izmantot tikai straumes, kas satur audio"
       }
     },
     "debug": {

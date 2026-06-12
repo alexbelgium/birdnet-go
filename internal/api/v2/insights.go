@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/tphakala/birdnet-go/internal/datastore"
 	datastoreV2 "github.com/tphakala/birdnet-go/internal/datastore/v2"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	"github.com/tphakala/birdnet-go/internal/imageprovider"
@@ -176,34 +177,29 @@ func normalizeForLookup(s string) string {
 // them to an arbitrary species based on label order would silently hide
 // valid matches. sciToCommon is not affected because scientific names are
 // unique per label.
-func buildNameMaps(labels []string) *nameMaps {
+// When resolver is non-nil, each label's common name is overridden by the
+// resolver (authoritative/localized), so insights display (sciToCommon) and
+// search (commonToSci) both reflect the localized name. Labels the resolver does
+// not cover keep their embedded common name.
+func buildNameMaps(labels []string, resolver datastore.SpeciesNameResolver) *nameMaps {
 	nm := &nameMaps{
 		sciToCommon: make(map[string]string, len(labels)),
 		commonToSci: make(map[string]string, len(labels)),
 	}
 	ambiguous := make(map[string]struct{})
-	for _, label := range labels {
-		scientificName, commonName, found := strings.Cut(label, "_")
-		if !found {
-			continue
-		}
-		scientificName = strings.TrimSpace(scientificName)
-		commonName = strings.TrimSpace(commonName)
-		if scientificName == "" || commonName == "" {
-			continue
-		}
-		nm.sciToCommon[scientificName] = commonName
+	for _, sn := range datastore.ResolveLabelNames(labels, resolver) {
+		nm.sciToCommon[sn.Scientific] = sn.Common
 
-		key := normalizeForLookup(commonName)
+		key := normalizeForLookup(sn.Common)
 		if _, seen := ambiguous[key]; seen {
 			continue
 		}
-		if existing, exists := nm.commonToSci[key]; exists && existing != scientificName {
+		if existing, exists := nm.commonToSci[key]; exists && existing != sn.Scientific {
 			ambiguous[key] = struct{}{}
 			delete(nm.commonToSci, key)
 			continue
 		}
-		nm.commonToSci[key] = scientificName
+		nm.commonToSci[key] = sn.Scientific
 	}
 	return nm
 }
@@ -234,7 +230,24 @@ func (c *Controller) loadCommonToScientificMap() map[string]string {
 // UpdateCommonNameMap rebuilds both cached name maps from updated BirdNET labels.
 // Called after locale or model changes to keep insights and search endpoints current.
 func (c *Controller) UpdateCommonNameMap(labels []string) {
-	c.nameMaps.Store(buildNameMaps(labels))
+	c.nameMaps.Store(buildNameMaps(labels, c.loadNameResolver()))
+}
+
+// SetNameResolver installs the authoritative localized name resolver, shared with
+// the classifier orchestrator. A nil resolver is ignored.
+func (c *Controller) SetNameResolver(r datastore.SpeciesNameResolver) {
+	if datastore.IsNilResolver(r) {
+		return
+	}
+	c.nameResolver.Store(&r)
+}
+
+// loadNameResolver returns the installed resolver, or nil if none has been set.
+func (c *Controller) loadNameResolver() datastore.SpeciesNameResolver {
+	if p := c.nameResolver.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // loadCommonNameMap returns the current scientific-to-common lookup map.
@@ -243,8 +256,11 @@ func (c *Controller) loadCommonNameMap() map[string]string {
 	return c.loadNameMaps().sciToCommon
 }
 
-// resolveCommonName looks up the common name for a scientific name.
-// Returns the scientific name itself as fallback.
+// resolveCommonName looks up the common name for a scientific name in the cached
+// map. That map is already localized at build time (buildNameMaps applies the
+// OpenFauna resolver override), so this is a plain lookup that returns the
+// scientific name itself as fallback. This differs from the datastore's
+// resolveCommonName method, which consults the live resolver per call.
 func resolveCommonName(nameMap map[string]string, scientificName string) string {
 	if cn, ok := nameMap[scientificName]; ok {
 		return cn
@@ -373,8 +389,8 @@ func (c *Controller) initInsightsRoutes() {
 	c.insightsRepo = repository.NewInsightsRepository(db, useV2Prefix, isMySQL)
 
 	// Build both name maps once and cache on Controller
-	if c.Settings != nil {
-		c.UpdateCommonNameMap(c.Settings.BirdNET.Labels)
+	if s := c.controllerSettings(); s != nil {
+		c.UpdateCommonNameMap(s.BirdNET.Labels)
 	}
 
 	insightsGroup := c.Group.Group("/insights")
@@ -481,7 +497,7 @@ func (c *Controller) getExpectedTodayRegionalImpl(ctx echo.Context) error {
 		return c.HandleError(ctx, err, "Failed to query eBird observations", http.StatusInternalServerError)
 	}
 
-	// Get local species to deduplicate against (best-effort — if this fails, show all eBird results)
+	// Get local species to deduplicate against (best-effort; if this fails, show all eBird results)
 	yearRanges := buildYearRanges(time.Now(), expectedTodayWindowDays)
 	localSpecies, localErr := c.insightsRepo.GetExpectedSpeciesToday(reqCtx, yearRanges, nil)
 	if localErr != nil {

@@ -15,6 +15,7 @@ package datastore
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,11 +104,11 @@ type Interface interface {
 	// GetTopBirdsData returns daily detection summaries, ordered by detection count descending.
 	// The limit parameter (if > 0) restricts the number of unique species returned.
 	GetTopBirdsData(selectedDate string, minConfidenceNormalized float64, limit int) ([]Note, error)
-	GetHourlyOccurrences(date, commonName string, minConfidenceNormalized float64) ([24]int, error)
 	// GetBatchHourlyOccurrences retrieves hourly detection counts for multiple species on a given date.
-	// Returns a map of species CommonName to [24]int hourly counts.
-	// This batches multiple GetHourlyOccurrences calls into a single query for performance.
-	GetBatchHourlyOccurrences(date string, species []string, minConfidence float64) (map[string][24]int, error)
+	// The species slice holds scientific names; the returned map is keyed by scientific name.
+	// Keying on scientific name keeps the result robust across models and locales.
+	// This batches the per-species hourly lookups into a single query for performance.
+	GetBatchHourlyOccurrences(ctx context.Context, date string, species []string, minConfidence float64) (map[string][24]int, error)
 	SpeciesDetections(species, date, hour string, duration int, sortAscending bool, limit int, offset int) ([]Note, error)
 	GetLastDetections(numDetections int) ([]Note, error)
 	GetAllDetectedSpecies() ([]Note, error)
@@ -231,6 +232,9 @@ type Interface interface {
 	// UpdateNameMaps rebuilds species name lookup maps from updated BirdNET labels.
 	// Called after locale or model changes. No-op for legacy datastores.
 	UpdateNameMaps(labels []string)
+	// SetNameResolver installs the authoritative localized species-name resolver
+	// shared with the classifier orchestrator. No-op for legacy datastores.
+	SetNameResolver(resolver SpeciesNameResolver)
 
 	// Application event log (v2 only; legacy stores return nil/empty)
 	SaveAppEvent(ctx context.Context, category, eventType, message string, metadata map[string]any) error
@@ -350,6 +354,34 @@ func (ds *DataStore) GetDBCounters() *dbstats.Counters {
 
 // UpdateNameMaps is a no-op for legacy DataStore (common names stored directly in DB).
 func (ds *DataStore) UpdateNameMaps(_ []string) {}
+
+// SpeciesNameResolver resolves a scientific name to a localized common name,
+// returning "" when unknown. Satisfied by *openfauna.Resolver. The locale argument
+// is accepted for interface symmetry; resolvers are built for the active species
+// locale (settings.BirdNET.Locale), not a per-call locale.
+type SpeciesNameResolver interface {
+	Resolve(scientificName, locale string) string
+	// ResolveLocal returns a name only if it is already resident in memory (no
+	// O(dataset) on-demand lookup), reporting ok=false otherwise. Bulk callers use
+	// it to avoid driving the slow path for out-of-working-set species.
+	ResolveLocal(scientificName string) (name string, ok bool)
+}
+
+// IsNilResolver reports whether r is nil or a typed-nil pointer. Setters use it so
+// they never store an interface that wraps a nil pointer (which would pass an
+// `!= nil` check yet panic on a non-defensive Resolve implementation).
+func IsNilResolver(r SpeciesNameResolver) bool {
+	if r == nil {
+		return true
+	}
+	if v := reflect.ValueOf(r); v.Kind() == reflect.Pointer && v.IsNil() {
+		return true
+	}
+	return false
+}
+
+// SetNameResolver is a no-op for legacy DataStore (common names stored in DB).
+func (ds *DataStore) SetNameResolver(_ SpeciesNameResolver) {}
 
 // SetSunCalcMetrics sets the metrics instance for the SunCalc service
 func (ds *DataStore) SetSunCalcMetrics(suncalcMetrics any) {
@@ -672,7 +704,7 @@ func (ds *DataStore) GetTopBirdsData(selectedDate string, minConfidenceNormalize
 		notes = append(notes, note)
 
 		// For the web UI, we only need one note per species
-		// The hourly counts will be retrieved separately via GetHourlyOccurrences
+		// The hourly counts will be retrieved separately via GetBatchHourlyOccurrences
 	}
 
 	return notes, nil
@@ -778,46 +810,11 @@ func (ds *DataStore) GetDateFormat(columnName string) string {
 	}
 }
 
-// GetHourlyOccurrences retrieves hourly occurrences of a specified bird species.
-func (ds *DataStore) GetHourlyOccurrences(date, commonName string, minConfidenceNormalized float64) ([24]int, error) {
-	var hourlyCounts [24]int
-	var results []struct {
-		Hour  int
-		Count int
-	}
-
-	hourFormat := ds.GetHourFormat()
-
-	// Exclude detections marked as false_positive
-	err := ds.DB.Model(&Note{}).
-		Joins("LEFT JOIN note_reviews ON notes.id = note_reviews.note_id").
-		Select(fmt.Sprintf("%s as hour, COUNT(*) as count", hourFormat)).
-		Where("notes.date = ? AND notes.common_name = ? AND notes.confidence >= ?", date, commonName, minConfidenceNormalized).
-		Where("(note_reviews.verified IS NULL OR note_reviews.verified != ?)", string(entities.VerificationFalsePositive)).
-		Group(hourFormat).
-		Scan(&results).Error
-
-	if err != nil {
-		return hourlyCounts, errors.New(err).
-			Component("datastore").
-			Category(errors.CategoryDatabase).
-			Context("operation", "get_hourly_occurrences").
-			Context("date", date).
-			Context("species", commonName).
-			Build()
-	}
-
-	for _, result := range results {
-		if result.Hour >= 0 && result.Hour < 24 {
-			hourlyCounts[result.Hour] = result.Count
-		}
-	}
-
-	return hourlyCounts, nil
-}
-
 // GetBatchHourlyOccurrences retrieves hourly detection counts for multiple species on a given date.
-func (ds *DataStore) GetBatchHourlyOccurrences(date string, species []string, minConfidence float64) (map[string][24]int, error) {
+// The species parameter holds scientific names, and the returned map is keyed by
+// scientific name. Keying on scientific name (rather than the localized common
+// name) keeps the daily summary robust across models and locales.
+func (ds *DataStore) GetBatchHourlyOccurrences(ctx context.Context, date string, species []string, minConfidence float64) (map[string][24]int, error) {
 	if len(species) == 0 {
 		return make(map[string][24]int), nil
 	}
@@ -825,19 +822,19 @@ func (ds *DataStore) GetBatchHourlyOccurrences(date string, species []string, mi
 	hourFormat := ds.GetHourFormat()
 
 	var results []struct {
-		CommonName string
-		Hour       int
-		Count      int
+		ScientificName string
+		Hour           int
+		Count          int
 	}
 
 	// Exclude detections marked as false_positive
-	err := ds.DB.Model(&Note{}).
+	err := ds.DB.WithContext(ctx).Model(&Note{}).
 		Joins("LEFT JOIN note_reviews ON notes.id = note_reviews.note_id").
-		Select(fmt.Sprintf("notes.common_name, %s as hour, COUNT(*) as count", hourFormat)).
-		Where("notes.common_name IN ? AND notes.date = ? AND notes.confidence >= ?", species, date, minConfidence).
+		Select(fmt.Sprintf("notes.scientific_name, %s as hour, COUNT(*) as count", hourFormat)).
+		Where("notes.scientific_name IN ? AND notes.date = ? AND notes.confidence >= ?", species, date, minConfidence).
 		Where("(note_reviews.verified IS NULL OR note_reviews.verified != ?)", string(entities.VerificationFalsePositive)).
-		Group(fmt.Sprintf("notes.common_name, %s", hourFormat)).
-		Order("notes.common_name, hour").
+		Group(fmt.Sprintf("notes.scientific_name, %s", hourFormat)).
+		Order("notes.scientific_name, hour").
 		Scan(&results).Error
 
 	if err != nil {
@@ -859,9 +856,9 @@ func (ds *DataStore) GetBatchHourlyOccurrences(date string, species []string, mi
 
 	for _, r := range results {
 		if r.Hour >= 0 && r.Hour < 24 {
-			hourlyData := result[r.CommonName]
+			hourlyData := result[r.ScientificName]
 			hourlyData[r.Hour] = r.Count
-			result[r.CommonName] = hourlyData
+			result[r.ScientificName] = hourlyData
 		}
 	}
 

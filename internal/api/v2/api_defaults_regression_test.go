@@ -32,7 +32,7 @@ func testNotes() []datastore.Note {
 		{
 			ID:             1,
 			CommonName:     "American Robin",
-			ScientificName: "Turdus migratorius",
+			ScientificName: sciAmericanRobin,
 			Confidence:     0.85,
 			Date:           today,
 			Time:           "08:30:00",
@@ -40,7 +40,7 @@ func testNotes() []datastore.Note {
 		{
 			ID:             2,
 			CommonName:     "Blue Jay",
-			ScientificName: "Cyanocitta cristata",
+			ScientificName: sciBlueJay,
 			Confidence:     0.72,
 			Date:           today,
 			Time:           "09:15:00",
@@ -86,10 +86,10 @@ func TestDailySpeciesSummary_DefaultParams(t *testing.T) {
 	mockDS.On("GetTopBirdsData", today, 0.0, 0).Return(notes, nil).Once()
 
 	// aggregateDailySpeciesData calls GetBatchHourlyOccurrences for hourly counts
-	mockDS.On("GetBatchHourlyOccurrences", today, mock.Anything, 0.0).
+	mockDS.On("GetBatchHourlyOccurrences", mock.Anything, today, mock.Anything, 0.0).
 		Return(map[string][24]int{
-			"American Robin": {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-			"Blue Jay":       {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			sciAmericanRobin: {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			sciBlueJay:       {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		}, nil).Once()
 
 	rec := executeRequest(t, e, http.MethodGet, "/api/v2/analytics/species/daily", controller.GetDailySpeciesSummary)
@@ -116,7 +116,7 @@ func TestSpeciesSummary_DefaultParams(t *testing.T) {
 
 	mockData := []datastore.SpeciesSummaryData{
 		{
-			ScientificName: "Turdus migratorius",
+			ScientificName: sciAmericanRobin,
 			CommonName:     "American Robin",
 			SpeciesCode:    "amerob",
 			Count:          42,
@@ -148,7 +148,7 @@ func TestNewSpeciesDetections_DefaultParams(t *testing.T) {
 
 	mockData := []datastore.NewSpeciesData{
 		{
-			ScientificName: "Turdus migratorius",
+			ScientificName: sciAmericanRobin,
 			CommonName:     "American Robin",
 			FirstSeenDate:  "2025-01-15",
 			CountInPeriod:  5,
@@ -362,15 +362,15 @@ func setupPostMigrationTestEnvironment(t *testing.T) (*echo.Echo, *mocks.MockInt
 	e, mockDS, controller := setupTestEnvironment(t)
 
 	// Run migration — moves SummaryLimit into layout element, zeros deprecated field
-	migrated := controller.Settings.MigrateDashboardLayout()
+	migrated := controller.Settings.Load().MigrateDashboardLayout()
 	require.True(t, migrated, "migration should have occurred (no pre-existing layout)")
 
 	// Verify the deprecated field is actually zeroed
-	assert.Equal(t, 0, controller.Settings.Realtime.Dashboard.SummaryLimit,
+	assert.Equal(t, 0, controller.Settings.Load().Realtime.Dashboard.SummaryLimit,
 		"deprecated SummaryLimit should be zeroed after migration")
 
 	// Verify GetEffectiveSummaryLimit still returns a valid value
-	effectiveLimit := controller.Settings.GetEffectiveSummaryLimit()
+	effectiveLimit := controller.Settings.Load().GetEffectiveSummaryLimit()
 	assert.Positive(t, effectiveLimit,
 		"GetEffectiveSummaryLimit should return positive value after migration")
 
@@ -391,10 +391,10 @@ func TestDailySpeciesSummary_DefaultParams_AfterMigration(t *testing.T) {
 
 	// After migration, the API handler still passes limit=0 (its default for "no limit param").
 	mockDS.On("GetTopBirdsData", today, 0.0, 0).Return(notes, nil).Once()
-	mockDS.On("GetBatchHourlyOccurrences", today, mock.Anything, 0.0).
+	mockDS.On("GetBatchHourlyOccurrences", mock.Anything, today, mock.Anything, 0.0).
 		Return(map[string][24]int{
-			"American Robin": {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-			"Blue Jay":       {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			sciAmericanRobin: {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+			sciBlueJay:       {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		}, nil).Once()
 
 	rec := executeRequest(t, e, http.MethodGet, "/api/v2/analytics/species/daily", controller.GetDailySpeciesSummary)

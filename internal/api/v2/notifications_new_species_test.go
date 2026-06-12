@@ -20,20 +20,22 @@ func parseJSONResponse(body []byte, target any) error {
 }
 
 func TestCreateTestNewSpeciesNotification_ServiceNotInitialized(t *testing.T) {
-	// Skip this test if notification service is already initialized
-	// This test specifically validates the uninitialized service error path
-	if notification.IsInitialized() {
-		t.Skip("notification service already initialized; skipping service-not-initialized path")
-	}
+	t.Parallel()
+
+	// This validates the requireNotificationService guard when no service is
+	// available. The api/v2 test suite never initializes the process-global
+	// singleton (every test injects an isolated instance), so a controller with
+	// no injected service resolves to nil and the middleware must return 503.
+	require.False(t, notification.IsInitialized(),
+		"no api/v2 test may initialize the global notification singleton; this test relies on it staying unset")
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/notifications/test/new-species", http.NoBody)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	controller := &Controller{
-		Settings: &conf.Settings{},
-	}
+	controller := &Controller{}
+	controller.Settings.Store(&conf.Settings{})
 
 	// Call through middleware to test the guard
 	handler := controller.requireNotificationService(controller.CreateTestNewSpeciesNotification)
@@ -46,7 +48,11 @@ func TestCreateTestNewSpeciesNotification_ServiceNotInitialized(t *testing.T) {
 }
 
 func TestCreateTestNewSpeciesNotification_Success(t *testing.T) {
-	// Initialize notification service for testing using correct API
+	// No t.Parallel(): this test publishes to the process-global settings
+	// singleton via publishTestSettings (CreateTestNewSpeciesNotification reads
+	// the live snapshot through currentSettings(), which consults
+	// conf.GetSettings() first). The notification service is fully isolated
+	// per test via dependency injection.
 	config := &notification.ServiceConfig{
 		Debug:              true,
 		MaxNotifications:   100,
@@ -55,33 +61,30 @@ func TestCreateTestNewSpeciesNotification_Success(t *testing.T) {
 		RateLimitMaxEvents: 10,
 	}
 
-	// Try to set up isolated service for testing
 	service := notification.NewService(config)
-	err := notification.SetServiceForTesting(service)
-	if err != nil {
-		// Service already exists, use it
-		service = notification.GetService()
-		require.NotNil(t, service, "Expected notification service to be available")
-	}
+	t.Cleanup(service.Stop)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/notifications/test/new-species", http.NoBody)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	controller := &Controller{Settings: newValidTestSettings()}
-	controller.Settings = &conf.Settings{}
-	controller.Settings.Security.Host = "localhost"
-	controller.Settings.WebServer.Port = "8080"
-	controller.Settings.Main.TimeAs24h = true
+	controller := &Controller{notificationService: service}
+	// Build a minimal settings snapshot with only the fields this test needs,
+	// then publish it once (the empty base matches the original test).
+	settings := &conf.Settings{}
+	settings.Security.Host = "localhost"
+	settings.WebServer.Port = "8080"
+	settings.Main.TimeAs24h = true
 	// Set default templates from config.yaml
-	controller.Settings.Notification.Templates.NewSpecies.Title = "New Species: {{.CommonName}}"
-	controller.Settings.Notification.Templates.NewSpecies.Message = "First detection of {{.CommonName}} ({{.ScientificName}}) with {{.ConfidencePercent}}% confidence at {{.DetectionTime}}. View: {{.DetectionURL}}"
+	settings.Notification.Templates.NewSpecies.Title = "New Species: {{.CommonName}}"
+	settings.Notification.Templates.NewSpecies.Message = "First detection of {{.CommonName}} ({{.ScientificName}}) with {{.ConfidencePercent}}% confidence at {{.DetectionTime}}. View: {{.DetectionURL}}"
+	controller.Settings.Store(settings)
 	// CreateTestNewSpeciesNotification reads the live snapshot via currentSettings();
 	// publish the controller's settings so the read resolves to them.
-	publishTestSettings(t, controller.Settings)
+	publishTestSettings(t, settings)
 
-	err = controller.CreateTestNewSpeciesNotification(c)
+	err := controller.CreateTestNewSpeciesNotification(c)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, rec.Code)

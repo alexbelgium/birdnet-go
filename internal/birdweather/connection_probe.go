@@ -1,4 +1,7 @@
-// testing.go provides BirdWeather connection and functionality testing capabilities
+// connection_probe.go implements the BirdWeather "Test Connection" feature exposed in
+// the Settings UI: it probes API connectivity, authentication, soundscape upload, and
+// detection posting. This is production code, not Go test helpers (the file is
+// deliberately not named *_test.go so it is included in normal builds).
 package birdweather
 
 import (
@@ -54,12 +57,18 @@ func generateTestPCMData() []byte {
 	return make([]byte, numSamples*testAudioBytesPerSample)
 }
 
-// newSecureHTTPClient creates an HTTP client with secure TLS configuration
-// This helper reduces code duplication for creating HTTP clients with TLS settings
+// newSecureHTTPClient creates an HTTP client with secure TLS configuration.
+// This helper reduces code duplication for creating HTTP clients with TLS settings.
+//
+// It is used only for one-shot connectivity and authentication probes (a single
+// HEAD/GET per call), so keep-alives are disabled: without this the probe's
+// persistent connection (and its read/write loops) would linger in the idle
+// pool after the request, outliving the probe as leaked goroutines.
 func newSecureHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
+			DisableKeepAlives: true,
 			TLSClientConfig: &tls.Config{
 				MinVersion:         tls.VersionTLS12,
 				InsecureSkipVerify: false,

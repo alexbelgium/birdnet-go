@@ -145,6 +145,11 @@ type Datastore struct {
 	// for lock-free reads and atomic swaps when locale changes.
 	names atomic.Pointer[nameMaps]
 
+	// nameResolver, when set, is the authoritative localized name source shared
+	// with the classifier orchestrator. It overrides the label-derived maps and
+	// resolves historic out-of-working-set species via on-demand lookup.
+	nameResolver atomic.Pointer[datastore.SpeciesNameResolver]
+
 	// speciesCodeMap provides O(1) lookup from scientific name to eBird species code.
 	// Populated from the eBird taxonomy data passed via Config.SpeciesCodeMap.
 	speciesCodeMap map[string]string
@@ -267,8 +272,10 @@ func New(cfg *Config) (*Datastore, error) {
 		tz = time.Local
 	}
 
-	// Build species name maps from labels.
-	nm := buildNameMaps(cfg.Labels)
+	// Build species name maps from labels. The OpenFauna resolver is injected
+	// later via SetNameResolver (it is owned by the orchestrator, constructed
+	// separately), so the maps are localized on the first post-wiring rebuild.
+	nm := buildNameMaps(cfg.Labels, nil)
 
 	// Use species code map from taxonomy data (injected via config).
 	speciesCodeMap := cfg.SpeciesCodeMap
@@ -311,31 +318,61 @@ func New(cfg *Config) (*Datastore, error) {
 // buildNameMaps parses BirdNET labels ("ScientificName_CommonName" format)
 // into lookup maps for common name resolution.
 // See issue #1907 for context on species map usage.
-func buildNameMaps(labels []string) *nameMaps {
+// When resolver is non-nil, each label's common name is overridden by the
+// resolver (authoritative/localized); labels the resolver does not cover keep
+// their embedded common name. This keeps the reverse (search) maps consistent
+// with what resolveCommonName displays.
+func buildNameMaps(labels []string, resolver datastore.SpeciesNameResolver) *nameMaps {
 	speciesMap := make(map[string]string, len(labels))
 	commonMap := make(map[string]string, len(labels))
 	commonFoldedMap := make(map[string]string, len(labels))
-	for _, label := range labels {
-		if scientificName, commonName, found := strings.Cut(label, "_"); found {
-			scientificName = strings.TrimSpace(scientificName)
-			commonName = strings.TrimSpace(commonName)
-			if commonName != "" && scientificName != "" {
-				speciesMap[strings.ToLower(commonName)] = scientificName
-				commonMap[scientificName] = commonName
-				commonFoldedMap[scientificName] = strings.ToLower(norm.NFC.String(commonName))
-			}
+	// Ambiguous reverse keys are deleted, not last-writer-wins: an ambiguous common
+	// name must fall through to substring search (which returns all matches) rather
+	// than route to an arbitrary species.
+	ambiguous := make(map[string]struct{})
+	for _, sn := range datastore.ResolveLabelNames(labels, resolver) {
+		commonMap[sn.Scientific] = sn.Common
+		folded := strings.ToLower(norm.NFC.String(sn.Common))
+		commonFoldedMap[sn.Scientific] = folded
+
+		if _, seen := ambiguous[folded]; seen {
+			continue
 		}
+		if existing, exists := speciesMap[folded]; exists && existing != sn.Scientific {
+			ambiguous[folded] = struct{}{}
+			delete(speciesMap, folded)
+			continue
+		}
+		speciesMap[folded] = sn.Scientific
 	}
 	return &nameMaps{common: commonMap, commonFolded: commonFoldedMap, species: speciesMap}
 }
 
 // UpdateNameMaps rebuilds species name lookup maps from updated BirdNET labels.
 // Called after locale or model changes to keep common name resolution current.
-// The new maps are built first, then atomically swapped in — readers are never blocked.
+// The new maps are built first, then atomically swapped in - readers are never blocked.
 // Also resets the missing-name warning deduplication so new mismatches are logged.
 func (ds *Datastore) UpdateNameMaps(labels []string) {
-	ds.names.Store(buildNameMaps(labels))
+	ds.names.Store(buildNameMaps(labels, ds.loadNameResolver()))
 	ds.loggedMissingNames.Clear()
+}
+
+// SetNameResolver installs the authoritative localized name resolver, shared with
+// the classifier orchestrator. Safe to call concurrently with reads; a nil
+// resolver is ignored.
+func (ds *Datastore) SetNameResolver(r datastore.SpeciesNameResolver) {
+	if datastore.IsNilResolver(r) {
+		return
+	}
+	ds.nameResolver.Store(&r)
+}
+
+// loadNameResolver returns the installed resolver, or nil if none has been set.
+func (ds *Datastore) loadNameResolver() datastore.SpeciesNameResolver {
+	if p := ds.nameResolver.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // Open is a no-op since the manager is already open.
@@ -941,7 +978,13 @@ func (ds *Datastore) detectionToRecord(det *entities.Detection) datastore.Detect
 	source := ""
 	if det.Source != nil {
 		device = det.Source.NodeName
-		source = string(det.Source.SourceType)
+		// Prefer DisplayName for human-readable source identification;
+		// fall back to SourceType if no display name is configured.
+		if det.Source.DisplayName != nil && *det.Source.DisplayName != "" {
+			source = *det.Source.DisplayName
+		} else {
+			source = string(det.Source.SourceType)
+		}
 	}
 
 	// TimeOfDay calculation
@@ -1133,53 +1176,31 @@ func (ds *Datastore) GetTopBirdsData(selectedDate string, minConfidenceNormalize
 	return notes, nil
 }
 
-// GetHourlyOccurrences retrieves hourly occurrences for a species on a date.
-// The parameter is named commonName for interface compatibility with legacy datastore,
-// but we need to normalize it to scientific name for the V2 label lookup.
-func (ds *Datastore) GetHourlyOccurrences(date, commonName string, minConfidenceNormalized float64) ([24]int, error) {
-	ctx := context.Background()
-	var hourly [24]int
-
-	// Normalize common name to scientific name using speciesMap
-	speciesName := commonName
-	normalized := strings.ToLower(strings.TrimSpace(commonName))
-	if sci, ok := ds.loadNameMaps().species[normalized]; ok {
-		speciesName = sci
-	}
-
-	// Get label IDs for this species across all models
-	labelIDs, err := ds.label.GetLabelIDsByScientificName(ctx, speciesName)
-	if err != nil {
-		return hourly, err
-	}
-	if len(labelIDs) == 0 {
-		return hourly, nil
-	}
-
-	t, err := time.ParseInLocation("2006-01-02", date, ds.timezone)
-	if err != nil {
-		return hourly, fmt.Errorf("invalid date format: %w", err)
-	}
-
-	startTime := t.Unix()
-	endTime := t.AddDate(0, 0, 1).Unix()
-
-	// Single query with IN clause for all label IDs (multi-model support)
-	return ds.detection.GetHourlyOccurrences(ctx, labelIDs, startTime, endTime, minConfidenceNormalized)
-}
-
 // GetBatchHourlyOccurrences retrieves hourly detection counts for multiple species on a given date.
-func (ds *Datastore) GetBatchHourlyOccurrences(date string, species []string, minConfidence float64) (map[string][24]int, error) {
+// The species parameter holds scientific names. Scientific names map directly to
+// label IDs for every model, so no localized common-name round-trip is performed
+// (that round-trip dropped non-primary-model species such as bats from the daily
+// summary). The returned map is keyed by the same scientific names that were passed in.
+//
+// Label IDs are resolved in a single batched query (no per-species N+1) and the hourly
+// counts are fetched in a single batched query, so this is two queries total regardless
+// of the number of species. A failure in either query is returned to the caller rather
+// than silently zeroing a species, so a cancelled context aborts the request instead of
+// producing partial counts.
+func (ds *Datastore) GetBatchHourlyOccurrences(ctx context.Context, date string, species []string, minConfidence float64) (map[string][24]int, error) {
 	if len(species) == 0 {
 		return make(map[string][24]int), nil
 	}
 
-	ctx := context.Background()
-
 	// Parse date
 	targetDate, err := time.ParseInLocation(time.DateOnly, date, ds.timezone)
 	if err != nil {
-		return nil, fmt.Errorf("invalid date format: %w", err)
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryValidation).
+			Context("operation", "get_batch_hourly_occurrences").
+			Context("date", date).
+			Build()
 	}
 
 	// Calculate Unix timestamp range for the date
@@ -1187,101 +1208,66 @@ func (ds *Datastore) GetBatchHourlyOccurrences(date string, species []string, mi
 	startOfDay := targetDate.Unix()
 	endOfDay := targetDate.AddDate(0, 0, 1).Unix()
 
-	// Convert species common names to scientific names and collect label IDs
-	allLabelIDs := make(map[string][]uint) // map[commonName][]labelID
-	for _, commonName := range species {
-		normalized := strings.ToLower(strings.TrimSpace(commonName))
-		scientificName := commonName
-		if sci, ok := ds.loadNameMaps().species[normalized]; ok {
-			scientificName = sci
-		}
+	// Resolve all scientific names to label IDs in one batched query (avoids the
+	// per-species N+1 round-trip). The returned map is keyed by the stored scientific
+	// name; results are re-keyed by the caller's input names below.
+	labelsByName, err := ds.label.GetByScientificNames(ctx, species)
+	if err != nil {
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryDatabase).
+			Context("operation", "get_batch_hourly_occurrences_labels").
+			Build()
+	}
 
-		// Get label IDs for this species across all models
-		labelIDs, err := ds.label.GetLabelIDsByScientificName(ctx, scientificName)
-		if err != nil {
-			// Log error with context and continue with other species
-			ds.log.Warn("failed to get label IDs for species in batch query",
-				logger.String("common_name", commonName),
-				logger.String("scientific_name", scientificName),
-				logger.Error(err))
+	// Flatten label IDs across all requested species and build a reverse map from label
+	// ID back to the caller's input scientific name. Keying by the input name (not the
+	// stored label.ScientificName) preserves the exact map contract the caller relies on
+	// (it looks up results by note.ScientificName).
+	flatLabelIDs := make([]uint, 0, len(species))
+	labelToScientificName := make(map[uint]string) // labelID -> input scientific name
+	for _, scientificName := range species {
+		for _, label := range labelsByName[scientificName] {
+			flatLabelIDs = append(flatLabelIDs, label.ID)
+			labelToScientificName[label.ID] = scientificName
+		}
+	}
+
+	// Initialize all requested species with zero counts so callers always get an entry.
+	resultMap := make(map[string][24]int, len(species))
+	for _, scientificName := range species {
+		resultMap[scientificName] = [24]int{}
+	}
+
+	// No matching labels: every requested species has zero detections.
+	if len(flatLabelIDs) == 0 {
+		return resultMap, nil
+	}
+
+	// Fetch per-label hourly counts in one batched query (chunked internally).
+	hourlyByLabel, err := ds.detection.GetBatchHourlyOccurrences(ctx, flatLabelIDs, startOfDay, endOfDay, minConfidence)
+	if err != nil {
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryDatabase).
+			Context("operation", "get_batch_hourly_occurrences").
+			Build()
+	}
+
+	// Aggregate per-label counts into per-species counts, keyed by the input scientific
+	// name. Multiple label IDs (one per model) can map to the same species. Range over
+	// keys only to avoid copying the 192-byte [24]int value on every iteration.
+	for labelID := range hourlyByLabel {
+		scientificName, ok := labelToScientificName[labelID]
+		if !ok {
 			continue
 		}
-		if len(labelIDs) > 0 {
-			allLabelIDs[commonName] = labelIDs
+		hours := hourlyByLabel[labelID]
+		hourlyData := resultMap[scientificName]
+		for h := range 24 {
+			hourlyData[h] += hours[h]
 		}
-	}
-
-	if len(allLabelIDs) == 0 {
-		// No matching species found in map
-		result := make(map[string][24]int)
-		for _, commonName := range species {
-			result[commonName] = [24]int{}
-		}
-		return result, nil
-	}
-
-	// Flatten all label IDs for batch query
-	var flatLabelIDs []uint
-	labelToCommonName := make(map[uint]string) // reverse map for results
-	for commonName, labelIDs := range allLabelIDs {
-		for _, labelID := range labelIDs {
-			flatLabelIDs = append(flatLabelIDs, labelID)
-			labelToCommonName[labelID] = commonName
-		}
-	}
-
-	// Query detections grouped by label_id and hour
-	type result struct {
-		LabelID uint
-		Hour    int
-		Count   int
-	}
-
-	// Generate database-agnostic hour expression
-	// MySQL: HOUR(FROM_UNIXTIME(d.detected_at))
-	// SQLite: CAST(strftime('%H', datetime(d.detected_at, 'unixepoch', 'localtime')) AS INTEGER)
-	var hourExpr string
-	if ds.manager.IsMySQL() {
-		hourExpr = "HOUR(FROM_UNIXTIME(d.detected_at))"
-	} else {
-		hourExpr = "CAST(strftime('%H', datetime(d.detected_at, 'unixepoch', 'localtime')) AS INTEGER)"
-	}
-
-	var results []result
-	// Exclude detections marked as false_positive
-	prefix := ds.manager.TablePrefix()
-	err = ds.manager.DB().WithContext(ctx).
-		Table(prefix+"detections d").
-		Joins(fmt.Sprintf("LEFT JOIN %sdetection_reviews dr ON d.id = dr.detection_id", prefix)).
-		Select(fmt.Sprintf("d.label_id as label_id, %s as hour, COUNT(*) as count", hourExpr)).
-		Where("d.label_id IN ?", flatLabelIDs).
-		Where("d.detected_at >= ? AND d.detected_at < ?", startOfDay, endOfDay).
-		Where("d.confidence >= ?", minConfidence).
-		Where("(dr.verified IS NULL OR dr.verified != ?)", string(entities.VerificationFalsePositive)).
-		Group(fmt.Sprintf("d.label_id, %s", hourExpr)).
-		Scan(&results).Error
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch batch hourly occurrences: %w", err)
-	}
-
-	// Build result map with common names
-	resultMap := make(map[string][24]int)
-
-	// Initialize all requested species with zero counts
-	for _, commonName := range species {
-		resultMap[commonName] = [24]int{}
-	}
-
-	// Fill in actual counts, aggregating by common name
-	for _, r := range results {
-		if commonName, ok := labelToCommonName[r.LabelID]; ok {
-			if r.Hour >= 0 && r.Hour < 24 {
-				hourlyData := resultMap[commonName]
-				hourlyData[r.Hour] += r.Count // Accumulate counts from multiple label IDs
-				resultMap[commonName] = hourlyData
-			}
-		}
+		resultMap[scientificName] = hourlyData
 	}
 
 	return resultMap, nil
@@ -2873,6 +2859,13 @@ func thresholdModelName(t *entities.DynamicThreshold) string {
 // the benign fallback on the diagnostics health check.
 func (ds *Datastore) resolveCommonName(scientificName string) string {
 	sciName := detection.ExtractScientificName(scientificName)
+	// OpenFauna is authoritative: override label-derived names, serve localized
+	// names, and resolve historic out-of-working-set species via on-demand lookup.
+	if r := ds.loadNameResolver(); r != nil {
+		if name := r.Resolve(sciName, ""); name != "" {
+			return name
+		}
+	}
 	nm := ds.loadNameMaps()
 	if cn, ok := nm.common[sciName]; ok {
 		return cn
@@ -2881,7 +2874,10 @@ func (ds *Datastore) resolveCommonName(scientificName string) string {
 	// Logged at info because the fallback to the scientific name is the intended
 	// behavior; surfacing as a warning made it surface on the diagnostics health
 	// check as an "elevated error count" for benign missing translations.
-	if len(nm.common) > 0 {
+	// Guard ds.log: it may be nil when the datastore is constructed without a logger,
+	// matching the other logging sites in this file. Skipping the LoadOrStore when there
+	// is no logger is harmless: the dedup set only exists to rate-limit this log line.
+	if ds.log != nil && len(nm.common) > 0 {
 		if _, alreadyLogged := ds.loggedMissingNames.LoadOrStore(sciName, struct{}{}); !alreadyLogged {
 			ds.log.Info("common name not found in name maps, falling back to scientific name",
 				logger.String("scientific_name", sciName),
@@ -2895,11 +2891,18 @@ func (ds *Datastore) resolveCommonName(scientificName string) string {
 // or scientific name) to a scientific name for v2 label lookups.
 // Uses the pre-built species name map (lowercase common name → scientific name).
 // Falls back to the input unchanged if no mapping is found.
-// This follows the same pattern used in GetHourlyOccurrences.
 func (ds *Datastore) resolveToScientificName(name string) string {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if sci, ok := ds.loadNameMaps().species[normalized]; ok {
+	normalized := strings.ToLower(norm.NFC.String(strings.TrimSpace(name)))
+	species := ds.loadNameMaps().species
+	if sci, ok := species[normalized]; ok {
 		return sci
+	}
+	// Reverse miss: the input did not map to a known scientific name, so callers fall
+	// back to substring/LIKE. Log once so an unresolvable name is distinguishable from
+	// a name with no detections. Guard ds.log (may be nil; matches resolveCommonName).
+	if ds.log != nil && len(species) > 0 {
+		ds.log.Debug("species name did not resolve to a scientific name, using input verbatim",
+			logger.String("input", name))
 	}
 	return name
 }
@@ -3165,8 +3168,9 @@ func (ds *Datastore) GetThresholdEvents(speciesName string, limit int) ([]datast
 
 	// Query 2: If we can resolve to scientific name, also query with that
 	// This finds correctly saved events (after #1907 fix)
-	normalizedCommon := strings.ToLower(strings.TrimSpace(speciesName))
-	if scientificName, ok := ds.loadNameMaps().species[normalizedCommon]; ok && scientificName != speciesName {
+	// Resolve through resolveToScientificName so this shares the reverse map's NFC-folded
+	// normalization; a decomposed (NFD) localized name must match the NFC-folded keys.
+	if scientificName := ds.resolveToScientificName(speciesName); scientificName != speciesName {
 		sciEvents, err := ds.threshold.GetThresholdEvents(ctx, scientificName, limit)
 		if err == nil && len(sciEvents) > 0 {
 			v2Events = append(v2Events, sciEvents...)

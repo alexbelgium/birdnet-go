@@ -1,12 +1,18 @@
 package api
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/datastore"
+	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
 )
 
 // testLabels contains representative BirdNET label strings used across
@@ -25,13 +31,13 @@ func setupSearchTestController(t *testing.T, labels []string) *Controller {
 	e := echo.New()
 	c := &Controller{
 		Group: e.Group("/api/v2"),
-		Settings: &conf.Settings{
-			BirdNET: conf.BirdNETConfig{
-				Labels: labels,
-			},
-		},
 	}
-	c.nameMaps.Store(buildNameMaps(labels))
+	c.Settings.Store(&conf.Settings{
+		BirdNET: conf.BirdNETConfig{
+			Labels: labels,
+		},
+	})
+	c.nameMaps.Store(buildNameMaps(labels, nil))
 	return c
 }
 
@@ -197,7 +203,7 @@ func TestBuildNameMaps_AmbiguousCommonName(t *testing.T) {
 		"Strix aluco_Owl",
 		"Bubo bubo_Owl",
 		"Parus major_Great Tit",
-	})
+	}, nil)
 	require.NotNil(t, nm)
 
 	// sciToCommon keeps both species; scientific names are always unique.
@@ -214,7 +220,7 @@ func TestBuildNameMaps_AmbiguousCommonName(t *testing.T) {
 		"Strix aluco_Owl",
 		"Bubo bubo_Owl",
 		"Tyto alba_Owl",
-	})
+	}, nil)
 	_, ok = nm.commonToSci["owl"]
 	assert.False(t, ok)
 
@@ -223,7 +229,7 @@ func TestBuildNameMaps_AmbiguousCommonName(t *testing.T) {
 		"Strix aluco_Owl",
 		"Bubo bubo_Owl",
 		"Parus major_Great Tit",
-	})
+	}, nil)
 	assert.Equal(t, "Parus major", nm.commonToSci["great tit"])
 }
 
@@ -240,7 +246,7 @@ func TestBuildNameMaps_MalformedLabels(t *testing.T) {
 		"NoSeparatorAtAll",
 		"",
 		"   _   ",
-	})
+	}, nil)
 	require.NotNil(t, nm)
 	assert.Len(t, nm.sciToCommon, 1)
 	assert.Len(t, nm.commonToSci, 1)
@@ -259,4 +265,67 @@ func TestLoadNameMaps_CalledBeforeInit(t *testing.T) {
 	assert.NotNil(t, c.loadCommonToScientificMap())
 	assert.Empty(t, c.loadCommonNameMap())
 	assert.Empty(t, c.loadCommonToScientificMap())
+}
+
+// TestHandleSearch_LocalizedCommonName_SecondaryModelSpecies is the end-to-end
+// HTTP regression test for the localized common-name search fix. It verifies that when a search
+// request arrives with a localized common name for a secondary-model species
+// (a bat label that has no embedded common name in the label string and is
+// resolved only via the batch localizer), the name is resolved to the scientific
+// name before the datastore query runs. Pre-fix, the batch seam was absent so
+// the bat label never entered commonToSci and the search fell back to a
+// substring match on the unresolved localized string.
+func TestHandleSearch_LocalizedCommonName_SecondaryModelSpecies(t *testing.T) {
+	t.Parallel()
+	t.Attr("component", "search")
+	t.Attr("feature", "localized-name-resolution")
+
+	e := echo.New()
+	mockDS := mocks.NewMockInterface(t)
+
+	controller := &Controller{
+		Group: e.Group("/api/v2"),
+		DS:    mockDS,
+	}
+	controller.Settings.Store(newValidTestSettings())
+
+	// Wire a batch-capable resolver so the scientific-only bat label
+	// "Barbastella barbastellus" (no underscore-separated common name in the
+	// label string) gets a Finnish localized name via the batch path.
+	controller.SetNameResolver(&analyticsBatchFakeResolver{batch: map[string]string{
+		"Barbastella barbastellus": "mopsilepakko",
+	}})
+	// Feed the scientific-only label so UpdateCommonNameMap triggers the
+	// batchLocalizer path and populates commonToSci with
+	// "mopsilepakko" -> "Barbastella barbastellus".
+	controller.UpdateCommonNameMap([]string{"Barbastella barbastellus"})
+
+	// Capture the SearchFilters that reach the datastore.
+	var captured *datastore.SearchFilters
+	mockDS.EXPECT().
+		SearchDetections(mock.Anything).
+		RunAndReturn(func(f *datastore.SearchFilters) ([]datastore.DetectionRecord, int, error) {
+			captured = f
+			return nil, 0, nil
+		}).Once()
+
+	// Drive a POST /search request with the localized Finnish bat name.
+	body := strings.NewReader(`{"species":"mopsilepakko"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/search", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetPath("/api/v2/search")
+
+	err := controller.HandleSearch(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// The localized name must have been resolved to the scientific name before
+	// the datastore call. Pre-fix this would be "mopsilepakko" (unresolved).
+	require.NotNil(t, captured, "SearchDetections must have been called")
+	assert.Equal(t, "Barbastella barbastellus", captured.Species,
+		"localized bat name must resolve to scientific name before the datastore query")
+
+	mockDS.AssertExpectations(t)
 }

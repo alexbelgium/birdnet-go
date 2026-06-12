@@ -486,7 +486,8 @@
       "confidenceMax": "Hoogste percentage betrouwbaarheid",
       "verifiedStatus": "Status beoordeling",
       "lockedStatus": "Status vergrendeling",
-      "timeOfDay": "Tijdstip"
+      "timeOfDay": "Tijdstip",
+      "source": "Audiobron"
     },
     "advancedFilters": "Uitgebreide filters",
     "showAdvancedFilters": "Toon uitgebreide filters",
@@ -508,6 +509,9 @@
       "sunrise": "Zonsopkomst +/- 30 min.",
       "sunset": "Zonsondergang +/- 30 min."
     },
+    "sourceOptions": {
+      "any": "Alle bronnen"
+    },
     "sortOptions": {
       "dateDesc": "Datum (Nieuwste eerst)",
       "dateAsc": "Datum (Oudste eerst)",
@@ -519,6 +523,7 @@
       "timeOfDay": "Dagdeel",
       "species": "Soort",
       "confidence": "Betrouwbaarheid",
+      "source": "Bron",
       "status": "Status",
       "actions": "Akties"
     },
@@ -592,6 +597,18 @@
       "empty": "Alles rustig — momenteel geen vogels gedetecteerd"
     },
     "rejected": "Afgewezen",
+    "newSpeciesHighlights": {
+      "title": "Nieuwe & terugkerende soorten",
+      "subtitle": "Eerste waarnemingen en recente terugkeer",
+      "trackingDisabled": "Schakel \"Soorten volgen inschakelen\" in om deze functie te gebruiken.",
+      "categoryLifetime": "Nieuwe soort",
+      "categoryYear": "Nieuw dit jaar",
+      "categorySeason": "Nieuw dit seizoen",
+      "categorySeasonNamed": "Nieuw dit {season}",
+      "maxConfidenceShort": "Max {confidence}%",
+      "detections": "{count, plural, one {# detectie} other {# detecties}}",
+      "lastSeen": "Laatst: {days, plural, =0 {vandaag} one {# dag geleden} other {# dagen geleden}}"
+    },
     "dailySummary": {
       "title": "Dagactiviteit",
       "subtitle": "Detecties per uur",
@@ -758,6 +775,7 @@
     "elements": {
       "banner": "Dashboard-banner",
       "dailySummary": "Dagelijks overzicht",
+      "newSpeciesHighlights": "Nieuwe soorten in de kijker",
       "currentlyHearing": "Momenteel gehoord",
       "detectionsGrid": "Recente detecties",
       "liveSpectrogram": "Live spectrogram",
@@ -1606,6 +1624,7 @@
         "dateTime": "Datum/Tijd",
         "species": "Soort",
         "confidence": "Betrouwbaarheid",
+        "source": "Bron",
         "timeOfDay": "Dagdeel"
       },
       "noRecentDetections": "Geen recente herkenning gevonden",
@@ -2186,12 +2205,15 @@
         },
         "githubRequired": {
           "title": "Vereist: GitHub Issue voor Ondersteunings Uploads",
-          "description": "<strong>Ondersteunings uploads vereisen een GitHub issue nummer.</strong> <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"underline font-semibold\">Maak een GitHub issue aan</a> waarin je jouw probleem beschrijft <strong>voordat</strong> je een ondersteunings rapport genereert. Zonder een gelinkt issue kunnen ontwikkelaars niets doen met jouw ondersteunings gegevens."
+          "description": "<strong>Ondersteunings uploads vereisen een GitHub issue nummer.</strong> {createIssueLink} waarin je jouw probleem beschrijft <strong>voordat</strong> je een ondersteunings rapport genereert. Zonder een gelinkt issue kunnen ontwikkelaars niets doen met jouw ondersteunings gegevens.",
+          "createGithubIssue": "Maak een GitHub issue aan"
         },
         "githubIssue": {
           "label": "GitHub Issue Nummer",
           "placeholder": "bijv., 123 of #123",
-          "helper": "<a href=\"https://github.com/tphakala/birdnet-go/issues\" target=\"_blank\" class=\"link link-primary\">Bekijk bestaande issues</a> of <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"link link-primary\">maak eerst een nieuw issue aan</a>"
+          "helper": "{viewIssuesLink} of {createIssueLink}",
+          "viewExistingIssues": "Bekijk bestaande issues",
+          "createNewIssue": "maak eerst een nieuw issue aan"
         },
         "whatsIncluded": {
           "title": "Wat is opgenomen in het rapport:",
@@ -3313,10 +3335,11 @@
       "hostLabel": "Host Adres",
       "hostHelp": "De openbare hostnaam of het IP-adres van uw server (bijv. birdnet.example.com). Vereist voor OAuth-aanmelding en TLS-certificaten. Als u een reverse proxy gebruikt, gebruik dan in plaats daarvan de Base URL.",
       "allowSubnetBypassLabel": "Sta Toegang vanaf Subnet toe om Authenticatie te Omzeilen",
+      "subnetBypassLocalNote": "Wanneer ingeschakeld worden clients in hetzelfde lokale netwerk als deze server automatisch vertrouwd en slaan ze de login over. Gebruik het onderstaande veld alleen om dat vertrouwen uit te breiden naar aanvullende netwerken (bijvoorbeeld een apart VLAN of een gerouteerd subnet).",
       "allowedSubnetsLabel": "Toegestane Subnets",
-      "allowedSubnetsHelp": "Toegestane netwerk bereiken om de login te omzeilen (CIDR notatie, door komma's gescheiden lijst)",
+      "allowedSubnetsHelp": "Aanvullende netwerkbereiken die de login mogen omzeilen, naast het eigen lokale netwerk van deze server. CIDR-notatie, gescheiden door komma's.",
       "securityWarningTitle": "Beveiligings Waarschuwing:",
-      "subnetWarningText": "Apparaten vanaf deze subnets zullen onbeperkte toegang hebben. Voeg alleen vertrouwde interne netwerken toe.",
+      "subnetWarningText": "Het lokale netwerk van deze server en alle hier vermelde subnetten krijgen volledige toegang zonder in te loggen. Voeg alleen netwerken toe die u volledig vertrouwt.",
       "httpsSettingsTitle": "HTTPS Instellingen",
       "httpsSettingsDescription": "Beveiligde toegang met SSL/TLS encryptie",
       "basicAuthTitle": "Basis Authenticatie",
@@ -4559,7 +4582,8 @@
         "invalidUrl": "Ongeldig URL-formaat. Voer een volledige URL in, bijv. rtsp://host:poort/pad",
         "unsupportedScheme": "Niet-ondersteund URL-schema \"{scheme}\". Gebruik rtsp, rtsps, http, https, rtmp of udp",
         "blockedDestination": "Deze bestemming is geblokkeerd om veiligheidsredenen",
-        "connectionFailed": "Kan geen verbinding maken met de stream. Controleer of de URL correct is en de stream bereikbaar is"
+        "connectionFailed": "Kan geen verbinding maken met de stream. Controleer of de URL correct is en de stream bereikbaar is",
+        "noAudioTrack": "De stream heeft geen audiospoor. Alleen streams die audio bevatten, kunnen worden gebruikt"
       }
     },
     "debug": {

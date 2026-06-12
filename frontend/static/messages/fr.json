@@ -486,7 +486,8 @@
       "confidenceMax": "Pourcentage de confiance maximum",
       "verifiedStatus": "Statut vérifié",
       "lockedStatus": "Statut verrouillé",
-      "timeOfDay": "Moment de la journée"
+      "timeOfDay": "Moment de la journée",
+      "source": "Source audio"
     },
     "advancedFilters": "Filtres avancés",
     "showAdvancedFilters": "Afficher les filtres avancés",
@@ -508,6 +509,9 @@
       "sunrise": "Lever du soleil +/- 30min",
       "sunset": "Coucher du soleil +/- 30min"
     },
+    "sourceOptions": {
+      "any": "Toutes les sources"
+    },
     "sortOptions": {
       "dateDesc": "Date (Plus récent en premier)",
       "dateAsc": "Date (Plus ancien en premier)",
@@ -519,6 +523,7 @@
       "timeOfDay": "Moment de la journée",
       "species": "Espèce",
       "confidence": "Confiance",
+      "source": "Source",
       "status": "Statut",
       "actions": "Actions"
     },
@@ -592,6 +597,18 @@
       "empty": "Tout est calme — aucun oiseau détecté pour le moment"
     },
     "rejected": "Rejeté",
+    "newSpeciesHighlights": {
+      "title": "Espèces nouvelles et de retour",
+      "subtitle": "Premières observations et retours récents",
+      "trackingDisabled": "Veuillez activer « Activer le suivi des espèces » pour utiliser cette fonctionnalité.",
+      "categoryLifetime": "Nouvelle espèce",
+      "categoryYear": "Nouvelle cette année",
+      "categorySeason": "Nouvelle cette saison",
+      "categorySeasonNamed": "Nouvelle ce {season}",
+      "maxConfidenceShort": "Max {confidence} %",
+      "detections": "{count, plural, one {# détection} other {# détections}}",
+      "lastSeen": "Dernier : {days, plural, =0 {aujourd'hui} one {il y a # jour} other {il y a # jours}}"
+    },
     "dailySummary": {
       "title": "Activité Quotidienne",
       "subtitle": "Détections par heure",
@@ -758,6 +775,7 @@
     "elements": {
       "banner": "Bannière du tableau de bord",
       "dailySummary": "Résumé quotidien",
+      "newSpeciesHighlights": "Nouvelles espèces marquantes",
       "currentlyHearing": "En écoute actuellement",
       "detectionsGrid": "Détections récentes",
       "liveSpectrogram": "Spectrogramme en direct",
@@ -1606,6 +1624,7 @@
         "dateTime": "Date et heure",
         "species": "Espèce",
         "confidence": "Confiance",
+        "source": "Source",
         "timeOfDay": "Moment de la journée"
       },
       "noRecentDetections": "Aucune détection récente trouvée",
@@ -2186,12 +2205,15 @@
         },
         "githubRequired": {
           "title": "Requis : Problème GitHub pour les envois de support",
-          "description": "<strong>Les envois de support nécessitent un numéro de problème GitHub.</strong> Veuillez <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"underline font-semibold\">créer un problème GitHub</a> décrivant votre problème <strong>avant</strong> de générer un rapport de support. Sans problème lié, les développeurs ne peuvent pas traiter vos données de support."
+          "description": "<strong>Les envois de support nécessitent un numéro de problème GitHub.</strong> Veuillez {createIssueLink} décrivant votre problème <strong>avant</strong> de générer un rapport de support. Sans problème lié, les développeurs ne peuvent pas traiter vos données de support.",
+          "createGithubIssue": "créer un problème GitHub"
         },
         "githubIssue": {
           "label": "Numéro du problème GitHub",
           "placeholder": "#123",
-          "helper": "<a href=\"https://github.com/tphakala/birdnet-go/issues\" target=\"_blank\" class=\"link link-primary\">Voir les problèmes existants</a> ou <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"link link-primary\">créer un nouveau problème</a> d'abord"
+          "helper": "{viewIssuesLink} ou {createIssueLink} d'abord",
+          "viewExistingIssues": "Voir les problèmes existants",
+          "createNewIssue": "créer un nouveau problème"
         },
         "whatsIncluded": {
           "title": "Ce qui est inclus dans le rapport :",
@@ -3313,10 +3335,11 @@
       "hostLabel": "Adresse de l'hôte",
       "hostHelp": "Le nom d'hôte public ou l'adresse IP de votre serveur (ex. birdnet.example.com). Requis pour la connexion OAuth et les certificats TLS. Si vous utilisez un reverse proxy, utilisez plutôt l'URL de base.",
       "allowSubnetBypassLabel": "Autoriser les accès depuis le sous-réseau à contourner l'authentification",
+      "subnetBypassLocalNote": "Lorsque cette option est activée, les clients sur le même réseau local que ce serveur sont automatiquement approuvés et ignorent la connexion. Utilisez le champ ci-dessous uniquement pour étendre cette confiance à des réseaux supplémentaires (par exemple un VLAN distinct ou un sous-réseau routé).",
       "allowedSubnetsLabel": "Sous-réseaux autorisés",
-      "allowedSubnetsHelp": "Plages de réseau autorisées à contourner la connexion (notation CIDR, liste séparée par des virgules)",
+      "allowedSubnetsHelp": "Plages de réseau supplémentaires autorisées à contourner la connexion, en plus du propre réseau local de ce serveur. Notation CIDR, séparées par des virgules.",
       "securityWarningTitle": "Avertissement de sécurité :",
-      "subnetWarningText": "Les appareils de ces sous-réseaux auront un accès illimité. N'incluez que des réseaux internes de confiance.",
+      "subnetWarningText": "Le réseau local de ce serveur et tous les sous-réseaux listés ici obtiennent un accès complet sans connexion. N'incluez que des réseaux en lesquels vous avez entièrement confiance.",
       "httpsSettingsTitle": "Paramètres HTTPS",
       "httpsSettingsDescription": "Accès sécurisé avec chiffrement SSL/TLS",
       "basicAuthTitle": "Authentification basique",
@@ -4559,7 +4582,8 @@
         "invalidUrl": "Format d'URL invalide. Saisissez une URL complète, par ex. rtsp://hôte:port/chemin",
         "unsupportedScheme": "Schéma d'URL non pris en charge \"{scheme}\". Utilisez rtsp, rtsps, http, https, rtmp ou udp",
         "blockedDestination": "Cette destination est bloquée pour des raisons de sécurité",
-        "connectionFailed": "Impossible de se connecter au flux. Vérifiez que l'URL est correcte et que le flux est accessible"
+        "connectionFailed": "Impossible de se connecter au flux. Vérifiez que l'URL est correcte et que le flux est accessible",
+        "noAudioTrack": "Le flux ne contient aucune piste audio. Seuls les flux contenant de l'audio peuvent être utilisés"
       }
     },
     "debug": {

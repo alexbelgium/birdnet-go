@@ -486,7 +486,8 @@
       "confidenceMax": "Maximum confidence percentage",
       "verifiedStatus": "Verified Status",
       "lockedStatus": "Locked Status",
-      "timeOfDay": "Time of Day"
+      "timeOfDay": "Time of Day",
+      "source": "Audio Source"
     },
     "advancedFilters": "Advanced Filters",
     "showAdvancedFilters": "Show Advanced Filters",
@@ -508,6 +509,9 @@
       "sunrise": "Sunrise +/- 30min",
       "sunset": "Sunset +/- 30min"
     },
+    "sourceOptions": {
+      "any": "All Sources"
+    },
     "sortOptions": {
       "dateDesc": "Date (Newest First)",
       "dateAsc": "Date (Oldest First)",
@@ -519,6 +523,7 @@
       "timeOfDay": "Time of Day",
       "species": "Species",
       "confidence": "Confidence",
+      "source": "Source",
       "status": "Status",
       "actions": "Actions"
     },
@@ -592,6 +597,18 @@
       "empty": "All quiet — no birds detected right now"
     },
     "rejected": "Rejected",
+    "newSpeciesHighlights": {
+      "title": "New & Returning Species",
+      "subtitle": "First-time and recently returned detections",
+      "trackingDisabled": "Please activate \"Enable Species Tracking\" to use this feature.",
+      "categoryLifetime": "New species",
+      "categoryYear": "New this year",
+      "categorySeason": "New this season",
+      "categorySeasonNamed": "New this {season}",
+      "maxConfidenceShort": "Max {confidence}%",
+      "detections": "{count, plural, one {# detection} other {# detections}}",
+      "lastSeen": "Last: {days, plural, =0 {today} one {# day ago} other {# days ago}}"
+    },
     "dailySummary": {
       "title": "Daily Activity",
       "subtitle": "Species detections by hour",
@@ -758,6 +775,7 @@
     "elements": {
       "banner": "Dashboard Banner",
       "dailySummary": "Daily Summary",
+      "newSpeciesHighlights": "New Species Highlights",
       "currentlyHearing": "Currently Hearing",
       "detectionsGrid": "Recent Detections",
       "liveSpectrogram": "Live Spectrogram",
@@ -1606,6 +1624,7 @@
         "dateTime": "Date & Time",
         "species": "Species",
         "confidence": "Confidence",
+        "source": "Source",
         "timeOfDay": "Time of Day"
       },
       "noRecentDetections": "No recent detections found",
@@ -2186,12 +2205,15 @@
         },
         "githubRequired": {
           "title": "Required: GitHub Issue for Support Uploads",
-          "description": "<strong>Support uploads require a GitHub issue number.</strong> Please <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"underline font-semibold\">create a GitHub issue</a> describing your problem <strong>before</strong> generating a support report. Without a linked issue, developers cannot act on your support data."
+          "description": "<strong>Support uploads require a GitHub issue number.</strong> Please {createIssueLink} describing your problem <strong>before</strong> generating a support report. Without a linked issue, developers cannot act on your support data.",
+          "createGithubIssue": "create a GitHub issue"
         },
         "githubIssue": {
           "label": "GitHub Issue Number",
           "placeholder": "e.g., 123 or #123",
-          "helper": "<a href=\"https://github.com/tphakala/birdnet-go/issues\" target=\"_blank\" class=\"link link-primary\">View existing issues</a> or <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"link link-primary\">create a new issue</a> first"
+          "helper": "{viewIssuesLink} or {createIssueLink} first",
+          "viewExistingIssues": "View existing issues",
+          "createNewIssue": "create a new issue"
         },
         "whatsIncluded": {
           "title": "What's included in the report:",
@@ -3313,10 +3335,11 @@
       "hostLabel": "Host Address",
       "hostHelp": "Your server's public hostname or IP address (e.g. birdnet.example.com). Required for OAuth login and TLS certificates. If behind a reverse proxy, use Base URL instead.",
       "allowSubnetBypassLabel": "Allow Access from Subnet to Bypass Authentication",
+      "subnetBypassLocalNote": "When enabled, clients on the same local network as this server are trusted automatically and skip the login. Use the field below only to extend that trust to additional networks (for example a separate VLAN or a routed subnet).",
       "allowedSubnetsLabel": "Allowed Subnets",
-      "allowedSubnetsHelp": "Allowed network ranges to bypass the login (CIDR notation, comma-separated list)",
+      "allowedSubnetsHelp": "Additional network ranges that may bypass the login, on top of this server's own local network. CIDR notation, comma-separated.",
       "securityWarningTitle": "Security Warning:",
-      "subnetWarningText": "Devices from these subnets will have unrestricted access. Only include trusted internal networks.",
+      "subnetWarningText": "This server's local network and any subnets listed here get full access without logging in. Only include networks you fully trust.",
       "httpsSettingsTitle": "HTTPS Settings",
       "httpsSettingsDescription": "Secure access with SSL/TLS encryption",
       "basicAuthTitle": "Basic Authentication",
@@ -4559,7 +4582,8 @@
         "invalidUrl": "Invalid URL format. Enter a full URL like rtsp://host:port/path",
         "unsupportedScheme": "Unsupported URL scheme \"{scheme}\". Use rtsp, rtsps, http, https, rtmp, or udp",
         "blockedDestination": "This destination is blocked for security reasons",
-        "connectionFailed": "Could not connect to the stream. Check that the URL is correct and the stream is accessible"
+        "connectionFailed": "Could not connect to the stream. Check that the URL is correct and the stream is accessible",
+        "noAudioTrack": "The stream has no audio track. Only streams that contain audio can be used"
       }
     },
     "debug": {

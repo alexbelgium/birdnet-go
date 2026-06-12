@@ -597,6 +597,7 @@ func (c *Controller) GetDetections(ctx echo.Context) error {
 
 	// Convert notes to response format
 	detections := c.convertNotesToDetectionResponses(notes, params.IncludeWeather)
+	c.stripSourceForUnauthenticated(ctx, detections)
 
 	// Create paginated response
 	response := c.createPaginatedResponse(detections, totalResults, params.NumResults, params.Offset)
@@ -683,6 +684,20 @@ func (c *Controller) getDetectionsByQueryType(params *detectionQueryParams) ([]d
 			return c.getSearchDetectionsAdvanced(params)
 		}
 		return c.getAllDetections(params.NumResults, params.Offset)
+	}
+}
+
+// stripSourceForUnauthenticated removes audio source metadata from detection
+// responses for unauthenticated clients. Source ids and display names are
+// private data: they can reveal internal hostnames, IPs, stream paths, and
+// user-chosen labels. This matches the anonymization done by the audio source
+// listing endpoints and the search endpoint.
+func (c *Controller) stripSourceForUnauthenticated(ctx echo.Context, detections []DetectionResponse) {
+	if c.isClientAuthenticated(ctx) {
+		return
+	}
+	for i := range detections {
+		detections[i].Source = nil
 	}
 }
 
@@ -1215,6 +1230,9 @@ func (c *Controller) GetDetection(ctx echo.Context) error {
 	// For single detection, include weather data by default
 	weatherCache := make(map[string][]datastore.HourlyWeather)
 	detection := c.noteToDetectionResponse(&note, true, weatherCache)
+	if !c.isClientAuthenticated(ctx) {
+		detection.Source = nil
+	}
 	return ctx.JSON(http.StatusOK, detection)
 }
 
@@ -1237,6 +1255,7 @@ func (c *Controller) GetRecentDetections(ctx echo.Context) error {
 	}
 
 	detections := c.convertNotesToDetectionResponses(notes, includeWeather)
+	c.stripSourceForUnauthenticated(ctx, detections)
 	return ctx.JSON(http.StatusOK, detections)
 }
 
@@ -1653,9 +1672,7 @@ func (c *Controller) IgnoreSpecies(ctx echo.Context) error {
 
 // GetExcludedSpecies returns the list of excluded species
 func (c *Controller) GetExcludedSpecies(ctx echo.Context) error {
-	c.settingsMutex.RLock()
 	species := slices.Clone(c.getSettingsOrFallback().Realtime.Species.Exclude)
-	c.settingsMutex.RUnlock()
 
 	return ctx.JSON(http.StatusOK, ExcludedSpeciesResponse{
 		Species: species,
@@ -1769,14 +1786,14 @@ func (c *Controller) toggleSpeciesInSettingsList(
 		return "", false, nil
 	}
 
-	// Serialise against concurrent settings saves so that out-of-band
-	// StoreSettings calls (range filter rebuild, etc.) cannot desynchronise
-	// c.Settings from the live atomic pointer between read and publish.
+	// Serialise this read-modify-write against concurrent settings saves so an
+	// out-of-band StoreSettings (range filter rebuild, etc.) cannot interleave
+	// between reading current and publishing the update.
 	c.settingsMutex.Lock()
 	defer c.settingsMutex.Unlock()
 
-	// Always read the live atomic snapshot; c.Settings may be stale after
-	// UpdateIncludedSpecies or other out-of-band StoreSettings calls.
+	// Read the latest snapshot; getSettingsOrFallback prefers the global when
+	// this controller owns it, so out-of-band StoreSettings calls are seen.
 	current := c.getSettingsOrFallback()
 	wasMember := slices.Contains(getList(current), species)
 
@@ -1985,8 +2002,8 @@ func calculateTimeOfDay(detectionTime time.Time, sunEvents *suncalc.SunEventTime
 // Returns "imperial" for Fahrenheit or "metric" for Celsius to match frontend expectations.
 func (c *Controller) getWeatherUnits() string {
 	// Use dashboard temperature unit preference for display. Read the live
-	// snapshot (race-free, hot-reloading) rather than the bare c.Settings field,
-	// matching the rest of the Dashboard subtree reads.
+	// snapshot (race-free, hot-reloading) via currentSettings() so out-of-band
+	// global republishes are picked up, matching the rest of the Dashboard reads.
 	// All temperatures are now stored in Celsius internally.
 	switch c.currentSettings().Realtime.Dashboard.TemperatureUnit {
 	case conf.TemperatureUnitFahrenheit:

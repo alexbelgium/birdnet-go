@@ -56,10 +56,7 @@ func (m *MockDatastore) GetAllNotes() ([]datastore.Note, error) {
 func (m *MockDatastore) GetTopBirdsData(string, float64, int) ([]datastore.Note, error) {
 	return make([]datastore.Note, 0), nil
 }
-func (m *MockDatastore) GetHourlyOccurrences(string, string, float64) ([24]int, error) {
-	return [24]int{}, nil
-}
-func (m *MockDatastore) GetBatchHourlyOccurrences(string, []string, float64) (map[string][24]int, error) {
+func (m *MockDatastore) GetBatchHourlyOccurrences(context.Context, string, []string, float64) (map[string][24]int, error) {
 	return make(map[string][24]int), nil
 }
 func (m *MockDatastore) SpeciesDetections(string, string, string, int, bool, int, int) ([]datastore.Note, error) {
@@ -346,8 +343,9 @@ func (m *MockDatastore) DeleteExpiredNotificationHistory(before time.Time) (int6
 	return 0, nil
 }
 
-func (m *MockDatastore) SchemaVersion() string     { return datastore.SchemaVersionLegacy }
-func (m *MockDatastore) UpdateNameMaps(_ []string) {}
+func (m *MockDatastore) SchemaVersion() string                           { return datastore.SchemaVersionLegacy }
+func (m *MockDatastore) UpdateNameMaps(_ []string)                       {}
+func (m *MockDatastore) SetNameResolver(_ datastore.SpeciesNameResolver) {}
 func (m *MockDatastore) GetDatabaseStats(_ context.Context) (*datastore.DatabaseStats, error) {
 	return &datastore.DatabaseStats{
 		Type:      "mock",

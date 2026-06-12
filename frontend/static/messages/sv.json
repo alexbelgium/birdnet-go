@@ -486,7 +486,8 @@
       "confidenceMax": "Högsta konfidensprocent",
       "verifiedStatus": "Verifieringsstatus",
       "lockedStatus": "Låsstatus",
-      "timeOfDay": "Tid på dygnet"
+      "timeOfDay": "Tid på dygnet",
+      "source": "Ljudkälla"
     },
     "advancedFilters": "Avancerade filter",
     "showAdvancedFilters": "Visa avancerade filter",
@@ -508,6 +509,9 @@
       "sunrise": "Soluppgång +/- 30min",
       "sunset": "Solnedgång +/- 30min"
     },
+    "sourceOptions": {
+      "any": "Alla källor"
+    },
     "sortOptions": {
       "dateDesc": "Datum (nyast först)",
       "dateAsc": "Datum (äldst först)",
@@ -519,6 +523,7 @@
       "timeOfDay": "Tid på dygnet",
       "species": "Art",
       "confidence": "Konfidens",
+      "source": "Källa",
       "status": "Status",
       "actions": "Åtgärder"
     },
@@ -592,6 +597,18 @@
       "empty": "Allt är tyst — inga fåglar detekterade just nu"
     },
     "rejected": "Avvisad",
+    "newSpeciesHighlights": {
+      "title": "Nya & återvändande arter",
+      "subtitle": "Förstagångsobservationer och nyligen återvända",
+      "trackingDisabled": "Aktivera \"Aktivera artspårning\" för att använda den här funktionen.",
+      "categoryLifetime": "Ny art",
+      "categoryYear": "Ny i år",
+      "categorySeason": "Ny denna säsong",
+      "categorySeasonNamed": "Ny detta {season}",
+      "maxConfidenceShort": "Max {confidence} %",
+      "detections": "{count, plural, one {# upptäckt} other {# upptäckter}}",
+      "lastSeen": "Senast: {days, plural, =0 {idag} one {för # dag sedan} other {för # dagar sedan}}"
+    },
     "dailySummary": {
       "title": "Daglig aktivitet",
       "subtitle": "Artdetekteringar per timme",
@@ -758,6 +775,7 @@
     "elements": {
       "banner": "Instrumentpanelens banner",
       "dailySummary": "Daglig sammanfattning",
+      "newSpeciesHighlights": "Nya artsrekord",
       "currentlyHearing": "Hörs just nu",
       "detectionsGrid": "Senaste detekteringar",
       "liveSpectrogram": "Live spektrogram",
@@ -1606,6 +1624,7 @@
         "dateTime": "Datum & tid",
         "species": "Art",
         "confidence": "Konfidens",
+        "source": "Källa",
         "timeOfDay": "Tid på dygnet"
       },
       "noRecentDetections": "Inga senaste detektioner hittades",
@@ -2186,12 +2205,15 @@
         },
         "githubRequired": {
           "title": "Krav: GitHub-ärende för supportuppladdningar",
-          "description": "<strong>Supportuppladdningar kräver ett GitHub-ärendenummer.</strong> Vänligen <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"underline font-semibold\">skapa ett GitHub-ärende</a> som beskriver ditt problem <strong>innan</strong> du genererar en supportrapport. Utan ett länkat ärende kan utvecklare inte agera på din supportdata."
+          "description": "<strong>Supportuppladdningar kräver ett GitHub-ärendenummer.</strong> Vänligen {createIssueLink} som beskriver ditt problem <strong>innan</strong> du genererar en supportrapport. Utan ett länkat ärende kan utvecklare inte agera på din supportdata.",
+          "createGithubIssue": "skapa ett GitHub-ärende"
         },
         "githubIssue": {
           "label": "GitHub-ärendenummer",
           "placeholder": "t.ex. 123 eller #123",
-          "helper": "<a href=\"https://github.com/tphakala/birdnet-go/issues\" target=\"_blank\" class=\"link link-primary\">Visa befintliga ärenden</a> eller <a href=\"https://github.com/tphakala/birdnet-go/issues/new\" target=\"_blank\" class=\"link link-primary\">skapa ett nytt ärende</a> först"
+          "helper": "{viewIssuesLink} eller {createIssueLink} först",
+          "viewExistingIssues": "Visa befintliga ärenden",
+          "createNewIssue": "skapa ett nytt ärende"
         },
         "whatsIncluded": {
           "title": "Vad som ingår i rapporten:",
@@ -3313,10 +3335,11 @@
       "hostLabel": "Värdadress",
       "hostHelp": "Serverns offentliga värdnamn eller IP-adress (t.ex. birdnet.example.com). Krävs för OAuth-inloggning och TLS-certifikat. Om du använder en omvänd proxy, använd Bas-URL istället.",
       "allowSubnetBypassLabel": "Tillåt åtkomst från subnät att kringgå autentisering",
+      "subnetBypassLocalNote": "När detta är aktiverat anses klienter i samma lokala nätverk som denna server automatiskt vara betrodda och hoppar över inloggningen. Använd fältet nedan endast för att utöka denna tillit till ytterligare nätverk (till exempel ett separat VLAN eller ett routat subnät).",
       "allowedSubnetsLabel": "Tillåtna subnät",
-      "allowedSubnetsHelp": "Tillåtna nätverksintervall för att kringgå inloggning (CIDR-notation, kommaseparerad lista)",
+      "allowedSubnetsHelp": "Ytterligare nätverksintervall som får kringgå inloggningen, utöver serverns eget lokala nätverk. CIDR-notation, kommaseparerade.",
       "securityWarningTitle": "Säkerhetsvarning:",
-      "subnetWarningText": "Enheter från dessa subnät kommer att ha obegränsad åtkomst. Inkludera bara betrodda interna nätverk.",
+      "subnetWarningText": "Denna servers lokala nätverk och alla subnät som anges här får full åtkomst utan att logga in. Inkludera endast nätverk som du litar fullständigt på.",
       "httpsSettingsTitle": "HTTPS-inställningar",
       "httpsSettingsDescription": "Säker åtkomst med SSL/TLS-kryptering",
       "basicAuthTitle": "Grundläggande autentisering",
@@ -4559,7 +4582,8 @@
         "invalidUrl": "Ogiltigt URL-format. Ange en fullständig URL, t.ex. rtsp://värd:port/sökväg",
         "unsupportedScheme": "URL-schema \"{scheme}\" stöds inte. Använd rtsp, rtsps, http, https, rtmp eller udp",
         "blockedDestination": "Denna destination är blockerad av säkerhetsskäl",
-        "connectionFailed": "Kunde inte ansluta till strömmen. Kontrollera att URL:en är korrekt och att strömmen är tillgänglig"
+        "connectionFailed": "Kunde inte ansluta till strömmen. Kontrollera att URL:en är korrekt och att strömmen är tillgänglig",
+        "noAudioTrack": "Strömmen har inget ljudspår. Endast strömmar som innehåller ljud kan användas"
       }
     },
     "debug": {
