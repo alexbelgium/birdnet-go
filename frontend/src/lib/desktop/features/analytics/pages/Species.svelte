@@ -714,9 +714,12 @@
     if (rangeScores.size > 0) return;
     isLoadingScores = true;
     try {
+      // names=false skips per-species localized common-name resolution server-side: this
+      // view keys purely on scientific name, and resolving names for the full geomodel
+      // label set otherwise pushes the request past the request timeout on slow hosts.
       const data = await fetchWithCSRF<{
         species: Array<{ scientificName: string; score?: number }>;
-      }>('/api/v2/range/species/scores');
+      }>('/api/v2/range/species/scores?names=false');
       const next = new Map<string, number>();
       for (const entry of data.species) {
         if (typeof entry.score === 'number') {

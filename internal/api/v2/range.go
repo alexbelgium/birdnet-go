@@ -127,6 +127,25 @@ func convertSpeciesScores(scores []classifier.SpeciesScore, resolver *classifier
 	return species
 }
 
+// convertSpeciesScoresWithoutNames converts classifier.SpeciesScore entries to the API
+// response format with only the scientific name and probability score, skipping the
+// per-species localized common-name resolution. This is the fast path for callers that
+// key purely on scientific name (e.g. the species management view): it avoids resolving
+// names for the entire geomodel label set when a zero threshold is used, which otherwise
+// dominates the request time on low-powered hosts.
+func convertSpeciesScoresWithoutNames(scores []classifier.SpeciesScore) []RangeFilterSpecies {
+	species := make([]RangeFilterSpecies, 0, len(scores))
+	for _, s := range scores {
+		score := s.Score
+		species = append(species, RangeFilterSpecies{
+			Label:          s.Label,
+			ScientificName: detection.ParseSpeciesString(s.Label).ScientificName,
+			Score:          &score,
+		})
+	}
+	return species
+}
+
 // convertLabels converts string labels to the API response format without scores.
 // When resolver and locale are provided, common names are resolved to the
 // user's locale.
@@ -321,7 +340,17 @@ func (c *Controller) GetRangeFilterSpeciesScores(ctx echo.Context) error {
 		return c.HandleError(ctx, err, "Failed to get species scores", http.StatusInternalServerError)
 	}
 
-	speciesList := convertSpeciesScores(speciesScores, birdnetInstance, locale)
+	// Resolving a localized common name for every species in the full geomodel label set
+	// (~12k entries at a zero threshold) is the dominant cost of this endpoint and can
+	// exceed the client request timeout on low-powered hosts. Callers that only need
+	// scientific name + score (e.g. the species management view) pass names=false to skip
+	// per-species name resolution entirely.
+	var speciesList []RangeFilterSpecies
+	if ctx.QueryParam("names") == "false" {
+		speciesList = convertSpeciesScoresWithoutNames(speciesScores)
+	} else {
+		speciesList = convertSpeciesScores(speciesScores, birdnetInstance, locale)
+	}
 
 	response := RangeFilterScoresResponse{
 		Species:   speciesList,
