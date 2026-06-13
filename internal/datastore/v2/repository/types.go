@@ -222,3 +222,22 @@ type NewSpeciesData struct {
 	// Confidence is the confidence score of the first detection.
 	Confidence float64
 }
+
+// SpeciesReviewStatsData contains per-species detection totals together with manual
+// review counts. Unlike SpeciesSummaryData it does NOT exclude false positives, so a
+// species whose detections were all rejected is still reported. Common names are not
+// included; the caller resolves them from its name maps because the labels table stores
+// only scientific names.
+type SpeciesReviewStatsData struct {
+	// ScientificName is the species scientific name (label identifier).
+	ScientificName string
+
+	// Total is the count of every detection of the species, including rejected ones.
+	Total int64
+
+	// Verified is the number of detections manually reviewed as correct.
+	Verified int64
+
+	// Rejected is the number of detections manually reviewed as false positive.
+	Rejected int64
+}

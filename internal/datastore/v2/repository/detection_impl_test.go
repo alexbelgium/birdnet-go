@@ -558,3 +558,117 @@ func TestSaveReview_ConcurrentUpsertNoDuplicates(t *testing.T) {
 	require.NoError(t, db.Table(tableDetectionReviews).Where("detection_id = ?", det.ID).Count(&count).Error)
 	assert.Equal(t, int64(1), count)
 }
+
+func createReview(t *testing.T, db *gorm.DB, detectionID uint, status entities.VerificationStatus) {
+	t.Helper()
+	require.NoError(t, db.Table(tableDetectionReviews).Create(&entities.DetectionReview{
+		DetectionID: detectionID,
+		Verified:    status,
+	}).Error)
+}
+
+// TestGetSpeciesReviewStats verifies per-species aggregation collapses model variants,
+// counts confirmed/rejected reviews, and still reports species whose detections were all
+// rejected (the prime bulk-deletion candidates).
+func TestGetSpeciesReviewStats(t *testing.T) {
+	db := setupDetectionTestDBWithLabels(t)
+	ctx := t.Context()
+	repo := &detectionRepository{db: db}
+
+	// Same species under two models must collapse into one row (grouped by scientific_name).
+	blackbird1 := createTestLabel(t, db, "Turdus merula", 1)
+	blackbird2 := createTestLabel(t, db, "Turdus merula", 2)
+	crow := createTestLabel(t, db, "Corvus corone", 1)
+	robin := createTestLabel(t, db, "Erithacus rubecula", 1)
+
+	// Blackbird: 3 detections (model 1) + 1 (model 2) = 4 total; 2 correct, 1 rejected, 1 unreviewed.
+	bd1 := createDetectionForLabel(t, db, blackbird1.ID, 1000)
+	bd2 := createDetectionForLabel(t, db, blackbird1.ID, 1001)
+	bd3 := createDetectionForLabel(t, db, blackbird1.ID, 1002)
+	_ = createDetectionForLabel(t, db, blackbird2.ID, 1003) // unreviewed
+	createReview(t, db, bd1.ID, entities.VerificationCorrect)
+	createReview(t, db, bd2.ID, entities.VerificationCorrect)
+	createReview(t, db, bd3.ID, entities.VerificationFalsePositive)
+
+	// Crow: 2 detections, BOTH rejected — must still appear with zero verified.
+	cd1 := createDetectionForLabel(t, db, crow.ID, 2000)
+	cd2 := createDetectionForLabel(t, db, crow.ID, 2001)
+	createReview(t, db, cd1.ID, entities.VerificationFalsePositive)
+	createReview(t, db, cd2.ID, entities.VerificationFalsePositive)
+
+	// Robin: 1 detection, unreviewed.
+	_ = createDetectionForLabel(t, db, robin.ID, 3000)
+
+	stats, err := repo.GetSpeciesReviewStats(ctx)
+	require.NoError(t, err)
+
+	byName := make(map[string]SpeciesReviewStatsData, len(stats))
+	for _, s := range stats {
+		byName[s.ScientificName] = s
+	}
+
+	require.Contains(t, byName, "Turdus merula")
+	assert.Equal(t, int64(4), byName["Turdus merula"].Total, "totals must span both model variants")
+	assert.Equal(t, int64(2), byName["Turdus merula"].Verified)
+	assert.Equal(t, int64(1), byName["Turdus merula"].Rejected)
+
+	require.Contains(t, byName, "Corvus corone", "species with only rejected detections must still be reported")
+	assert.Equal(t, int64(2), byName["Corvus corone"].Total)
+	assert.Equal(t, int64(0), byName["Corvus corone"].Verified)
+	assert.Equal(t, int64(2), byName["Corvus corone"].Rejected)
+
+	require.Contains(t, byName, "Erithacus rubecula")
+	assert.Equal(t, int64(1), byName["Erithacus rubecula"].Total)
+	assert.Equal(t, int64(0), byName["Erithacus rubecula"].Verified)
+	assert.Equal(t, int64(0), byName["Erithacus rubecula"].Rejected)
+
+	// Ordered by total DESC: Turdus merula (4) leads.
+	require.NotEmpty(t, stats)
+	assert.Equal(t, "Turdus merula", stats[0].ScientificName)
+}
+
+func TestGetSpeciesReviewStats_Empty(t *testing.T) {
+	db := setupDetectionTestDBWithLabels(t)
+	repo := &detectionRepository{db: db}
+
+	stats, err := repo.GetSpeciesReviewStats(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, stats)
+}
+
+// TestGetDetectionIDsByLabelIDs verifies detections are enumerated across all supplied
+// label IDs and that empty input is handled without a query.
+func TestGetDetectionIDsByLabelIDs(t *testing.T) {
+	db := setupDetectionTestDBWithLabels(t)
+	ctx := t.Context()
+	repo := &detectionRepository{db: db}
+
+	merula := createTestLabel(t, db, "Turdus merula", 1)
+	merula2 := createTestLabel(t, db, "Turdus merula", 2)
+	crow := createTestLabel(t, db, "Corvus corone", 1)
+
+	d1 := createDetectionForLabel(t, db, merula.ID, 1000)
+	d2 := createDetectionForLabel(t, db, merula.ID, 1001)
+	d3 := createDetectionForLabel(t, db, merula2.ID, 1002)
+	dCrow := createDetectionForLabel(t, db, crow.ID, 2000)
+
+	t.Run("returns IDs across multiple label variants", func(t *testing.T) {
+		ids, err := repo.GetDetectionIDsByLabelIDs(ctx, []uint{merula.ID, merula2.ID})
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []uint{d1.ID, d2.ID, d3.ID}, ids)
+		assert.NotContains(t, ids, dCrow.ID)
+	})
+
+	t.Run("empty input returns empty slice", func(t *testing.T) {
+		ids, err := repo.GetDetectionIDsByLabelIDs(ctx, nil)
+		require.NoError(t, err)
+		assert.Empty(t, ids)
+	})
+
+	t.Run("label with no detections returns empty", func(t *testing.T) {
+		orphan := createTestLabel(t, db, "Bubo bubo", 1)
+		ids, err := repo.GetDetectionIDsByLabelIDs(ctx, []uint{orphan.ID})
+		require.NoError(t, err)
+		assert.Empty(t, ids)
+	})
+}

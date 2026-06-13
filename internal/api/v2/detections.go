@@ -158,6 +158,11 @@ func (c *Controller) initDetectionRoutes() {
 	detectionGroup.POST("/:id/lock", c.LockDetection)
 	detectionGroup.POST("/ignore", c.IgnoreSpecies)
 	detectionGroup.GET("/ignored", c.GetExcludedSpecies)
+	detectionGroup.POST("/include", c.IncludeSpecies)
+	detectionGroup.GET("/included", c.GetIncludedSpecies)
+	detectionGroup.POST("/confirm", c.ConfirmSpecies)
+	detectionGroup.GET("/confirmed", c.GetConfirmedSpecies)
+	detectionGroup.POST("/species/delete", c.DeleteSpeciesDetections)
 
 	// Batch operation endpoints
 	batchGroup := detectionGroup.Group("/batch")
@@ -1287,6 +1292,64 @@ func (c *Controller) DeleteDetection(ctx echo.Context) error {
 	return ctx.NoContent(http.StatusNoContent)
 }
 
+// DeleteSpeciesRequest is the request body for deleting every detection of a species.
+type DeleteSpeciesRequest struct {
+	ScientificName string `json:"scientific_name"`
+}
+
+// DeleteSpeciesResult reports the outcome of a whole-species deletion.
+type DeleteSpeciesResult struct {
+	ScientificName string `json:"scientific_name"`
+	Deleted        int    `json:"deleted"`
+	Skipped        int    `json:"skipped"`
+}
+
+// DeleteSpeciesDetections deletes every detection for a given scientific name along with
+// the associated audio and spectrogram files. It is intended for removing a mislabeled
+// species in one action. Locked detections are skipped and reported in the response. The
+// species is identified by scientific name in the request body (rather than a path
+// parameter) to avoid URL-encoding issues with the spaces in binomial names.
+func (c *Controller) DeleteSpeciesDetections(ctx echo.Context) error {
+	manager, ok := c.DS.(datastore.SpeciesManager)
+	if !ok {
+		return c.HandleError(ctx, fmt.Errorf("species management not supported by datastore"),
+			"Species management is not available for this database", http.StatusNotImplemented)
+	}
+
+	var req DeleteSpeciesRequest
+	if err := ctx.Bind(&req); err != nil {
+		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
+	}
+	scientificName := strings.TrimSpace(req.ScientificName)
+	if scientificName == "" {
+		return c.HandleError(ctx, fmt.Errorf("scientific_name is required"),
+			"Species name is required", http.StatusBadRequest)
+	}
+
+	ids, err := manager.GetSpeciesNoteIDs(scientificName)
+	if err != nil {
+		return c.HandleError(ctx, err, "Failed to list species detections", http.StatusInternalServerError)
+	}
+	if len(ids) == 0 {
+		return c.HandleError(ctx, fmt.Errorf("no detections for species %q", scientificName),
+			"No detections found for species", http.StatusNotFound)
+	}
+
+	result := c.deleteDetectionIDs(ids)
+	c.invalidateDetectionCache()
+
+	c.logInfoIfEnabled("Deleted species detections",
+		logger.String("scientific_name", scientificName),
+		logger.Int("deleted", result.Processed),
+		logger.Int("skipped", result.Skipped))
+
+	return ctx.JSON(http.StatusOK, DeleteSpeciesResult{
+		ScientificName: scientificName,
+		Deleted:        result.Processed,
+		Skipped:        result.Skipped,
+	})
+}
+
 // spectrogramWidths lists all valid spectrogram widths used for file naming.
 // These correspond to the size constants: sm=258, md=514, lg=1026, xl=2050.
 var spectrogramWidths = []int{
@@ -1537,6 +1600,42 @@ type ExcludedSpeciesResponse struct {
 	Count   int      `json:"count"`
 }
 
+// IncludeSpeciesRequest represents the request body for toggling a species in the include list.
+type IncludeSpeciesRequest struct {
+	CommonName string `json:"common_name"`
+}
+
+// IncludeSpeciesResponse represents the response for the include-species toggle endpoint.
+type IncludeSpeciesResponse struct {
+	CommonName string `json:"common_name"`
+	Action     string `json:"action"` // "added" or "removed"
+	IsIncluded bool   `json:"is_included"`
+}
+
+// IncludedSpeciesResponse represents the response for the get-included-species endpoint.
+type IncludedSpeciesResponse struct {
+	Species []string `json:"species"`
+	Count   int      `json:"count"`
+}
+
+// ConfirmSpeciesRequest represents the request body for toggling a species in the confirmed list.
+type ConfirmSpeciesRequest struct {
+	CommonName string `json:"common_name"`
+}
+
+// ConfirmSpeciesResponse represents the response for the confirm-species toggle endpoint.
+type ConfirmSpeciesResponse struct {
+	CommonName  string `json:"common_name"`
+	Action      string `json:"action"` // "added" or "removed"
+	IsConfirmed bool   `json:"is_confirmed"`
+}
+
+// ConfirmedSpeciesResponse represents the response for the get-confirmed-species endpoint.
+type ConfirmedSpeciesResponse struct {
+	Species []string `json:"species"`
+	Count   int      `json:"count"`
+}
+
 // IgnoreSpecies toggles a species in the ignored list (adds if not present, removes if present)
 func (c *Controller) IgnoreSpecies(ctx echo.Context) error {
 	// Parse request body
@@ -1581,6 +1680,90 @@ func (c *Controller) GetExcludedSpecies(ctx echo.Context) error {
 	})
 }
 
+// IncludeSpecies toggles a species in the always-include list (adds if absent, removes if present).
+func (c *Controller) IncludeSpecies(ctx echo.Context) error {
+	req := &IncludeSpeciesRequest{}
+	if err := ctx.Bind(req); err != nil {
+		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
+	}
+	if req.CommonName == "" {
+		return c.HandleError(ctx, nil, "Missing species name", http.StatusBadRequest)
+	}
+
+	action, isIncluded, err := c.toggleSpeciesInIncludeList(req.CommonName)
+	if err != nil {
+		return c.HandleError(ctx, err, "Failed to update species filter", http.StatusInternalServerError)
+	}
+
+	c.logInfoIfEnabled("Species inclusion toggled",
+		logger.String("species", req.CommonName),
+		logger.String("action", action),
+		logger.Bool("is_included", isIncluded),
+		logger.String("ip", ctx.RealIP()),
+	)
+
+	return ctx.JSON(http.StatusOK, IncludeSpeciesResponse{
+		CommonName: req.CommonName,
+		Action:     action,
+		IsIncluded: isIncluded,
+	})
+}
+
+// GetIncludedSpecies returns the list of always-included species.
+func (c *Controller) GetIncludedSpecies(ctx echo.Context) error {
+	c.settingsMutex.RLock()
+	species := slices.Clone(c.getSettingsOrFallback().Realtime.Species.Include)
+	c.settingsMutex.RUnlock()
+
+	return ctx.JSON(http.StatusOK, IncludedSpeciesResponse{
+		Species: species,
+		Count:   len(species),
+	})
+}
+
+// ConfirmSpecies toggles a species in the confirmed list (adds if absent, removes if present).
+// The confirmed list flags species that the user has manually verified as a genuine
+// occurrence; it has no effect on detection processing and is surfaced only in analytics.
+func (c *Controller) ConfirmSpecies(ctx echo.Context) error {
+	req := &ConfirmSpeciesRequest{}
+	if err := ctx.Bind(req); err != nil {
+		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
+	}
+	if req.CommonName == "" {
+		return c.HandleError(ctx, nil, "Missing species name", http.StatusBadRequest)
+	}
+
+	action, isConfirmed, err := c.toggleSpeciesInConfirmedList(req.CommonName)
+	if err != nil {
+		return c.HandleError(ctx, err, "Failed to update confirmed species", http.StatusInternalServerError)
+	}
+
+	c.logInfoIfEnabled("Species confirmation toggled",
+		logger.String("species", req.CommonName),
+		logger.String("action", action),
+		logger.Bool("is_confirmed", isConfirmed),
+		logger.String("ip", ctx.RealIP()),
+	)
+
+	return ctx.JSON(http.StatusOK, ConfirmSpeciesResponse{
+		CommonName:  req.CommonName,
+		Action:      action,
+		IsConfirmed: isConfirmed,
+	})
+}
+
+// GetConfirmedSpecies returns the list of manually confirmed species.
+func (c *Controller) GetConfirmedSpecies(ctx echo.Context) error {
+	c.settingsMutex.RLock()
+	species := slices.Clone(c.getSettingsOrFallback().Realtime.Species.Confirmed)
+	c.settingsMutex.RUnlock()
+
+	return ctx.JSON(http.StatusOK, ConfirmedSpeciesResponse{
+		Species: species,
+		Count:   len(species),
+	})
+}
+
 // addToIgnoredSpecies handles the logic for adding species to the ignore list
 func (c *Controller) addToIgnoredSpecies(verified, ignoreSpecies string) error {
 	if verified == "false_positive" && ignoreSpecies != "" {
@@ -1589,10 +1772,16 @@ func (c *Controller) addToIgnoredSpecies(verified, ignoreSpecies string) error {
 	return nil
 }
 
-// toggleSpeciesInIgnoredList toggles a species in the ignore list with proper concurrency control.
-// If the species is already excluded, it removes it. If not excluded, it adds it.
-// Returns the action taken ("added" or "removed"), the new excluded state, and any error.
-func (c *Controller) toggleSpeciesInIgnoredList(species string) (action string, isExcluded bool, err error) {
+// toggleSpeciesInSettingsList atomically toggles membership of species in a settings list.
+// getList reads the target slice; setList writes the modified slice back into the settings
+// copy. Holds the settings mutex for the full read-modify-write cycle so that concurrent
+// settings saves cannot desynchronise the live atomic pointer from the saved file.
+// Returns the action taken ("added"/"removed"), the new membership state, and any error.
+func (c *Controller) toggleSpeciesInSettingsList(
+	species string,
+	getList func(*conf.Settings) []string,
+	setList func(*conf.Settings, []string),
+) (action string, isMember bool, err error) {
 	if species == "" {
 		return "", false, nil
 	}
@@ -1606,36 +1795,66 @@ func (c *Controller) toggleSpeciesInIgnoredList(species string) (action string, 
 	// Read the latest snapshot; getSettingsOrFallback prefers the global when
 	// this controller owns it, so out-of-band StoreSettings calls are seen.
 	current := c.getSettingsOrFallback()
-
-	wasExcluded := slices.Contains(current.Realtime.Species.Exclude, species)
+	wasMember := slices.Contains(getList(current), species)
 
 	updated := conf.CloneSettings(current)
-	if wasExcluded {
-		updated.Realtime.Species.Exclude = slices.DeleteFunc(updated.Realtime.Species.Exclude, func(s string) bool {
+	if wasMember {
+		setList(updated, slices.DeleteFunc(getList(updated), func(s string) bool {
 			return s == species
-		})
+		}))
 		action = "removed"
-		isExcluded = false
+		isMember = false
 	} else {
-		updated.Realtime.Species.Exclude = append(updated.Realtime.Species.Exclude, species)
+		setList(updated, append(getList(updated), species))
 		action = "added"
-		isExcluded = true
+		isMember = true
 	}
 
 	if err := c.publishAndSaveSettings(current, updated); err != nil {
-		return "", wasExcluded, err
+		return "", wasMember, err
 	}
 
-	// Trigger side-effects (range filter rebuild, etc.) so the include list
-	// reflects the updated exclude list without waiting for the daily rebuild.
 	if handleErr := c.handleSettingsChanges(current, updated); handleErr != nil {
-		GetLogger().Warn("Failed to trigger settings side-effects after species exclusion change",
+		GetLogger().Warn("Failed to trigger settings side-effects after species list change",
 			logger.Error(handleErr),
 			logger.String("species", species),
 			logger.String("action", action))
 	}
 
-	return action, isExcluded, nil
+	return action, isMember, nil
+}
+
+// toggleSpeciesInIgnoredList toggles a species in the ignore (exclude) list.
+// If the species is already excluded, it removes it. If not excluded, it adds it.
+// Returns the action taken ("added" or "removed"), the new excluded state, and any error.
+func (c *Controller) toggleSpeciesInIgnoredList(species string) (action string, isExcluded bool, err error) {
+	return c.toggleSpeciesInSettingsList(
+		species,
+		func(s *conf.Settings) []string { return s.Realtime.Species.Exclude },
+		func(s *conf.Settings, list []string) { s.Realtime.Species.Exclude = list },
+	)
+}
+
+// toggleSpeciesInIncludeList toggles a species in the always-include list.
+// If the species is already included, it removes it. If not included, it adds it.
+// Returns the action taken ("added" or "removed"), the new included state, and any error.
+func (c *Controller) toggleSpeciesInIncludeList(species string) (action string, isIncluded bool, err error) {
+	return c.toggleSpeciesInSettingsList(
+		species,
+		func(s *conf.Settings) []string { return s.Realtime.Species.Include },
+		func(s *conf.Settings, list []string) { s.Realtime.Species.Include = list },
+	)
+}
+
+// toggleSpeciesInConfirmedList toggles a species in the confirmed (manually verified) list.
+// If the species is already confirmed, it removes it. If not confirmed, it adds it.
+// Returns the action taken ("added" or "removed"), the new confirmed state, and any error.
+func (c *Controller) toggleSpeciesInConfirmedList(species string) (action string, isConfirmed bool, err error) {
+	return c.toggleSpeciesInSettingsList(
+		species,
+		func(s *conf.Settings) []string { return s.Realtime.Species.Confirmed },
+		func(s *conf.Settings, list []string) { s.Realtime.Species.Confirmed = list },
+	)
 }
 
 // addSpeciesToIgnoredList adds a species to the ignore list (used by review endpoint).

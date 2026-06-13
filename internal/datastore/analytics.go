@@ -4,6 +4,7 @@ package datastore
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -806,4 +807,82 @@ func (ds *DataStore) GetNewSpeciesDetections(ctx context.Context, startDate, end
 	}
 
 	return finalResults, nil
+}
+
+// SpeciesReviewStats contains per-species detection totals together with the number of
+// detections a user has manually reviewed as correct (confirmed) or false positive
+// (rejected). Total counts every detection of the species, including rejected ones, so it
+// reflects how many records a full-species deletion would remove.
+type SpeciesReviewStats struct {
+	ScientificName string `json:"scientific_name"`
+	CommonName     string `json:"common_name"`
+	Total          int    `json:"total"`
+	Verified       int    `json:"verified"` // manually reviewed as "correct"
+	Rejected       int    `json:"rejected"` // manually reviewed as "false_positive"
+}
+
+// SpeciesManager is an optional datastore capability used by the species management UI to
+// review and bulk-delete an entire species. It is implemented by the legacy SQLite/MySQL
+// datastore; callers must type-assert and degrade gracefully when it is unavailable
+// (mirroring DatabaseInspector / DBCountersProvider).
+type SpeciesManager interface {
+	// GetSpeciesReviewStats returns detection totals and manual review counts grouped by
+	// species. Unlike GetSpeciesSummaryData it does NOT exclude false positives.
+	GetSpeciesReviewStats(ctx context.Context) ([]SpeciesReviewStats, error)
+	// GetSpeciesNoteIDs returns the IDs of every detection for the given scientific name.
+	GetSpeciesNoteIDs(scientificName string) ([]string, error)
+}
+
+// Compile-time assertion that the legacy datastore satisfies SpeciesManager, so a
+// future signature drift fails the build instead of silently degrading to HTTP 501.
+var _ SpeciesManager = (*DataStore)(nil)
+
+// GetSpeciesReviewStats returns detection totals and manual review counts grouped by
+// species (scientific name) across all detections. Unlike GetSpeciesSummaryData it does
+// NOT exclude false positives, so species whose detections were all rejected are still
+// reported — these are the prime "mislabel" candidates for deletion.
+func (ds *DataStore) GetSpeciesReviewStats(ctx context.Context) ([]SpeciesReviewStats, error) {
+	stats := make([]SpeciesReviewStats, 0, 100)
+
+	// Bound the aggregation so a very large database cannot hang the request.
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	err := ds.DB.WithContext(ctxWithTimeout).
+		Table("notes").
+		Select(`notes.scientific_name AS scientific_name,
+			COALESCE(MAX(notes.common_name), '') AS common_name,
+			COUNT(*) AS total,
+			SUM(CASE WHEN note_reviews.verified = ? THEN 1 ELSE 0 END) AS verified,
+			SUM(CASE WHEN note_reviews.verified = ? THEN 1 ELSE 0 END) AS rejected`,
+			string(entities.VerificationCorrect), string(entities.VerificationFalsePositive)).
+		Joins("LEFT JOIN note_reviews ON notes.id = note_reviews.note_id").
+		Group("notes.scientific_name").
+		Order("total DESC").
+		Scan(&stats).Error
+	if err != nil {
+		return nil, dbError(err, "get_species_review_stats", errors.PriorityMedium,
+			"action", "generate_species_review_stats")
+	}
+
+	return stats, nil
+}
+
+// GetSpeciesNoteIDs returns the IDs (as strings) of all detections for the given
+// scientific name. The IDs are returned as strings so they plug directly into the
+// existing per-ID delete/review pipeline (Get/Delete accept string IDs).
+func (ds *DataStore) GetSpeciesNoteIDs(scientificName string) ([]string, error) {
+	var ids []uint
+	if err := ds.DB.Model(&Note{}).
+		Where("scientific_name = ?", scientificName).
+		Pluck("id", &ids).Error; err != nil {
+		return nil, dbError(err, "get_species_note_ids", errors.PriorityMedium,
+			"action", "list_species_detection_ids")
+	}
+
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, strconv.FormatUint(uint64(id), 10))
+	}
+	return result, nil
 }

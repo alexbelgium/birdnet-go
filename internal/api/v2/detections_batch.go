@@ -64,6 +64,45 @@ type BatchResolveResult struct {
 	Count int      `json:"count"`
 }
 
+// deleteDetectionIDs deletes the given detection IDs, skipping locked ones and removing
+// each detection's associated audio and spectrogram files. IDs are deduplicated. It does
+// NOT enforce maxBatchSize, so callers that accept arbitrary user input must validate the
+// size beforehand; the caller is also responsible for invalidating the detection cache.
+func (c *Controller) deleteDetectionIDs(ids []string) BatchResult {
+	ids = deduplicateIDs(ids)
+	var processed, skipped int
+	for _, idStr := range ids {
+		note, err := c.DS.Get(idStr)
+		if err != nil {
+			c.logWarnIfEnabled("Delete: failed to get detection",
+				logger.String("id", idStr),
+				logger.Error(err))
+			skipped++
+			continue
+		}
+		if note.Locked {
+			skipped++
+			continue
+		}
+
+		clipName := note.ClipName
+		if err := c.DS.Delete(idStr); err != nil {
+			c.logWarnIfEnabled("Delete: failed to delete detection",
+				logger.String("id", idStr),
+				logger.Error(err))
+			skipped++
+			continue
+		}
+
+		processed++
+		if clipName != "" {
+			c.removeDetectionFiles(clipName)
+		}
+	}
+
+	return BatchResult{Processed: processed, Skipped: skipped}
+}
+
 // BatchDeleteDetections deletes multiple detections by ID, skipping locked ones.
 func (c *Controller) BatchDeleteDetections(ctx echo.Context) error {
 	var req BatchIDsRequest
@@ -79,43 +118,10 @@ func (c *Controller) BatchDeleteDetections(ctx echo.Context) error {
 			"Batch size exceeds maximum", http.StatusBadRequest)
 	}
 
-	ids := deduplicateIDs(req.IDs)
-	var processed, skipped int
-	for _, idStr := range ids {
-		note, err := c.DS.Get(idStr)
-		if err != nil {
-			c.logWarnIfEnabled("Batch delete: failed to get detection",
-				logger.String("id", idStr),
-				logger.Error(err))
-			skipped++
-			continue
-		}
-		if note.Locked {
-			skipped++
-			continue
-		}
-
-		clipName := note.ClipName
-		if err := c.DS.Delete(idStr); err != nil {
-			c.logWarnIfEnabled("Batch delete: failed to delete detection",
-				logger.String("id", idStr),
-				logger.Error(err))
-			skipped++
-			continue
-		}
-
-		processed++
-		if clipName != "" {
-			c.removeDetectionFiles(clipName)
-		}
-	}
-
+	result := c.deleteDetectionIDs(req.IDs)
 	c.invalidateDetectionCache()
 
-	return ctx.JSON(http.StatusOK, BatchResult{
-		Processed: processed,
-		Skipped:   skipped,
-	})
+	return ctx.JSON(http.StatusOK, result)
 }
 
 // BatchReviewDetections sets the verification status on multiple detections, skipping locked ones.
