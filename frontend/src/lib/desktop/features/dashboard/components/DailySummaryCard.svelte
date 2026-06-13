@@ -48,6 +48,7 @@ Responsive Breakpoints:
 
 <script lang="ts">
   import DatePicker from '$lib/desktop/components/ui/DatePicker.svelte';
+  import Modal from '$lib/desktop/components/ui/Modal.svelte';
   import SkeletonDailySummary from '$lib/desktop/components/ui/SkeletonDailySummary.svelte';
   import { t } from '$lib/i18n';
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
@@ -78,7 +79,17 @@ Responsive Breakpoints:
     resolveNoveltyCategory,
     noveltyCategoryColorVar,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { ChevronLeft, ChevronRight, Star, Sunrise, Sunset, XCircle } from '@lucide/svelte';
+  import {
+    ChevronLeft,
+    ChevronRight,
+    LineChart,
+    Star,
+    Sunrise,
+    Sunset,
+    XCircle,
+  } from '@lucide/svelte';
+  import { scaleTime, scaleLinear } from 'd3-scale';
+  import { line as d3Line, curveMonotoneX } from 'd3-shape';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
@@ -116,6 +127,14 @@ Responsive Breakpoints:
     },
     QUERY: {
       DEFAULT_NUM_RESULTS: 25, // Default number of results for detection queries
+    },
+    TREND: {
+      MIN_DAYS: 7,
+      DEFAULT_DAYS: 30,
+      MAX_DAYS: 1095,
+      WIDTH: 640,
+      HEIGHT: 220,
+      PADDING: 32,
     },
     SKELETON: {
       SPECIES_COUNT: 8, // Number of skeleton rows to show during loading
@@ -174,6 +193,21 @@ Responsive Breakpoints:
     align: string;
   }
 
+  interface DailyTrendPoint {
+    date: string;
+    count: number;
+  }
+
+  interface DailyTrendResponse {
+    data: DailyTrendPoint[];
+    total: number;
+  }
+
+  interface TrendSvgPoint {
+    date: Date;
+    count: number;
+  }
+
   type ColumnDefinition = SpeciesColumn | HourlyColumn | BiHourlyColumn | SixHourlyColumn;
 
   // URL builder types
@@ -225,6 +259,21 @@ Responsive Breakpoints:
   let hourlyWeather = $state<HourlyWeatherResponse[]>([]);
   // Map for O(1) hour lookup (populated when hourlyWeather changes)
   let hourlyWeatherMap = $state(new Map<number, HourlyWeatherResponse>());
+
+  let trendSpecies = $state<DailySpeciesSummary | null>(null);
+  let trendData = $state<DailyTrendPoint[]>([]);
+  let trendLoading = $state(false);
+  let trendError = $state<string | null>(null);
+  let trendDurationLog = $state(Math.log10(CONFIG.TREND.DEFAULT_DAYS));
+  let trendRequestId = 0;
+
+  const trendDurationTicks = $state.raw([
+    { days: 7, label: '7d' },
+    { days: 30, label: '1m' },
+    { days: 90, label: '3m' },
+    { days: 365, label: '1y' },
+    { days: 1095, label: '3y' },
+  ]);
 
   // Temperature unit preference (from dashboard settings store, consistent with BannerCard/System/Search)
   let temperatureUnit: TemperatureUnit = $derived(
@@ -709,6 +758,112 @@ Responsive Breakpoints:
   });
   const isToday = $derived(selectedDate === serverTodayDate);
 
+  const trendDurationDays = $derived(
+    Math.max(
+      CONFIG.TREND.MIN_DAYS,
+      Math.min(CONFIG.TREND.MAX_DAYS, Math.round(10 ** trendDurationLog))
+    )
+  );
+
+  const trendDisplayName = $derived(
+    trendSpecies ? localizeSpeciesName(trendSpecies.scientific_name, trendSpecies.common_name) : ''
+  );
+
+  function parseDateOnly(date: string): Date {
+    const [year = '0', month = '1', day = '1'] = date.split('-');
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
+  function startDateForDuration(endDate: string, days: number): string {
+    const date = parseDateOnly(endDate);
+    date.setDate(date.getDate() - days + 1);
+    return getLocalDateString(date);
+  }
+
+  function openTrendOverlay(species: DailySpeciesSummary): void {
+    trendSpecies = species;
+    trendDurationLog = Math.log10(CONFIG.TREND.DEFAULT_DAYS);
+  }
+
+  function closeTrendOverlay(): void {
+    trendRequestId++;
+    trendSpecies = null;
+  }
+
+  async function fetchTrendData(species: DailySpeciesSummary, days: number): Promise<void> {
+    const requestId = ++trendRequestId;
+    trendLoading = true;
+    trendError = null;
+
+    try {
+      const startDate = startDateForDuration(selectedDate, days);
+      const params = new URLSearchParams({
+        start_date: startDate,
+        end_date: selectedDate,
+        species: species.scientific_name,
+      });
+      const response = await fetch(
+        buildAppUrl(`/api/v2/analytics/time/daily?${params.toString()}`)
+      );
+      if (!response.ok) {
+        throw new Error(
+          t('dashboard.errors.dailySummaryFetch', { status: response.status.toString() })
+        );
+      }
+      const payload = (await response.json()) as DailyTrendResponse;
+      if (requestId !== trendRequestId) return;
+      trendData = payload.data;
+    } catch (error) {
+      if (requestId !== trendRequestId) return;
+      trendError = error instanceof Error ? error.message : t('dashboard.errors.dailySummaryLoad');
+      trendData = [];
+    } finally {
+      if (requestId === trendRequestId) {
+        trendLoading = false;
+      }
+    }
+  }
+
+  $effect(() => {
+    if (trendSpecies) {
+      fetchTrendData(trendSpecies, trendDurationDays);
+    }
+  });
+
+  const trendPath = $derived.by(() => {
+    if (trendData.length === 0) return '';
+
+    const { WIDTH, HEIGHT, PADDING } = CONFIG.TREND;
+    const points: TrendSvgPoint[] = trendData.map(point => ({
+      date: parseDateOnly(point.date),
+      count: point.count,
+    }));
+    const xScale = scaleTime()
+      .domain([
+        parseDateOnly(startDateForDuration(selectedDate, trendDurationDays)),
+        parseDateOnly(selectedDate),
+      ])
+      .range([PADDING, WIDTH - PADDING]);
+    const yMax = Math.max(1, ...points.map(point => point.count));
+    const yScale = scaleLinear()
+      .domain([0, yMax])
+      .nice()
+      .range([HEIGHT - PADDING, PADDING]);
+
+    return (
+      d3Line<TrendSvgPoint>()
+        .x(point => xScale(point.date))
+        .y(point => yScale(point.count))
+        .curve(curveMonotoneX)(points) ?? ''
+    );
+  });
+
+  const trendAreaPath = $derived.by(() => {
+    if (!trendPath) return '';
+    const { HEIGHT, PADDING } = CONFIG.TREND;
+    return `${trendPath} L ${CONFIG.TREND.WIDTH - PADDING} ${HEIGHT - PADDING} L ${PADDING} ${HEIGHT - PADDING} Z`;
+  });
+
   // Check for reduced motion preference for performance and accessibility
   const prefersReducedMotion = $derived(
     typeof window !== 'undefined'
@@ -1119,6 +1274,15 @@ Responsive Breakpoints:
                       </span>
                     {/if}
                   </a>
+                  <button
+                    type="button"
+                    class="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-[var(--color-base-content)]/60 transition-colors hover:bg-[var(--hover-overlay)] hover:text-[var(--color-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)]"
+                    title={`${t('dashboard.dailySummary.title')}: ${displayName}`}
+                    aria-label={`${t('dashboard.dailySummary.title')}: ${displayName}`}
+                    onclick={() => openTrendOverlay(item)}
+                  >
+                    <LineChart class="size-4" />
+                  </button>
                 </div>
 
                 <!-- Hourly heatmap cells (desktop) -->
@@ -1233,6 +1397,94 @@ Responsive Breakpoints:
     </div>
   </section>
 {/if}
+
+<Modal
+  isOpen={trendSpecies !== null}
+  title={trendDisplayName}
+  size="3xl"
+  type="default"
+  onClose={closeTrendOverlay}
+>
+  {#snippet header()}
+    <div class="pr-8">
+      <h3 id="modal-title" class="text-lg font-bold">{trendDisplayName}</h3>
+      {#if trendSpecies}
+        <p class="text-sm italic text-[var(--color-base-content)]/60">
+          {trendSpecies.scientific_name}
+        </p>
+      {/if}
+    </div>
+  {/snippet}
+
+  {#snippet children()}
+    <div class="space-y-4">
+      <div class="rounded-2xl bg-[var(--color-base-200)]/70 p-4">
+        {#if trendLoading}
+          <div
+            class="flex h-56 items-center justify-center text-sm text-[var(--color-base-content)]/60"
+          >
+            {t('common.loading')}
+          </div>
+        {:else if trendError}
+          <div class="flex h-56 items-center justify-center text-sm text-[var(--color-error)]">
+            {trendError}
+          </div>
+        {:else if trendData.length === 0}
+          <div
+            class="flex h-56 items-center justify-center text-sm text-[var(--color-base-content)]/60"
+          >
+            {t('dashboard.dailySummary.noSpecies')}
+          </div>
+        {:else}
+          <svg
+            viewBox={`0 0 ${CONFIG.TREND.WIDTH} ${CONFIG.TREND.HEIGHT}`}
+            class="h-56 w-full overflow-visible"
+            role="img"
+            aria-label={`${t('dashboard.dailySummary.title')}: ${trendDisplayName}`}
+          >
+            <path d={trendAreaPath} fill="var(--color-primary)" opacity="0.12" />
+            <path
+              d={trendPath}
+              fill="none"
+              stroke="var(--color-primary)"
+              stroke-width="3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        {/if}
+      </div>
+
+      <div class="space-y-2">
+        <input
+          type="range"
+          class="w-full accent-[var(--color-primary)]"
+          min={Math.log10(CONFIG.TREND.MIN_DAYS)}
+          max={Math.log10(CONFIG.TREND.MAX_DAYS)}
+          step="0.001"
+          bind:value={trendDurationLog}
+          list="daily-summary-trend-duration"
+        />
+        <datalist id="daily-summary-trend-duration">
+          {#each trendDurationTicks as tick (tick.days)}
+            <option value={Math.log10(tick.days)} label={tick.label}></option>
+          {/each}
+        </datalist>
+        <div class="flex justify-between text-xs text-[var(--color-base-content)]/60">
+          {#each trendDurationTicks as tick (tick.days)}
+            <button
+              type="button"
+              class="rounded px-2 py-1 hover:bg-[var(--hover-overlay)]"
+              onclick={() => (trendDurationLog = Math.log10(tick.days))}
+            >
+              {tick.label}
+            </button>
+          {/each}
+        </div>
+      </div>
+    </div>
+  {/snippet}
+</Modal>
 
 <style>
   /* ========================================================================
