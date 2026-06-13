@@ -34,10 +34,12 @@ vi.mock('$lib/utils/api', () => ({
 // Import after mocks are declared
 import {
   loadDictionary,
+  resolveCommonToScientificUnique,
   localizeScientific,
   resolveCommonToScientific,
   searchScientificByCommon,
   resetDictionaryForTest,
+  PER_VISITOR_SPECIES_LOCALE_ENABLED,
 } from './speciesDictionary.svelte';
 import { api } from '$lib/utils/api';
 import { getLocale } from '$lib/i18n/store.svelte';
@@ -76,6 +78,16 @@ const MOCK_FI_BAT_DICT: Record<string, string> = {
 function mockApiGet(dict: Record<string, string>): void {
   vi.mocked(api.get).mockResolvedValue(dict as unknown);
 }
+
+describe('per-visitor species locale gate', () => {
+  // The per-visitor client-side localization overlay is PARKED: it overrode the
+  // admin's server-side species language (settings.BirdNET.Locale) with the
+  // visitor's UI locale. This pins the release-blocking default so the gate is not
+  // flipped back on without the proper per-visitor species-language preference.
+  it('stays disabled until a species-language preference separate from the UI locale exists', () => {
+    expect(PER_VISITOR_SPECIES_LOCALE_ENABLED).toBe(false);
+  });
+});
 
 describe('speciesDictionary store', () => {
   beforeEach(() => {
@@ -254,6 +266,39 @@ describe('speciesDictionary store', () => {
     // Lookup with NFC 'ä' (U+00E4) should still find the entry
     const result = resolveCommonToScientific('Tälltiainen');
     expect(result).toContain('Parus major');
+  });
+
+  // --- Unique reverse resolution ---
+
+  describe('resolveCommonToScientificUnique', () => {
+    it('returns the single scientific name for an unambiguous common name', async () => {
+      mockApiGet(MOCK_FI_DICT);
+      await loadDictionary('fi');
+
+      expect(resolveCommonToScientificUnique('Mustarastas')).toBe('Turdus merula');
+    });
+
+    it('returns undefined for an ambiguous common name (more than one match)', async () => {
+      mockApiGet(MOCK_AMBIGUOUS_DICT);
+      await loadDictionary('fi');
+
+      // Two scientific names share this common name; a unique resolution is impossible.
+      expect(resolveCommonToScientificUnique('Raven')).toBeUndefined();
+    });
+
+    it('returns undefined for an unknown common name (no match)', async () => {
+      mockApiGet(MOCK_FI_DICT);
+      await loadDictionary('fi');
+
+      expect(resolveCommonToScientificUnique('Tuntematon Lintu')).toBeUndefined();
+    });
+
+    it('normalizes the query (NFC + case-insensitive) before resolving', async () => {
+      mockApiGet(MOCK_FI_DICT);
+      await loadDictionary('fi');
+
+      expect(resolveCommonToScientificUnique('mustarastas')).toBe('Turdus merula');
+    });
   });
 
   // --- Version in URL ---

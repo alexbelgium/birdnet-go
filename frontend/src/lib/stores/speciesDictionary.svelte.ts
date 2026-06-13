@@ -31,6 +31,34 @@ import type { Locale } from '$lib/i18n/config';
 const logger = getLogger('speciesDictionary');
 
 // ---------------------------------------------------------------------------
+// Feature gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Master switch for per-visitor, client-side species-name localization.
+ *
+ * PARKED (false) on purpose. The shipped overlay localized species names to the
+ * visitor's UI locale (getLocale()), which silently overrode the admin's explicit
+ * server-side species language (settings.BirdNET.Locale). For a user who runs the
+ * UI in English but sets the species language to Finnish, that turned species names
+ * back into English: a behavioral regression that conflates two independent axes
+ * (UI chrome language vs species-name language).
+ *
+ * While this is false, the two loadDictionary() call sites (App.svelte and
+ * Search.svelte) skip the fetch, so the store's maps stay empty and every consumer
+ * falls back to the server-locale behavior:
+ *   - display  (localizeSpeciesName) -> server-provided common name -> scientific
+ *   - search   (searchScientificByCommon) -> [] -> raw term resolved server-side
+ *   - settings (resolveCommonToScientificUnique) -> undefined -> prediction match
+ *
+ * The store, endpoint, generator and CI drift gate all stay in place, dormant.
+ * Re-enable ONLY together with a proper per-visitor species-language preference
+ * that is SEPARATE from the UI locale and DEFAULTS to settings.BirdNET.Locale
+ * (never the browser).
+ */
+export const PER_VISITOR_SPECIES_LOCALE_ENABLED = false;
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -219,6 +247,24 @@ export function localizeScientific(scientificName: string): string | undefined {
  */
 export function resolveCommonToScientific(text: string): string[] {
   return current.reverse.get(normalizeForLookup(text)) ?? [];
+}
+
+/**
+ * Resolve a localized common name to its scientific name ONLY when the match is
+ * unambiguous (exactly one scientific name shares that normalized common name in
+ * the current locale).
+ *
+ * The reverse map intentionally keeps every candidate for an ambiguous common
+ * name; this helper exists so a settings picker never silently writes reverse[0]
+ * (an arbitrary pick) into server-wide config. Returns undefined when there are
+ * zero matches or more than one, so the caller can fall back to the typed text.
+ *
+ * @param text - The common name to resolve. Normalized via NFC + lowercase.
+ * @returns The single matching scientific name, or undefined when not unique.
+ */
+export function resolveCommonToScientificUnique(text: string): string | undefined {
+  const matches = current.reverse.get(normalizeForLookup(text));
+  return matches?.length === 1 ? matches[0] : undefined;
 }
 
 /** Minimum query length for substring search (avoids matching everything on 1 char). */
