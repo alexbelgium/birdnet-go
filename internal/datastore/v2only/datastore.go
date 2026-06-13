@@ -2436,9 +2436,20 @@ func (ds *Datastore) GetSpeciesNoteIDs(scientificName string) ([]string, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), speciesNoteIDsTimeout)
 	defer cancel()
 
-	labelIDs, err := ds.label.GetLabelIDsByScientificName(ctx, scientificName)
+	// Match labels by their extracted scientific name so legacy
+	// "ScientificName_CommonName" labels are included. GetSpeciesReviewStats shows such
+	// species under the extracted name, so an exact lookup here would find no label IDs
+	// and make whole-species deletion return 404 for species visible in the manage table.
+	// The labels table is small (one row per species per model), so scanning it is cheap.
+	allLabels, err := ds.label.GetAll(ctx)
 	if err != nil {
 		return nil, err
+	}
+	labelIDs := make([]uint, 0, 4)
+	for _, label := range allLabels {
+		if detection.ExtractScientificName(label.ScientificName) == scientificName {
+			labelIDs = append(labelIDs, label.ID)
+		}
 	}
 	if len(labelIDs) == 0 {
 		return []string{}, nil

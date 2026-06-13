@@ -653,6 +653,32 @@ func TestV2OnlyDatastore_DeleteThresholdEvents_LegacyCommonNameLabel(t *testing.
 	assert.Empty(t, events, "legacy common-name event must not survive the delete")
 }
 
+// TestV2OnlyDatastore_GetSpeciesNoteIDs_LegacyLabel verifies whole-species deletion can
+// resolve detection IDs for legacy "ScientificName_CommonName" labels. GetSpeciesReviewStats
+// shows such species under the extracted scientific name, so GetSpeciesNoteIDs must match by
+// extracted name; an exact label lookup would miss them and make the delete 404.
+func TestV2OnlyDatastore_GetSpeciesNoteIDs_LegacyLabel(t *testing.T) {
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+
+	// Note 1: legacy concatenated label; the manage UI shows it as "Turdus migratorius".
+	saveTestNote(t, ds, "2024-01-15", "08:00:00", "Turdus migratorius_American Robin", 0.91) //nolint:misspell // scientific name
+	// Note 2: a clean-label control that must NOT be returned for the robin lookup.
+	saveTestNote(t, ds, "2024-01-15", "09:00:00", "Parus major", 0.82)
+
+	ids, err := ds.GetSpeciesNoteIDs("Turdus migratorius") //nolint:misspell // scientific name
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1"}, ids, "legacy concatenated label must resolve by extracted name")
+
+	ids, err = ds.GetSpeciesNoteIDs("Parus major")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"2"}, ids, "clean label still resolves by exact scientific name")
+
+	ids, err = ds.GetSpeciesNoteIDs("Nonexistent species")
+	require.NoError(t, err)
+	assert.Empty(t, ids, "unknown species yields no IDs (handler returns 404)")
+}
+
 func TestV2OnlyDatastore_ImageCache(t *testing.T) {
 	ds, cleanup := setupTestDatastore(t)
 	defer cleanup()
