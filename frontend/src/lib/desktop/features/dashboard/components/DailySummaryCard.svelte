@@ -90,6 +90,7 @@ Responsive Breakpoints:
   } from '@lucide/svelte';
   import { scaleTime, scaleLinear } from 'd3-scale';
   import { line as d3Line, curveMonotoneX } from 'd3-shape';
+  import { timeFormat } from 'd3-time-format';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
@@ -133,8 +134,13 @@ Responsive Breakpoints:
       DEFAULT_DAYS: 30,
       MAX_DAYS: 1095,
       WIDTH: 640,
-      HEIGHT: 220,
-      PADDING: 32,
+      HEIGHT: 260,
+      PADDING_TOP: 32,
+      PADDING_RIGHT: 18,
+      PADDING_BOTTOM: 48,
+      PADDING_LEFT: 48,
+      MOVING_AVERAGE_DAYS: 7,
+      MAX_PEAK_LABELS: 8,
     },
     SKELETON: {
       SPECIES_COUNT: 8, // Number of skeleton rows to show during loading
@@ -208,6 +214,11 @@ Responsive Breakpoints:
     count: number;
   }
 
+  interface TrendChartPoint extends TrendSvgPoint {
+    x: number;
+    y: number;
+  }
+
   type ColumnDefinition = SpeciesColumn | HourlyColumn | BiHourlyColumn | SixHourlyColumn;
 
   // URL builder types
@@ -268,11 +279,11 @@ Responsive Breakpoints:
   let trendRequestId = 0;
 
   const trendDurationTicks = $state.raw([
-    { days: 7, label: '7d' },
-    { days: 30, label: '1m' },
-    { days: 90, label: '3m' },
-    { days: 365, label: '1y' },
-    { days: 1095, label: '3y' },
+    { days: 7 },
+    { days: 30 },
+    { days: 90 },
+    { days: 365 },
+    { days: null },
   ]);
 
   // Temperature unit preference (from dashboard settings store, consistent with BannerCard/System/Search)
@@ -758,12 +769,14 @@ Responsive Breakpoints:
   });
   const isToday = $derived(selectedDate === serverTodayDate);
 
-  const trendDurationDays = $derived(
-    Math.max(
-      CONFIG.TREND.MIN_DAYS,
-      Math.min(CONFIG.TREND.MAX_DAYS, Math.round(10 ** trendDurationLog))
-    )
+  const trendAllTimeDays = $derived(
+    Math.max(CONFIG.TREND.MAX_DAYS, (trendSpecies?.days_since_first_seen ?? 3650) + 1)
   );
+
+  const trendDurationDays = $derived.by(() => {
+    const selectedDays = Math.max(CONFIG.TREND.MIN_DAYS, Math.round(10 ** trendDurationLog));
+    return Math.min(trendAllTimeDays, selectedDays);
+  });
 
   const trendDisplayName = $derived(
     trendSpecies ? localizeSpeciesName(trendSpecies.scientific_name, trendSpecies.common_name) : ''
@@ -830,10 +843,35 @@ Responsive Breakpoints:
     }
   });
 
-  const trendPath = $derived.by(() => {
-    if (trendData.length === 0) return '';
+  function trendTickLabel(days: number | null): string {
+    if (days === null) return t('analytics.periods.allTime');
+    if (days < 30) return `${days}d`;
+    if (days < 365) return `${Math.round(days / 30)}m`;
+    return `${Math.round(days / 365)}y`;
+  }
 
-    const { WIDTH, HEIGHT, PADDING } = CONFIG.TREND;
+  function formatTrendDate(date: Date, days: number): string {
+    if (days <= 31) return timeFormat('%b %-d')(date);
+    if (days <= 365) return timeFormat('%b')(date);
+    return timeFormat('%Y')(date);
+  }
+
+  function movingAverage(points: TrendSvgPoint[]): TrendSvgPoint[] {
+    return points.map((point, index) => {
+      const start = Math.max(0, index - CONFIG.TREND.MOVING_AVERAGE_DAYS + 1);
+      const window = points.slice(start, index + 1);
+      const total = window.reduce((sum, item) => sum + item.count, 0);
+      return { ...point, count: total / window.length };
+    });
+  }
+
+  const trendChart = $derived.by(() => {
+    if (trendData.length === 0) return null;
+
+    const { WIDTH, HEIGHT, PADDING_TOP, PADDING_RIGHT, PADDING_BOTTOM, PADDING_LEFT } =
+      CONFIG.TREND;
+    const chartBottom = HEIGHT - PADDING_BOTTOM;
+    const chartRight = WIDTH - PADDING_RIGHT;
     const points: TrendSvgPoint[] = trendData.map(point => ({
       date: parseDateOnly(point.date),
       count: point.count,
@@ -843,26 +881,56 @@ Responsive Breakpoints:
         parseDateOnly(startDateForDuration(selectedDate, trendDurationDays)),
         parseDateOnly(selectedDate),
       ])
-      .range([PADDING, WIDTH - PADDING]);
+      .range([PADDING_LEFT, chartRight]);
     const yMax = Math.max(1, ...points.map(point => point.count));
-    const yScale = scaleLinear()
-      .domain([0, yMax])
-      .nice()
-      .range([HEIGHT - PADDING, PADDING]);
+    const yScale = scaleLinear().domain([0, yMax]).nice().range([chartBottom, PADDING_TOP]);
+    const toChartPoint = (point: TrendSvgPoint): TrendChartPoint => ({
+      ...point,
+      x: xScale(point.date),
+      y: yScale(point.count),
+    });
+    const chartPoints = points.map(toChartPoint);
+    const averagePoints = movingAverage(points).map(toChartPoint);
+    const lineGenerator = d3Line<TrendChartPoint>()
+      .x(point => point.x)
+      .y(point => point.y)
+      .curve(curveMonotoneX);
+    const peakLabels = chartPoints
+      .filter((point, index, values) => {
+        if (point.count <= 0) return false;
+        const previous = values[index - 1]?.count ?? -1;
+        const next = values[index + 1]?.count ?? -1;
+        return point.count >= previous && point.count >= next;
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, CONFIG.TREND.MAX_PEAK_LABELS)
+      .sort((a, b) => a.x - b.x);
 
-    return (
-      d3Line<TrendSvgPoint>()
-        .x(point => xScale(point.date))
-        .y(point => yScale(point.count))
-        .curve(curveMonotoneX)(points) ?? ''
-    );
+    return {
+      path: lineGenerator(chartPoints) ?? '',
+      averagePath: lineGenerator(averagePoints) ?? '',
+      peakLabels,
+      xTicks: xScale.ticks(5).map(date => ({
+        value: date.getTime(),
+        label: formatTrendDate(date, trendDurationDays),
+        x: xScale(date),
+      })),
+      yTicks: yScale.ticks(4).map(value => ({
+        value,
+        label: value.toString(),
+        y: yScale(value),
+      })),
+      chartBottom,
+      chartRight,
+    };
   });
 
-  const trendAreaPath = $derived.by(() => {
-    if (!trendPath) return '';
-    const { HEIGHT, PADDING } = CONFIG.TREND;
-    return `${trendPath} L ${CONFIG.TREND.WIDTH - PADDING} ${HEIGHT - PADDING} L ${PADDING} ${HEIGHT - PADDING} Z`;
-  });
+  const trendDurationOptions = $derived(
+    trendDurationTicks.map(tick => ({
+      days: tick.days ?? trendAllTimeDays,
+      label: trendTickLabel(tick.days),
+    }))
+  );
 
   // Check for reduced motion preference for performance and accessibility
   const prefersReducedMotion = $derived(
@@ -1438,19 +1506,115 @@ Responsive Breakpoints:
         {:else}
           <svg
             viewBox={`0 0 ${CONFIG.TREND.WIDTH} ${CONFIG.TREND.HEIGHT}`}
-            class="h-56 w-full overflow-visible"
+            class="h-64 w-full overflow-visible"
             role="img"
             aria-label={`${t('dashboard.dailySummary.title')}: ${trendDisplayName}`}
           >
-            <path d={trendAreaPath} fill="var(--color-primary)" opacity="0.12" />
-            <path
-              d={trendPath}
-              fill="none"
-              stroke="var(--color-primary)"
-              stroke-width="3"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
+            {#if trendChart}
+              {#each trendChart.yTicks as tick (tick.value)}
+                <line
+                  x1={CONFIG.TREND.PADDING_LEFT}
+                  x2={trendChart.chartRight}
+                  y1={tick.y}
+                  y2={tick.y}
+                  stroke="var(--color-base-content)"
+                  opacity="0.08"
+                />
+                <text
+                  x={CONFIG.TREND.PADDING_LEFT - 8}
+                  y={(tick.y ?? 0) + 4}
+                  text-anchor="end"
+                  fill="var(--color-base-content)"
+                  opacity="0.6"
+                  class="text-[11px]"
+                >
+                  {tick.label}
+                </text>
+              {/each}
+              <line
+                x1={CONFIG.TREND.PADDING_LEFT}
+                x2={trendChart.chartRight}
+                y1={trendChart.chartBottom}
+                y2={trendChart.chartBottom}
+                stroke="var(--color-base-content)"
+                opacity="0.35"
+              />
+              <line
+                x1={CONFIG.TREND.PADDING_LEFT}
+                x2={CONFIG.TREND.PADDING_LEFT}
+                y1={CONFIG.TREND.PADDING_TOP}
+                y2={trendChart.chartBottom}
+                stroke="var(--color-base-content)"
+                opacity="0.35"
+              />
+              {#each trendChart.xTicks as tick (tick.value)}
+                <line
+                  x1={tick.x}
+                  x2={tick.x}
+                  y1={trendChart.chartBottom}
+                  y2={trendChart.chartBottom + 5}
+                  stroke="var(--color-base-content)"
+                  opacity="0.35"
+                />
+                <text
+                  x={tick.x}
+                  y={trendChart.chartBottom + 20}
+                  text-anchor="middle"
+                  fill="var(--color-base-content)"
+                  opacity="0.6"
+                  class="text-[11px]"
+                >
+                  {tick.label}
+                </text>
+              {/each}
+              <text
+                x={(CONFIG.TREND.PADDING_LEFT + trendChart.chartRight) / 2}
+                y={CONFIG.TREND.HEIGHT - 8}
+                text-anchor="middle"
+                fill="var(--color-base-content)"
+                opacity="0.7"
+                class="text-[12px] font-medium"
+              >
+                {t('analytics.charts.tooltips.date')}
+              </text>
+              <text
+                transform={`translate(14 ${(CONFIG.TREND.PADDING_TOP + trendChart.chartBottom) / 2}) rotate(-90)`}
+                text-anchor="middle"
+                fill="var(--color-base-content)"
+                opacity="0.7"
+                class="text-[12px] font-medium"
+              >
+                {t('dashboard.dailySummary.columns.detections')}
+              </text>
+              <path
+                d={trendChart.averagePath}
+                fill="none"
+                stroke="var(--color-secondary)"
+                stroke-width="2"
+                stroke-dasharray="5 4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d={trendChart.path}
+                fill="none"
+                stroke="var(--color-primary)"
+                stroke-width="3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              {#each trendChart.peakLabels as peak (`${peak.date.getTime()}-${peak.count}`)}
+                <text
+                  x={peak.x}
+                  y={Math.max(CONFIG.TREND.PADDING_TOP - 8, peak.y - 8)}
+                  text-anchor="middle"
+                  fill="var(--color-primary)"
+                  class="text-[11px] font-semibold"
+                >
+                  {peak.count}
+                </text>
+              {/each}
+            {/if}
           </svg>
         {/if}
       </div>
@@ -1460,18 +1624,18 @@ Responsive Breakpoints:
           type="range"
           class="w-full accent-[var(--color-primary)]"
           min={Math.log10(CONFIG.TREND.MIN_DAYS)}
-          max={Math.log10(CONFIG.TREND.MAX_DAYS)}
+          max={Math.log10(trendAllTimeDays)}
           step="0.001"
           bind:value={trendDurationLog}
           list="daily-summary-trend-duration"
         />
         <datalist id="daily-summary-trend-duration">
-          {#each trendDurationTicks as tick (tick.days)}
+          {#each trendDurationOptions as tick (tick.days)}
             <option value={Math.log10(tick.days)} label={tick.label}></option>
           {/each}
         </datalist>
         <div class="flex justify-between text-xs text-[var(--color-base-content)]/60">
-          {#each trendDurationTicks as tick (tick.days)}
+          {#each trendDurationOptions as tick (tick.days)}
             <button
               type="button"
               class="rounded px-2 py-1 hover:bg-[var(--hover-overlay)]"
