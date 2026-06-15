@@ -51,21 +51,20 @@
   </figure>
   <div class="card-body p-4">
     <div class="flex items-center gap-1.5">
-    <h3 class="card-title text-base">{displayName}</h3>
-    {#if ebirdUrl}
+      <h3 class="card-title text-base">{displayName}</h3>
+      {#if ebirdUrl}
         <a
           href={ebirdUrl}
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-xs font-bold tracking-wide text-[var(--color-primary)] opacity-60 transition-opacity hover:opacity-100"
           title={t('analytics.species.viewOnEbird')}
-          aria-label={t('analytics.species.viewOnEbirdAria', { species: species.common_name })}
+          aria-label={t('analytics.species.viewOnEbirdAria', { species: displayName })}
         >
           eBird&nbsp;↗
         </a>
       {/if}
     </div>
-    <h3 class="card-title text-base">{displayName}</h3>>>>>>>> main
     <p class="text-sm text-[var(--color-base-content)] opacity-60 italic">
       {species.scientific_name}
     </p>

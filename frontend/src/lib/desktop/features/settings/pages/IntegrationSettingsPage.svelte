@@ -519,8 +519,10 @@
     });
   }
 
-  // eBird species page links only require an enabled integration, not an API key,
-  // since the link is built client-side from the detection's species code.
+  // eBird species page links are independent of the API integration: no API key
+  // and no "enabled" toggle are required, since the link is built client-side from
+  // the detection's species code. Gating on "enabled" would force an API key (see
+  // validateEBird), so the species-links controls stay decoupled from it.
   let ebirdRegionInvalid = $derived(!isValidEbirdRegionCode(settings.ebird?.speciesPageRegion));
 
   // eBird locale options
@@ -1718,7 +1720,7 @@
                 checked={settings.ebird!.showSpeciesPageLinks}
                 label={t('settings.integration.ebird.speciesLinks.enable')}
                 helpText={t('settings.integration.ebird.speciesLinks.helpText')}
-                disabled={!settings.ebird?.enabled || store.isLoading || store.isSaving}
+                disabled={store.isLoading || store.isSaving}
                 onchange={updateEBirdShowSpeciesPageLinks}
               />
 
@@ -1733,8 +1735,7 @@
                     validationMessage={ebirdRegionInvalid
                       ? t('settings.integration.ebird.speciesLinks.region.invalid')
                       : ''}
-                    disabled={!settings.ebird?.enabled ||
-                      !settings.ebird?.showSpeciesPageLinks ||
+                    disabled={!settings.ebird?.showSpeciesPageLinks ||
                       store.isLoading ||
                       store.isSaving}
                   />

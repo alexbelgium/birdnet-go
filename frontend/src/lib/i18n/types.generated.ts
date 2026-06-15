@@ -1285,6 +1285,8 @@ export type TranslationKey =
   | 'analytics.species.card.detections'
   | 'analytics.species.card.confidence'
   | 'analytics.species.card.first'
+  | 'analytics.species.viewOnEbird'
+  | 'analytics.species.viewOnEbirdAria' // params: species
   | 'analytics.advanced.title'
   | 'analytics.advanced.chartControls'
   | 'analytics.advanced.dateRange'
@@ -2035,6 +2037,13 @@ export type TranslationKey =
   | 'settings.integration.ebird.cacheTTL.helpText'
   | 'settings.integration.ebird.note'
   | 'settings.integration.ebird.apiKeyInfo'
+  | 'settings.integration.ebird.speciesLinks.enable'
+  | 'settings.integration.ebird.speciesLinks.helpText'
+  | 'settings.integration.ebird.speciesLinks.region.label'
+  | 'settings.integration.ebird.speciesLinks.region.placeholder'
+  | 'settings.integration.ebird.speciesLinks.region.helpText'
+  | 'settings.integration.ebird.speciesLinks.region.hint'
+  | 'settings.integration.ebird.speciesLinks.region.invalid'
   | 'settings.integration.ebird.test.button'
   | 'settings.integration.ebird.test.loading'
   | 'settings.integration.ebird.test.enabledRequired'
@@ -3817,6 +3826,7 @@ export type TranslationParams = {
   };
   'system.database.migration.prerequisites.criticalCount': { count: string | number };
   'system.database.migration.prerequisites.warningCount': { count: string | number };
+  'analytics.species.viewOnEbirdAria': { species: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
   'analytics.advanced.detections': { count: string | number };
   'settings.notFound.message': { section: string | number };

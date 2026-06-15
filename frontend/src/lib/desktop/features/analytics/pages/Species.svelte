@@ -132,10 +132,10 @@
   let showDetailModal = $state(false);
 
   // Optional eBird species-page links, built client-side from each species' code.
+  // Independent of the eBird API integration toggle: the links are built from the
+  // species code with no API key, so they only require the showSpeciesPageLinks opt-in.
   let ebirdSettings = $derived($settingsStore.formData.realtime?.ebird);
-  let ebirdLinksEnabled = $derived(
-    !!(ebirdSettings?.enabled && ebirdSettings?.showSpeciesPageLinks)
-  );
+  let ebirdLinksEnabled = $derived(!!ebirdSettings?.showSpeciesPageLinks);
   function ebirdUrlFor(species: SpeciesData): string | null {
     if (!ebirdLinksEnabled) return null;
     return buildEbirdSpeciesUrl({
@@ -761,7 +761,7 @@
                       </div>
                       <div>
                         <div class="flex items-center gap-1.5">
-                          <span class="font-bold">{species.common_name}</span>
+                          <span class="font-bold">{displayName}</span>
                           {#if ebirdUrl}
                             <a
                               href={ebirdUrl}
@@ -770,7 +770,7 @@
                               class="inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-xs font-bold tracking-wide text-[var(--color-primary)] opacity-60 transition-opacity hover:opacity-100"
                               title={t('analytics.species.viewOnEbird')}
                               aria-label={t('analytics.species.viewOnEbirdAria', {
-                                species: species.common_name,
+                                species: displayName,
                               })}
                             >
                               eBird&nbsp;↗
