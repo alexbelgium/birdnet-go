@@ -2,6 +2,7 @@
   import { cn } from '$lib/utils/cn';
   import { t } from '$lib/i18n';
   import { formatDate } from '$lib/utils/formatters';
+  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
 
   interface SpeciesData {
     common_name: string;
@@ -28,6 +29,7 @@
   }
 
   let imageLoadFailed = $state(false);
+  let displayName = $derived(localizeSpeciesName(species.scientific_name, species.common_name));
 
   function handleImageError() {
     imageLoadFailed = true;
@@ -40,7 +42,7 @@
       {#if species.thumbnail_url && !imageLoadFailed}
         <img
           src={species.thumbnail_url}
-          alt={species.common_name}
+          alt={displayName}
           class="h-full w-full object-cover"
           onerror={handleImageError}
         />
@@ -49,8 +51,8 @@
   </figure>
   <div class="card-body p-4">
     <div class="flex items-center gap-1.5">
-      <h3 class="card-title text-base">{species.common_name}</h3>
-      {#if ebirdUrl}
+    <h3 class="card-title text-base">{displayName}</h3>
+    {#if ebirdUrl}
         <a
           href={ebirdUrl}
           target="_blank"
@@ -63,6 +65,7 @@
         </a>
       {/if}
     </div>
+    <h3 class="card-title text-base">{displayName}</h3>>>>>>>> main
     <p class="text-sm text-[var(--color-base-content)] opacity-60 italic">
       {species.scientific_name}
     </p>

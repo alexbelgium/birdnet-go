@@ -458,8 +458,7 @@ func (p *Processor) initDynamicThresholds(settings *conf.Settings) {
 			logger.String("operation", "load_dynamic_thresholds"))
 	}
 
-	p.startThresholdPersistence()
-	p.startThresholdCleanup()
+	p.startThresholdGoroutines()
 }
 
 // New creates a new Processor with the given dependencies.
@@ -1381,7 +1380,11 @@ func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *con
 		p.detectionMutex.RLock()
 		lastHumanDetection, exists := p.LastHumanDetection[item.Source]
 		p.detectionMutex.RUnlock()
-		if exists && lastHumanDetection.After(item.FirstDetected) {
+		// Discard when a human voice was detected at or after the bird detection
+		// started. Using !Before (>=) rather than After (>) so a human and a bird
+		// sharing the exact same audio chunk (equal timestamps) still trips the
+		// privacy filter instead of leaking the detection.
+		if exists && !lastHumanDetection.Before(item.FirstDetected) {
 			// Add structured logging for privacy filter
 			GetLogger().Debug("Detection discarded by privacy filter",
 				logger.String("species", item.Detection.Result.Species.CommonName),
@@ -2421,9 +2424,14 @@ func (p *Processor) ShutdownWithContext(ctx context.Context) error {
 	}
 	p.discoveryDebounceMu.Unlock()
 
-	// Stop threshold persistence and cleanup goroutines first
-	if p.thresholdsCancel != nil {
-		p.thresholdsCancel()
+	// Stop threshold persistence and cleanup goroutines first. Snapshot the cancel func
+	// under thresholdsMutex so this never races with StopDynamicThresholds rewriting the
+	// field when the feature is toggled off at runtime (see #1025). cancel() is idempotent.
+	p.thresholdsMutex.RLock()
+	thresholdsCancel := p.thresholdsCancel
+	p.thresholdsMutex.RUnlock()
+	if thresholdsCancel != nil {
+		thresholdsCancel()
 	}
 
 	// Cancel flusher goroutine

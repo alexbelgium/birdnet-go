@@ -133,7 +133,8 @@
       "downloadCsv": "Lataa lajilista CSV-tiedostona",
       "visitEbirdLink": "Avaa eBird.org uuteen välilehteen",
       "learnEbirdTaxonomyLink": "Avaa eBird-taksonomia uuteen välilehteen",
-      "resizeHandle": "Vedä muuttaaksesi kokoa"
+      "resizeHandle": "Vedä muuttaaksesi kokoa",
+      "imageCredit": "Image credit: {name}"
     },
     "labels": {
       "confidence": "Luottamus",
@@ -486,7 +487,8 @@
       "confidenceMax": "Enimmäisluottamusprosentti",
       "verifiedStatus": "Todennettu tila",
       "lockedStatus": "Lukittu tila",
-      "timeOfDay": "Vuorokaudenaika"
+      "timeOfDay": "Vuorokaudenaika",
+      "source": "Äänilähde"
     },
     "advancedFilters": "Lisäsuodattimet",
     "showAdvancedFilters": "Näytä lisäsuodattimet",
@@ -508,6 +510,9 @@
       "sunrise": "Auringonnousu +/- 30min",
       "sunset": "Auringonlasku +/- 30min"
     },
+    "sourceOptions": {
+      "any": "Kaikki lähteet"
+    },
     "sortOptions": {
       "dateDesc": "Päivämäärä (Uusin ensin)",
       "dateAsc": "Päivämäärä (Vanhin ensin)",
@@ -519,6 +524,7 @@
       "timeOfDay": "Vuorokaudenaika",
       "species": "Laji",
       "confidence": "Luottamus",
+      "source": "Lähde",
       "status": "Tila",
       "actions": "Toiminnot"
     },
@@ -788,7 +794,23 @@
     },
     "detail": {
       "species": "Laji",
-      "observation": "Havainto"
+      "observation": "Havainto",
+      "aria": {
+        "downloadAudioClip": "Download audio clip for {name} detection",
+        "audioRecordingFor": "Audio recording and spectrogram for {name}",
+        "scientificName": "Tieteellinen nimi",
+        "classificationBadges": "Lajin luokitusmerkit",
+        "confidence": "Havainnon luottamus {confidence}%",
+        "metadata": "Havainnon metatiedot",
+        "weatherConditions": "Sääolosuhteet havaintohetkellä",
+        "comments": "Havainnon kommentit",
+        "commentText": "Kommentin teksti",
+        "commentTimestamp": "Kommentin aikaleima",
+        "mainRegion": "Havainnon tiedot",
+        "tabsHeading": "Havaintotietojen välilehdet",
+        "tabList": "Havainnon tietojen välilehdet",
+        "speciesHeadingSuffix": "havainnon tiedot"
+      }
     },
     "headers": {
       "dateTime": "Päivä ja aika",
@@ -1619,6 +1641,7 @@
         "dateTime": "Päivä ja aika",
         "species": "Laji",
         "confidence": "Luottamus",
+        "source": "Lähde",
         "timeOfDay": "Vuorokaudenaika"
       },
       "noRecentDetections": "Viimeaikaisia havaintoja ei löytynyt",
@@ -1721,6 +1744,14 @@
     },
     "errors": {
       "loadFailed": "Analytiikkatietojen lataaminen epäonnistui. Yritä uudelleen."
+    },
+    "timeOfDayPeriods": {
+      "night0to4": "Night (0-4)",
+      "dawn5to8": "Dawn (5-8)",
+      "morning9to11": "Morning (9-11)",
+      "afternoon12to16": "Afternoon (12-16)",
+      "evening17to19": "Evening (17-19)",
+      "night20to23": "Night (20-23)"
     }
   },
   "settings": {
@@ -3666,16 +3697,22 @@
         "configureActions": "Määritä toiminnot",
         "actionsConfigured": "Määritetty",
         "list": {
-          "threshold": "Kynnysarvo:",
-          "interval": "Väli:",
-          "intervalNone": "Ei mitään",
-          "actionBadge": "Toiminto",
           "editTitle": "Muokkaa määritystä",
           "removeTitle": "Poista määritys"
         },
         "emptyState": {
           "title": "Määrityksiä ei vielä ole.",
           "description": "Napsauta \"Lisää määritys\" mukauttaaksesi lajintunnistusasetuksia."
+        },
+        "table": {
+          "columnScientificName": "Tieteellinen nimi",
+          "intervalDefault": "Oletus",
+          "intervalDefaultTooltip": "0 = käytä globaalia oletusväliä",
+          "noActions": "Ei mitään",
+          "searchPlaceholder": "Etsi lajeja...",
+          "noResults": "Ei vastaavia asetuksia",
+          "editDisabledReason": "Tallenna tai sulje nykyinen muokkain ennen toisen lajin muokkaamista",
+          "actionsDisabledBusy": "Odota, että nykyinen toiminto on valmis"
         }
       },
       "synonyms": {
@@ -4452,6 +4489,11 @@
       "removeCertificate": "Poista sertifikaatti",
       "fileReadError": "Tiedoston lukeminen epäonnistui",
       "loading": "Ladataan sertifikaattitietoja..."
+    },
+    "birdThumbnail": {
+      "viewDetections": "View {name} detections",
+      "largeView": "Large view of {name}",
+      "clickToView": "Click to view detections"
     }
   },
   "connectivity": {
@@ -4555,7 +4597,8 @@
         "invalidUrl": "Virheellinen URL-muoto. Syötä täydellinen URL, esim. rtsp://host:portti/polku",
         "unsupportedScheme": "URL-skeemaa \"{scheme}\" ei tueta. Käytä rtsp, rtsps, http, https, rtmp tai udp",
         "blockedDestination": "Tämä kohde on estetty turvallisuussyistä",
-        "connectionFailed": "Striimiin ei saatu yhteyttä. Tarkista, että URL on oikein ja striimi on saavutettavissa"
+        "connectionFailed": "Striimiin ei saatu yhteyttä. Tarkista, että URL on oikein ja striimi on saavutettavissa",
+        "noAudioTrack": "Striimissä ei ole ääniraitaa. Vain ääntä sisältäviä striimejä voidaan käyttää"
       }
     },
     "debug": {

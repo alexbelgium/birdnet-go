@@ -133,7 +133,8 @@
       "downloadCsv": "Stáhnout seznam druhů jako CSV",
       "visitEbirdLink": "Otevřít eBird.org v nové kartě",
       "learnEbirdTaxonomyLink": "Otevřít taxonomii eBird v nové kartě",
-      "resizeHandle": "Tažením změníte velikost"
+      "resizeHandle": "Tažením změníte velikost",
+      "imageCredit": "Image credit: {name}"
     },
     "labels": {
       "confidence": "Spolehlivost",
@@ -486,7 +487,8 @@
       "confidenceMax": "Maximální procento spolehlivosti",
       "verifiedStatus": "Stav ověření",
       "lockedStatus": "Stav uzamčení",
-      "timeOfDay": "Denní doba"
+      "timeOfDay": "Denní doba",
+      "source": "Zdroj zvuku"
     },
     "advancedFilters": "Pokročilé filtry",
     "showAdvancedFilters": "Zobrazit pokročilé filtry",
@@ -508,6 +510,9 @@
       "sunrise": "Východ slunce +/- 30 min",
       "sunset": "Západ slunce +/- 30 min"
     },
+    "sourceOptions": {
+      "any": "Všechny zdroje"
+    },
     "sortOptions": {
       "dateDesc": "Datum (od nejnovějších)",
       "dateAsc": "Datum (od nejstarších)",
@@ -519,6 +524,7 @@
       "timeOfDay": "Denní doba",
       "species": "Druh",
       "confidence": "Spolehlivost",
+      "source": "Zdroj",
       "status": "Stav",
       "actions": "Akce"
     },
@@ -788,7 +794,23 @@
     },
     "detail": {
       "species": "Druh",
-      "observation": "Pozorování"
+      "observation": "Pozorování",
+      "aria": {
+        "downloadAudioClip": "Download audio clip for {name} detection",
+        "audioRecordingFor": "Audio recording and spectrogram for {name}",
+        "scientificName": "Vědecký název",
+        "classificationBadges": "Odznaky klasifikace druhu",
+        "confidence": "Spolehlivost detekce {confidence}%",
+        "metadata": "Metadata detekce",
+        "weatherConditions": "Povětrnostní podmínky v době detekce",
+        "comments": "Komentáře k detekci",
+        "commentText": "Text komentáře",
+        "commentTimestamp": "Časové razítko komentáře",
+        "mainRegion": "Podrobnosti detekce",
+        "tabsHeading": "Karty s informacemi o detekci",
+        "tabList": "Karty podrobností detekce",
+        "speciesHeadingSuffix": "podrobnosti detekce"
+      }
     },
     "headers": {
       "dateTime": "Datum a čas",
@@ -1619,6 +1641,7 @@
         "dateTime": "Datum a čas",
         "species": "Druh",
         "confidence": "Spolehlivost",
+        "source": "Zdroj",
         "timeOfDay": "Denní doba"
       },
       "noRecentDetections": "Nebyly nalezeny žádné nedávné detekce",
@@ -1721,6 +1744,14 @@
     },
     "errors": {
       "loadFailed": "Nepodařilo se načíst analytická data. Zkuste to prosím znovu."
+    },
+    "timeOfDayPeriods": {
+      "night0to4": "Night (0-4)",
+      "dawn5to8": "Dawn (5-8)",
+      "morning9to11": "Morning (9-11)",
+      "afternoon12to16": "Afternoon (12-16)",
+      "evening17to19": "Evening (17-19)",
+      "night20to23": "Night (20-23)"
     }
   },
   "settings": {
@@ -3666,16 +3697,22 @@
         "configureActions": "Nakonfigurovat akce",
         "actionsConfigured": "Nakonfigurováno",
         "list": {
-          "threshold": "Práh:",
-          "interval": "Interval:",
-          "intervalNone": "Žádný",
-          "actionBadge": "Akce",
           "editTitle": "Upravit konfiguraci",
           "removeTitle": "Odstranit konfiguraci"
         },
         "emptyState": {
           "title": "Zatím žádné konfigurace.",
           "description": "Klikněte na \"Přidat konfiguraci\" pro přizpůsobení nastavení detekce druhů."
+        },
+        "table": {
+          "columnScientificName": "Vědecký název",
+          "intervalDefault": "Výchozí",
+          "intervalDefaultTooltip": "0 = použít globální výchozí interval",
+          "noActions": "Žádný",
+          "searchPlaceholder": "Hledat druhy...",
+          "noResults": "Žádné odpovídající konfigurace",
+          "editDisabledReason": "Před úpravou jiného druhu uložte nebo zavřete aktuální editor",
+          "actionsDisabledBusy": "Počkejte prosím na dokončení aktuální operace"
         }
       },
       "synonyms": {
@@ -4452,6 +4489,11 @@
       "removeCertificate": "Odstranit certifikát",
       "fileReadError": "Soubor se nepodařilo přečíst",
       "loading": "Načítání informací o certifikátu…"
+    },
+    "birdThumbnail": {
+      "viewDetections": "View {name} detections",
+      "largeView": "Large view of {name}",
+      "clickToView": "Click to view detections"
     }
   },
   "connectivity": {
@@ -4555,7 +4597,8 @@
         "invalidUrl": "Neplatný formát URL. Zadejte úplnou URL, např. rtsp://host:port/cesta",
         "unsupportedScheme": "Nepodporované schéma URL \"{scheme}\". Použijte rtsp, rtsps, http, https, rtmp nebo udp",
         "blockedDestination": "Tento cíl je z bezpečnostních důvodů blokován",
-        "connectionFailed": "Nelze se připojit ke streamu. Zkontrolujte, zda je URL správná a stream je dostupný"
+        "connectionFailed": "Nelze se připojit ke streamu. Zkontrolujte, zda je URL správná a stream je dostupný",
+        "noAudioTrack": "Stream neobsahuje žádnou zvukovou stopu. Lze použít pouze streamy obsahující zvuk"
       }
     },
     "debug": {

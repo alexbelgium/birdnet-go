@@ -133,7 +133,8 @@
       "downloadCsv": "Stiahnuť zoznam druhov ako CSV",
       "visitEbirdLink": "Otvoriť eBird.org v novej karte",
       "learnEbirdTaxonomyLink": "Otvoriť taxonómiu eBird v novej karte",
-      "resizeHandle": "Potiahnutím zmeníte veľkosť"
+      "resizeHandle": "Potiahnutím zmeníte veľkosť",
+      "imageCredit": "Image credit: {name}"
     },
     "labels": {
       "confidence": "Istota",
@@ -486,7 +487,8 @@
       "confidenceMax": "Maximálne percento istoty",
       "verifiedStatus": "Stav overenia",
       "lockedStatus": "Stav uzamknutia",
-      "timeOfDay": "Denná doba"
+      "timeOfDay": "Denná doba",
+      "source": "Zvukový zdroj"
     },
     "advancedFilters": "Rozšírené filtre",
     "showAdvancedFilters": "Zobraziť rozšírené filtre",
@@ -508,6 +510,9 @@
       "sunrise": "Východ slnka +/- 30min",
       "sunset": "Západ slnka +/- 30min"
     },
+    "sourceOptions": {
+      "any": "Všetky zdroje"
+    },
     "sortOptions": {
       "dateDesc": "Dátum (od najnovšieho)",
       "dateAsc": "Dátum (od najstaršieho)",
@@ -519,6 +524,7 @@
       "timeOfDay": "Denná doba",
       "species": "Druh",
       "confidence": "Istota",
+      "source": "Zdroj",
       "status": "Stav",
       "actions": "Akcie"
     },
@@ -788,7 +794,23 @@
     },
     "detail": {
       "species": "Druh",
-      "observation": "Pozorovanie"
+      "observation": "Pozorovanie",
+      "aria": {
+        "downloadAudioClip": "Download audio clip for {name} detection",
+        "audioRecordingFor": "Audio recording and spectrogram for {name}",
+        "scientificName": "Vedecký názov",
+        "classificationBadges": "Odznaky klasifikácie druhu",
+        "confidence": "Istota detekcie {confidence}%",
+        "metadata": "Metadáta detekcie",
+        "weatherConditions": "Poveternostné podmienky v čase detekcie",
+        "comments": "Komentáre k detekcii",
+        "commentText": "Text komentára",
+        "commentTimestamp": "Časová značka komentára",
+        "mainRegion": "Podrobnosti detekcie",
+        "tabsHeading": "Karty s informáciami o detekcii",
+        "tabList": "Karty podrobností detekcie",
+        "speciesHeadingSuffix": "podrobnosti detekcie"
+      }
     },
     "headers": {
       "dateTime": "Dátum a čas",
@@ -1619,6 +1641,7 @@
         "dateTime": "Dátum a čas",
         "species": "Druh",
         "confidence": "Istota",
+        "source": "Zdroj",
         "timeOfDay": "Denná doba"
       },
       "noRecentDetections": "Nenašli sa žiadne nedávne detekcie",
@@ -1721,6 +1744,14 @@
     },
     "errors": {
       "loadFailed": "Nepodarilo sa načítať analytické údaje. Skúste to znova."
+    },
+    "timeOfDayPeriods": {
+      "night0to4": "Night (0-4)",
+      "dawn5to8": "Dawn (5-8)",
+      "morning9to11": "Morning (9-11)",
+      "afternoon12to16": "Afternoon (12-16)",
+      "evening17to19": "Evening (17-19)",
+      "night20to23": "Night (20-23)"
     }
   },
   "settings": {
@@ -3666,16 +3697,22 @@
         "configureActions": "Konfigurovať akcie",
         "actionsConfigured": "Nakonfigurované",
         "list": {
-          "threshold": "Prah:",
-          "interval": "Interval:",
-          "intervalNone": "Žiadny",
-          "actionBadge": "Akcia",
           "editTitle": "Upraviť konfiguráciu",
           "removeTitle": "Odstrániť konfiguráciu"
         },
         "emptyState": {
           "title": "Zatiaľ žiadne konfigurácie.",
           "description": "Kliknite na \"Pridať konfiguráciu\" pre prispôsobenie nastavení detekcie druhov."
+        },
+        "table": {
+          "columnScientificName": "Vedecký názov",
+          "intervalDefault": "Predvolené",
+          "intervalDefaultTooltip": "0 = použiť globálny predvolený interval",
+          "noActions": "Žiadny",
+          "searchPlaceholder": "Hľadať druhy...",
+          "noResults": "Žiadne zodpovedajúce konfigurácie",
+          "editDisabledReason": "Pred úpravou iného druhu uložte alebo zatvorte aktuálny editor",
+          "actionsDisabledBusy": "Počkajte prosím na dokončenie aktuálnej operácie"
         }
       },
       "synonyms": {
@@ -4452,6 +4489,11 @@
       "removeCertificate": "Odstrániť certifikát",
       "fileReadError": "Nepodarilo sa prečítať súbor",
       "loading": "Načítavanie informácií o certifikáte..."
+    },
+    "birdThumbnail": {
+      "viewDetections": "View {name} detections",
+      "largeView": "Large view of {name}",
+      "clickToView": "Click to view detections"
     }
   },
   "connectivity": {
@@ -4555,7 +4597,8 @@
         "invalidUrl": "Neplatný formát URL. Zadajte úplnú URL, napr. rtsp://host:port/cesta",
         "unsupportedScheme": "Nepodporovaná schéma URL \"{scheme}\". Použite rtsp, rtsps, http, https, rtmp alebo udp",
         "blockedDestination": "Tento cieľ je z bezpečnostných dôvodov zablokovaný",
-        "connectionFailed": "Nepodarilo sa pripojiť k streamu. Skontrolujte, či je URL správna a stream je dostupný"
+        "connectionFailed": "Nepodarilo sa pripojiť k streamu. Skontrolujte, či je URL správna a stream je dostupný",
+        "noAudioTrack": "Stream neobsahuje žiadnu zvukovú stopu. Použiť možno iba streamy obsahujúce zvuk"
       }
     },
     "debug": {

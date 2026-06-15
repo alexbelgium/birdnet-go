@@ -240,12 +240,26 @@ func shouldReportToSentry(ee *EnhancedError) bool {
 		}
 	}
 
+	// Filter out audio capture buffer validation errors that are expected during
+	// normal operation (e.g., after service start when buffer hasn't filled yet,
+	// or Extended Capture requesting audio from before the buffer window).
+	if ee.Category == CategoryValidation && ee.GetComponent() == "audiocore" {
+		if strings.Contains(errorMsg, "requested time range is empty after clamping") ||
+			strings.Contains(errorMsg, "requested segment exceeds") {
+			return false
+		}
+	}
+
 	// Filter out expected not-found conditions that are not code bugs:
 	// - "note not found": transient race between write commit and read, or retention cleanup
 	// - "not found in ebird taxonomy": non-bird species (e.g., Canis latrans) detected by BirdNET
+	// - "dynamic threshold not found": a user queried the dynamic threshold for a species
+	//   that has none; both the v2only and legacy datastore backends produce this benign
+	//   404 (#1068), so it must not reach Sentry
 	if ee.Category == CategoryNotFound {
 		if strings.Contains(errorMsg, "note not found") ||
-			strings.Contains(errorMsg, "not found in ebird taxonomy") {
+			strings.Contains(errorMsg, "not found in ebird taxonomy") ||
+			strings.Contains(errorMsg, "dynamic threshold not found") {
 			return false
 		}
 	}

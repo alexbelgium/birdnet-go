@@ -133,7 +133,8 @@
       "downloadCsv": "Pobierz listę gatunków jako CSV",
       "visitEbirdLink": "Otwórz eBird.org w nowej karcie",
       "learnEbirdTaxonomyLink": "Otwórz Taksonomię eBird w nowej karcie",
-      "resizeHandle": "Przeciągnij, aby zmienić rozmiar"
+      "resizeHandle": "Przeciągnij, aby zmienić rozmiar",
+      "imageCredit": "Image credit: {name}"
     },
     "labels": {
       "confidence": "Pewność",
@@ -486,7 +487,8 @@
       "confidenceMax": "Maksymalny procent pewności",
       "verifiedStatus": "Status Weryfikacji",
       "lockedStatus": "Status Blokady",
-      "timeOfDay": "Pora Dnia"
+      "timeOfDay": "Pora Dnia",
+      "source": "Źródło dźwięku"
     },
     "advancedFilters": "Zaawansowane Filtry",
     "showAdvancedFilters": "Pokaż Zaawansowane Filtry",
@@ -508,6 +510,9 @@
       "sunrise": "Wschód Słońca +/- 30min",
       "sunset": "Zachód Słońca +/- 30min"
     },
+    "sourceOptions": {
+      "any": "Wszystkie źródła"
+    },
     "sortOptions": {
       "dateDesc": "Data (Najnowsze Najpierw)",
       "dateAsc": "Data (Najstarsze Najpierw)",
@@ -519,6 +524,7 @@
       "timeOfDay": "Pora Dnia",
       "species": "Gatunek",
       "confidence": "Pewność",
+      "source": "Źródło",
       "status": "Status",
       "actions": "Akcje"
     },
@@ -788,7 +794,23 @@
     },
     "detail": {
       "species": "Gatunek",
-      "observation": "Obserwacja"
+      "observation": "Obserwacja",
+      "aria": {
+        "downloadAudioClip": "Download audio clip for {name} detection",
+        "audioRecordingFor": "Audio recording and spectrogram for {name}",
+        "scientificName": "Nazwa naukowa",
+        "classificationBadges": "Odznaki klasyfikacji gatunku",
+        "confidence": "Pewność detekcji {confidence}%",
+        "metadata": "Metadane detekcji",
+        "weatherConditions": "Warunki pogodowe w czasie detekcji",
+        "comments": "Komentarze detekcji",
+        "commentText": "Treść komentarza",
+        "commentTimestamp": "Znacznik czasu komentarza",
+        "mainRegion": "Szczegóły detekcji",
+        "tabsHeading": "Karty informacji o detekcji",
+        "tabList": "Karty szczegółów detekcji",
+        "speciesHeadingSuffix": "szczegóły detekcji"
+      }
     },
     "headers": {
       "dateTime": "Data i Czas",
@@ -1619,6 +1641,7 @@
         "dateTime": "Data i Czas",
         "species": "Gatunek",
         "confidence": "Pewność",
+        "source": "Źródło",
         "timeOfDay": "Pora Dnia"
       },
       "noRecentDetections": "Nie znaleziono ostatnich detekcji",
@@ -1721,6 +1744,14 @@
     },
     "errors": {
       "loadFailed": "Nie udało się załadować danych analitycznych. Spróbuj ponownie."
+    },
+    "timeOfDayPeriods": {
+      "night0to4": "Night (0-4)",
+      "dawn5to8": "Dawn (5-8)",
+      "morning9to11": "Morning (9-11)",
+      "afternoon12to16": "Afternoon (12-16)",
+      "evening17to19": "Evening (17-19)",
+      "night20to23": "Night (20-23)"
     }
   },
   "settings": {
@@ -3666,16 +3697,22 @@
         "configureActions": "Konfiguruj Akcje",
         "actionsConfigured": "Skonfigurowane",
         "list": {
-          "threshold": "Próg:",
-          "interval": "Interwał:",
-          "intervalNone": "Brak",
-          "actionBadge": "Akcja",
           "editTitle": "Edytuj konfigurację",
           "removeTitle": "Usuń konfigurację"
         },
         "emptyState": {
           "title": "Brak konfiguracji.",
           "description": "Kliknij \"Dodaj Konfigurację\" aby dostosować ustawienia wykrywania gatunków."
+        },
+        "table": {
+          "columnScientificName": "Nazwa naukowa",
+          "intervalDefault": "Domyślne",
+          "intervalDefaultTooltip": "0 = użyj globalnego domyślnego interwału",
+          "noActions": "Brak",
+          "searchPlaceholder": "Szukaj gatunków...",
+          "noResults": "Brak pasujących konfiguracji",
+          "editDisabledReason": "Zapisz lub zamknij obecny edytor przed edycją innego gatunku",
+          "actionsDisabledBusy": "Proszę czekać na zakończenie obecnej operacji"
         }
       },
       "synonyms": {
@@ -4452,6 +4489,11 @@
       "removeCertificate": "Usuń certyfikat",
       "fileReadError": "Nie udało się odczytać pliku",
       "loading": "Ładowanie informacji o certyfikacie..."
+    },
+    "birdThumbnail": {
+      "viewDetections": "View {name} detections",
+      "largeView": "Large view of {name}",
+      "clickToView": "Click to view detections"
     }
   },
   "connectivity": {
@@ -4555,7 +4597,8 @@
         "invalidUrl": "Nieprawidłowy format URL. Wprowadź pełny URL, np. rtsp://host:port/ścieżka",
         "unsupportedScheme": "Nieobsługiwany schemat URL \"{scheme}\". Użyj rtsp, rtsps, http, https, rtmp lub udp",
         "blockedDestination": "Ten cel jest zablokowany ze względów bezpieczeństwa",
-        "connectionFailed": "Nie udało się połączyć ze strumieniem. Sprawdź, czy URL jest poprawny i strumień jest dostępny"
+        "connectionFailed": "Nie udało się połączyć ze strumieniem. Sprawdź, czy URL jest poprawny i strumień jest dostępny",
+        "noAudioTrack": "Strumień nie zawiera ścieżki dźwiękowej. Można używać tylko strumieni zawierających dźwięk"
       }
     },
     "debug": {

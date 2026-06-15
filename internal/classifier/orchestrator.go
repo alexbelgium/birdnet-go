@@ -522,7 +522,7 @@ func (o *Orchestrator) GetProbableSpeciesWithSettings(date time.Time, week float
 // scores already contain the full geomodel label set above the configured
 // threshold ("ScientificName_CommonName"), exclude-filtered.
 //
-// Additional models (except bat) emit labels in their own convention (Perch v2
+// Additional non-bat models emit labels in their own convention (Perch v2
 // uses scientific-name-only labels). To decide whether a non-primary species
 // should be added, the geomodel's coverage is consulted by scientific name:
 //
@@ -541,6 +541,12 @@ func (o *Orchestrator) GetProbableSpeciesWithSettings(date time.Time, week float
 // (exclude honored), preserving prior multi-classifier behavior. Deduplication
 // is by scientific name throughout, never exact label, because the geomodel and
 // Perch use different label conventions for the same species.
+//
+// The bat model is handled separately from the loop above: it has no geomodel,
+// so its species can never be range-filtered. They are all included as
+// always-active (score 1.0), deduped by scientific name and exclude-honored, so
+// a BattyBirdNET setup sees its bat species in the active/probable list instead
+// of a bird-only view.
 func (o *Orchestrator) GetAllProbableSpeciesWithSettings(date time.Time, week float32, settings *conf.Settings) ([]SpeciesScore, error) {
 	// Snapshot primary under read lock to avoid racing with Delete().
 	o.mu.RLock()
@@ -594,7 +600,10 @@ func (o *Orchestrator) GetAllProbableSpeciesWithSettings(date time.Time, week fl
 	slices.SortFunc(refs, func(a, b entryRef) int { return strings.Compare(a.id, b.id) })
 
 	passUnmapped := settings.BirdNET.RangeFilter.PassUnmappedSpecies
-	excludeList := settings.Realtime.Species.Exclude
+	// Build the exclude matcher once for this pass: it reverse-resolves localized
+	// common-name exclude entries through OpenFauna a single time so the per-label
+	// matches() below stays off the dataset scan.
+	excluder := newExcludeMatcher(settings.Realtime.Species.Exclude, settings.BirdNET.Locale)
 
 	for _, ref := range refs {
 		ref.entry.mu.Lock()
@@ -627,19 +636,58 @@ func (o *Orchestrator) GetAllProbableSpeciesWithSettings(date time.Time, week fl
 					// Legacy path: no geomodel to consult. Preserve prior
 					// behavior and include the species, deduped by scientific
 					// name, without gating on PassUnmappedSpecies.
-					if !isSpeciesExcluded(label, excludeList) {
+					if !excluder.matches(label) {
 						scores = append(scores, SpeciesScore{Label: label, Score: 1.0})
 						seenSci[sci] = true
 					}
 					continue
 				}
-				if passUnmapped && !isSpeciesExcluded(label, excludeList) {
+				if passUnmapped && !excluder.matches(label) {
 					scores = append(scores, SpeciesScore{Label: label, Score: 1.0})
 					seenSci[sci] = true
 				}
 			}
 		}
 	}
+
+	// The bat model is intentionally skipped by the range-filter loop above: it
+	// has no geomodel, so its species can never be location-filtered. Include
+	// them all here as always-active (score 1.0), deduped by scientific name and
+	// honoring the exclude list, so multi-model (BattyBirdNET) setups see their
+	// bat species in the active/probable list instead of a bird-only view.
+	o.mu.RLock()
+	batEntry, hasBat := o.models[RegistryIDBat]
+	o.mu.RUnlock()
+	if hasBat {
+		batEntry.mu.Lock()
+		var batLabels []string
+		if batEntry.instance != nil {
+			batLabels = batEntry.instance.Labels()
+		}
+		batEntry.mu.Unlock()
+		if len(batLabels) > 0 {
+			scores = slices.Grow(scores, len(batLabels))
+		}
+		for _, label := range batLabels {
+			sci := strings.ToLower(detection.ExtractScientificName(label))
+			if seenSci[sci] || excluder.matches(label) {
+				continue
+			}
+			scores = append(scores, SpeciesScore{Label: label, Score: 1.0})
+			seenSci[sci] = true
+		}
+	}
+
+	// The primary's range-filtered scores arrive pre-sorted descending, but the
+	// secondary-model and bat species above are appended after that sort with a
+	// flat always-active score of 1.0. Re-sort the merged slice so the full set
+	// is ordered by score descending, matching the primary path's contract:
+	// otherwise always-active species (the maximum 1.0) would trail behind
+	// low-probability birds in consumers that do not re-sort (the CSV export and
+	// the range-filter test preview). A stable sort keeps the deterministic append
+	// order of the equal-scored 1.0 species (secondary models are walked in
+	// sorted-by-ID order above), so the output does not shuffle run to run.
+	sort.Stable(ByScore(scores))
 
 	return scores, nil
 }
@@ -686,6 +734,78 @@ func (o *Orchestrator) Labels() []string {
 		return nil
 	}
 	return primary.Labels()
+}
+
+// unionLabels returns the deduplicated concatenation of the given label sets,
+// preserving first-seen order and skipping empty strings.
+func unionLabels(sets ...[]string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, set := range sets {
+		for _, label := range set {
+			if label == "" {
+				continue
+			}
+			if _, dup := seen[label]; dup {
+				continue
+			}
+			seen[label] = struct{}{}
+			out = append(out, label)
+		}
+	}
+	return out
+}
+
+// AllLabels returns the deduplicated union of every loaded model's labels: the
+// primary model plus all secondary models, INCLUDING the bat model. Unlike Labels(),
+// which returns the primary model's labels only, and unlike
+// GetAllProbableSpeciesWithSettings, which range-filters the bird models,
+// AllLabels is the unfiltered superset. It is the label source for the reverse
+// name-search maps so localized common names of secondary-model species (bats,
+// Perch-unique species) are searchable, matching how the forward display path
+// already resolves them.
+func (o *Orchestrator) AllLabels() []string {
+	if o == nil {
+		return nil
+	}
+	o.mu.RLock()
+	primary := o.primary
+	primaryID := o.ModelInfo.ID
+	refs := make([]entryRef, 0, len(o.models))
+	for id, entry := range o.models {
+		// When a primary is set, skip its map entry: its labels are unioned explicitly
+		// below via the *BirdNET pointer, so including it here would snapshot them twice.
+		// When primary is nil, do not skip, so the primary model's labels are still
+		// covered via the map entry. unionLabels dedupes regardless.
+		if primary != nil && id == primaryID {
+			continue
+		}
+		refs = append(refs, entryRef{id: id, entry: entry})
+	}
+	o.mu.RUnlock()
+
+	// Sort secondary models by ID so the union (and the reverse maps built from it) is
+	// stable across rebuilds; Go's randomized map iteration would otherwise pick a
+	// different winner for duplicate scientific names, matching GetAllProbableSpeciesWithSettings.
+	slices.SortFunc(refs, func(a, b entryRef) int { return strings.Compare(a.id, b.id) })
+
+	// Include the primary explicitly. primary.Labels() is safe without entry.mu because
+	// BirdNET.Labels takes the model's own lock internally, matching Labels() and
+	// GetAllProbableSpeciesWithSettings; only secondary entries are read under entry.mu.
+	sets := make([][]string, 0, len(refs)+1)
+	if primary != nil {
+		sets = append(sets, primary.Labels())
+	}
+	for _, ref := range refs {
+		ref.entry.mu.Lock()
+		var labels []string
+		if ref.entry.instance != nil {
+			labels = ref.entry.instance.Labels()
+		}
+		ref.entry.mu.Unlock()
+		sets = append(sets, labels)
+	}
+	return unionLabels(sets...)
 }
 
 // GetSpeciesCode returns the eBird species code for a given label.

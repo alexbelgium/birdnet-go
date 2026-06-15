@@ -133,7 +133,8 @@
       "downloadCsv": "Artenliste als CSV herunterladen",
       "visitEbirdLink": "eBird.org in neuem Tab öffnen",
       "learnEbirdTaxonomyLink": "eBird-Taxonomie in neuem Tab öffnen",
-      "resizeHandle": "Ziehen zum Ändern der Größe"
+      "resizeHandle": "Ziehen zum Ändern der Größe",
+      "imageCredit": "Image credit: {name}"
     },
     "labels": {
       "confidence": "Konfidenz",
@@ -486,7 +487,8 @@
       "confidenceMax": "Maximaler Konfidenzprozentsatz",
       "verifiedStatus": "Verifizierungsstatus",
       "lockedStatus": "Sperrstatus",
-      "timeOfDay": "Tageszeit"
+      "timeOfDay": "Tageszeit",
+      "source": "Audioquelle"
     },
     "advancedFilters": "Erweiterte Filter",
     "showAdvancedFilters": "Erweiterte Filter anzeigen",
@@ -508,6 +510,9 @@
       "sunrise": "Sonnenaufgang +/- 30min",
       "sunset": "Sonnenuntergang +/- 30min"
     },
+    "sourceOptions": {
+      "any": "Alle Quellen"
+    },
     "sortOptions": {
       "dateDesc": "Datum (Neueste zuerst)",
       "dateAsc": "Datum (Älteste zuerst)",
@@ -519,6 +524,7 @@
       "timeOfDay": "Tageszeit",
       "species": "Art",
       "confidence": "Konfidenz",
+      "source": "Quelle",
       "status": "Status",
       "actions": "Aktionen"
     },
@@ -788,7 +794,23 @@
     },
     "detail": {
       "species": "Art",
-      "observation": "Beobachtung"
+      "observation": "Beobachtung",
+      "aria": {
+        "downloadAudioClip": "Download audio clip for {name} detection",
+        "audioRecordingFor": "Audio recording and spectrogram for {name}",
+        "scientificName": "Wissenschaftlicher Name",
+        "classificationBadges": "Badges zur Artklassifizierung",
+        "confidence": "Erkennungskonfidenz {confidence}%",
+        "metadata": "Erkennungsmetadaten",
+        "weatherConditions": "Wetterbedingungen zum Zeitpunkt der Erkennung",
+        "comments": "Kommentare zur Erkennung",
+        "commentText": "Kommentartext",
+        "commentTimestamp": "Zeitstempel des Kommentars",
+        "mainRegion": "Erkennungsdetails",
+        "tabsHeading": "Registerkarten mit Erkennungsinformationen",
+        "tabList": "Registerkarten der Erkennungsdetails",
+        "speciesHeadingSuffix": "Erkennungsdetails"
+      }
     },
     "headers": {
       "dateTime": "Datum & Zeit",
@@ -1619,6 +1641,7 @@
         "dateTime": "Datum & Zeit",
         "species": "Art",
         "confidence": "Konfidenz",
+        "source": "Quelle",
         "timeOfDay": "Tageszeit"
       },
       "noRecentDetections": "Keine aktuellen Erkennungen gefunden",
@@ -1721,6 +1744,14 @@
     },
     "errors": {
       "loadFailed": "Analysedaten konnten nicht geladen werden. Bitte versuchen Sie es erneut."
+    },
+    "timeOfDayPeriods": {
+      "night0to4": "Night (0-4)",
+      "dawn5to8": "Dawn (5-8)",
+      "morning9to11": "Morning (9-11)",
+      "afternoon12to16": "Afternoon (12-16)",
+      "evening17to19": "Evening (17-19)",
+      "night20to23": "Night (20-23)"
     }
   },
   "settings": {
@@ -3666,16 +3697,22 @@
         "configureActions": "Aktionen konfigurieren",
         "actionsConfigured": "Konfiguriert",
         "list": {
-          "threshold": "Schwellenwert:",
-          "interval": "Intervall:",
-          "intervalNone": "Keines",
-          "actionBadge": "Aktion",
           "editTitle": "Konfiguration bearbeiten",
           "removeTitle": "Konfiguration entfernen"
         },
         "emptyState": {
           "title": "Noch keine Konfigurationen.",
           "description": "Klicken Sie auf \"Konfiguration hinzufügen\", um die Artenerkennungseinstellungen anzupassen."
+        },
+        "table": {
+          "columnScientificName": "Wissenschaftlicher Name",
+          "intervalDefault": "Standard",
+          "intervalDefaultTooltip": "0 = globales Standardintervall verwenden",
+          "noActions": "Keines",
+          "searchPlaceholder": "Arten suchen...",
+          "noResults": "Keine passenden Konfigurationen",
+          "editDisabledReason": "Speichern oder schließen Sie den aktuellen Editor, bevor Sie eine andere Art bearbeiten",
+          "actionsDisabledBusy": "Bitte warten Sie, bis der aktuelle Vorgang abgeschlossen ist"
         }
       },
       "synonyms": {
@@ -4452,6 +4489,11 @@
       "removeCertificate": "Zertifikat entfernen",
       "fileReadError": "Datei konnte nicht gelesen werden",
       "loading": "Zertifikatsinformationen werden geladen..."
+    },
+    "birdThumbnail": {
+      "viewDetections": "View {name} detections",
+      "largeView": "Large view of {name}",
+      "clickToView": "Click to view detections"
     }
   },
   "connectivity": {
@@ -4555,7 +4597,8 @@
         "invalidUrl": "Ungültiges URL-Format. Geben Sie eine vollständige URL ein, z. B. rtsp://host:port/pfad",
         "unsupportedScheme": "Nicht unterstütztes URL-Schema \"{scheme}\". Verwenden Sie rtsp, rtsps, http, https, rtmp oder udp",
         "blockedDestination": "Dieses Ziel ist aus Sicherheitsgründen gesperrt",
-        "connectionFailed": "Verbindung zum Stream konnte nicht hergestellt werden. Überprüfen Sie, ob die URL korrekt ist und der Stream erreichbar ist"
+        "connectionFailed": "Verbindung zum Stream konnte nicht hergestellt werden. Überprüfen Sie, ob die URL korrekt ist und der Stream erreichbar ist",
+        "noAudioTrack": "Der Stream enthält keine Audiospur. Es können nur Streams mit Audio verwendet werden"
       }
     },
     "debug": {

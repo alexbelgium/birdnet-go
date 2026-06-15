@@ -50,7 +50,7 @@
   import SpeciesTable from '$lib/desktop/features/settings/components/SpeciesTable.svelte';
   import SpeciesListCard from '$lib/desktop/features/settings/components/SpeciesListCard.svelte';
   import SpeciesConfigEditor from '$lib/desktop/features/settings/components/SpeciesConfigEditor.svelte';
-  import SpeciesConfigList from '$lib/desktop/features/settings/components/SpeciesConfigList.svelte';
+  import SpeciesConfigTable from '$lib/desktop/features/settings/components/SpeciesConfigTable.svelte';
   import { t } from '$lib/i18n';
   import { loggers } from '$lib/utils/logger';
   import { safeGet } from '$lib/utils/security';
@@ -59,8 +59,10 @@
   import {
     buildSpeciesNameMaps,
     isSpeciesInList,
+    normalizeForLookup,
     type SpeciesNameMaps,
   } from '$lib/utils/speciesNames';
+  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import {
     ArrowLeftRight,
     ChevronRight,
@@ -289,7 +291,7 @@
   }
 
   function extractScientificName(prediction: string): string {
-    // Format: "ScientificName (CommonName)" — extract before the first opening paren
+    // Format: "ScientificName (CommonName)": extract before the first opening paren
     // Use indexOf (not lastIndexOf) since scientific names never contain parentheses
     // but common names can, e.g., "Herring Gull (European)"
     const parenIndex = prediction.indexOf(' (');
@@ -653,10 +655,11 @@
         commonName: string,
         scientificName: string
       ): boolean =>
-        nameSet.has(commonName.toLowerCase()) || nameSet.has(scientificName.toLowerCase());
+        nameSet.has(normalizeForLookup(commonName)) ||
+        nameSet.has(normalizeForLookup(scientificName));
 
-      const includeSet = new Set((currentInclude ?? []).map(s => s.toLowerCase()));
-      const configKeys = new Set(Object.keys(currentConfig ?? {}).map(s => s.toLowerCase()));
+      const includeSet = new Set((currentInclude ?? []).map(s => normalizeForLookup(s)));
+      const configKeys = new Set(Object.keys(currentConfig ?? {}).map(s => normalizeForLookup(s)));
 
       // Filter species that pass the threshold OR are manually included
       const mappedSpecies: ActiveSpecies[] = response.species
@@ -812,6 +815,28 @@
     clearTimeout(debounceTimeouts.config);
   });
 
+  // Resolve a canonical species value (server-locale common name or scientific
+  // name from allNames) to its visitor-locale display label. Reads speciesNameMaps
+  // and the dictionary store, so callers must invoke it in a reactive context to
+  // re-run on locale change. Passed to the pickers as localizeLabel; the predictions
+  // and stored values stay canonical.
+  function localizeSpeciesLabel(value: string): string {
+    const lower = normalizeForLookup(value);
+    const scientific = speciesNameMaps.scientificToCommon.has(lower)
+      ? value
+      : speciesNameMaps.commonToScientific.get(lower);
+    return localizeSpeciesName(scientific, value);
+  }
+
+  // Match a candidate against the typed input by its canonical value OR its
+  // localized label, so a visitor can find a species by typing the name they see.
+  function predictionMatchesInput(species: string, needle: string): boolean {
+    return (
+      normalizeForLookup(species).includes(needle) ||
+      normalizeForLookup(localizeSpeciesLabel(species)).includes(needle)
+    );
+  }
+
   function updateIncludePredictions(input: string) {
     clearTimeout(debounceTimeouts.include);
     debounceTimeouts.include = window.setTimeout(() => {
@@ -820,11 +845,11 @@
         return;
       }
 
-      const inputLower = input.toLowerCase();
+      const needle = normalizeForLookup(input);
       includePredictions = allSpecies
         .filter(
           species =>
-            species.toLowerCase().includes(inputLower) &&
+            predictionMatchesInput(species, needle) &&
             !isSpeciesInList(species, settings.include, speciesNameMaps)
         )
         .slice(0, 10);
@@ -839,11 +864,11 @@
         return;
       }
 
-      const inputLower = input.toLowerCase();
+      const needle = normalizeForLookup(input);
       excludePredictions = allSpecies
         .filter(
           species =>
-            species.toLowerCase().includes(inputLower) &&
+            predictionMatchesInput(species, needle) &&
             !isSpeciesInList(species, settings.exclude, speciesNameMaps)
         )
         .slice(0, 10);
@@ -858,14 +883,14 @@
         return;
       }
 
-      const inputLower = input.toLowerCase();
+      const needle = normalizeForLookup(input);
       // Exclude the currently-editing species from the collision check so its
       // own alias remains selectable during rename operations.
       const existingConfigKeys = Object.keys(settings.config).filter(key => key !== editingSpecies);
       configPredictions = allSpecies
         .filter(
           species =>
-            species.toLowerCase().includes(inputLower) &&
+            predictionMatchesInput(species, needle) &&
             !isSpeciesInList(species, existingConfigKeys, speciesNameMaps)
         )
         .slice(0, 10);
@@ -1292,6 +1317,7 @@
     scientificNameMap={speciesNameMaps.commonToScientific}
     scientificToCommonMap={speciesNameMaps.scientificToCommon}
     predictions={includePredictions}
+    localizeLabel={localizeSpeciesLabel}
     bind:inputValue={includeInputValue}
     inputLabel={t('settings.species.addSpeciesToIncludeLabel')}
     inputPlaceholder={t('settings.species.addSpeciesToInclude')}
@@ -1313,6 +1339,7 @@
     scientificNameMap={speciesNameMaps.commonToScientific}
     scientificToCommonMap={speciesNameMaps.scientificToCommon}
     predictions={excludePredictions}
+    localizeLabel={localizeSpeciesLabel}
     bind:inputValue={excludeInputValue}
     inputLabel={t('settings.species.addSpeciesToExcludeLabel')}
     inputPlaceholder={t('settings.species.addSpeciesToExclude')}
@@ -1327,39 +1354,6 @@
 <!-- Custom Configuration Tab Content -->
 {#snippet configTabContent()}
   <div class="space-y-4">
-    <!-- Header with Add button -->
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <div class="p-1.5 rounded-lg bg-teal-500/10">
-          <Settings2 class="w-4 h-4 text-teal-500" />
-        </div>
-        <h3
-          class="text-xs font-semibold uppercase tracking-wider text-[var(--color-base-content)]/60"
-        >
-          {t('settings.species.customConfiguration.title')}
-        </h3>
-        {#if Object.keys(settings.config).length > 0}
-          <span
-            class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-500/10 text-[var(--color-base-content)]/60"
-          >
-            {Object.keys(settings.config).length}
-          </span>
-        {/if}
-      </div>
-      {#if !editorOpen}
-        <button
-          type="button"
-          class="inline-flex items-center justify-center gap-2 h-8 px-3 text-xs font-medium rounded-lg bg-teal-500 text-white hover:bg-teal-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          data-testid="add-configuration-button"
-          onclick={() => openEditor()}
-          disabled={store.isLoading || store.isSaving}
-        >
-          <Plus class="size-3.5" />
-          {t('settings.species.customConfiguration.addConfiguration')}
-        </button>
-      {/if}
-    </div>
-
     <!-- Editor panel (conditional, keyed to reset state on species change) -->
     {#if editorOpen}
       <div bind:this={editorElement}>
@@ -1368,6 +1362,7 @@
             species={editingSpecies}
             config={editingSpecies ? (safeGet(settings.config, editingSpecies) ?? null) : null}
             predictions={configPredictions}
+            localizeLabel={localizeSpeciesLabel}
             disabled={store.isLoading}
             saving={store.isSaving}
             onSave={handleEditorSave}
@@ -1385,12 +1380,13 @@
       </div>
     {/if}
 
-    <!-- Config list -->
-    <SpeciesConfigList
+    <!-- Config table (owns its header, count badge, search, and Add button) -->
+    <SpeciesConfigTable
       configs={settings.config}
       scientificNameMap={speciesNameMaps.commonToScientific}
       {editingSpecies}
       disabled={store.isLoading || store.isSaving}
+      onAdd={() => openEditor()}
       onEdit={openEditor}
       onDelete={species => {
         removeConfig(species);

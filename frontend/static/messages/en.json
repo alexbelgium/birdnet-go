@@ -133,7 +133,8 @@
       "downloadCsv": "Download species list as CSV",
       "visitEbirdLink": "Open eBird.org in a new tab",
       "learnEbirdTaxonomyLink": "Open eBird Taxonomy in a new tab",
-      "resizeHandle": "Drag to resize"
+      "resizeHandle": "Drag to resize",
+      "imageCredit": "Image credit: {name}"
     },
     "labels": {
       "confidence": "Confidence",
@@ -486,7 +487,8 @@
       "confidenceMax": "Maximum confidence percentage",
       "verifiedStatus": "Verified Status",
       "lockedStatus": "Locked Status",
-      "timeOfDay": "Time of Day"
+      "timeOfDay": "Time of Day",
+      "source": "Audio Source"
     },
     "advancedFilters": "Advanced Filters",
     "showAdvancedFilters": "Show Advanced Filters",
@@ -508,6 +510,9 @@
       "sunrise": "Sunrise +/- 30min",
       "sunset": "Sunset +/- 30min"
     },
+    "sourceOptions": {
+      "any": "All Sources"
+    },
     "sortOptions": {
       "dateDesc": "Date (Newest First)",
       "dateAsc": "Date (Oldest First)",
@@ -519,6 +524,7 @@
       "timeOfDay": "Time of Day",
       "species": "Species",
       "confidence": "Confidence",
+      "source": "Source",
       "status": "Status",
       "actions": "Actions"
     },
@@ -788,7 +794,23 @@
     },
     "detail": {
       "species": "Species",
-      "observation": "Observation"
+      "observation": "Observation",
+      "aria": {
+        "downloadAudioClip": "Download audio clip for {name} detection",
+        "audioRecordingFor": "Audio recording and spectrogram for {name}",
+        "scientificName": "Scientific name",
+        "classificationBadges": "Species classification badges",
+        "confidence": "Detection confidence {confidence}%",
+        "metadata": "Detection metadata",
+        "weatherConditions": "Weather conditions at time of detection",
+        "comments": "Detection comments",
+        "commentText": "Comment text",
+        "commentTimestamp": "Comment timestamp",
+        "mainRegion": "Detection details",
+        "tabsHeading": "Detection information tabs",
+        "tabList": "Detection details tabs",
+        "speciesHeadingSuffix": "detection details"
+      }
     },
     "headers": {
       "dateTime": "Date & Time",
@@ -1619,6 +1641,7 @@
         "dateTime": "Date & Time",
         "species": "Species",
         "confidence": "Confidence",
+        "source": "Source",
         "timeOfDay": "Time of Day"
       },
       "noRecentDetections": "No recent detections found",
@@ -1721,6 +1744,14 @@
     },
     "errors": {
       "loadFailed": "Failed to load analytics data. Please try again."
+    },
+    "timeOfDayPeriods": {
+      "night0to4": "Night (0-4)",
+      "dawn5to8": "Dawn (5-8)",
+      "morning9to11": "Morning (9-11)",
+      "afternoon12to16": "Afternoon (12-16)",
+      "evening17to19": "Evening (17-19)",
+      "night20to23": "Night (20-23)"
     }
   },
   "settings": {
@@ -3666,16 +3697,22 @@
         "configureActions": "Configure Actions",
         "actionsConfigured": "Configured",
         "list": {
-          "threshold": "Threshold:",
-          "interval": "Interval:",
-          "intervalNone": "None",
-          "actionBadge": "Action",
           "editTitle": "Edit configuration",
           "removeTitle": "Remove configuration"
         },
         "emptyState": {
           "title": "No configurations yet.",
           "description": "Click \"Add Configuration\" to customize species detection settings."
+        },
+        "table": {
+          "columnScientificName": "Scientific Name",
+          "intervalDefault": "Default",
+          "intervalDefaultTooltip": "0 = use the global default interval",
+          "noActions": "None",
+          "searchPlaceholder": "Search species...",
+          "noResults": "No matching configurations",
+          "editDisabledReason": "Save or close the current editor before editing another species",
+          "actionsDisabledBusy": "Please wait for the current operation to finish"
         }
       },
       "synonyms": {
@@ -4452,6 +4489,11 @@
       "removeCertificate": "Remove Certificate",
       "fileReadError": "Failed to read file",
       "loading": "Loading certificate information..."
+    },
+    "birdThumbnail": {
+      "viewDetections": "View {name} detections",
+      "largeView": "Large view of {name}",
+      "clickToView": "Click to view detections"
     }
   },
   "connectivity": {
@@ -4555,7 +4597,8 @@
         "invalidUrl": "Invalid URL format. Enter a full URL like rtsp://host:port/path",
         "unsupportedScheme": "Unsupported URL scheme \"{scheme}\". Use rtsp, rtsps, http, https, rtmp, or udp",
         "blockedDestination": "This destination is blocked for security reasons",
-        "connectionFailed": "Could not connect to the stream. Check that the URL is correct and the stream is accessible"
+        "connectionFailed": "Could not connect to the stream. Check that the URL is correct and the stream is accessible",
+        "noAudioTrack": "The stream has no audio track. Only streams that contain audio can be used"
       }
     },
     "debug": {
