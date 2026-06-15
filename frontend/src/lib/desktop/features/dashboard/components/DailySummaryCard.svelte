@@ -91,7 +91,6 @@ Responsive Breakpoints:
   import { scaleTime, scaleLinear } from 'd3-scale';
   import { line as d3Line, curveMonotoneX } from 'd3-shape';
   import { timeFormat } from 'd3-time-format';
-  import { ChevronLeft, ChevronRight, Star, XCircle } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
