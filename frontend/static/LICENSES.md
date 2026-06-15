@@ -27,11 +27,6 @@ Source: Apache-2.0
 License: https://github.com/FiloSottile/edwards25519/blob/v1.2.0/LICENSE
 Source: BSD-3-Clause
 
-### github.com/antonholmquist/jason
-
-License: https://github.com/antonholmquist/jason/blob/v1.0.0/LICENSE
-Source: MIT
-
 ### github.com/beorn7/perks/quantile
 
 License: https://github.com/beorn7/perks/blob/v1.0.1/LICENSE
@@ -51,11 +46,6 @@ Source: MIT
 
 License: https://github.com/davecgh/go-spew/blob/d8f796af33cc/LICENSE
 Source: ISC
-
-### github.com/eaburns/bit
-
-License: https://github.com/eaburns/bit/blob/7bd5cd37375d/LICENSE
-Source: MIT
 
 ### github.com/eclipse/paho.golang
 
@@ -186,11 +176,6 @@ Source: MIT
 
 License: https://github.com/jlaffaye/ftp/blob/v0.2.1/LICENSE
 Source: ISC
-
-### github.com/k3a/html2text
-
-License: https://github.com/k3a/html2text/blob/v1.4.0/LICENSE
-Source: MIT
 
 ### github.com/klauspost/cpuid/v2
 
@@ -417,15 +402,15 @@ Source: Unknown
 License: Unknown
 Source: Unknown
 
-### github.com/tphakala/flac
-
-License: https://github.com/tphakala/flac/blob/20d6d98f5ee3/LICENSE
-Source: MIT
-
 ### github.com/tphakala/go-audio-resampler
 
 License: https://github.com/tphakala/go-audio-resampler/blob/v1.4.0/LICENSE
 Source: LGPL-3.0
+
+### github.com/tphakala/go-flac
+
+License: https://github.com/tphakala/go-flac/blob/v0.3.0/LICENSE
+Source: MIT
 
 ### github.com/tphakala/go-tflite
 
@@ -434,7 +419,7 @@ Source: MIT
 
 ### github.com/tphakala/simd
 
-License: https://github.com/tphakala/simd/blob/v1.1.0/LICENSE
+License: https://github.com/tphakala/simd/blob/v1.4.0-rc.2/LICENSE
 Source: MIT
 
 ### github.com/valyala/bytebufferpool

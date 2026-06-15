@@ -4,7 +4,6 @@ go 1.26.1
 
 require (
 	github.com/UserExistsError/conpty v0.1.4
-	github.com/antonholmquist/jason v1.0.0
 	github.com/creack/pty v1.1.24
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/gen2brain/malgo v0.11.25
@@ -15,7 +14,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jarcoal/httpmock v1.4.1
 	github.com/jlaffaye/ftp v0.2.1
-	github.com/k3a/html2text v1.4.0
 	github.com/klauspost/cpuid/v2 v2.3.0
 	github.com/labstack/echo/v4 v4.15.2
 	github.com/nicholas-fedor/shoutrrr v0.16.1
@@ -33,10 +31,10 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/mysql v0.42.0
-	github.com/tphakala/flac v0.0.0-20241217200312-20d6d98f5ee3
 	github.com/tphakala/go-audio-resampler v1.4.0
+	github.com/tphakala/go-flac v0.3.0
 	github.com/tphakala/go-tflite v0.2.2-0.20260514101223-29408e53fff7
-	github.com/tphakala/simd v1.1.0
+	github.com/tphakala/simd v1.4.0-rc.2
 	github.com/yalue/onnxruntime_go v1.30.1
 	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.53.0
@@ -67,7 +65,6 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/eaburns/bit v0.0.0-20131029213740-7bd5cd37375d // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/eclipse/paho.golang v0.23.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

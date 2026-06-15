@@ -13,6 +13,7 @@ import (
 	v2 "github.com/tphakala/birdnet-go/internal/datastore/v2"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
@@ -770,6 +771,98 @@ func TestV2OnlyDatastore_ThresholdEvent(t *testing.T) {
 	recent, err := ds.GetRecentThresholdEvents(10)
 	require.NoError(t, err)
 	assert.Len(t, recent, 1)
+}
+
+// TestV2OnlyDatastore_ThresholdReads_ErrorTelemetry pins #1019 and #1068: the v2only
+// threshold read methods must wrap genuine DB errors with datastore Component/Category
+// telemetry, while a benign not-found (ErrDynamicThresholdNotFound) must be wrapped as a
+// CategoryNotFound EnhancedError (never CategoryDatabase) so the API maps it to 404 and it
+// never reaches Sentry as a database error, all while staying reachable via errors.Is.
+func TestV2OnlyDatastore_ThresholdReads_ErrorTelemetry(t *testing.T) {
+	t.Run("NotFoundWrappedAsNotFoundCategory", func(t *testing.T) {
+		ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Parus major_Great Tit"})
+		defer cleanup()
+
+		// Label exists but no threshold was saved, so the repository returns the
+		// ErrDynamicThresholdNotFound sentinel. This is a benign not-found, not a DB fault.
+		// It is wrapped as a CategoryNotFound EnhancedError so the API layer's
+		// handleErrorWithNotFound maps it to HTTP 404 (#1068), while the sentinel stays
+		// reachable via errors.Is (EnhancedError.Unwrap) and the CategoryNotFound
+		// "dynamic threshold not found" message is suppressed from Sentry, so it is never
+		// surfaced as a database error (#1019).
+		_, err := ds.GetDynamicThreshold("Parus major", "")
+		require.Error(t, err)
+		require.ErrorIs(t, err, repository.ErrDynamicThresholdNotFound,
+			"not-found sentinel must propagate so callers can distinguish a benign miss from a genuine DB fault")
+		var ee *errors.EnhancedError
+		require.True(t, errors.As(err, &ee),
+			"not-found must be a CategoryNotFound EnhancedError so the API maps it to 404")
+		assert.Equal(t, string(errors.CategoryNotFound), ee.GetCategory(),
+			"not-found must be CategoryNotFound, never CategoryDatabase (which would be Sentry noise)")
+	})
+
+	t.Run("GenuineDBErrorIsWrapped", func(t *testing.T) {
+		ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Parus major_Great Tit"})
+		defer cleanup()
+
+		// Close the underlying DB so every query on the read paths fails for real.
+		require.NoError(t, ds.Close())
+
+		assertDatastoreWrapped := func(t *testing.T, err error, op string) {
+			t.Helper()
+			require.Error(t, err, "%s should surface the DB error", op)
+			var ee *errors.EnhancedError
+			require.True(t, errors.As(err, &ee), "%s error must be an EnhancedError", op)
+			assert.Equal(t, "datastore", ee.GetComponent(), "%s must tag datastore component", op)
+			assert.Equal(t, string(errors.CategoryDatabase), ee.GetCategory(), "%s must tag database category", op)
+		}
+
+		_, errGet := ds.GetDynamicThreshold("Parus major", "")
+		assertDatastoreWrapped(t, errGet, "GetDynamicThreshold")
+
+		_, errAll := ds.GetAllDynamicThresholds()
+		assertDatastoreWrapped(t, errAll, "GetAllDynamicThresholds")
+
+		_, errRecent := ds.GetRecentThresholdEvents(10)
+		assertDatastoreWrapped(t, errRecent, "GetRecentThresholdEvents")
+
+		_, _, _, _, errStats := ds.GetDynamicThresholdStats()
+		assertDatastoreWrapped(t, errStats, "GetDynamicThresholdStats")
+	})
+}
+
+// TestV2OnlyDatastore_ThresholdEvent_ModelName verifies that GetThresholdEvents and
+// GetRecentThresholdEvents return ModelName constructed from the event Label's AIModel
+// (e.g., "BirdNET_V2.4"), the event-side parallel of the GitHub #2902 record fix.
+// Regression test for #1025: events previously returned an empty ModelName because the
+// repository only preloaded Label (not Label.Model) and the converter never set it.
+func TestV2OnlyDatastore_ThresholdEvent_ModelName(t *testing.T) {
+	ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Parus major_Great Tit"})
+	defer cleanup()
+
+	event := &datastore.ThresholdEvent{
+		SpeciesName:   "Parus major",
+		PreviousLevel: 0,
+		NewLevel:      1,
+		PreviousValue: 0.6,
+		NewValue:      0.7,
+		ChangeReason:  "high_confidence",
+		Confidence:    0.95,
+		CreatedAt:     time.Now(),
+	}
+	require.NoError(t, ds.SaveThresholdEvent(event))
+
+	events, err := ds.GetThresholdEvents("Parus major", 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "BirdNET_V2.4", events[0].ModelName,
+		"event ModelName must be constructed from the Label's Model (Name_VVersion)")
+
+	recent, err := ds.GetRecentThresholdEvents(10)
+	require.NoError(t, err)
+	require.Len(t, recent, 1)
+	assert.Equal(t, "BirdNET_V2.4", recent[0].ModelName,
+		"recent event ModelName must be constructed from the Label's Model")
 }
 
 // TestV2OnlyDatastore_GetThresholdEvents_ResolvesScientificName covers the
@@ -1755,4 +1848,93 @@ func TestBuildNameMaps_AmbiguousCommonNameDeletedNotLastWriterWins(t *testing.T)
 	// lookup key, not the forward display names.
 	assert.Equal(t, "Owl", nm.common["Strix aluco"], "forward map must retain common name for Strix aluco")
 	assert.Equal(t, "Owl", nm.common["Bubo bubo"], "forward map must retain common name for Bubo bubo")
+}
+
+// TestUnixTimeOrZero verifies that a non-positive epoch yields the zero time (so the
+// API renders an empty timestamp) instead of the 1970 epoch origin, while a positive
+// epoch converts in the supplied location.
+func TestUnixTimeOrZero(t *testing.T) {
+	t.Parallel()
+
+	t.Run("positive epoch converts in location", func(t *testing.T) {
+		t.Parallel()
+		got := unixTimeOrZero(1718000000, time.UTC)
+		require.False(t, got.IsZero())
+		assert.Equal(t, int64(1718000000), got.Unix())
+		assert.Equal(t, time.UTC, got.Location())
+	})
+
+	t.Run("zero epoch returns zero time", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, unixTimeOrZero(0, time.UTC).IsZero())
+	})
+
+	t.Run("negative epoch returns zero time", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, unixTimeOrZero(-1, time.UTC).IsZero())
+	})
+
+	t.Run("nil location does not panic", func(t *testing.T) {
+		t.Parallel()
+		got := unixTimeOrZero(1718000000, nil)
+		require.False(t, got.IsZero())
+		assert.Equal(t, int64(1718000000), got.Unix())
+	})
+}
+
+// TestConvertToNewSpeciesData_ZeroEpoch verifies the new-species path emits an empty
+// date for a zero/negative FirstDetected epoch rather than formatting 1970-01-01.
+func TestConvertToNewSpeciesData_ZeroEpoch(t *testing.T) {
+	t.Parallel()
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+
+	got := ds.convertToNewSpeciesData(t.Context(), []speciesFirstSeenInfo{
+		{ScientificName: "Parus major", FirstDetected: 0, LastDetected: 0},
+		{ScientificName: "Turdus merula", FirstDetected: 1718000000, LastDetected: 1718600000},
+	})
+
+	require.Len(t, got, 2)
+	assert.Empty(t, got[0].FirstSeenDate, "zero epoch must not render the 1970 origin")
+	assert.Empty(t, got[0].LastSeenDate)
+	assert.NotEmpty(t, got[1].FirstSeenDate)
+	assert.NotEmpty(t, got[1].LastSeenDate)
+}
+
+// TestV2OnlyDatastore_GetSpeciesDiversityData_TimezoneBucketing verifies the date grouping in
+// GetSpeciesDiversityData buckets by the configured timezone, not UTC or the OS-local zone. A
+// detection at a fixed UTC instant 30 minutes before midnight must group on the NEXT calendar day
+// when the configured zone is UTC+5. The negative assertion (the UTC date does not match) proves
+// the bucketing is genuinely offset-aware, and exercises the BETWEEN date filter end-to-end.
+func TestV2OnlyDatastore_GetSpeciesDiversityData_TimezoneBucketing(t *testing.T) {
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+	ctx := t.Context()
+
+	// Force a deterministic non-UTC zone so the assertion does not depend on the test host.
+	ds.timezone = time.FixedZone("UTC+5", 5*3600)
+
+	label, err := ds.label.GetOrCreate(ctx, "Turdus merula", ds.defaultModelID, ds.speciesLabelTypeID, ds.avesClassID)
+	require.NoError(t, err)
+
+	// 2024-06-14T23:30:00Z -> 2024-06-15 04:30 in UTC+5, so the detection belongs to 2024-06-15.
+	nearMidnight := time.Date(2024, 6, 14, 23, 30, 0, 0, time.UTC).Unix()
+	require.NoError(t, ds.detection.Save(ctx, &entities.Detection{
+		ModelID:    ds.defaultModelID,
+		LabelID:    label.ID,
+		DetectedAt: nearMidnight,
+		Confidence: 0.9,
+	}))
+
+	// The configured-zone date matches.
+	data, err := ds.GetSpeciesDiversityData(ctx, "2024-06-15", "2024-06-15")
+	require.NoError(t, err)
+	require.Len(t, data, 1, "near-midnight detection must bucket on the configured-zone date 2024-06-15")
+	assert.Equal(t, "2024-06-15", data[0].Date)
+	assert.Equal(t, 1, data[0].Count)
+
+	// The UTC date must NOT match, proving bucketing is not in UTC.
+	none, err := ds.GetSpeciesDiversityData(ctx, "2024-06-14", "2024-06-14")
+	require.NoError(t, err)
+	assert.Empty(t, none, "detection must not bucket on the UTC date when the configured zone is UTC+5")
 }
