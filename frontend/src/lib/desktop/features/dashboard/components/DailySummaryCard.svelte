@@ -78,7 +78,7 @@ Responsive Breakpoints:
     resolveNoveltyCategory,
     noveltyCategoryColorVar,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { ChevronLeft, ChevronRight, Info, Star, XCircle } from '@lucide/svelte';
+  import { ChevronLeft, ChevronRight, Star, XCircle } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
@@ -1087,6 +1087,18 @@ Responsive Breakpoints:
                       {getSpeciesInitials(displayName)}
                     </a>
                   {/if}
+                  {#if ebirdSpeciesUrl}
+                    <a
+                      href={ebirdSpeciesUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-[var(--color-base-content)]/60 hover:text-[var(--color-primary)]"
+                      title={`eBird: ${displayName}`}
+                      aria-label={`eBird: ${displayName}`}
+                    >
+                      i
+                    </a>
+                  {/if}
                   <a
                     href={urlBuilders.species(item)}
                     class="text-sm hover:text-[var(--color-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
@@ -1119,18 +1131,6 @@ Responsive Breakpoints:
                       </span>
                     {/if}
                   </a>
-                  {#if ebirdSpeciesUrl}
-                    <a
-                      href={ebirdSpeciesUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="shrink-0 text-[var(--color-base-content)]/60 hover:text-[var(--color-primary)]"
-                      title={`eBird: ${displayName}`}
-                      aria-label={`eBird: ${displayName}`}
-                    >
-                      <Info class="size-3.5" />
-                    </a>
-                  {/if}
                 </div>
 
                 <!-- Hourly heatmap cells (desktop) -->
