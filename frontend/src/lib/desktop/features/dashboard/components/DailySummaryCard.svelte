@@ -49,7 +49,7 @@ Responsive Breakpoints:
 <script lang="ts">
   import DatePicker from '$lib/desktop/components/ui/DatePicker.svelte';
   import SkeletonDailySummary from '$lib/desktop/components/ui/SkeletonDailySummary.svelte';
-  import { getLocale, t } from '$lib/i18n';
+  import { t } from '$lib/i18n';
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { getLocalDateString, getDateInTimezone } from '$lib/utils/date';
   import {
@@ -130,11 +130,24 @@ Responsive Breakpoints:
     },
   } as const;
 
+  function getEbirdSiteLanguage(): string {
+    if (typeof localStorage !== 'undefined') {
+      const storedLocale = localStorage.getItem('birdnet-locale')?.trim();
+      if (storedLocale) return storedLocale;
+    }
+
+    if (typeof navigator !== 'undefined') {
+      return navigator.language.toLowerCase().split('-')[0] || 'en';
+    }
+
+    return 'en';
+  }
+
   function buildEbirdSpeciesUrl(speciesCode: string): string | null {
     const code = speciesCode.trim();
     if (!code) return null;
 
-    return `https://ebird.org/species/${encodeURIComponent(code)}/${EBIRD_REGION}?siteLanguage=${getLocale()}`;
+    return `https://ebird.org/species/${encodeURIComponent(code)}/${EBIRD_REGION}?siteLanguage=${getEbirdSiteLanguage()}`;
   }
 
   interface SunTimes {
