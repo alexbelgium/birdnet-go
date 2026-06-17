@@ -49,7 +49,7 @@ Responsive Breakpoints:
 <script lang="ts">
   import DatePicker from '$lib/desktop/components/ui/DatePicker.svelte';
   import SkeletonDailySummary from '$lib/desktop/components/ui/SkeletonDailySummary.svelte';
-  import { t } from '$lib/i18n';
+  import { getLocale, t } from '$lib/i18n';
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { getLocalDateString, getDateInTimezone } from '$lib/utils/date';
   import {
@@ -78,13 +78,14 @@ Responsive Breakpoints:
     resolveNoveltyCategory,
     noveltyCategoryColorVar,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { ChevronLeft, ChevronRight, Star, XCircle } from '@lucide/svelte';
+  import { ChevronLeft, ChevronRight, Info, Star, XCircle } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
   import SunTimeTooltip from './SunTimeTooltip.svelte';
 
   const logger = loggers.ui;
+  const EBIRD_REGION = 'BE-WAL';
 
   // Progressive loading timing constants (optimized for Svelte 5)
   const LOADING_PHASES = $state.raw({
@@ -128,6 +129,13 @@ Responsive Breakpoints:
       MAX_WIDTH: 22, // rem - maximum column width (prevents excessive width)
     },
   } as const;
+
+  function buildEbirdSpeciesUrl(speciesCode: string): string | null {
+    const code = speciesCode.trim();
+    if (!code) return null;
+
+    return `https://ebird.org/species/${encodeURIComponent(code)}/${EBIRD_REGION}?siteLanguage=${getLocale()}`;
+  }
 
   interface SunTimes {
     sunrise: string; // ISO date string
@@ -1051,6 +1059,7 @@ Responsive Breakpoints:
           <div class="flex flex-col" style:gap="var(--grid-gap)">
             {#each sortedData as item, index (`${item.scientific_name}_${index}`)}
               {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
+              {@const ebirdSpeciesUrl = buildEbirdSpeciesUrl(item.species_code)}
               <div
                 class="flex items-center species-row"
                 class:new-species={item.isNew && !prefersReducedMotion}
@@ -1110,6 +1119,18 @@ Responsive Breakpoints:
                       </span>
                     {/if}
                   </a>
+                  {#if ebirdSpeciesUrl}
+                    <a
+                      href={ebirdSpeciesUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="shrink-0 text-[var(--color-base-content)]/60 hover:text-[var(--color-primary)]"
+                      title={`eBird: ${displayName}`}
+                      aria-label={`eBird: ${displayName}`}
+                    >
+                      <Info class="size-3.5" />
+                    </a>
+                  {/if}
                 </div>
 
                 <!-- Hourly heatmap cells (desktop) -->
