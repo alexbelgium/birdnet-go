@@ -347,19 +347,19 @@ func TestGetSpeciesNoteIDs(t *testing.T) {
 	seedTestData(t, ds)
 
 	t.Run("returns all note IDs for a scientific name", func(t *testing.T) {
-		ids, err := ds.GetSpeciesNoteIDs("Turdus migratorius")
+		ids, err := ds.GetSpeciesNoteIDs(t.Context(), "Turdus migratorius")
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"1", "2"}, ids)
 	})
 
 	t.Run("handles legacy ScientificName_CommonName label", func(t *testing.T) {
-		ids, err := ds.GetSpeciesNoteIDs("Turdus migratorius_American Robin")
+		ids, err := ds.GetSpeciesNoteIDs(t.Context(), "Turdus migratorius_American Robin")
 		require.NoError(t, err)
 		assert.ElementsMatch(t, []string{"1", "2"}, ids)
 	})
 
 	t.Run("returns empty for unknown species", func(t *testing.T) {
-		ids, err := ds.GetSpeciesNoteIDs("Nonexistent species")
+		ids, err := ds.GetSpeciesNoteIDs(t.Context(), "Nonexistent species")
 		require.NoError(t, err)
 		assert.Empty(t, ids)
 	})

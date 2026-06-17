@@ -1685,7 +1685,8 @@
         "deleteConfirm": "Smazat",
         "deleteMessage": "Smazat všech {count} detekcí druhu {species}? Uzamčené detekce zůstanou zachovány.",
         "deleteWarning": "Tímto trvale odstraníte detekce i jejich zvukové nahrávky a tuto akci nelze vrátit zpět.",
-        "deleteFailed": "Smazání detekcí se nezdařilo. Zkuste to prosím znovu."
+        "deleteFailed": "Smazání detekcí se nezdařilo. Zkuste to prosím znovu.",
+        "membershipFailed": "Nepodařilo se aktualizovat seznamy druhů. Zkuste to znovu."
       }
     },
     "advanced": {

@@ -1657,6 +1657,20 @@
       "switchToGrid": "Bytt til rutenettvisning",
       "switchToList": "Bytt til listevisning",
       "switchToManage": "Bytt til administrasjonsvisning",
+      "noSpeciesFound": "Ingen arter funnet som matcher filtrene dine.",
+      "headers": {
+        "species": "Art",
+        "detections": "Registreringer",
+        "avgConfidence": "Gjsn. sikkerhet",
+        "maxConfidence": "Maks. sikkerhet",
+        "firstDetected": "Første registrert",
+        "lastDetected": "Siste registrert"
+      },
+      "card": {
+        "detections": "Registreringer:",
+        "confidence": "Sikkerhet:",
+        "first": "Første:"
+      },
       "manage": {
         "headers": {
           "excluded": "Ekskludert",
@@ -1671,21 +1685,8 @@
         "deleteConfirm": "Slett",
         "deleteMessage": "Slette alle {count} registreringer for {species}? Låste registreringer beholdes.",
         "deleteWarning": "Dette fjerner registreringene og lydklippene deres permanent og kan ikke angres.",
-        "deleteFailed": "Kunne ikke slette registreringer. Prøv igjen."
-      },
-      "noSpeciesFound": "Ingen arter funnet som matcher filtrene dine.",
-      "headers": {
-        "species": "Art",
-        "detections": "Registreringer",
-        "avgConfidence": "Gjsn. sikkerhet",
-        "maxConfidence": "Maks. sikkerhet",
-        "firstDetected": "Første registrert",
-        "lastDetected": "Siste registrert"
-      },
-      "card": {
-        "detections": "Registreringer:",
-        "confidence": "Sikkerhet:",
-        "first": "Første:"
+        "deleteFailed": "Kunne ikke slette registreringer. Prøv igjen.",
+        "membershipFailed": "Kunne ikke oppdatere artslistene. Prøv igjen."
       }
     },
     "advanced": {

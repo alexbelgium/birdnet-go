@@ -1685,7 +1685,8 @@
         "deleteConfirm": "Slet",
         "deleteMessage": "Slet alle {count} registreringer for {species}? Låste registreringer bevares.",
         "deleteWarning": "Dette fjerner permanent registreringerne og deres lydklip og kan ikke fortrydes.",
-        "deleteFailed": "Kunne ikke slette registreringer. Prøv igen."
+        "deleteFailed": "Kunne ikke slette registreringer. Prøv igen.",
+        "membershipFailed": "Kunne ikke opdatere artslisterne. Prøv igen."
       }
     },
     "advanced": {

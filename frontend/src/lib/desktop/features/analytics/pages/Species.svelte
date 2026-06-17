@@ -629,6 +629,11 @@
   let deleteInFlight = $state(false);
   let deleteError = $state<string | null>(null);
 
+  // Inline error surfaced when an exclude/include/confirm toggle fails. The
+  // checkbox reverts to its prior state on failure, so without this the failure
+  // would be silent.
+  let membershipError = $state<string | null>(null);
+
   // Default sort direction per Manage-only column (only the name column starts ascending).
   const MANAGE_SORT_COLUMNS: { field: ManageSortKey; defaultAsc: boolean }[] = [
     { field: 'name', defaultAsc: true },
@@ -865,6 +870,7 @@
     const payloadName = listEntryFor(set, species) ?? species.common_name;
 
     inflight.add(inflightKey);
+    membershipError = null;
     try {
       const resp = await api.post<{ action: string }>(path, { common_name: payloadName });
       if (resp.action === 'removed') {
@@ -874,6 +880,7 @@
       }
     } catch (error) {
       logger.error(`Error toggling ${list} membership:`, error);
+      membershipError = t('analytics.species.manage.membershipFailed');
     } finally {
       inflight.delete(inflightKey);
     }
@@ -1164,6 +1171,9 @@
 
       <!-- Manage View (authenticated, desktop-only) -->
       {#if !isLoading && viewMode === 'manage' && manageRows.length > 0}
+        {#if membershipError}
+          <p class="text-sm text-[var(--color-error)] mb-2" role="alert">{membershipError}</p>
+        {/if}
         <div class="overflow-x-auto hidden sm:block">
           <table class="table w-full">
             <thead>
@@ -1261,14 +1271,22 @@
                       : '—'}</td
                   >
                   <td class="text-sm">{formatDateOnly(species.last_heard)}</td>
-                  <td>
+                  <td
+                    title={togglingExcluded.has(species.scientific_name)
+                      ? t('common.ui.loading')
+                      : undefined}
+                  >
                     <Checkbox
                       checked={isMember(excludedSet, species)}
                       disabled={togglingExcluded.has(species.scientific_name)}
                       onchange={() => toggleMembership('excluded', species)}
                     />
                   </td>
-                  <td>
+                  <td
+                    title={togglingIncluded.has(species.scientific_name)
+                      ? t('common.ui.loading')
+                      : undefined}
+                  >
                     <Checkbox
                       checked={isMember(includedSet, species)}
                       disabled={togglingIncluded.has(species.scientific_name)}
@@ -1288,7 +1306,11 @@
                       —
                     {/if}
                   </td>
-                  <td>
+                  <td
+                    title={togglingConfirmed.has(species.scientific_name)
+                      ? t('common.ui.loading')
+                      : undefined}
+                  >
                     <Checkbox
                       checked={isMember(confirmedSet, species)}
                       disabled={togglingConfirmed.has(species.scientific_name)}

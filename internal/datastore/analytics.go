@@ -315,14 +315,14 @@ func (ds *DataStore) GetSpeciesReviewStats(ctx context.Context) ([]SpeciesReview
 // GetSpeciesNoteIDs returns the string IDs of every note for the given scientific
 // name. Legacy callers may pass a raw BirdNET label ("ScientificName_CommonName");
 // only the scientific-name portion before the first underscore is used.
-func (ds *DataStore) GetSpeciesNoteIDs(scientificName string) ([]string, error) {
+func (ds *DataStore) GetSpeciesNoteIDs(ctx context.Context, scientificName string) ([]string, error) {
 	name := detection.ExtractScientificName(scientificName)
 	if name == "" {
 		return []string{}, nil
 	}
 
 	var ids []uint
-	if err := ds.DB.Model(&Note{}).Where("scientific_name = ?", name).Pluck("id", &ids).Error; err != nil {
+	if err := ds.DB.WithContext(ctx).Model(&Note{}).Where("scientific_name = ?", name).Pluck("id", &ids).Error; err != nil {
 		return nil, dbError(err, "get_species_note_ids", errors.PriorityMedium,
 			"action", "lookup_species_note_ids")
 	}

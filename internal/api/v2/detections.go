@@ -1744,6 +1744,7 @@ func (c *Controller) toggleManagedSpecies(ctx echo.Context, listOf func(*conf.Se
 	if err := ctx.Bind(req); err != nil {
 		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
 	}
+	req.CommonName = strings.TrimSpace(req.CommonName)
 	if req.CommonName == "" {
 		return c.HandleError(ctx, nil, "Missing species name", http.StatusBadRequest)
 	}

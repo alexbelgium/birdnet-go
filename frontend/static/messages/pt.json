@@ -1685,7 +1685,8 @@
         "deleteConfirm": "Eliminar",
         "deleteMessage": "Eliminar todas as {count} detecções de {species}? As detecções bloqueadas são mantidas.",
         "deleteWarning": "Isto remove permanentemente as detecções e os respetivos clipes de áudio e não pode ser desfeito.",
-        "deleteFailed": "Não foi possível eliminar as detecções. Tente novamente."
+        "deleteFailed": "Não foi possível eliminar as detecções. Tente novamente.",
+        "membershipFailed": "Não foi possível atualizar as listas de espécies. Tente novamente."
       }
     },
     "advanced": {

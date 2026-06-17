@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/tphakala/birdnet-go/internal/logger"
@@ -295,7 +297,7 @@ type SpeciesDeleteResult struct {
 // every detection ID for a scientific name. Datastores that do not implement it
 // cause DeleteSpeciesDetections to return HTTP 501.
 type speciesNoteIDsDatastore interface {
-	GetSpeciesNoteIDs(scientificName string) ([]string, error)
+	GetSpeciesNoteIDs(ctx context.Context, scientificName string) ([]string, error)
 }
 
 // DeleteSpeciesDetections deletes every detection for a scientific name, skipping
@@ -306,6 +308,7 @@ func (c *Controller) DeleteSpeciesDetections(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
 	}
+	req.ScientificName = strings.TrimSpace(req.ScientificName)
 	if req.ScientificName == "" {
 		return c.HandleError(ctx, fmt.Errorf("no scientific name provided"),
 			"Scientific name is required", http.StatusBadRequest)
@@ -317,7 +320,7 @@ func (c *Controller) DeleteSpeciesDetections(ctx echo.Context) error {
 			"Species deletion is not supported by the active datastore", http.StatusNotImplemented)
 	}
 
-	ids, err := ds.GetSpeciesNoteIDs(req.ScientificName)
+	ids, err := ds.GetSpeciesNoteIDs(ctx.Request().Context(), req.ScientificName)
 	if err != nil {
 		return c.HandleError(ctx, err, "Failed to look up detections for species", http.StatusInternalServerError)
 	}

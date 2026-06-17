@@ -54,7 +54,6 @@ func assertAnalyticsErrorResponse(t *testing.T, rec *httptest.ResponseRecorder, 
 	assert.Contains(t, fmt.Sprint(errVal), expectedBody)
 }
 
-// TestGetSpeciesSummary tests the species summary endpoint
 // TestGetSpeciesReviewStats covers the analytics review-stats endpoint: success,
 // empty result, and the HTTP 501 fallback when the datastore lacks support.
 func TestGetSpeciesReviewStats(t *testing.T) {

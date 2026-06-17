@@ -1321,11 +1321,11 @@ func TestV2OnlyDatastore_GetSpeciesNoteIDs(t *testing.T) {
 	saveTestNote(t, ds, "2024-01-15", "09:00:00", "Passer domesticus", 0.90) // ID 2
 	saveTestNote(t, ds, "2024-01-16", "10:00:00", "Turdus merula", 0.80)     // ID 3
 
-	ids, err := ds.GetSpeciesNoteIDs("Passer domesticus")
+	ids, err := ds.GetSpeciesNoteIDs(t.Context(), "Passer domesticus")
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"1", "2"}, ids)
 
-	none, err := ds.GetSpeciesNoteIDs("Nonexistent species")
+	none, err := ds.GetSpeciesNoteIDs(t.Context(), "Nonexistent species")
 	require.NoError(t, err)
 	assert.Empty(t, none)
 }
@@ -1347,7 +1347,7 @@ func TestV2OnlyDatastore_GetSpeciesNoteIDs_LegacyLabelFormat(t *testing.T) {
 	det := &entities.Detection{ModelID: ds.defaultModelID, LabelID: label.ID, DetectedAt: time.Now().Unix(), Confidence: 0.9}
 	require.NoError(t, ds.detection.Save(ctx, det))
 
-	ids, err := ds.GetSpeciesNoteIDs("Tyto alba")
+	ids, err := ds.GetSpeciesNoteIDs(ctx, "Tyto alba")
 	require.NoError(t, err)
 	assert.Equal(t, []string{fmt.Sprintf("%d", det.ID)}, ids)
 

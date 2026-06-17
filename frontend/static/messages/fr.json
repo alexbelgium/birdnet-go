@@ -1685,7 +1685,8 @@
         "deleteConfirm": "Supprimer",
         "deleteMessage": "Supprimer les {count} détections de {species} ? Les détections verrouillées sont conservées.",
         "deleteWarning": "Cette action supprime définitivement les détections et leurs extraits audio et ne peut pas être annulée.",
-        "deleteFailed": "Échec de la suppression des détections. Veuillez réessayer."
+        "deleteFailed": "Échec de la suppression des détections. Veuillez réessayer.",
+        "membershipFailed": "Échec de la mise à jour des listes d'espèces. Veuillez réessayer."
       }
     },
     "advanced": {

@@ -2500,8 +2500,8 @@ func (ds *Datastore) GetSpeciesReviewStats(ctx context.Context) ([]datastore.Spe
 // GetSpeciesNoteIDs returns the string IDs of all detections for the given
 // scientific name, matching legacy "ScientificName_CommonName" labels on the
 // scientific-name portion.
-func (ds *Datastore) GetSpeciesNoteIDs(scientificName string) ([]string, error) {
-	ids, err := ds.detection.GetDetectionIDsByScientificName(context.Background(), scientificName)
+func (ds *Datastore) GetSpeciesNoteIDs(ctx context.Context, scientificName string) ([]string, error) {
+	ids, err := ds.detection.GetDetectionIDsByScientificName(ctx, scientificName)
 	if err != nil {
 		return nil, err
 	}

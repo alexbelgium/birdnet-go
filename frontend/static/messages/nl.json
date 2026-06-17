@@ -1685,7 +1685,8 @@
         "deleteConfirm": "Verwijderen",
         "deleteMessage": "Alle {count} detecties van {species} verwijderen? Vergrendelde detecties blijven behouden.",
         "deleteWarning": "Hiermee worden de detecties en hun audiofragmenten permanent verwijderd en dit kan niet ongedaan worden gemaakt.",
-        "deleteFailed": "Kan detecties niet verwijderen. Probeer het opnieuw."
+        "deleteFailed": "Kan detecties niet verwijderen. Probeer het opnieuw.",
+        "membershipFailed": "Kan de soortenlijsten niet bijwerken. Probeer het opnieuw."
       }
     },
     "advanced": {

@@ -35,7 +35,7 @@ func (d *managedSpeciesStubDS) GetSpeciesReviewStats(_ context.Context) ([]datas
 }
 
 // GetSpeciesNoteIDs returns the canned note IDs for the given scientific name.
-func (d *managedSpeciesStubDS) GetSpeciesNoteIDs(scientificName string) ([]string, error) {
+func (d *managedSpeciesStubDS) GetSpeciesNoteIDs(_ context.Context, scientificName string) ([]string, error) {
 	return d.noteIDs[scientificName], nil
 }
 

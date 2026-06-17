@@ -1685,7 +1685,8 @@
         "deleteConfirm": "Poista",
         "deleteMessage": "Poistetaanko kaikki {count} havaintoa lajille {species}? Lukitut havainnot säilytetään.",
         "deleteWarning": "Tämä poistaa havainnot ja niiden äänileikkeet pysyvästi, eikä toimintoa voi kumota.",
-        "deleteFailed": "Havaintojen poistaminen epäonnistui. Yritä uudelleen."
+        "deleteFailed": "Havaintojen poistaminen epäonnistui. Yritä uudelleen.",
+        "membershipFailed": "Lajiluetteloiden päivitys epäonnistui. Yritä uudelleen."
       }
     },
     "advanced": {

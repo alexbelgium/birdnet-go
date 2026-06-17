@@ -1685,7 +1685,8 @@
         "deleteConfirm": "Radera",
         "deleteMessage": "Radera alla {count} detektioner för {species}? Låsta detektioner behålls.",
         "deleteWarning": "Detta tar bort detektionerna och deras ljudklipp permanent och kan inte ångras.",
-        "deleteFailed": "Det gick inte att radera detektionerna. Försök igen."
+        "deleteFailed": "Det gick inte att radera detektionerna. Försök igen.",
+        "membershipFailed": "Det gick inte att uppdatera artlistorna. Försök igen."
       }
     },
     "advanced": {
