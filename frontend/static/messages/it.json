@@ -1656,6 +1656,7 @@
       "speciesList": "Elenco Specie",
       "switchToGrid": "Passa alla vista griglia",
       "switchToList": "Passa alla vista elenco",
+      "switchToManage": "Passa alla vista di gestione",
       "noSpeciesFound": "Nessuna specie trovata corrispondente ai tuoi filtri.",
       "headers": {
         "species": "Specie",
@@ -1669,6 +1670,22 @@
         "detections": "Rilevamenti:",
         "confidence": "Confidenza:",
         "first": "Primo:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Escluso",
+          "included": "Incluso",
+          "reviewRatio": "Corretti",
+          "rangeProbability": "Intervallo",
+          "confirmed": "Confermato",
+          "actions": "Azioni"
+        },
+        "delete": "Elimina tutti i rilevamenti di questa specie",
+        "deleteTitle": "Elimina rilevamenti della specie",
+        "deleteConfirm": "Elimina",
+        "deleteMessage": "Eliminare tutti i {count} rilevamenti di {species}? I rilevamenti bloccati vengono mantenuti.",
+        "deleteWarning": "Questa operazione rimuove definitivamente i rilevamenti e le loro clip audio e non può essere annullata.",
+        "deleteFailed": "Eliminazione dei rilevamenti non riuscita. Riprova."
       }
     },
     "advanced": {
