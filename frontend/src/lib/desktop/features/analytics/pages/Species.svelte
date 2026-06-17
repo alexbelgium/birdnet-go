@@ -896,10 +896,9 @@
     deleteInFlight = true;
     deleteError = null;
     try {
-      await api.post<{ deleted: number; skipped: number }>(
-        '/api/v2/detections/species/delete',
-        { scientific_name: target.scientific_name }
-      );
+      await api.post<{ deleted: number; skipped: number }>('/api/v2/detections/species/delete', {
+        scientific_name: target.scientific_name,
+      });
       // Optimistically drop the species from the table without a full data refresh:
       // remove it from the summary and clear its review-stats entry so manageSpecies
       // does not re-synthesize a stale row (old all-time count / re-deletable). Any
