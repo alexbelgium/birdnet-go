@@ -901,8 +901,11 @@
         { scientific_name: target.scientific_name }
       );
       if (resp.skipped === 0) {
-        // Full deletion: drop the row locally.
+        // Full deletion: drop the row locally, and clear its review-stats entry so
+        // manageSpecies does not re-synthesize a stale row for the just-deleted
+        // species (which would show the old all-time count and be "deletable" again).
         speciesData = speciesData.filter(s => s.scientific_name !== target.scientific_name);
+        reviewStats.delete(target.scientific_name);
       } else {
         // Partial deletion (locked detections remain): refresh summary + review data.
         manageDataLoaded = false;
