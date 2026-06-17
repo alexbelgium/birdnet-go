@@ -896,22 +896,16 @@
     deleteInFlight = true;
     deleteError = null;
     try {
-      const resp = await api.post<{ deleted: number; skipped: number }>(
+      await api.post<{ deleted: number; skipped: number }>(
         '/api/v2/detections/species/delete',
         { scientific_name: target.scientific_name }
       );
-      if (resp.skipped === 0) {
-        // Full deletion: drop the row locally, and clear its review-stats entry so
-        // manageSpecies does not re-synthesize a stale row for the just-deleted
-        // species (which would show the old all-time count and be "deletable" again).
-        speciesData = speciesData.filter(s => s.scientific_name !== target.scientific_name);
-        reviewStats.delete(target.scientific_name);
-      } else {
-        // Partial deletion (locked detections remain): refresh summary + review data.
-        manageDataLoaded = false;
-        await fetchData();
-        await fetchManageData();
-      }
+      // Optimistically drop the species from the table without a full data refresh:
+      // remove it from the summary and clear its review-stats entry so manageSpecies
+      // does not re-synthesize a stale row (old all-time count / re-deletable). Any
+      // locked detections the server kept reappear on the next manual data reload.
+      speciesData = speciesData.filter(s => s.scientific_name !== target.scientific_name);
+      reviewStats.delete(target.scientific_name);
       showDeleteModal = false;
       deleteTarget = null;
     } catch (error) {

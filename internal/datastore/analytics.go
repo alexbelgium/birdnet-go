@@ -292,19 +292,19 @@ func (ds *DataStore) GetSpeciesSummaryData(ctx context.Context, startDate, endDa
 func (ds *DataStore) GetSpeciesReviewStats(ctx context.Context) ([]SpeciesReviewStat, error) {
 	stats := make([]SpeciesReviewStat, 0, 100)
 
-	query := fmt.Sprintf(`
+	const query = `
 		SELECT
 			notes.scientific_name AS scientific_name,
 			COALESCE(MAX(notes.common_name), '') AS common_name,
 			COUNT(DISTINCT notes.id) AS total,
-			COUNT(DISTINCT CASE WHEN note_reviews.verified = '%s' THEN notes.id END) AS verified,
-			COUNT(DISTINCT CASE WHEN note_reviews.verified = '%s' THEN notes.id END) AS rejected
+			COUNT(DISTINCT CASE WHEN note_reviews.verified = ? THEN notes.id END) AS verified,
+			COUNT(DISTINCT CASE WHEN note_reviews.verified = ? THEN notes.id END) AS rejected
 		FROM notes
 		LEFT JOIN note_reviews ON notes.id = note_reviews.note_id
-		GROUP BY notes.scientific_name
-	`, entities.VerificationCorrect, entities.VerificationFalsePositive)
+		GROUP BY notes.scientific_name`
 
-	if err := ds.DB.WithContext(ctx).Raw(query).Scan(&stats).Error; err != nil {
+	if err := ds.DB.WithContext(ctx).Raw(query,
+		string(entities.VerificationCorrect), string(entities.VerificationFalsePositive)).Scan(&stats).Error; err != nil {
 		return nil, dbError(err, "get_species_review_stats", errors.PriorityMedium,
 			"action", "generate_species_review_stats")
 	}
