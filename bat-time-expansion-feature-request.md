@@ -40,21 +40,31 @@ A frequency `f` becomes `f/F`; output duration becomes `original × F`; output i
 | 10× | 10 | standard bat-detector reference; higher-frequency species / poor HF hearing |
 | 16× / 20× | 16 / 20 | very high-frequency calls / hearing comfort |
 
-**Rationale for Native/Auto default:** BirdNET-Go's *native* expansion is `sourceRate/48000`. Offering this as the default preset lines the playback up 1:1 with the frequency axis already displayed in the spectrogram for that detection. The fixed 5/10/16/20× presets remain available.
+**Rationale for Native/Auto default:** BirdNET-Go's *native* expansion factor is `sourceRate/48000` — the same ratio the inference pipeline uses. The fixed 5/10/16/20× presets remain available alongside it.
 
-## Feature gating: use the same bat model check as the spectrogram
+> **Caveat — do not claim 1:1 alignment with the displayed spectrogram (yet).** `ProfileForModelType()` currently returns `BirdProfile()` for *all* model types — the bat profile is intentionally disabled (`internal/spectrogram/frequency_profile.go:42-44`, "Bat profile is temporarily disabled due to spectrogram generation bugs"). So the spectrogram shown for a bat detection today is rendered with bird defaults (resampled to 24 kHz, Nyquist 12 kHz — see the `FREQ_NYQUIST_KHZ`/`FREQ_TICKS_KHZ` overlay in `AudioPlayer.svelte`). Until `BatProfile()` is re-enabled, the Native/Auto audio and the on-screen frequency axis are **not** the same scale, and the UI must not assert that they are. Treat 1:1 spectrogram alignment as a follow-up that lands together with the bat-spectrogram fix.
 
-The spectrogram frequency axis for each detection is chosen server-side by `ProfileForModelType(modelType)` in `internal/spectrogram/frequency_profile.go`. When a detection comes from the `bat` model (BattyBirdNET), this returns `BatProfile()` — no resampling, 18 kHz high-pass — which produces a different frequency axis from the bird default. The `modelType` value (`"bat"`, `"bird"`, `"multi"`) is persisted in the database and already retrieved via `c.DS.GetNoteModelType(noteID)` in `internal/api/v2/media.go`.
+## Feature gating: probed sample rate is the gate; bat model is only a hint
 
-**The time-expansion UI should apply the same gate:** show it if and only if `ProfileForModelType(modelType)` would return `BatProfile()` — i.e., `modelType == "bat"`.
+The transform is only meaningful — and the backend only accepts it — when the clip's actual sample rate is above the 48 kHz playback target. The single source of truth for "is this clip ultrasonic?" is therefore the **probed sample rate of the stored clip**, not the model type.
 
-This requires one small change: the `Detection` API response (currently defined in `frontend/src/lib/types/detection.types.ts`) does not include `modelType`. The field must be added to the backend response and the frontend type so the `DetectionDetail.svelte` component can conditionally render the time-expansion control without an extra API call.
+Model type is an unreliable proxy here:
+
+- `AudioSourceConfig.Validate` accepts the `model` value independently of `SampleRate` and only validates `SampleRate` when it is nonzero, so a `bat`-model source can carry a ≤ 48 kHz rate.
+- This document's own blocking prerequisite flags that bat clips may be **saved/relabelled at 48 kHz**. In that case a model-type gate would show the selector while the expansion endpoint correctly rejects the clip — exactly the ambiguous/broken state the frontend guidelines warn against.
+
+**Gating rule:**
+
+- **Backend** rejects/410s expansion requests whose probed source rate ≤ 48000 Hz (unchanged).
+- **Frontend** shows the control based on the **probed/effective clip sample rate > 48000 Hz**, surfaced in the detection response (see below). `modelType == "bat"` is used only as a cheap *hint* (e.g., to decide whether it's worth probing, or to label the control "bat playback"), never as the sole visibility condition. This keeps the UI gate and the backend gate in agreement.
+
+To support this, the detection API response (currently `frontend/src/lib/types/detection.types.ts`, which has no rate/model field) should expose the clip's **sample rate** (and optionally `modelType` as a hint). The frontend gates on the rate so it never offers a preset the backend will reject.
 
 ## Backend implementation
 
 Reuse existing infrastructure rather than a standalone service.
 
-1. **Expose `modelType` in the detection response** — add the value from `GetNoteModelType` to the detection JSON already returned to the frontend. This is the single prerequisite for frontend gating.
+1. **Expose the clip sample rate in the detection response** — surface the probed/effective sample rate (and optionally `modelType` from `GetNoteModelType` as a hint) in the detection JSON returned to the frontend. The rate is what the frontend gates on so its visibility condition matches the backend's `≤ 48000 Hz` rejection.
 
 2. **Endpoint** — extend the existing audio-serving surface (`internal/api/v2/media.go`) instead of inventing a parallel one. Either:
    - add an `expansion` query param to `GET /api/v2/audio/:id` (e.g. `?expansion=10` or `?expansion=native`), or
@@ -75,7 +85,7 @@ Reuse existing infrastructure rather than a standalone service.
 
 - The existing client-side speed control (`SPEED_OPTIONS`, `applyPlaybackRate`, `preservesPitch=false` in `frontend/src/lib/utils/audio.ts`) **cannot** serve this: browser `playbackRate` floors at 0.25 (4× max) and browsers can't decode ultrasonic WAV. Keep it separate and unchanged.
 
-- **Visibility gate:** show the time-expansion control only when `detection.modelType === "bat"` — the same condition that (when re-enabled) triggers `BatProfile()` in the spectrogram generator. This mirrors the spectrogram's own bat-model check exactly. When `modelType` is not `"bat"`, hide the control entirely.
+- **Visibility gate:** show the time-expansion control only when the detection's probed/effective clip **sample rate > 48000 Hz** — the same threshold the backend uses to accept the expansion request, so the UI never offers a preset the server will reject. `modelType === "bat"` may be used as a hint (e.g. to label the control or skip probing) but is **not** the sole gate, because bat clips can be stored/relabelled at 48 kHz. When the rate is ≤ 48000 Hz, hide the control (optionally with an info tooltip explaining it needs a high-sample-rate recording).
 
 - Add an **"Audible bat playback"** preset selector in `AudioPlayer.svelte` (best placed alongside the existing `AudioSettingsButton`, on `DetectionDetail.svelte`). Selecting a preset swaps `audioUrl` to the expansion endpoint; selecting "Original" restores the source URL.
 
@@ -87,17 +97,17 @@ Reuse existing infrastructure rather than a standalone service.
 
 ## Scope
 
-**In scope (v1):** Original + Native/Auto + 5× + 10× + 16× + 20× presets; server-side generation; on-disk caching; clear "derived copy" labelling; 192/256/384 kHz source support; visibility gating by `modelType === "bat"`.
+**In scope (v1):** Original + Native/Auto + 5× + 10× + 16× + 20× presets; server-side generation; on-disk caching; clear "derived copy" labelling; 192/256/384 kHz source support; visibility gating by probed clip sample rate > 48000 Hz (with `modelType == "bat"` as a hint only).
 
-**Out of scope (v1):** heterodyne playback; automatic peak-frequency detection (unless trivially reusable); arbitrary user-chosen factors; modifying the live capture/inference path.
+**Out of scope (v1):** heterodyne playback; automatic peak-frequency detection (unless trivially reusable); arbitrary user-chosen factors; modifying the live capture/inference path; 1:1 alignment of Native-preset audio with the displayed spectrogram (blocked on re-enabling `BatProfile()`).
 
 ## Acceptance criteria
 
-- For a bat-model detection (`modelType === "bat"`), the user can play a 48 kHz audible time-expanded copy in the browser.
-- For all other model types, the time-expansion control is hidden — same gate as the bat spectrogram frequency axis.
-- Default preset is **Native/Auto** (`sourceRate/48000`); 5×/10×/16×/20× are selectable; 10× is labelled the standard reference.
+- For a detection whose clip sample rate is above 48 kHz, the user can play a 48 kHz audible time-expanded copy in the browser.
+- The time-expansion control is shown if and only if the probed clip rate > 48000 Hz, so the frontend visibility condition and the backend acceptance condition always agree; clips at ≤ 48 kHz never show a selector the server would reject.
+- Default preset is **Native/Auto** (`sourceRate/48000`); 5×/10×/16×/20× are selectable; 10× is labelled the standard reference. The UI does not claim the Native preset matches the on-screen spectrogram scale while `ProfileForModelType` still returns bird defaults.
 - The original recording file is never modified, and the derived audio is clearly labelled as a review copy.
 - Derived audio is generated server-side via FFmpeg `asetrate,aresample` (pitch intentionally lowered; `atempo` not used), output at 48 kHz, and cached (keyed by note + rate + factor) so repeat requests don't regenerate.
 - Derived audio is never used as classifier input.
 - Works for at least 192/256/384 kHz sources.
-- `modelType` is present in the detection API response so the frontend can apply the gating without an extra round-trip.
+- The clip sample rate is present in the detection API response so the frontend can apply the gating without an extra round-trip.
