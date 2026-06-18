@@ -9,7 +9,7 @@ Add a server-side **time-expansion playback** mode so users reviewing ultrasonic
 - Bat capture at high sample rates (96–256 kHz) is already a supported configuration (`AudioSourceConfig.SampleRate`, model `bat`).
 - The inference pipeline reinterprets 256 kHz audio as 48 kHz — a 5.33× slow-down — to make ultrasonic calls audible to the embedding model. This feature applies the same idea for human listening.
 - FFmpeg is already integrated (`internal/audiocore/ffmpeg/`, with `-af` filter chains used for denoise/normalize/gain), so the transform needs no new dependency.
-- Spectrograms are already generated and cached server-side with a parameter-keyed, immutable-cache, dedup-queue pattern (`internal/api/v2/media.go`, `internal/spectrogram/`). The derived audio should reuse this exact pattern.
+- The existing `ProcessAudioByID` / `ExtractAudioClipByID` handlers (`internal/api/v2/media.go`) already generate FFmpeg-derived audio on demand and serve it back to the player — this feature is a thin extension of that path, not a new service.
 
 ## Prerequisite to confirm before implementation (blocking)
 
@@ -32,17 +32,14 @@ A frequency `f` becomes `f/F`; output duration becomes `original × F`; output i
 
 ### Presets
 
+A small fixed set of integer factors (no computed/"auto" factor — keeps the endpoint a simple allow-list and avoids any implied relationship to the spectrogram axis, which is currently rendered with bird defaults regardless of model type):
+
 | Preset | Factor | Notes |
 |---|---|---|
 | **Original** | 1× | unchanged file |
-| **Native / matches detection** *(recommended default)* | `sourceRate ÷ 48000` (≈5.3× at 256 kHz, 4× at 192 kHz, 8× at 384 kHz) | reproduces exactly what the detector "heard" and what the spectrogram shows |
-| 5× | 5 | short clips, common 20–55 kHz European species |
+| 5× *(default)* | 5 | short clips, common 20–55 kHz European species |
 | 10× | 10 | standard bat-detector reference; higher-frequency species / poor HF hearing |
 | 16× / 20× | 16 / 20 | very high-frequency calls / hearing comfort |
-
-**Rationale for Native/Auto default:** BirdNET-Go's *native* expansion factor is `sourceRate/48000` — the same ratio the inference pipeline uses. The fixed 5/10/16/20× presets remain available alongside it.
-
-> **Caveat — do not claim 1:1 alignment with the displayed spectrogram (yet).** `ProfileForModelType()` currently returns `BirdProfile()` for *all* model types — the bat profile is intentionally disabled (`internal/spectrogram/frequency_profile.go:42-44`, "Bat profile is temporarily disabled due to spectrogram generation bugs"). So the spectrogram shown for a bat detection today is rendered with bird defaults (resampled to 24 kHz, Nyquist 12 kHz — see the `FREQ_NYQUIST_KHZ`/`FREQ_TICKS_KHZ` overlay in `AudioPlayer.svelte`). Until `BatProfile()` is re-enabled, the Native/Auto audio and the on-screen frequency axis are **not** the same scale, and the UI must not assert that they are. Treat 1:1 spectrogram alignment as a follow-up that lands together with the bat-spectrogram fix.
 
 ## Feature gating: probed sample rate is the gate; bat model is only a hint
 
@@ -66,20 +63,15 @@ Reuse existing infrastructure rather than a standalone service.
 
 1. **Expose the clip sample rate in the detection response** — surface the probed/effective sample rate (and optionally `modelType` from `GetNoteModelType` as a hint) in the detection JSON returned to the frontend. The rate is what the frontend gates on so its visibility condition matches the backend's `≤ 48000 Hz` rejection.
 
-2. **Endpoint** — extend the existing audio-serving surface (`internal/api/v2/media.go`) instead of inventing a parallel one. Either:
-   - add an `expansion` query param to `GET /api/v2/audio/:id` (e.g. `?expansion=10` or `?expansion=native`), or
-   - add a sibling to the existing `POST /api/v2/audio/:id/process` / `ExtractAudioClipByID` handlers.
-   Validate `expansion` against an allow-list of presets (no arbitrary floats → avoids cache-key explosion and abuse).
+2. **Endpoint** — add an `expansion` query param (`5`/`10`/`16`/`20`) to the existing audio-serving surface (`internal/api/v2/media.go`), reusing the `ProcessAudioByID` path rather than inventing a parallel one. Validate `expansion` against the fixed allow-list above (reject anything else).
 
 3. **Probe** the source rate via the existing ffprobe path (`internal/audiocore/ffmpeg/validate.go`); reject with a clear error if the probed rate is ≤ 48000 Hz.
 
-4. **Generate** the derived 48 kHz file through the existing FFmpeg filter-chain mechanism (`internal/audiocore/ffmpeg/export.go` / `clip.go`), adding the `asetrate,aresample` filter. Never write to the original path.
+4. **Generate** the derived 48 kHz audio through the existing FFmpeg filter-chain mechanism (`internal/audiocore/ffmpeg/export.go` / `clip.go`), adding the `asetrate,aresample` filter — exactly as the current denoise/normalize/gain filters are applied. Never write to the original path. Serve `audio/wav` inline with normal cache headers so the browser caches the response; server-side disk caching is **not** required for v1 (the clips are short and generation is fast — add it later only if profiling shows repeated regeneration is a problem).
 
-5. **Cache** on disk keyed by `(noteID, sourceRate, factor)`, mirroring the spectrogram cache: immutable `Cache-Control` headers and a `sync.Map`-based in-flight dedup queue so concurrent requests don't regenerate the same file. Serve `audio/wav` with `Content-Disposition: inline`.
+5. **Never** feed derived audio back into classification; it is a review artifact only.
 
-6. **Never** feed derived audio back into classification; it is a review artifact only.
-
-7. Respect `SecureFS` path handling already used by the media handlers.
+6. Respect `SecureFS` path handling already used by the media handlers.
 
 ## Frontend implementation
 
@@ -97,17 +89,17 @@ Reuse existing infrastructure rather than a standalone service.
 
 ## Scope
 
-**In scope (v1):** Original + Native/Auto + 5× + 10× + 16× + 20× presets; server-side generation; on-disk caching; clear "derived copy" labelling; 192/256/384 kHz source support; visibility gating by probed clip sample rate > 48000 Hz (with `modelType == "bat"` as a hint only).
+**In scope (v1):** Original + 5× + 10× + 16× + 20× presets; on-demand server-side generation reusing the existing FFmpeg/`ProcessAudioByID` path; clear "derived copy" labelling; 192/256/384 kHz source support; visibility gating by probed clip sample rate > 48000 Hz (with `modelType == "bat"` as a hint only).
 
-**Out of scope (v1):** heterodyne playback; automatic peak-frequency detection (unless trivially reusable); arbitrary user-chosen factors; modifying the live capture/inference path; 1:1 alignment of Native-preset audio with the displayed spectrogram (blocked on re-enabling `BatProfile()`).
+**Out of scope (v1):** heterodyne playback; automatic peak-frequency detection; arbitrary user-chosen factors; server-side disk caching; modifying the live capture/inference path.
 
 ## Acceptance criteria
 
 - For a detection whose clip sample rate is above 48 kHz, the user can play a 48 kHz audible time-expanded copy in the browser.
 - The time-expansion control is shown if and only if the probed clip rate > 48000 Hz, so the frontend visibility condition and the backend acceptance condition always agree; clips at ≤ 48 kHz never show a selector the server would reject.
-- Default preset is **Native/Auto** (`sourceRate/48000`); 5×/10×/16×/20× are selectable; 10× is labelled the standard reference. The UI does not claim the Native preset matches the on-screen spectrogram scale while `ProfileForModelType` still returns bird defaults.
+- Default preset is **5×**; 10×/16×/20× are selectable; 10× is labelled the standard reference.
 - The original recording file is never modified, and the derived audio is clearly labelled as a review copy.
-- Derived audio is generated server-side via FFmpeg `asetrate,aresample` (pitch intentionally lowered; `atempo` not used), output at 48 kHz, and cached (keyed by note + rate + factor) so repeat requests don't regenerate.
+- Derived audio is generated server-side via FFmpeg `asetrate,aresample` (pitch intentionally lowered; `atempo` not used), output at 48 kHz.
 - Derived audio is never used as classifier input.
 - Works for at least 192/256/384 kHz sources.
 - The clip sample rate is present in the detection API response so the frontend can apply the gating without an extra round-trip.
