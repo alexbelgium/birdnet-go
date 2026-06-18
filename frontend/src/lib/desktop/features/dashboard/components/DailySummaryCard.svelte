@@ -1110,9 +1110,12 @@ Responsive Breakpoints:
                       </span>
                     {/if}
                   </a>
-                  {#if item.species_code}
+                  {#if item.species_code && item.species_code === item.species_code.toLowerCase()}
                     <a
-                      href="https://ebird.org/species/{item.species_code}?siteLanguage={getLocale()}"
+                      href="https://ebird.org/species/{item.species_code}?siteLanguage={getLocale() ===
+                      'nb'
+                        ? 'no'
+                        : getLocale()}"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="shrink-0 opacity-40 hover:opacity-100 hover:text-[var(--color-primary)]"
