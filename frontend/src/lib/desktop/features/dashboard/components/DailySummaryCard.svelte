@@ -49,7 +49,7 @@ Responsive Breakpoints:
 <script lang="ts">
   import DatePicker from '$lib/desktop/components/ui/DatePicker.svelte';
   import SkeletonDailySummary from '$lib/desktop/components/ui/SkeletonDailySummary.svelte';
-  import { t } from '$lib/i18n';
+  import { t, getLocale } from '$lib/i18n';
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { getLocalDateString, getDateInTimezone } from '$lib/utils/date';
   import {
@@ -78,7 +78,7 @@ Responsive Breakpoints:
     resolveNoveltyCategory,
     noveltyCategoryColorVar,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { ChevronLeft, ChevronRight, Star, XCircle } from '@lucide/svelte';
+  import { ChevronLeft, ChevronRight, ExternalLink, Star, XCircle } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
@@ -122,7 +122,7 @@ Responsive Breakpoints:
       SPECIES_COUNT: 8, // Number of skeleton rows to show during loading
     },
     SPECIES_COLUMN: {
-      BASE_WIDTH: 4, // rem - thumbnail (2) + gap (0.5) + padding (1) + buffer (0.5)
+      BASE_WIDTH: 5.5, // rem - thumbnail (2) + gap (0.5) + padding (1) + ebird icon (0.75) + gap (0.5) + buffer (0.75)
       CHAR_WIDTH: 0.52, // rem per character for text-sm font
       MIN_WIDTH: 9, // rem - minimum column width
       MAX_WIDTH: 22, // rem - maximum column width (prevents excessive width)
@@ -1110,6 +1110,18 @@ Responsive Breakpoints:
                       </span>
                     {/if}
                   </a>
+                  {#if item.species_code}
+                    <a
+                      href="https://ebird.org/species/{item.species_code}?siteLanguage={getLocale()}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="shrink-0 opacity-40 hover:opacity-100 hover:text-[var(--color-primary)]"
+                      title="View on eBird"
+                      aria-label="View {displayName} on eBird"
+                    >
+                      <ExternalLink class="size-3" />
+                    </a>
+                  {/if}
                 </div>
 
                 <!-- Hourly heatmap cells (desktop) -->
