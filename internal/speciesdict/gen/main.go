@@ -53,6 +53,8 @@ func run(outDir string) error {
 			return fmt.Errorf("build dictionary for %q: %w", locale, err)
 		}
 
+		applyOverrides(dict, locale)
+
 		// Compact, sorted-key JSON (json.Marshal sorts map keys) keeps the output
 		// deterministic and small.
 		data, err := json.Marshal(dict)

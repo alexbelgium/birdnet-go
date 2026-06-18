@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Fix missing species translations in BirdNET-Go speciesdict data files.
+
+NOTE: This script updates the SOURCE DATA at the generator level.
+The generated .json.gz files are artifacts; the real fix belongs in
+internal/speciesdict/gen/overrides.go (already seeded with bat/bird names).
+
+This script fetches ADDITIONAL translations from Wikipedia that are not yet in
+overrides.go, writes them to gen/overrides.go, and then re-runs the generator
+so the .json.gz files stay in sync.
 
 Usage:
     python3 fix_translations.py [--dry-run]
@@ -12,12 +21,16 @@ After running, delete this script before committing.
 """
 
 import gzip
+import io
 import json
 import sys
 import time
 import urllib.parse
 import urllib.request
 import os
+
+# Force UTF-8 output on Windows where the default codec may be cp1252
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 # --- CONFIGURATION -----------------------------------------------------------
 
@@ -207,24 +220,24 @@ def main():
 
         # Skip hybrids
         if species in SKIP:
-            print(f'{prefix}  →  SKIP (hybrid)')
+            print(f'{prefix}  ->  SKIP (hybrid)')
             continue
 
         # Apply manual overrides
         if species in MANUAL:
             overrides = MANUAL[species]
             if not overrides:
-                print(f'{prefix}  →  SKIP (non-species, no translation needed)')
+                print(f'{prefix}  ->  SKIP (non-species, no translation needed)')
                 continue
             for lang, name in overrides.items():
                 if lang in missing_langs:
                     updates[lang][species] = name
             found = [f'{l}={v!r}' for l, v in overrides.items() if l in missing_langs]
-            print(f'{prefix}  →  manual: {", ".join(found)}')
+            print(f'{prefix}  ->  manual: {", ".join(found)}')
             continue
 
         # Fetch from Wikipedia
-        print(f'{prefix}  →  querying Wikipedia...', end=' ', flush=True)
+        print(f'{prefix}  ->  querying Wikipedia...', end=' ', flush=True)
         translations = wiki_translations(species, missing_langs)
         found = []
         for lang in missing_langs:
