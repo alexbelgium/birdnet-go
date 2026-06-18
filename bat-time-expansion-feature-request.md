@@ -1,105 +1,81 @@
-# Audible bat playback via server-side time expansion
+# Audible bat playback via time expansion
+
+## Depends on (merge after): tphakala/birdnet-go#3529
+
+This feature is designed to land **after** the bat-spectrogram fix (#3529). That PR already does work both earlier drafts treated as in-scope, so we simply consume it:
+
+- Adds `ModelType` to the single-detection `DetectionResponse` and the frontend `Detection` type, and wires it into `AudioPlayer.svelte` / `DetectionDetail.svelte`.
+- Re-enables `BatProfile()` so bat detections render a native ultrasonic spectrogram (0–128 kHz axis), instead of the bird-default 0–12 kHz axis.
+
+**Consequences for this feature:** do **not** re-add `modelType` to the API or the frontend type — verify it's present from #3529 and reuse it. The frontend gate (`detection.modelType === 'bat'`) is then literally the same model-type selection that drives the spectrogram frequency axis.
 
 ## Summary
 
-Add a server-side **time-expansion playback** mode so users reviewing ultrasonic bat detections can hear the calls. BirdNET-Go already performs a ~5.3× time-expansion internally for bat inference (the "slow-down trick", `doc/wiki/detection-pipeline.md`); this feature exposes an equivalent transform on the **review/detail page** as a selectable, clearly-labelled *derived* audio copy, leaving the original recording untouched.
+BirdNET-Go bat detections capture ultrasonic audio (typically 96–384 kHz) that is inaudible at normal playback. This adds an **audible review mode**: a derived copy slowed by a selectable time-expansion factor via FFmpeg `asetrate`+`aresample`, resampled to 48 kHz for the browser. The original clip is never modified, and the (ultrasonic) spectrogram is left as-is.
 
-## Background in this codebase (why this fits)
+## Transform
 
-- Bat capture at high sample rates (96–256 kHz) is already a supported configuration (`AudioSourceConfig.SampleRate`, model `bat`).
-- The inference pipeline reinterprets 256 kHz audio as 48 kHz — a 5.33× slow-down — to make ultrasonic calls audible to the embedding model. This feature applies the same idea for human listening.
-- FFmpeg is already integrated (`internal/audiocore/ffmpeg/`, with `-af` filter chains used for denoise/normalize/gain), so the transform needs no new dependency.
-- The existing `ProcessAudioByID` / `ExtractAudioClipByID` handlers (`internal/api/v2/media.go`) already generate FFmpeg-derived audio on demand and serve it back to the player — this feature is a thin extension of that path, not a new service.
-
-## Prerequisite to confirm before implementation (blocking)
-
-Determine the on-disk sample rate of saved bat clips (from the `CaptureBuffer`, which holds audio at the source rate):
-
-1. **Saved at native rate (e.g., 256 kHz):** server-side expansion is required and fully recoverable → implement as below.
-2. **Saved already downsampled/relabelled to 48 kHz:** ultrasonic content is already shifted/aliased; this feature reduces to UI labelling plus optional *further* expansion, and high-frequency detail may not be recoverable.
-
-The implementation plan below assumes case (1); the UI/messaging should degrade gracefully for case (2).
-
-## Proposed transform
-
-Generalize the existing slow-down trick. For an expansion factor **F**, reinterpret then resample to a standard 48 kHz playback rate — using `asetrate` + `aresample`, **not** `atempo` (we *want* the pitch to drop; `atempo` preserves pitch and is wrong here):
+For factor **F**, reinterpret the source at `sourceRate/F` Hz then resample to 48 kHz — `asetrate`+`aresample`, **not** `atempo` (we want pitch to drop):
 
 ```
-ffmpeg -i input.wav -af "asetrate=${SOURCE_SAMPLE_RATE}/${F},aresample=48000" output_audible_${F}x.wav
+ffmpeg -i input.wav -af "asetrate=${sourceRate}/${F},aresample=48000" out.wav
 ```
 
-A frequency `f` becomes `f/F`; output duration becomes `original × F`; output is always 48 kHz (browser-playable). This is independent of the source rate, so it works for 192/256/384 kHz sources.
+A 45 kHz call at 5× → 9 kHz (audible); duration becomes `original × F`; output is always 48 kHz.
 
-### Presets
-
-A small fixed set of integer factors (no computed/"auto" factor — keeps the endpoint a simple allow-list and avoids any implied relationship to the spectrogram axis, which is currently rendered with bird defaults regardless of model type):
+### Presets (fixed allow-list)
 
 | Preset | Factor | Notes |
 |---|---|---|
-| **Original** | 1× | unchanged file |
-| 5× *(default)* | 5 | short clips, common 20–55 kHz European species |
-| 10× | 10 | standard bat-detector reference; higher-frequency species / poor HF hearing |
+| Original | — | unchanged file |
+| 5× *(default)* | 5 | common European bats (pipistrelles, noctules, serotines) |
+| 10× | 10 | standard bat-detector reference; high-frequency species / reduced hearing |
 | 16× / 20× | 16 / 20 | very high-frequency calls / hearing comfort |
 
-## Feature gating: probed sample rate is the gate; bat model is only a hint
+## Gating
 
-The transform is only meaningful — and the backend only accepts it — when the clip's actual sample rate is above the 48 kHz playback target. The single source of truth for "is this clip ultrasonic?" is therefore the **probed sample rate of the stored clip**, not the model type.
+Two layers, each using existing mechanisms:
 
-Model type is an unreliable proxy here:
+- **Frontend visibility:** render the control only when `detection.modelType === 'bat'` — the same `GetNoteModelType` value that selects the spectrogram frequency profile (`media.go:1081/1459/1828`). `modelType` is already on the response thanks to #3529.
+- **Backend correctness:** the `/expand` handler gates on `GetNoteModelType == "bat"` (422 otherwise) and rejects sources below `MinBatSampleRate` (96 kHz, `internal/audiocore/ffmpeg/probe.go:19`) with a typed error surfaced as 422. This covers the edge case of a bat-model source whose clip is ≤ 96 kHz, so the UI gate and backend never silently disagree.
 
-- `AudioSourceConfig.Validate` accepts the `model` value independently of `SampleRate` and only validates `SampleRate` when it is nonzero, so a `bat`-model source can carry a ≤ 48 kHz rate.
-- This document's own blocking prerequisite flags that bat clips may be **saved/relabelled at 48 kHz**. In that case a model-type gate would show the selector while the expansion endpoint correctly rejects the clip — exactly the ambiguous/broken state the frontend guidelines warn against.
+## Backend (reuse `/process` end to end)
 
-**Gating rule:**
+1. **Endpoint:** `POST /api/v2/audio/:id/expand` (auth required), registered next to `/process` and `/clip` in `initMediaRoutes` (`media.go:211`). Body `{"factor": 5}`.
+2. **Handler `ExpandAudioByID`:** mirror `ProcessAudioByID` (`media.go:857–968`) step for step:
+   - validate `factor` against a fixed allow-list (`5/10/16/20`);
+   - gate on `GetNoteModelType(noteID) == "bat"` → 422 if not;
+   - resolve + validate clip path via `SecureFS` as `/process` does;
+   - check `processingCache` with a new `expansionCacheKey(noteID, factor)` (mirror `processingCacheKey`, `process_cache.go:35`);
+   - acquire `processingSemaphore` (503 when full);
+   - run the FFmpeg transform into a temp file under `.tmp-processing/` (the WAV muxer needs seekable output — same temp-file pattern as `media.go:928–942`), read back, `defer os.Remove`;
+   - `processingCache.put` (existing 15-min TTL) and return `audio/wav`.
+3. **Probe + transform helper** in `internal/audiocore/ffmpeg/`: probe the local file's sample rate (reuse the private `parseProbeOutput`, `probe.go:106`; `ProbeStreamInfo` adds RTSP flags unsuitable for files), reject `< MinBatSampleRate`, then apply `asetrate,aresample`. Never write the original path.
+4. Derived audio is **never** fed to classification.
 
-- **Backend** rejects/410s expansion requests whose probed source rate ≤ 48000 Hz (unchanged).
-- **Frontend** shows the control based on the **probed/effective clip sample rate > 48000 Hz**, surfaced in the detection response (see below). `modelType == "bat"` is used only as a cheap *hint* (e.g., to decide whether it's worth probing, or to label the control "bat playback"), never as the sole visibility condition. This keeps the UI gate and the backend gate in agreement.
+Nothing new is added to `processingCache`, `processingSemaphore`, `SecureFS`, the schema, or the auth model — all reused as-is.
 
-To support this, the detection API response (currently `frontend/src/lib/types/detection.types.ts`, which has no rate/model field) should expose the clip's **sample rate** (and optionally `modelType` as a hint). The frontend gates on the rate so it never offers a preset the backend will reject.
+## Frontend (reuse the AudioToolbar denoise dropdown)
 
-## Backend implementation
-
-Reuse existing infrastructure rather than a standalone service.
-
-1. **Expose the clip sample rate in the detection response** — surface the probed/effective sample rate (and optionally `modelType` from `GetNoteModelType` as a hint) in the detection JSON returned to the frontend. The rate is what the frontend gates on so its visibility condition matches the backend's `≤ 48000 Hz` rejection.
-
-2. **Endpoint** — add an `expansion` query param (`5`/`10`/`16`/`20`) to the existing audio-serving surface (`internal/api/v2/media.go`), reusing the `ProcessAudioByID` path rather than inventing a parallel one. Validate `expansion` against the fixed allow-list above (reject anything else).
-
-3. **Probe** the source rate via the existing ffprobe path (`internal/audiocore/ffmpeg/validate.go`); reject with a clear error if the probed rate is ≤ 48000 Hz.
-
-4. **Generate** the derived 48 kHz audio through the existing FFmpeg filter-chain mechanism (`internal/audiocore/ffmpeg/export.go` / `clip.go`), adding the `asetrate,aresample` filter — exactly as the current denoise/normalize/gain filters are applied. Never write to the original path. Serve `audio/wav` inline with normal cache headers so the browser caches the response; server-side disk caching is **not** required for v1 (the clips are short and generation is fast — add it later only if profiling shows repeated regeneration is a problem).
-
-5. **Never** feed derived audio back into classification; it is a review artifact only.
-
-6. Respect `SecureFS` path handling already used by the media handlers.
-
-## Frontend implementation
-
-- The existing client-side speed control (`SPEED_OPTIONS`, `applyPlaybackRate`, `preservesPitch=false` in `frontend/src/lib/utils/audio.ts`) **cannot** serve this: browser `playbackRate` floors at 0.25 (4× max) and browsers can't decode ultrasonic WAV. Keep it separate and unchanged.
-
-- **Visibility gate:** show the time-expansion control only when the detection's probed/effective clip **sample rate > 48000 Hz** — the same threshold the backend uses to accept the expansion request, so the UI never offers a preset the server will reject. `modelType === "bat"` may be used as a hint (e.g. to label the control or skip probing) but is **not** the sole gate, because bat clips can be stored/relabelled at 48 kHz. When the rate is ≤ 48000 Hz, hide the control (optionally with an info tooltip explaining it needs a high-sample-rate recording).
-
-- Add an **"Audible bat playback"** preset selector in `AudioPlayer.svelte` (best placed alongside the existing `AudioSettingsButton`, on `DetectionDetail.svelte`). Selecting a preset swaps `audioUrl` to the expansion endpoint; selecting "Original" restores the source URL.
-
-- When a derived preset is active, show a clear notice, e.g. *"Audible review copy — 10× slowed (standard bat-detector time expansion). Original recording is unchanged."*
-
-- Optional nudge for peak frequency > ~60 kHz: *"This recording contains very high-frequency calls; 10× or 16× may be easier to hear."* — only if existing spectrogram/`frequency_profile.go` analysis can supply peak frequency cheaply; otherwise out of scope for v1.
-
-- Add labels to `frontend/static/messages/en.json` and run the i18n sync/type-gen scripts.
+- Add a small expansion dropdown to `AudioToolbar.svelte`, following the existing denoise-dropdown pattern (`AudioToolbar.svelte:96–307`), rendered only when `detection.modelType === 'bat'`.
+- Options: Original / 5× (default) / 10× (standard) / 16× / 20×.
+- On select, `POST /api/v2/audio/:id/expand`; swap the `<audio>` source to the returned blob URL. Selecting "Original" restores `GET /api/v2/audio/:id`.
+- **Do not regenerate the spectrogram** — the ultrasonic spectrogram (from #3529) is more informative for ID than a frequency-shifted one.
+- Show an inline notice when active: *"Audible review copy — {factor}× slowed. Original recording is unchanged."*
+- Surface the backend 422 message if the source rate is too low (the response doesn't expose `sourceRate`, so don't pre-check client-side).
+- Add i18n keys to `en.json`, run `npm run i18n:sync && npm run generate:i18n-types`, update all 15 locales.
 
 ## Scope
 
-**In scope (v1):** Original + 5× + 10× + 16× + 20× presets; on-demand server-side generation reusing the existing FFmpeg/`ProcessAudioByID` path; clear "derived copy" labelling; 192/256/384 kHz source support; visibility gating by probed clip sample rate > 48000 Hz (with `modelType == "bat"` as a hint only).
+**In (v1):** 5×/10×/16×/20× presets; `POST /audio/:id/expand` reusing the `/process` path, cache, and semaphore; frontend dropdown gated on `modelType === 'bat'`; clear "derived copy" labelling.
 
-**Out of scope (v1):** heterodyne playback; automatic peak-frequency detection; arbitrary user-chosen factors; server-side disk caching; modifying the live capture/inference path.
+**Out (v1):** heterodyne; auto peak-frequency detection; arbitrary factors; exposing `sourceRate` to the client for pre-validation (nice-to-have follow-up to disable the control with a tooltip instead of a 422); any change to capture/inference, spectrograms, or the original clip.
 
 ## Acceptance criteria
 
-- For a detection whose clip sample rate is above 48 kHz, the user can play a 48 kHz audible time-expanded copy in the browser.
-- The time-expansion control is shown if and only if the probed clip rate > 48000 Hz, so the frontend visibility condition and the backend acceptance condition always agree; clips at ≤ 48 kHz never show a selector the server would reject.
-- Default preset is **5×**; 10×/16×/20× are selectable; 10× is labelled the standard reference.
-- The original recording file is never modified, and the derived audio is clearly labelled as a review copy.
-- Derived audio is generated server-side via FFmpeg `asetrate,aresample` (pitch intentionally lowered; `atempo` not used), output at 48 kHz.
-- Derived audio is never used as classifier input.
-- Works for at least 192/256/384 kHz sources.
-- The clip sample rate is present in the detection API response so the frontend can apply the gating without an extra round-trip.
+- For a bat detection with a ≥ 96 kHz source, the user can play 5×/10×/16×/20× expanded audio at 48 kHz in the browser; default offered is 5×, 10× labelled standard.
+- Control is shown iff `modelType === 'bat'`; backend returns 422 for non-bat or sub-96 kHz sources and the UI surfaces the message.
+- Original clip is byte-identical before/after; derived audio is clearly labelled and never classified.
+- Repeated `(detection, factor)` requests are served from the existing `processingCache`.
+- No duplication of the `modelType` plumbing already delivered by #3529.
+- `golangci-lint run -v` and `npm run check:all` pass clean; all 15 locales updated.
