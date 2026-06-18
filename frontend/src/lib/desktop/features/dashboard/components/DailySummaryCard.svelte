@@ -1112,10 +1112,10 @@ Responsive Breakpoints:
                   </a>
                   {#if item.species_code && item.species_code === item.species_code.toLowerCase()}
                     <a
-                      href="https://ebird.org/species/{item.species_code}?siteLanguage={getLocale() ===
+                      href="https://ebird.org/species/{item.species_code}/BE-WAL?siteLanguage={getLocale() ===
                       'nb'
                         ? 'no'
-                        : getLocale()}"
+                        : getLocale() || 'fr'}"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="shrink-0 opacity-40 hover:opacity-100 hover:text-[var(--color-primary)]"
