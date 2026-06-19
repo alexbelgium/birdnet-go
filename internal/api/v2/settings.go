@@ -2334,6 +2334,27 @@ func birdnetSettingsChanged(oldSettings, currentSettings *conf.Settings) bool {
 		return true
 	}
 
+	// Check for changes in BirdNET inference backend preference. OpenVINOPath is
+	// intentionally NOT checked here: it is restart-required (the OpenVINO core
+	// loads the library once via InitOpenVINO and libopenvino_c cannot be safely
+	// unloaded), so a runtime path change is declared hotReloadRestart, matching
+	// ONNXRuntimePath.
+	if oldSettings.BirdNET.Backend != currentSettings.BirdNET.Backend {
+		return true
+	}
+
+	// Check for changes in the OpenVINO device preference. Switching CPU<->GPU
+	// recompiles the model on the new device, so a reload is needed; the OpenVINO
+	// core itself stays loaded (only the compiled model and infer request are
+	// rebuilt), so this is hot-reloadable, not restart-required. The reload path
+	// (handleReloadBirdnet) rebuilds the primary BirdNET classifier and then
+	// reloads the OV-capable secondary models (e.g. Perch) via
+	// Orchestrator.ReloadSecondaryModels, so a device/backend change applies to
+	// both without a restart.
+	if oldSettings.BirdNET.OpenVINODevice != currentSettings.BirdNET.OpenVINODevice {
+		return true
+	}
+
 	return false
 }
 
