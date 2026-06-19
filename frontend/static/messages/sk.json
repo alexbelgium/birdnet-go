@@ -1656,7 +1656,7 @@
       "speciesList": "Zoznam druhov",
       "switchToGrid": "Prepnúť na mriežku",
       "switchToList": "Prepnúť na zoznam",
-      "switchToManage": "Prepnúť na zobrazenie správy",
+      "switchToManage": "Prepnúť na správu druhov",
       "noSpeciesFound": "Nenašli sa žiadne druhy zodpovedajúce vašim filtrom.",
       "headers": {
         "species": "Druh",

@@ -1054,7 +1054,7 @@
           {#if $isAuthenticated}
             <button
               type="button"
-              class="btn btn-sm join-item"
+              class="btn btn-sm join-item hidden sm:inline-flex"
               class:btn-active={viewMode === 'manage'}
               onclick={showManageView}
               aria-label={t('analytics.species.switchToManage')}

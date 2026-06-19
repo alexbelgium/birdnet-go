@@ -1683,7 +1683,7 @@
         "delete": "Usuń wszystkie detekcje tego gatunku",
         "deleteTitle": "Usuń detekcje gatunku",
         "deleteConfirm": "Usuń",
-        "deleteMessage": "Usunąć wszystkie {count} detekcji gatunku {species}? Zablokowane detekcje zostaną zachowane.",
+        "deleteMessage": "{count, plural, one {Usunąć # detekcję gatunku {species}?} few {Usunąć # detekcje gatunku {species}?} many {Usunąć # detekcji gatunku {species}?} other {Usunąć # detekcji gatunku {species}?}} Zablokowane detekcje zostaną zachowane.",
         "deleteWarning": "Spowoduje to trwałe usunięcie detekcji oraz ich klipów audio i nie można tego cofnąć.",
         "deleteFailed": "Nie udało się usunąć detekcji. Spróbuj ponownie.",
         "membershipFailed": "Nie udało się zaktualizować list gatunków. Spróbuj ponownie."

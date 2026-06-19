@@ -1683,7 +1683,7 @@
         "delete": "Poista kaikki tämän lajin havainnot",
         "deleteTitle": "Poista lajin havainnot",
         "deleteConfirm": "Poista",
-        "deleteMessage": "Poistetaanko kaikki {count} havaintoa lajille {species}? Lukitut havainnot säilytetään.",
+        "deleteMessage": "Poistetaanko {count, plural, one {# havainto} other {# havaintoa}} lajille {species}? Lukitut havainnot säilytetään.",
         "deleteWarning": "Tämä poistaa havainnot ja niiden äänileikkeet pysyvästi, eikä toimintoa voi kumota.",
         "deleteFailed": "Havaintojen poistaminen epäonnistui. Yritä uudelleen.",
         "membershipFailed": "Lajiluetteloiden päivitys epäonnistui. Yritä uudelleen."

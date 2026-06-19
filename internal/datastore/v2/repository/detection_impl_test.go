@@ -216,7 +216,7 @@ func TestGetDetectionIDsByScientificName(t *testing.T) {
 		d := createDetectionForLabel(t, db, owl.ID, 2000)
 		ids, err := repo.GetDetectionIDsByScientificName(ctx, "Tyto alba")
 		require.NoError(t, err)
-		assert.Contains(t, ids, d.ID)
+		assert.ElementsMatch(t, []uint{d.ID}, ids)
 	})
 
 	t.Run("does not match a longer name sharing the prefix", func(t *testing.T) {
@@ -225,12 +225,12 @@ func TestGetDetectionIDsByScientificName(t *testing.T) {
 		alba := createTestLabel(t, db, "Motacilla alba", 1)
 		albaAlba := createTestLabel(t, db, "Motacilla alba alba", 1)
 		dAlba := createDetectionForLabel(t, db, alba.ID, 3000)
-		dAlbaAlba := createDetectionForLabel(t, db, albaAlba.ID, 3001)
+		_ = createDetectionForLabel(t, db, albaAlba.ID, 3001) // prefix-sharing species must not be returned
 
 		ids, err := repo.GetDetectionIDsByScientificName(ctx, "Motacilla alba")
 		require.NoError(t, err)
-		assert.Contains(t, ids, dAlba.ID)
-		assert.NotContains(t, ids, dAlbaAlba.ID, "must not delete a different species sharing the prefix")
+		assert.ElementsMatch(t, []uint{dAlba.ID}, ids,
+			"must return only the exact species and never IDs for prefix-sharing species")
 	})
 
 	t.Run("no match", func(t *testing.T) {
