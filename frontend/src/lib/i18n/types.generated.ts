@@ -3937,9 +3937,9 @@ export type TranslationParams = {
   };
   'system.database.migration.prerequisites.criticalCount': { count: string | number };
   'system.database.migration.prerequisites.warningCount': { count: string | number };
-  'analytics.species.manage.deleteMessage': { count: string | number; species: string | number };
   'system.inference.coDetectedHelp': { seconds: string | number };
   'analytics.hub.card.notEnoughDataHint': { min: string | number };
+  'analytics.species.manage.deleteMessage': { count: string | number; species: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
   'analytics.advanced.detections': { count: string | number };
   'settings.notFound.message': { section: string | number };
