@@ -867,20 +867,30 @@
           : '/api/v2/detections/confirm';
 
     // Remove the alias actually stored in the list; add under the common name.
-    const payloadName = listEntryFor(set, species) ?? species.common_name;
+    const existingEntry = listEntryFor(set, species);
+    const payloadName = existingEntry ?? species.common_name;
+    const wasPresent = existingEntry !== undefined;
+
+    // Optimistic update: toggle immediately so the UI responds without waiting for the API.
+    if (wasPresent) {
+      set.delete(payloadName);
+    } else {
+      set.add(payloadName);
+    }
 
     inflight.add(inflightKey);
     membershipError = null;
     try {
-      const resp = await api.post<{ action: string }>(path, { common_name: payloadName });
-      if (resp.action === 'removed') {
-        set.delete(payloadName);
-      } else {
-        set.add(payloadName);
-      }
+      await api.post<{ action: string }>(path, { common_name: payloadName });
     } catch (error) {
       logger.error(`Error toggling ${list} membership:`, error);
       membershipError = t('analytics.species.manage.membershipFailed');
+      // Revert the optimistic update on failure.
+      if (wasPresent) {
+        set.add(payloadName);
+      } else {
+        set.delete(payloadName);
+      }
     } finally {
       inflight.delete(inflightKey);
     }
