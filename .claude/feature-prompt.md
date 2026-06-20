@@ -1,129 +1,122 @@
-# BirdNET-Go — Feature Prompt
+# BirdNET-Go Feature Prompt
 
-> Fill in the story below, then send. Follow phases in order. Rules are embedded — do not read CLAUDE.md or CONTRIBUTING.md unless explicitly told to below.
+> Fill story → send. Rules embedded — skip CLAUDE.md/CONTRIBUTING.md.
 
 ---
 
 ## Story
 
 **As a** [user / admin / developer]
-**I want** [what the feature does]
-**So that** [the benefit / outcome]
+**I want** [what]
+**So that** [benefit]
 
-**Implementation hints** *(optional)*: [preferred approach, files you suspect, constraints]
-**Scope**: [backend | frontend | both | new API endpoint | config setting]
-
----
-
-## Response Format — Applies to the Entire Session
-
-- Bullet lists only — no prose paragraphs, no narration ("I will now…", "Let me…")
-- File references: `path/to/file:line`
-- After each phase: one-line status, then stop
-- Ask before acting outside these phases
+**Hints** *(opt)*: [approach, suspected files, constraints]
+**Scope**: [backend | frontend | both | API endpoint | config]
 
 ---
 
-## Embedded Rules — Do Not Re-Read Source Docs for These
+## Response format (whole session)
 
-### Universal
-- No API v1 — all new endpoints in `internal/api/v2/`
-- No magic numbers/strings — named constants only
-- UI settings must hot-reload without server restart (per-request checks, not startup-time branching)
-- Prefer editing existing files over creating new ones
-- No new abstraction unless 3+ call sites need it
-- No bonus refactoring, no backward-compat shims, no defensive stubs for hypothetical futures
+- Bullets only. No prose, no narration.
+- Files: `path:line`
+- Phase done: one-line status, stop.
+- Ask before acting outside phases.
+
+---
+
+## Rules (no need to re-read source docs)
+
+**Universal**
+- No API v1 — endpoints in `internal/api/v2/` only
+- Named constants — no magic numbers/strings
+- UI settings hot-reload without server restart
+- Edit existing files before creating new ones
+- No new abstraction unless 3+ call sites
+- No bonus refactoring, shims, or defensive stubs
 - No TODO/FIXME in committed code
-- No telemetry without explicit user opt-in
-- Comments: non-obvious WHY only, one line max — never explain WHAT
+- No telemetry without user opt-in
+- Comments: WHY only, one line max
 
-### Go Backend
-- `internal/errors` — never stdlib `errors`
-- `internal/logger` — structured logging
-- API handlers: `c.logAPIRequest()`, `c.HandleError(ctx, err, "msg", status)`, `c.getEffectiveAuthMiddleware()`
-- Go 1.26: `strings.Cut()` over index+slice, `errors.AsType[T]()` over `errors.As()`, `new(expr)` for pointer init
-- Every exported symbol: one-line doc comment
-- Tests: `testify` + `-race`; reuse `internal/testutil/`; never raw `t.Error`/`t.Fatal`
-- **Never** add paths under `/api/v2/audio/` — reserved for numeric `:id` only
+**Go**
+- `internal/errors` not stdlib `errors`; `internal/logger` for logging
+- Handlers: `c.logAPIRequest()`, `c.HandleError(ctx, err, "msg", status)`, `c.getEffectiveAuthMiddleware()`
+- Go 1.26: `strings.Cut()`, `errors.AsType[T]()`, `new(expr)`
+- Exported symbols: one-line doc comment
+- Tests: `testify` + `-race`; reuse `internal/testutil()`; no raw `t.Error`/`t.Fatal`
+- No paths under `/api/v2/audio/` — reserved for numeric `:id`
 
-### Frontend (Svelte 5 + TypeScript)
-- Runes only: `$props()`, `$state()`, `$derived()`, `$effect()` — no Svelte 4 `$:` syntax
-- No `any` — ever; no inline styles; no daisyUI classes (Tailwind v4.1 native only)
-- All user-facing strings: `$t('key')` — add key to every locale file
-- Reuse `frontend/src/lib/api/` and `frontend/src/lib/components/` before writing new code
+**Frontend (Svelte 5 + TS)**
+- Runes: `$props()`, `$state()`, `$derived()`, `$effect()` — no Svelte 4 `$:`
+- No `any`; no inline styles; no daisyUI (Tailwind v4.1 only)
+- User strings: `$t('key')` + add key to all locale files
+- Reuse `frontend/src/lib/api/` and `frontend/src/lib/components/` first
 
 ---
 
-## Phase 1 — Research (no code yet)
+## Phase 1 — Research
 
-**If scope includes a new API endpoint**: read `internal/api/v2/README.md` to confirm no duplicate exists.
+API endpoint → read `internal/api/v2/README.md` first (check duplicates).
 
-Search with ast-grep (not grep or sed):
+Search (ast-grep, not grep/sed):
 ```bash
 ast-grep --pattern "PATTERN" internal/
 ast-grep --pattern "PATTERN" --lang svelte frontend/src/
 ```
 
-Report (5 bullets max):
-- Closest analogous file:line
-- Reusable functions — name + package
-- Existing API endpoint covering this (if any)
-- Closest config field if a new setting is needed (`internal/conf/`)
+Report ≤5 bullets:
+- Closest analogous `file:line`
+- Reusable functions (name + pkg)
+- Existing endpoint covering this
+- Closest config field (`internal/conf/`)
 
 ---
 
-## Phase 2 — Plan (stop and wait for my approval)
+## Phase 2 — Plan
 
-One short list:
-- Modify: `file:approx-line` — one reason per file
-- Create: `file` — only if nothing existing fits
+- Modify: `file:line` — one reason
+- Create: `file` — only if nothing fits
 - Reuse: function names
-- New code: one justification line per item
-- Out of scope: what will not change
+- New code: one justification per item
+- Out of scope: what won't change
 
-**Do not write code until I say "go ahead".**
+**Stop. No code until "go ahead".**
 
 ---
 
 ## Phase 3 — Implement
 
-Minimum code to satisfy the story. Apply embedded rules above.
+Min code to satisfy story. Apply rules above.
 
-Extra steps by scope:
 - New API endpoint → update `internal/api/v2/README.md`
-- New i18n key → add to all files under `frontend/static/messages/`
+- New i18n key → add to all `frontend/static/messages/` files
 
 ---
 
-## Phase 4 — Lint (scoped, not repo-wide)
+## Phase 4 — Lint (scoped)
 
 ```bash
-# Go — changed packages only
 golangci-lint run -v ./internal/<pkg>/...
 go test -race -v ./internal/<pkg>/...
-
-# Frontend — always full
 cd frontend && npm run check:all
 ```
 
-Run `./...` only if cross-cutting code changed. Zero warnings — fix before moving on.
+`./...` only if cross-cutting code changed. Zero warnings.
 
 ---
 
 ## Phase 5 — Done?
 
-Ask exactly this:
-> "Done. Run `/preflight` (6-agent quality gate, ~5 min) before committing?"
+Ask: `"Done. Run /preflight (~5 min) before committing?"`
 
-Run `/preflight` only if I say yes — it is expensive and only useful on finished work.
+Preflight only if yes.
 
 ---
 
 ## Phase 6 — Commit
 
 ```bash
-git add <specific files — never git add -A or git add .>
-git commit -m "type: short imperative description"
+git add <specific files>
+git commit -m "type: short imperative"
 git push -u origin <branch>
 ```
 
