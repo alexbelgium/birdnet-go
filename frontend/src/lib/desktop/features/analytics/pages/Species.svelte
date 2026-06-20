@@ -922,6 +922,10 @@
       // locked detections the server kept reappear on the next manual data reload.
       speciesData = speciesData.filter(s => s.scientific_name !== target.scientific_name);
       reviewStats.delete(target.scientific_name);
+      // Also drop the species from the range-score caches so they don't leak
+      // entries for deleted species (module-scoped cache + reactive map).
+      cachedRangeScores?.delete(target.scientific_name);
+      rangeScores.delete(target.scientific_name);
       showDeleteModal = false;
       deleteTarget = null;
     } catch (error) {
