@@ -17,11 +17,14 @@ Shows up to 12 species, ordered by novelty category then detection count.
   import { speciesTrackingSettings } from '$lib/stores/settings';
   import { confidenceColorClasses } from '$lib/desktop/features/dashboard/utils/confidenceColors';
   import {
-    resolveNoveltyCategory,
-    noveltyCategoryColorVar,
-    type NoveltyCategory,
-  } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { AudioLines, CalendarDays, Leaf, Star } from '@lucide/svelte';
+    resolveHighlightCategory,
+    highlightCategoryColorVar,
+    highlightCategoryLabel,
+    highlightCategoryIcon,
+    highlightCategoryRank,
+    type HighlightCategory,
+  } from '$lib/desktop/features/dashboard/utils/highlightCategory';
+  import { AudioLines } from '@lucide/svelte';
 
   interface Props {
     data?: DailySpeciesSummary[];
@@ -45,10 +48,8 @@ Shows up to 12 species, ordered by novelty category then detection count.
 
   interface Highlight {
     species: DailySpeciesSummary;
-    category: NoveltyCategory;
+    category: HighlightCategory;
   }
-
-  const categoryRank: Record<NoveltyCategory, number> = { lifetime: 0, year: 1, season: 2 };
 
   const highlights = $derived.by<Highlight[]>(() => {
     const result: Highlight[] = [];
@@ -56,30 +57,17 @@ Shows up to 12 species, ordered by novelty category then detection count.
     // and the daily-summary endpoint can return a null body.
     if (!data) return result;
     for (const species of data) {
-      const category = resolveNoveltyCategory(species);
+      const category = resolveHighlightCategory(species, isToday);
       if (category !== null) result.push({ species, category });
     }
     result.sort((a, b) => {
-      const rankDiff = categoryRank[a.category] - categoryRank[b.category];
+      const rankDiff = highlightCategoryRank[a.category] - highlightCategoryRank[b.category];
       return rankDiff !== 0 ? rankDiff : b.species.count - a.species.count;
     });
     return result;
   });
 
   const visibleHighlights = $derived(highlights.slice(0, MAX_VISIBLE));
-
-  function categoryLabel(category: NoveltyCategory, season?: string): string {
-    switch (category) {
-      case 'lifetime':
-        return t('dashboard.newSpeciesHighlights.categoryLifetime');
-      case 'year':
-        return t('dashboard.newSpeciesHighlights.categoryYear');
-      case 'season':
-        return season
-          ? t('dashboard.newSpeciesHighlights.categorySeasonNamed', { season })
-          : t('dashboard.newSpeciesHighlights.categorySeason');
-    }
-  }
 
   function confidencePercent(item: DailySpeciesSummary): number | undefined {
     if (item.max_confidence === undefined || item.max_confidence <= 0) return undefined;
@@ -97,20 +85,15 @@ Shows up to 12 species, ordered by novelty category then detection count.
   }
 </script>
 
-{#snippet categoryIcon(category: NoveltyCategory, season: string | undefined)}
+{#snippet categoryIcon(category: HighlightCategory, season: string | undefined)}
+  {@const IconComponent = highlightCategoryIcon(category)}
   <span
     class="shrink-0"
-    style:color={noveltyCategoryColorVar(category)}
-    title={categoryLabel(category, season)}
-    aria-label={categoryLabel(category, season)}
+    style:color={highlightCategoryColorVar(category)}
+    title={highlightCategoryLabel(category, season)}
+    aria-label={highlightCategoryLabel(category, season)}
   >
-    {#if category === 'lifetime'}
-      <Star class="size-3.5 fill-current" />
-    {:else if category === 'year'}
-      <CalendarDays class="size-3.5" />
-    {:else}
-      <Leaf class="size-3.5" />
-    {/if}
+    <IconComponent class="size-3.5 {category === 'lifetime' ? 'fill-current' : ''}" />
   </span>
 {/snippet}
 
@@ -139,8 +122,8 @@ Shows up to 12 species, ordered by novelty category then detection count.
           href={speciesUrl(species)}
           class="group flex items-center gap-2.5 rounded-lg border border-[var(--color-base-200)] bg-[var(--color-base-100)] p-2.5 shadow-sm transition-shadow hover:shadow-md"
           style:border-left-width="3px"
-          style:border-left-color={noveltyCategoryColorVar(category)}
-          title={categoryLabel(category, species.current_season)}
+          style:border-left-color={highlightCategoryColorVar(category)}
+          title={highlightCategoryLabel(category, species.current_season)}
         >
           {#if showThumbnails}
             <img
