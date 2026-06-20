@@ -15,12 +15,16 @@
 
 ---
 
-## Response format (whole session)
+## Response format (whole session) — caveman mode
 
 - Bullets only. No prose, no narration.
+- Drop articles, filler, hedging. Fragments OK.
+- Short synonyms over long words.
+- Never shorten code, paths, API names, CLI commands.
 - Files: `path:line`
 - Phase done: one-line status, stop.
 - Ask before acting outside phases.
+- No meta-announcements ("activating caveman…", "understood…").
 
 ---
 
