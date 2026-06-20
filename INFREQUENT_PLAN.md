@@ -20,7 +20,7 @@ Add a 4th highlight category **Infrequent** = species returning after a long abs
 ## Backend facts (verified)
 
 - `DailySpeciesSummary.days_since_last_seen?: number` = absence gap BEFORE this return.
-- API (`internal/api/v2/analytics.go:618`) emits it only when `> 0`; first-ever (`-1`)
+- API (`internal/api/v2/analytics.go`) emits it only when `> 0`; first-ever (`-1`)
   and same-day (`0`) are omitted → undefined on the row.
 - So `(item.days_since_last_seen ?? 0) > 14` is correct and safe.
 - `> 14` = strictly 15+ days = "more than 14 days ago".
