@@ -86,6 +86,12 @@ Responsive Breakpoints:
   import DailySummaryOverview from './daily-summary/DailySummaryOverview.svelte';
   import DailySummaryStatColumns from './daily-summary/DailySummaryStatColumns.svelte';
   import SpeciesEbirdLink from './daily-summary/SpeciesEbirdLink.svelte';
+  import TaxonFilterDropdown from './daily-summary/TaxonFilterDropdown.svelte';
+  import {
+    filterByTaxon,
+    taxonCounts,
+    type TaxonFilter,
+  } from '$lib/desktop/features/dashboard/utils/taxonFilter';
 
   const logger = loggers.ui;
 
@@ -720,15 +726,22 @@ Responsive Breakpoints:
       : false
   );
 
+  // Taxon filter (Birds / Bats / Others) selected via the header dropdown.
+  // Classification logic lives in utils/taxonFilter.ts; the card only stores the
+  // selection and applies it to the row list and the overview counts.
+  let taxonFilter = $state<TaxonFilter>('all');
+  const taxonCountsValue = $derived(taxonCounts(data));
+  const visibleData = $derived(filterByTaxon(data, taxonFilter));
+
   // Optimized data sorting using $derived.by for better performance
   // Two-tier sorting: primary by count, secondary by latest detection time
   // Also applies speciesLimit to cap the number of displayed species
   const sortedData = $derived.by(() => {
-    // Early return for empty data
-    if (data.length === 0) return [];
+    // Early return for empty data (after the taxon filter is applied)
+    if (visibleData.length === 0) return [];
 
     // Use spread + sort with stable ordering
-    const sorted = [...data].sort((a: DailySpeciesSummary, b: DailySpeciesSummary) => {
+    const sorted = [...visibleData].sort((a: DailySpeciesSummary, b: DailySpeciesSummary) => {
       // Primary sort: by detection count (descending)
       if (b.count !== a.count) {
         return b.count - a.count;
@@ -874,13 +887,20 @@ Responsive Breakpoints:
             {t('dashboard.dailySummary.subtitle')}
           </p>
         </div>
-        {@render navigationControls()}
+        <div class="flex items-center gap-2 justify-between md:justify-end">
+          <TaxonFilterDropdown
+            value={taxonFilter}
+            counts={taxonCountsValue}
+            onChange={value => (taxonFilter = value)}
+          />
+          {@render navigationControls()}
+        </div>
       </div>
     </div>
 
     <!-- Grid Content -->
     <div class="p-6 pt-8">
-      <DailySummaryOverview {data} {selectedDate} />
+      <DailySummaryOverview data={visibleData} {selectedDate} />
       <div class="overflow-x-auto overflow-y-visible">
         <div
           class="daily-summary-grid min-w-[900px]"
