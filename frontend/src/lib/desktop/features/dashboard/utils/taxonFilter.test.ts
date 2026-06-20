@@ -51,9 +51,23 @@ describe('classifyTaxon', () => {
     expect(classifyTaxon({ scientific_name: 'Falco rufigularis' })).toBe('bird'); // Bat Falcon
   });
 
-  it('falls back to bird for empty names', () => {
-    expect(classifyTaxon({ scientific_name: '' })).toBe('bird');
-    expect(classifyTaxon({ scientific_name: '   ' })).toBe('bird');
+  it('classifies non-bird mammals as other (not bird)', () => {
+    // Foxes/deer from multi-taxa or custom models share the binomial shape but
+    // are in neither allow-list, so they must NOT default to bird.
+    expect(classifyTaxon({ scientific_name: 'Vulpes vulpes' })).toBe('other'); // Red fox
+    expect(classifyTaxon({ scientific_name: 'Capreolus capreolus' })).toBe('other'); // Roe deer
+  });
+
+  it('classifies BirdNET non-bird labels as other', () => {
+    // BirdNET 2.4 ships a few mammals/noise classes; these are excluded from the
+    // bird-genus allow-list, so they resolve to other rather than bird.
+    expect(classifyTaxon({ scientific_name: 'Canis latrans' })).toBe('other'); // Coyote
+    expect(classifyTaxon({ scientific_name: 'Sciurus carolinensis' })).toBe('other'); // Gray squirrel
+  });
+
+  it('falls back to other for empty or single-token names', () => {
+    expect(classifyTaxon({ scientific_name: '' })).toBe('other');
+    expect(classifyTaxon({ scientific_name: '   ' })).toBe('other');
   });
 });
 

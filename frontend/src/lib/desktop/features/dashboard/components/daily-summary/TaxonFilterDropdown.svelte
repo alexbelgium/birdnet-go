@@ -94,7 +94,7 @@
     <ul
       in:dropdown
       out:dropdown={{ duration: 100 }}
-      class="absolute right-0 mt-2 z-[1100] w-44 p-2 shadow-lg rounded-lg border bg-[var(--color-base-100)] border-[var(--color-base-300)]"
+      class="absolute left-0 sm:left-auto sm:right-0 mt-2 z-[1100] w-44 p-2 shadow-lg rounded-lg border bg-[var(--color-base-100)] border-[var(--color-base-300)]"
       role="menu"
     >
       {#each OPTIONS as option (option.value)}

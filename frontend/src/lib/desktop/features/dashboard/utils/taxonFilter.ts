@@ -1,21 +1,25 @@
 // taxonFilter.ts - Group daily-summary rows into bird / bat / other.
 //
 // BirdNET-Go can run the standard bird model, the BattyBirdNET bat model, and
-// multi-taxa models (Perch) that also emit non-animal "sound classes" (engine,
-// speech, rain, ...). The dashboard only receives names per row
-// (`scientific_name`, `common_name`), not the backend's taxonomic class, so we
-// reconstruct the group from the shape of the scientific name:
+// multi-taxa models (Perch and custom ones) that also emit mammals (foxes,
+// deer, ...) and non-animal "sound classes" (engine, speech, rain, ...). The
+// dashboard only receives names per row (`scientific_name`, `common_name`), not
+// the backend's taxonomic class, so we reconstruct the group from the genus
+// (first token of the scientific name) using two allow-lists:
 //
-//   - Real species (birds, bats) are stored as a binomial: "Genus species".
-//   - Non-bird sound classes are stored as a single lowercase token
-//     ("power", "speech", "rain") or a short multi-word phrase whose first
-//     token is a known non-species word ("Power tools", "Human vocal").
-//   - Bats are the binomials whose genus is in the Chiroptera genus set below.
+//   - genus in the Chiroptera set (BAT_GENERA below)    -> bat
+//   - genus in the BirdNET bird-genus set (BIRD_GENERA) -> bird
+//   - everything else                                   -> other
 //
-// Everything that is a binomial and not a bat genus is treated as a bird, which
-// is the correct default for this project.
+// "Other" is the default on purpose. A binomial is only a bird when its genus is
+// an actual BirdNET bird genus; a mammal such as Vulpes vulpes (red fox) shares
+// the "Genus species" shape but is in neither allow-list, so it falls through to
+// "other" instead of being mislabelled a bird. Single-token sound classes
+// ("engine", "rain") and multi-word noise labels ("Power tools") are likewise in
+// neither allow-list, so they land in "other" too.
 
 import type { DailySpeciesSummary } from '$lib/types/detection.types';
+import { BIRD_GENERA } from './birdGenera';
 
 /** Taxonomic group a daily-summary row belongs to. */
 export type TaxonClass = 'bird' | 'bat' | 'other';
@@ -82,32 +86,28 @@ const BAT_GENERA: ReadonlySet<string> = new Set([
   'otomops',
 ]);
 
-// First tokens of multi-word non-bird sound classes that the single-token rule
-// below would otherwise miss (e.g. BirdNET's "Human vocal", "Power tools").
-// Single-token classes ("dog", "engine", "siren") are already caught by shape.
-const NONBIRD_FIRST_TOKENS: ReadonlySet<string> = new Set(['human', 'power']);
-
 /** Row fields needed to classify a taxon. */
 export interface TaxonNamed {
   scientific_name: string;
 }
 
 /**
- * Resolves the taxonomic group for a row from its scientific name.
- * Empty names fall back to `bird` (the project default).
+ * Resolves the taxonomic group for a row from its scientific name's genus
+ * (first token). Bat genera win first, then BirdNET bird genera; anything else
+ * (mammals, sound classes, empty/single-token names) is `other`.
  */
 export function classifyTaxon(item: TaxonNamed): TaxonClass {
   const sci = item.scientific_name.trim();
-  if (sci === '') return 'bird';
+  if (sci === '') return 'other';
 
   const firstSpace = sci.indexOf(' ');
-  // No space => single-token sound class ("power", "speech", "rain").
+  // No space => single-token sound class ("engine", "rain"); never a species.
   if (firstSpace === -1) return 'other';
 
   const firstToken = sci.slice(0, firstSpace).toLowerCase();
   if (BAT_GENERA.has(firstToken)) return 'bat';
-  if (NONBIRD_FIRST_TOKENS.has(firstToken)) return 'other';
-  return 'bird';
+  if (BIRD_GENERA.has(firstToken)) return 'bird';
+  return 'other';
 }
 
 /** Returns true when a row should be shown under the given filter. */
