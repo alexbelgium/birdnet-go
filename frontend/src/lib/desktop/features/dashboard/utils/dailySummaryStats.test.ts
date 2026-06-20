@@ -5,9 +5,17 @@ import {
   EBIRD_DEFAULT_LANG,
   EBIRD_REGION,
   buildEbirdUrl,
+  computeConfidenceColor,
   computeOverviewStats,
   isValidEbirdCode,
 } from './dailySummaryStats';
+
+/** Extracts the integer hue from an `hsl(H, S%, L%)` string. */
+function hueOf(hsl: string): number {
+  const match = /hsl\((\d+),/.exec(hsl);
+  expect(match).not.toBeNull();
+  return Number(match?.[1]);
+}
 
 describe('isValidEbirdCode', () => {
   it('returns true for valid lowercase code', () => {
@@ -114,5 +122,43 @@ describe('computeOverviewStats', () => {
     const now = new Date('2024-06-20T08:00:00');
     expect(computeOverviewStats([], '2024-06-20', now).isToday).toBe(true);
     expect(computeOverviewStats([], '2024-06-19', now).isToday).toBe(false);
+  });
+});
+
+describe('computeConfidenceColor', () => {
+  it('is pure red at 0%', () => {
+    expect(hueOf(computeConfidenceColor(0))).toBe(0);
+  });
+
+  it('is orange at 70%', () => {
+    expect(hueOf(computeConfidenceColor(70))).toBe(30);
+  });
+
+  it('is green at 100%', () => {
+    expect(hueOf(computeConfidenceColor(100))).toBe(120);
+  });
+
+  it('interpolates between red and orange below 70%', () => {
+    const hue = hueOf(computeConfidenceColor(50));
+    expect(hue).toBeGreaterThan(0);
+    expect(hue).toBeLessThan(30);
+  });
+
+  it('interpolates between orange and green above 70%', () => {
+    const hue = hueOf(computeConfidenceColor(85));
+    expect(hue).toBeGreaterThan(30);
+    expect(hue).toBeLessThan(120);
+  });
+
+  it('clamps values below 0 to red', () => {
+    expect(hueOf(computeConfidenceColor(-5))).toBe(0);
+  });
+
+  it('clamps values above 100 to green', () => {
+    expect(hueOf(computeConfidenceColor(110))).toBe(120);
+  });
+
+  it('returns a valid hsl string', () => {
+    expect(computeConfidenceColor(75)).toMatch(/^hsl\(\d+, \d+%, \d+%\)$/);
   });
 });

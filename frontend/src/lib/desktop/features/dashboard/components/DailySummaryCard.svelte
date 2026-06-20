@@ -889,9 +889,9 @@ Responsive Breakpoints:
           <!-- Hourly weather visualization row (only shown if weather data exists) -->
           {#if hourlyWeather.length > 0}
             <div class="flex mb-1">
+              <DailySummaryStatColumns variant="spacer" />
               <!-- Empty label column to align with other rows -->
               <div class="species-label-col shrink-0"></div>
-              <DailySummaryStatColumns variant="spacer" />
 
               <!-- Hourly weather (desktop) -->
               <div class="hourly-grid flex-1 grid">
@@ -938,13 +938,13 @@ Responsive Breakpoints:
 
           <!-- Daylight visualization row -->
           <div class="flex mb-1">
+            <DailySummaryStatColumns variant="spacer" />
             <div class="species-label-col shrink-0 flex items-center">
               <span
                 class="text-xs text-[var(--color-base-content)]/60 font-normal whitespace-nowrap"
                 >{t('dashboard.dailySummary.daylight.label')}</span
               >
             </div>
-            <DailySummaryStatColumns variant="spacer" />
             <!-- Hourly daylight (desktop) -->
             <div class="hourly-grid flex-1 grid">
               {#each Array(24) as _, hour (hour)}
@@ -1001,8 +1001,8 @@ Responsive Breakpoints:
 
           <!-- Hours header row -->
           <div class="flex mb-1">
-            <div class="species-label-col shrink-0"></div>
             <DailySummaryStatColumns variant="header" />
+            <div class="species-label-col shrink-0"></div>
             <!-- Hourly headers (desktop) -->
             <div class="hourly-grid flex-1 grid text-xs">
               {#each Array(24) as _, hour (hour)}
@@ -1062,6 +1062,7 @@ Responsive Breakpoints:
                 class="flex items-center species-row"
                 class:new-species={item.isNew && !prefersReducedMotion}
               >
+                <DailySummaryStatColumns variant="data" {item} />
                 <!-- Species info column -->
                 <div class="species-label-col shrink-0 flex items-center gap-2 pr-4">
                   {#if showThumbnails}
@@ -1119,7 +1120,6 @@ Responsive Breakpoints:
                   </a>
                   <SpeciesEbirdLink speciesCode={item.species_code} {displayName} />
                 </div>
-                <DailySummaryStatColumns variant="data" {item} />
 
                 <!-- Hourly heatmap cells (desktop) -->
                 <div class="hourly-grid flex-1 grid">
