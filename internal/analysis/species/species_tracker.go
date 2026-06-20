@@ -118,7 +118,8 @@ type SpeciesStatus struct {
 	LastUpdatedTime time.Time // For cache management
 
 	// Absence-return tracking
-	DaysSinceLastSeen int // Days since the previous detection before a return episode; -1 if first-ever / unknown
+	DaysSinceLastSeen int  // Days since the previous detection before a return episode; -1 if first-ever / unknown
+	IsInfrequent      bool // True when DaysSinceLastSeen >= infrequentDays threshold
 
 	// Multi-period tracking
 	FirstThisYear   *time.Time // First detection this calendar year
@@ -177,6 +178,8 @@ type SpeciesTracker struct {
 	seasonalEnabled    bool
 	yearlyWindowDays   int
 	seasonalWindowDays int
+	infrequentEnabled  bool
+	infrequentDays     int
 	resetMonth         int // Month to reset yearly tracking (1-12)
 	resetDay           int // Day to reset yearly tracking (1-31)
 
@@ -274,6 +277,8 @@ func NewTrackerFromSettings(ds SpeciesDatastore, settings *conf.SpeciesTrackingS
 		seasonalWindowDays: settings.SeasonalTracking.WindowDays,
 		resetMonth:         settings.YearlyTracking.ResetMonth,
 		resetDay:           settings.YearlyTracking.ResetDay,
+		infrequentEnabled:  settings.InfrequentTracking.Enabled,
+		infrequentDays:     settings.InfrequentTracking.Days,
 
 		// Status result caching
 		statusCache:      make(map[string]cachedSpeciesStatus, initialSpeciesCapacity), // Pre-allocate for species

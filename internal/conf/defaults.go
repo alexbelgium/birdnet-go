@@ -330,6 +330,10 @@ func setDefaultConfig() {
 	viper.SetDefault("realtime.speciestracking.seasonaltracking.enabled", true)
 	viper.SetDefault("realtime.speciestracking.seasonaltracking.windowdays", 7)
 
+	// Infrequent tracking defaults
+	viper.SetDefault("realtime.speciestracking.infrequenttracking.enabled", true)
+	viper.SetDefault("realtime.speciestracking.infrequenttracking.days", 30)
+
 	// Default seasons (Northern Hemisphere)
 	viper.SetDefault("realtime.speciestracking.seasonaltracking.seasons.spring.startmonth", 3)
 	viper.SetDefault("realtime.speciestracking.seasonaltracking.seasons.spring.startday", 20)

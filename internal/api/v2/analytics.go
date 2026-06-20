@@ -101,6 +101,7 @@ type SpeciesDailySummary struct {
 	// Multi-period tracking metadata
 	IsNewThisYear   bool   `json:"is_new_this_year,omitempty"`   // First time this year
 	IsNewThisSeason bool   `json:"is_new_this_season,omitempty"` // First time this season
+	IsInfrequent    bool   `json:"is_infrequent,omitempty"`      // Not seen for at least infrequentDays
 	DaysThisYear    int    `json:"days_this_year,omitempty"`     // Days since first this year
 	DaysThisSeason  int    `json:"days_this_season,omitempty"`   // Days since first this season
 	CurrentSeason   string `json:"current_season,omitempty"`     // Current season name
@@ -621,6 +622,7 @@ func applySpeciesStatusToSummary(summary *SpeciesDailySummary, status *species.S
 
 	summary.IsNewThisYear = status.IsNewThisYear
 	summary.IsNewThisSeason = status.IsNewThisSeason
+	summary.IsInfrequent = status.IsInfrequent
 
 	if status.DaysThisYear >= 0 {
 		summary.DaysThisYear = status.DaysThisYear

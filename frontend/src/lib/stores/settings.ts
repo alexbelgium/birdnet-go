@@ -505,6 +505,12 @@ export interface SeasonalTrackingSettings {
   seasons: Record<string, Season>; // Season definitions (e.g., spring, summer, fall, winter)
 }
 
+// Infrequent tracking settings
+export interface InfrequentTrackingSettings {
+  enabled: boolean;
+  days: number; // Minimum absence days to flag as infrequent
+}
+
 // Species tracking settings
 export interface SpeciesTrackingSettings {
   enabled: boolean;
@@ -513,6 +519,7 @@ export interface SpeciesTrackingSettings {
   notificationSuppressionHours: number; // Hours to suppress duplicate notifications
   yearlyTracking: YearlyTrackingSettings;
   seasonalTracking: SeasonalTrackingSettings;
+  infrequentTracking: InfrequentTrackingSettings;
 }
 
 // Extended capture settings

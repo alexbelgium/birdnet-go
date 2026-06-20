@@ -608,6 +608,7 @@
       "categoryYear": "Nueva este año",
       "categorySeason": "Nueva esta temporada",
       "categorySeasonNamed": "Nueva esta {season}",
+      "categoryInfrequent": "Infrequent visitor",
       "maxConfidenceShort": "Máx {confidence} %",
       "detections": "{count, plural, one {# detección} other {# detecciones}}",
       "lastSeen": "Último: {days, plural, =0 {hoy} one {hace # día} other {hace # días}}"
@@ -3940,6 +3941,18 @@
             "startMonth": "Mes de inicio",
             "startDay": "Día de inicio",
             "hemisphereNote": "Las fechas de las temporadas se configuran automáticamente según su latitud. El hemisferio norte usa estaciones estándar, el hemisferio sur tiene fechas desplazadas, y las regiones ecuatoriales usan estaciones húmedas/secas."
+          }
+        },
+        "infrequent": {
+          "title": "Infrequent Tracking",
+          "description": "Highlight species that have not been seen for a long time when they return",
+          "enabled": {
+            "label": "Enable Infrequent Tracking",
+            "helpText": "Show a special indicator when a species returns after a long absence"
+          },
+          "days": {
+            "label": "Absence Threshold (days)",
+            "helpText": "Minimum number of days a species must be absent before it is flagged as infrequent (1-365)"
           }
         },
         "months": {

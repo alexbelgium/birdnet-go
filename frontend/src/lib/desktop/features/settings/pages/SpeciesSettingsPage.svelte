@@ -142,6 +142,10 @@
       windowDays: 7,
       seasons: SEASON_DEFAULTS,
     },
+    infrequentTracking: {
+      enabled: true,
+      days: 30,
+    },
   } as const;
 
   // ============================================================================
@@ -446,6 +450,10 @@
         windowDays?: number;
         seasons?: Record<string, { startMonth: number; startDay: number }>;
       };
+      infrequentTracking: {
+        enabled?: boolean;
+        days?: number;
+      };
     }>
   ) {
     settingsActions.updateSection('realtime', {
@@ -500,6 +508,18 @@
                 SEASON_DEFAULTS,
             }
           : (trackingSettings?.seasonalTracking ?? { ...TRACKING_DEFAULTS.seasonalTracking }),
+        infrequentTracking: updates.infrequentTracking
+          ? {
+              enabled:
+                updates.infrequentTracking.enabled ??
+                trackingSettings?.infrequentTracking?.enabled ??
+                TRACKING_DEFAULTS.infrequentTracking.enabled,
+              days:
+                updates.infrequentTracking.days ??
+                trackingSettings?.infrequentTracking?.days ??
+                TRACKING_DEFAULTS.infrequentTracking.days,
+            }
+          : (trackingSettings?.infrequentTracking ?? { ...TRACKING_DEFAULTS.infrequentTracking }),
       },
     });
   }
@@ -1980,6 +2000,59 @@
               <SettingsNote>
                 {t('settings.species.tracking.seasonal.seasons.hemisphereNote')}
               </SettingsNote>
+            </div>
+          {/if}
+        </div>
+      </SettingsSection>
+
+      <!-- Infrequent Tracking Settings -->
+      <SettingsSection
+        title={t('settings.species.tracking.infrequent.title')}
+        description={t('settings.species.tracking.infrequent.description')}
+        defaultOpen={false}
+      >
+        <div class="space-y-4">
+          <!-- Enable Infrequent Tracking -->
+          <Checkbox
+            checked={trackingSettings?.infrequentTracking?.enabled ?? true}
+            label={t('settings.species.tracking.infrequent.enabled.label')}
+            helpText={t('settings.species.tracking.infrequent.enabled.helpText')}
+            disabled={store.isLoading || store.isSaving}
+            onchange={value => updateTrackingSettings({ infrequentTracking: { enabled: value } })}
+          />
+
+          {#if trackingSettings?.infrequentTracking?.enabled}
+            <!-- Absence days threshold -->
+            <div class="max-w-xs">
+              <label class="flex items-center py-2" for="infrequent-days">
+                <span class="text-sm font-medium">
+                  {t('settings.species.tracking.infrequent.days.label')}
+                </span>
+              </label>
+              <div class="flex">
+                <input
+                  id="infrequent-days"
+                  type="number"
+                  min={TRACKING_LIMITS.days.min}
+                  max={TRACKING_LIMITS.days.max}
+                  value={trackingSettings?.infrequentTracking?.days ??
+                    TRACKING_DEFAULTS.infrequentTracking.days}
+                  onchange={createNumberInputHandler(
+                    TRACKING_LIMITS.days,
+                    TRACKING_DEFAULTS.infrequentTracking.days,
+                    v => updateTrackingSettings({ infrequentTracking: { days: v } })
+                  )}
+                  class="flex-1 h-9 px-3 text-sm rounded-l-lg border border-r-0 border-[var(--border-100)] bg-[var(--surface-100)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={store.isLoading || store.isSaving}
+                />
+                <span
+                  class="inline-flex items-center justify-center h-9 px-3 text-sm font-medium rounded-r-lg border border-[var(--border-100)] bg-[var(--surface-200)] text-muted"
+                  >{t('settings.species.tracking.units.days')}</span
+                >
+              </div>
+              <p class="text-xs text-muted mt-1">
+                {t('settings.species.tracking.infrequent.days.helpText')}
+              </p>
             </div>
           {/if}
         </div>

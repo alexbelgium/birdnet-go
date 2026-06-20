@@ -78,7 +78,7 @@ Responsive Breakpoints:
     resolveNoveltyCategory,
     noveltyCategoryColorVar,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { ChevronLeft, ChevronRight, Star, XCircle } from '@lucide/svelte';
+  import { ChevronLeft, ChevronRight, History, Star, XCircle } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
@@ -1107,6 +1107,14 @@ Responsive Breakpoints:
                         title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
                       >
                         🌿
+                      </span>
+                    {:else if resolveNoveltyCategory(item) === 'infrequent'}
+                      <span
+                        class="shrink-0"
+                        style:color={noveltyCategoryColorVar('infrequent')}
+                        title={`Infrequent visitor (${item.days_since_last_seen ?? 0} day${(item.days_since_last_seen ?? 0) === 1 ? '' : 's'} since last seen)`}
+                      >
+                        <History class="size-3" />
                       </span>
                     {/if}
                   </a>

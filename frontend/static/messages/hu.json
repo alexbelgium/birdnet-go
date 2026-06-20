@@ -608,6 +608,7 @@
       "categoryYear": "Idén új",
       "categorySeason": "Ebben az évszakban új",
       "categorySeasonNamed": "Ebben a(z) {season} évszakban új",
+      "categoryInfrequent": "Infrequent visitor",
       "maxConfidenceShort": "Max {confidence}%",
       "detections": "{count, plural, one {# észlelés} other {# észlelés}}",
       "lastSeen": "Utoljára: {days, plural, =0 {ma} one {# napja} other {# napja}}"
@@ -3940,6 +3941,18 @@
             "startMonth": "Kezdési hónap",
             "startDay": "Kezdési nap",
             "hemisphereNote": "Az évszak dátumok automatikusan az Ön szélessége alapján kerülnek konfigurálásra. Az északi félgömb a szabványos évszakokat, a déli félgömb eltolódott dátumokat, az egyenlítői régiók pedig esős/száraz évszakokat használnak."
+          }
+        },
+        "infrequent": {
+          "title": "Infrequent Tracking",
+          "description": "Highlight species that have not been seen for a long time when they return",
+          "enabled": {
+            "label": "Enable Infrequent Tracking",
+            "helpText": "Show a special indicator when a species returns after a long absence"
+          },
+          "days": {
+            "label": "Absence Threshold (days)",
+            "helpText": "Minimum number of days a species must be absent before it is flagged as infrequent (1-365)"
           }
         },
         "months": {

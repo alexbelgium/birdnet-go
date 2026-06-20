@@ -608,6 +608,7 @@
       "categoryYear": "Nový tento rok",
       "categorySeason": "Nový túto sezónu",
       "categorySeasonNamed": "Nový túto {season}",
+      "categoryInfrequent": "Infrequent visitor",
       "maxConfidenceShort": "Max {confidence} %",
       "detections": "{count, plural, one {# detekcia} few {# detekcie} other {# detekcií}}",
       "lastSeen": "Naposledy: {days, plural, =0 {dnes} one {pred # dňom} few {pred # dňami} other {pred # dňami}}"
@@ -3940,6 +3941,18 @@
             "startMonth": "Mesiac začiatku",
             "startDay": "Deň začiatku",
             "hemisphereNote": "Dátumy sezón sú automaticky konfigurované na základe vašej zemepisnej šírky. Severná hemisféra používa štandardné sezóny, južná hemisféra má posunuté dátumy a rovníkové oblasti používajú obdobia dažďov/sucha."
+          }
+        },
+        "infrequent": {
+          "title": "Infrequent Tracking",
+          "description": "Highlight species that have not been seen for a long time when they return",
+          "enabled": {
+            "label": "Enable Infrequent Tracking",
+            "helpText": "Show a special indicator when a species returns after a long absence"
+          },
+          "days": {
+            "label": "Absence Threshold (days)",
+            "helpText": "Minimum number of days a species must be absent before it is flagged as infrequent (1-365)"
           }
         },
         "months": {

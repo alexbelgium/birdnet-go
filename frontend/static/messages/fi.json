@@ -608,6 +608,7 @@
       "categoryYear": "Uusi tänä vuonna",
       "categorySeason": "Uusi tällä kaudella",
       "categorySeasonNamed": "Uusi tällä {season}",
+      "categoryInfrequent": "Infrequent visitor",
       "maxConfidenceShort": "Maks {confidence} %",
       "detections": "{count, plural, one {# havainto} other {# havaintoa}}",
       "lastSeen": "Viimeksi: {days, plural, =0 {tänään} one {# päivä sitten} other {# päivää sitten}}"
@@ -3940,6 +3941,18 @@
             "startMonth": "Alkukuukausi",
             "startDay": "Alkupäivä",
             "hemisphereNote": "Kausien päivämäärät määritetään automaattisesti leveysasteesi perusteella. Pohjoisella pallonpuoliskolla käytetään tavallisia vuodenaikoja, eteläisellä pallonpuoliskolla siirrettyjä päivämääriä ja päiväntasaajan alueilla sade-/kuivakausia."
+          }
+        },
+        "infrequent": {
+          "title": "Infrequent Tracking",
+          "description": "Highlight species that have not been seen for a long time when they return",
+          "enabled": {
+            "label": "Enable Infrequent Tracking",
+            "helpText": "Show a special indicator when a species returns after a long absence"
+          },
+          "days": {
+            "label": "Absence Threshold (days)",
+            "helpText": "Minimum number of days a species must be absent before it is flagged as infrequent (1-365)"
           }
         },
         "months": {

@@ -202,6 +202,9 @@ func (t *SpeciesTracker) buildSpeciesStatusWithBuffer(scientificName string, cur
 func (t *SpeciesTracker) applyNoveltyStatus(status *SpeciesStatus, scientificName string) {
 	if episode, exists := t.noveltyEpisodes[scientificName]; exists {
 		status.DaysSinceLastSeen = episode.DaysSinceLastSeen
+		if t.infrequentEnabled && t.infrequentDays > 0 && status.DaysSinceLastSeen >= t.infrequentDays {
+			status.IsInfrequent = true
+		}
 	}
 }
 

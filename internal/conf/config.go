@@ -877,9 +877,10 @@ type SpeciesTrackingSettings struct {
 	Enabled                      bool                     `yaml:"enabled" json:"enabled"`                                           // true to enable new species tracking
 	NewSpeciesWindowDays         int                      `yaml:"newspecieswindowdays" json:"newSpeciesWindowDays"`                 // Days to consider a species "new" (default: 14)
 	SyncIntervalMinutes          int                      `yaml:"syncintervalminutes" json:"syncIntervalMinutes"`                   // Interval to sync with database (default: 60)
-	NotificationSuppressionHours int                      `yaml:"notificationsuppressionhours" json:"notificationSuppressionHours"` // Hours to suppress duplicate notifications (default: 168)
-	YearlyTracking               YearlyTrackingSettings   `yaml:"yearlytracking" json:"yearlyTracking"`                             // Settings for yearly species tracking
-	SeasonalTracking             SeasonalTrackingSettings `yaml:"seasonaltracking" json:"seasonalTracking"`                         // Settings for seasonal species tracking
+	NotificationSuppressionHours int                         `yaml:"notificationsuppressionhours" json:"notificationSuppressionHours"` // Hours to suppress duplicate notifications (default: 168)
+	YearlyTracking               YearlyTrackingSettings      `yaml:"yearlytracking" json:"yearlyTracking"`                             // Settings for yearly species tracking
+	SeasonalTracking             SeasonalTrackingSettings    `yaml:"seasonaltracking" json:"seasonalTracking"`                         // Settings for seasonal species tracking
+	InfrequentTracking           InfrequentTrackingSettings  `yaml:"infrequenttracking" json:"infrequentTracking"`                     // Settings for infrequent species tracking
 }
 
 // YearlyTrackingSettings contains settings for tracking first arrivals each year
@@ -895,6 +896,12 @@ type SeasonalTrackingSettings struct {
 	Enabled    bool              `yaml:"enabled" json:"enabled"`       // true to enable seasonal tracking
 	WindowDays int               `yaml:"windowdays" json:"windowDays"` // Days to show "new this season" indicator (default: 21)
 	Seasons    map[string]Season `yaml:"seasons" json:"seasons"`       // Season definitions
+}
+
+// InfrequentTrackingSettings contains settings for highlighting species not seen recently
+type InfrequentTrackingSettings struct {
+	Enabled bool `yaml:"enabled" json:"enabled"` // true to enable infrequent tracking
+	Days    int  `yaml:"days" json:"days"`       // Minimum absence days to flag as infrequent (default: 30)
 }
 
 // Season defines the start date for a season

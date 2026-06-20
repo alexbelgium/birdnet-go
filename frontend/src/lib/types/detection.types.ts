@@ -187,6 +187,7 @@ export interface DailySpeciesSummary {
   // Multi-period tracking metadata
   is_new_this_year?: boolean; // First time this year
   is_new_this_season?: boolean; // First time this season
+  is_infrequent?: boolean; // Not seen for at least infrequentDays (tracker threshold)
   days_this_year?: number; // Days since first this year
   days_this_season?: number; // Days since first this season
   current_season?: string; // Current season name

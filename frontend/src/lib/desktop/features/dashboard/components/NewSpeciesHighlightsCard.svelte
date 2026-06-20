@@ -21,7 +21,7 @@ Shows up to 12 species, ordered by novelty category then detection count.
     noveltyCategoryColorVar,
     type NoveltyCategory,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { AudioLines, CalendarDays, Leaf, Star } from '@lucide/svelte';
+  import { AudioLines, CalendarDays, History, Leaf, Star } from '@lucide/svelte';
 
   interface Props {
     data?: DailySpeciesSummary[];
@@ -48,7 +48,12 @@ Shows up to 12 species, ordered by novelty category then detection count.
     category: NoveltyCategory;
   }
 
-  const categoryRank: Record<NoveltyCategory, number> = { lifetime: 0, year: 1, season: 2 };
+  const categoryRank: Record<NoveltyCategory, number> = {
+    lifetime: 0,
+    year: 1,
+    season: 2,
+    infrequent: 3,
+  };
 
   const highlights = $derived.by<Highlight[]>(() => {
     const result: Highlight[] = [];
@@ -57,7 +62,10 @@ Shows up to 12 species, ordered by novelty category then detection count.
     if (!data) return result;
     for (const species of data) {
       const category = resolveNoveltyCategory(species);
-      if (category !== null) result.push({ species, category });
+      if (category === null) continue;
+      // Infrequent species only shown for today (tracker state reflects live data).
+      if (category === 'infrequent' && !isToday) continue;
+      result.push({ species, category });
     }
     result.sort((a, b) => {
       const rankDiff = categoryRank[a.category] - categoryRank[b.category];
@@ -78,6 +86,8 @@ Shows up to 12 species, ordered by novelty category then detection count.
         return season
           ? t('dashboard.newSpeciesHighlights.categorySeasonNamed', { season })
           : t('dashboard.newSpeciesHighlights.categorySeason');
+      case 'infrequent':
+        return t('dashboard.newSpeciesHighlights.categoryInfrequent');
     }
   }
 
@@ -108,8 +118,10 @@ Shows up to 12 species, ordered by novelty category then detection count.
       <Star class="size-3.5 fill-current" />
     {:else if category === 'year'}
       <CalendarDays class="size-3.5" />
-    {:else}
+    {:else if category === 'season'}
       <Leaf class="size-3.5" />
+    {:else}
+      <History class="size-3.5" />
     {/if}
   </span>
 {/snippet}

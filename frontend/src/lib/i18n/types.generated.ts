@@ -497,6 +497,7 @@ export type TranslationKey =
   | 'dashboard.newSpeciesHighlights.categoryYear'
   | 'dashboard.newSpeciesHighlights.categorySeason'
   | 'dashboard.newSpeciesHighlights.categorySeasonNamed' // params: season
+  | 'dashboard.newSpeciesHighlights.categoryInfrequent'
   | 'dashboard.newSpeciesHighlights.maxConfidenceShort' // params: confidence
   | 'dashboard.newSpeciesHighlights.detections' // params: count
   | 'dashboard.newSpeciesHighlights.lastSeen' // params: days
@@ -2856,6 +2857,12 @@ export type TranslationKey =
   | 'settings.species.tracking.seasonal.seasons.startMonth'
   | 'settings.species.tracking.seasonal.seasons.startDay'
   | 'settings.species.tracking.seasonal.seasons.hemisphereNote'
+  | 'settings.species.tracking.infrequent.title'
+  | 'settings.species.tracking.infrequent.description'
+  | 'settings.species.tracking.infrequent.enabled.label'
+  | 'settings.species.tracking.infrequent.enabled.helpText'
+  | 'settings.species.tracking.infrequent.days.label'
+  | 'settings.species.tracking.infrequent.days.helpText'
   | 'settings.species.tracking.months.january'
   | 'settings.species.tracking.months.february'
   | 'settings.species.tracking.months.march'

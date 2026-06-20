@@ -421,6 +421,11 @@ func validateSpeciesTrackingSettings(settings *SpeciesTrackingSettings) error {
 		if err := validateSeasonalTrackingSettings(&settings.SeasonalTracking); err != nil {
 			return err
 		}
+
+		// Validate infrequent tracking settings
+		if err := validateInfrequentTrackingSettings(&settings.InfrequentTracking); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -495,6 +500,19 @@ func validateSeasonalTrackingSettings(settings *SeasonalTrackingSettings) error 
 					Context("max_days_in_month", maxDaysInMonth).
 					Build()
 			}
+		}
+	}
+	return nil
+}
+
+func validateInfrequentTrackingSettings(settings *InfrequentTrackingSettings) error {
+	if settings.Enabled {
+		if settings.Days < 1 || settings.Days > 365 {
+			return errors.Newf("infrequent tracking days must be between 1 and 365, got %d", settings.Days).
+				Category(errors.CategoryValidation).
+				Context("validation_type", "infrequent-tracking-days").
+				Context("days", settings.Days).
+				Build()
 		}
 	}
 	return nil
