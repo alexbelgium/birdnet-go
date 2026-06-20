@@ -36,7 +36,7 @@
     {#if item?.max_confidence != null}
       {@const pct = Math.round(Math.max(0, Math.min(1, item.max_confidence)) * 100)}
       <div
-        class="rounded px-1 text-[10px] font-semibold text-white tabular-nums"
+        class="w-9 rounded text-center text-[10px] font-semibold text-white tabular-nums"
         style:background-color={computeConfidenceColor(pct)}
         title="Max confidence: {pct}%"
       >
