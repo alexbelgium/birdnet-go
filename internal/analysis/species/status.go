@@ -9,9 +9,39 @@ import (
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
+// warmingSpeciesStatus is the suppressed status returned while the background
+// historical load is in flight. Every "new" flag is false so the warm-up window
+// never produces a spurious new-species result; the periods are reported as
+// unknown (sentinel -1 / empty season) until the load completes.
+//
+// FirstSeenTime is deliberately left as the zero value, not currentTime: some
+// consumers (the SSE feed and the detections REST handler) derive "is new
+// species" as `!FirstSeenTime.IsZero() && note.Date == FirstSeenTime`, so a
+// today-dated FirstSeenTime here would flag every live detection as new during
+// warm-up, exactly the spurious result this suppression exists to prevent.
+func warmingSpeciesStatus(currentTime time.Time) SpeciesStatus {
+	return SpeciesStatus{
+		FirstSeenTime:     time.Time{},
+		IsNew:             false,
+		DaysSinceFirst:    -1,
+		LastUpdatedTime:   currentTime,
+		DaysSinceLastSeen: -1,
+		IsNewThisYear:     false,
+		IsNewThisSeason:   false,
+		DaysThisYear:      -1,
+		DaysThisSeason:    -1,
+	}
+}
+
 // GetSpeciesStatus returns the tracking status for a species with caching for performance
 // This method implements cache-first lookup with TTL validation to minimize expensive computations
 func (t *SpeciesTracker) GetSpeciesStatus(scientificName string, currentTime time.Time) SpeciesStatus {
+	// Suppress new-species status while the background load populates the maps.
+	// Checked before t.mu so it never blocks on the lock the loader holds.
+	if t.warming.Load() {
+		return warmingSpeciesStatus(currentTime)
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -148,20 +178,31 @@ func (t *SpeciesTracker) buildSpeciesStatusWithBuffer(scientificName string, cur
 	// Reuse the pre-allocated status buffer
 	status := &t.statusBuffer
 	*status = SpeciesStatus{
-		LastUpdatedTime: currentTime,
-		FirstThisYear:   firstThisYear,
-		FirstThisSeason: firstThisSeason,
-		CurrentSeason:   currentSeason,
-		DaysSinceFirst:  -1,
-		DaysThisYear:    -1,
-		DaysThisSeason:  -1,
+		LastUpdatedTime:   currentTime,
+		FirstThisYear:     firstThisYear,
+		FirstThisSeason:   firstThisSeason,
+		CurrentSeason:     currentSeason,
+		DaysSinceFirst:    -1,
+		DaysSinceLastSeen: -1,
+		DaysThisYear:      -1,
+		DaysThisSeason:    -1,
 	}
 
 	t.applyLifetimeStatus(status, firstSeen, exists, currentTime)
 	t.applyYearlyStatus(status, firstThisYear, currentTime)
 	t.applySeasonalStatus(status, firstThisSeason, currentTime)
+	t.applyNoveltyStatus(status, scientificName)
 
 	return *status
+}
+
+// applyNoveltyStatus sets the absence-gap field from the active novelty episode.
+// DaysSinceLastSeen is the number of days since the species was previously
+// detected before the current return; it stays -1 for first-ever detections.
+func (t *SpeciesTracker) applyNoveltyStatus(status *SpeciesStatus, scientificName string) {
+	if episode, exists := t.noveltyEpisodes[scientificName]; exists {
+		status.DaysSinceLastSeen = episode.DaysSinceLastSeen
+	}
 }
 
 // cleanupExpiredCache removes expired entries and enforces size limits with LRU eviction
@@ -242,6 +283,15 @@ func (t *SpeciesTracker) GetBatchSpeciesStatus(scientificNames []string, current
 		return make(map[string]SpeciesStatus)
 	}
 
+	// Suppress new-species status while the background load populates the maps.
+	if t.warming.Load() {
+		results := make(map[string]SpeciesStatus, len(scientificNames))
+		for _, scientificName := range scientificNames {
+			results[scientificName] = warmingSpeciesStatus(currentTime)
+		}
+		return results
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -271,18 +321,20 @@ func (t *SpeciesTracker) buildSpeciesStatusLocked(scientificName string, current
 
 	// Build status struct (cannot reuse statusBuffer in batch operations)
 	status := SpeciesStatus{
-		LastUpdatedTime: currentTime,
-		FirstThisYear:   firstThisYear,
-		FirstThisSeason: firstThisSeason,
-		CurrentSeason:   currentSeason,
-		DaysSinceFirst:  -1,
-		DaysThisYear:    -1,
-		DaysThisSeason:  -1,
+		LastUpdatedTime:   currentTime,
+		FirstThisYear:     firstThisYear,
+		FirstThisSeason:   firstThisSeason,
+		CurrentSeason:     currentSeason,
+		DaysSinceFirst:    -1,
+		DaysSinceLastSeen: -1,
+		DaysThisYear:      -1,
+		DaysThisSeason:    -1,
 	}
 
 	t.applyLifetimeStatus(&status, firstSeen, exists, currentTime)
 	t.applyYearlyStatus(&status, firstThisYear, currentTime)
 	t.applySeasonalStatus(&status, firstThisSeason, currentTime)
+	t.applyNoveltyStatus(&status, scientificName)
 
 	return status
 }

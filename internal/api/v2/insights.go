@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/tphakala/birdnet-go/internal/datastore"
 	datastoreV2 "github.com/tphakala/birdnet-go/internal/datastore/v2"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	"github.com/tphakala/birdnet-go/internal/imageprovider"
@@ -176,34 +177,29 @@ func normalizeForLookup(s string) string {
 // them to an arbitrary species based on label order would silently hide
 // valid matches. sciToCommon is not affected because scientific names are
 // unique per label.
-func buildNameMaps(labels []string) *nameMaps {
+// When resolver is non-nil, each label's common name is overridden by the
+// resolver (authoritative/localized), so insights display (sciToCommon) and
+// search (commonToSci) both reflect the localized name. Labels the resolver does
+// not cover keep their embedded common name.
+func buildNameMaps(labels []string, resolver datastore.SpeciesNameResolver) *nameMaps {
 	nm := &nameMaps{
 		sciToCommon: make(map[string]string, len(labels)),
 		commonToSci: make(map[string]string, len(labels)),
 	}
 	ambiguous := make(map[string]struct{})
-	for _, label := range labels {
-		scientificName, commonName, found := strings.Cut(label, "_")
-		if !found {
-			continue
-		}
-		scientificName = strings.TrimSpace(scientificName)
-		commonName = strings.TrimSpace(commonName)
-		if scientificName == "" || commonName == "" {
-			continue
-		}
-		nm.sciToCommon[scientificName] = commonName
+	for _, sn := range datastore.ResolveLabelNames(labels, resolver) {
+		nm.sciToCommon[sn.Scientific] = sn.Common
 
-		key := normalizeForLookup(commonName)
+		key := normalizeForLookup(sn.Common)
 		if _, seen := ambiguous[key]; seen {
 			continue
 		}
-		if existing, exists := nm.commonToSci[key]; exists && existing != scientificName {
+		if existing, exists := nm.commonToSci[key]; exists && existing != sn.Scientific {
 			ambiguous[key] = struct{}{}
 			delete(nm.commonToSci, key)
 			continue
 		}
-		nm.commonToSci[key] = scientificName
+		nm.commonToSci[key] = sn.Scientific
 	}
 	return nm
 }
@@ -234,7 +230,24 @@ func (c *Controller) loadCommonToScientificMap() map[string]string {
 // UpdateCommonNameMap rebuilds both cached name maps from updated BirdNET labels.
 // Called after locale or model changes to keep insights and search endpoints current.
 func (c *Controller) UpdateCommonNameMap(labels []string) {
-	c.nameMaps.Store(buildNameMaps(labels))
+	c.nameMaps.Store(buildNameMaps(labels, c.loadNameResolver()))
+}
+
+// SetNameResolver installs the authoritative localized name resolver, shared with
+// the classifier orchestrator. A nil resolver is ignored.
+func (c *Controller) SetNameResolver(r datastore.SpeciesNameResolver) {
+	if datastore.IsNilResolver(r) {
+		return
+	}
+	c.nameResolver.Store(&r)
+}
+
+// loadNameResolver returns the installed resolver, or nil if none has been set.
+func (c *Controller) loadNameResolver() datastore.SpeciesNameResolver {
+	if p := c.nameResolver.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // loadCommonNameMap returns the current scientific-to-common lookup map.
@@ -243,8 +256,11 @@ func (c *Controller) loadCommonNameMap() map[string]string {
 	return c.loadNameMaps().sciToCommon
 }
 
-// resolveCommonName looks up the common name for a scientific name.
-// Returns the scientific name itself as fallback.
+// resolveCommonName looks up the common name for a scientific name in the cached
+// map. That map is already localized at build time (buildNameMaps applies the
+// OpenFauna resolver override), so this is a plain lookup that returns the
+// scientific name itself as fallback. This differs from the datastore's
+// resolveCommonName method, which consults the live resolver per call.
 func resolveCommonName(nameMap map[string]string, scientificName string) string {
 	if cn, ok := nameMap[scientificName]; ok {
 		return cn
@@ -255,6 +271,15 @@ func resolveCommonName(nameMap map[string]string, scientificName string) string 
 // buildThumbnailURL returns the proxy image URL for a species.
 func buildThumbnailURL(scientificName string) string {
 	return imageprovider.ProxyImageURL(scientificName)
+}
+
+// analyticsTZOffset returns the server local timezone's UTC offset (seconds) in effect at ref.
+// Insights date/hour/year SQL adds this offset to detected_at so rows bucket by wall-clock value
+// in the same zone the handlers use (time.Now()/time.Local), independent of the DB session /
+// OS-local zone. This mirrors the datastore's ds.timezone (time.Local in production) and reuses
+// repository.GetTimezoneOffsetAt, the same helper the hourly charts use.
+func analyticsTZOffset(ref time.Time) int {
+	return repository.GetTimezoneOffsetAt(time.Local, ref)
 }
 
 // buildYearRanges computes index-friendly Unix timestamp ranges for the
@@ -411,9 +436,9 @@ func (c *Controller) getExpectedTodayImpl(ctx echo.Context) error {
 	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), insightsQueryTimeout)
 	defer cancel()
 
-	results, err := c.insightsRepo.GetExpectedSpeciesToday(reqCtx, yearRanges, nil)
+	results, err := c.insightsRepo.GetExpectedSpeciesToday(reqCtx, yearRanges, analyticsTZOffset(now), nil)
 	if err != nil {
-		return c.HandleError(ctx, err, "Failed to query expected species", http.StatusInternalServerError)
+		return c.handleAnalyticsQueryError(ctx, err, "Expected species", "Failed to query expected species")
 	}
 
 	nameMap := c.loadCommonNameMap()
@@ -478,12 +503,13 @@ func (c *Controller) getExpectedTodayRegionalImpl(ctx echo.Context) error {
 
 	observations, err := c.EBirdClient.GetRecentObservations(reqCtx, lat, lng, 14)
 	if err != nil {
-		return c.HandleError(ctx, err, "Failed to query eBird observations", http.StatusInternalServerError)
+		return c.handleAnalyticsQueryError(ctx, err, "eBird observations", "Failed to query eBird observations")
 	}
 
-	// Get local species to deduplicate against (best-effort — if this fails, show all eBird results)
-	yearRanges := buildYearRanges(time.Now(), expectedTodayWindowDays)
-	localSpecies, localErr := c.insightsRepo.GetExpectedSpeciesToday(reqCtx, yearRanges, nil)
+	// Get local species to deduplicate against (best-effort; if this fails, show all eBird results)
+	now := time.Now()
+	yearRanges := buildYearRanges(now, expectedTodayWindowDays)
+	localSpecies, localErr := c.insightsRepo.GetExpectedSpeciesToday(reqCtx, yearRanges, analyticsTZOffset(now), nil)
 	if localErr != nil {
 		c.logAPIRequest(ctx, logger.LogLevelWarn, "Failed to query local species for deduplication",
 			logger.Error(localErr))
@@ -534,7 +560,7 @@ func (c *Controller) getPhantomSpeciesImpl(ctx echo.Context) error {
 
 	results, err := c.insightsRepo.GetPhantomSpecies(reqCtx, since, phantomMinDetections, phantomMaxAvgConfidence, nil)
 	if err != nil {
-		return c.HandleError(ctx, err, "Failed to query phantom species", http.StatusInternalServerError)
+		return c.handleAnalyticsQueryError(ctx, err, "Phantom species", "Failed to query phantom species")
 	}
 
 	nameMap := c.loadCommonNameMap()
@@ -573,9 +599,9 @@ func (c *Controller) getDawnChorusImpl(ctx echo.Context) error {
 	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), insightsQueryTimeout)
 	defer cancel()
 
-	rawEntries, err := c.insightsRepo.GetDawnChorusRaw(reqCtx, since, dawnChorusStartHour, dawnChorusEndHour, nil)
+	rawEntries, err := c.insightsRepo.GetDawnChorusRaw(reqCtx, since, dawnChorusStartHour, dawnChorusEndHour, analyticsTZOffset(time.Unix(since, 0)), nil)
 	if err != nil {
-		return c.HandleError(ctx, err, "Failed to query dawn chorus", http.StatusInternalServerError)
+		return c.handleAnalyticsQueryError(ctx, err, "Dawn chorus", "Failed to query dawn chorus")
 	}
 
 	// Group by species, compute DST-correct time-of-day averages
@@ -655,12 +681,12 @@ func (c *Controller) getMigrationImpl(ctx echo.Context) error {
 
 	arrivals, err := c.insightsRepo.GetNewArrivals(reqCtx, recentSince, nil)
 	if err != nil {
-		return c.HandleError(ctx, err, "Failed to query new arrivals", http.StatusInternalServerError)
+		return c.handleAnalyticsQueryError(ctx, err, "New arrivals", "Failed to query new arrivals")
 	}
 
 	quiet, err := c.insightsRepo.GetGoneQuiet(reqCtx, recentSince, migrationMinTotalDetections, nil)
 	if err != nil {
-		return c.HandleError(ctx, err, "Failed to query gone quiet species", http.StatusInternalServerError)
+		return c.handleAnalyticsQueryError(ctx, err, "Gone quiet species", "Failed to query gone quiet species")
 	}
 
 	nameMap := c.loadCommonNameMap()
@@ -715,9 +741,9 @@ func (c *Controller) getDashboardKPIsImpl(ctx echo.Context) error {
 	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), insightsQueryTimeout)
 	defer cancel()
 
-	kpis, err := c.insightsRepo.GetDashboardKPIs(reqCtx, todayStart.Unix(), nil)
+	kpis, err := c.insightsRepo.GetDashboardKPIs(reqCtx, todayStart.Unix(), analyticsTZOffset(now), nil)
 	if err != nil {
-		return c.HandleError(ctx, err, "Failed to query dashboard KPIs", http.StatusInternalServerError)
+		return c.handleAnalyticsQueryError(ctx, err, "Dashboard KPIs", "Failed to query dashboard KPIs")
 	}
 
 	today := todayStart.Format(time.DateOnly)

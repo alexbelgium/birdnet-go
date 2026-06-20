@@ -23,26 +23,20 @@ type DetectionsMap map[string][]datastore.Results
 // Predict performs inference on a given sample using the classifier backend.
 // Implements ModelInstance.
 func (bn *BirdNET) Predict(ctx context.Context, sample [][]float32) ([]datastore.Results, error) {
-	span, _ := StartSpan(ctx, "birdnet.predict", "Species prediction")
+	span, _ := startPredictSpan(ctx, bn.ModelInfo.ID, sample)
 	defer span.Finish()
 
 	settings := bn.currentSettings()
 	start := time.Now()
-	span.SetTag("model", bn.ModelInfo.ID)
-	span.SetData("sample_count", len(sample))
-	if len(sample) > 0 {
-		span.SetData("sample_size", len(sample[0]))
-	}
 
-	// Guard against empty sample slice
+	// Guard against empty sample slice. Pre-inference rejections are tagged but
+	// not counted as predictions.
 	if len(sample) == 0 || len(sample[0]) == 0 {
-		err := errors.Newf("empty audio sample").
+		span.markErrored(errTypeEmptySample)
+		return nil, errors.Newf("empty audio sample").
 			Category(errors.CategoryValidation).
 			ModelContext(settings.BirdNET.ModelPath, bn.ModelInfo.ID).
 			Build()
-		span.SetTag("error", "true")
-		span.SetData("error_type", "empty_sample")
-		return nil, err
 	}
 
 	// Lock to prevent concurrent access to the classifier backend and shared buffers
@@ -51,13 +45,11 @@ func (bn *BirdNET) Predict(ctx context.Context, sample [][]float32) ([]datastore
 
 	// Guard against nil classifier (e.g., after Delete() is called concurrently)
 	if bn.classifier == nil {
-		err := errors.Newf("classifier backend is not initialized").
+		span.markErrored(errTypeClassifierNil)
+		return nil, errors.Newf("classifier backend is not initialized").
 			Category(errors.CategoryModelInit).
 			ModelContext(settings.BirdNET.ModelPath, bn.ModelInfo.ID).
 			Build()
-		span.SetTag("error", "true")
-		span.SetData("error_type", "classifier_nil")
-		return nil, err
 	}
 
 	// Run inference via classifier backend
@@ -71,18 +63,12 @@ func (bn *BirdNET) Predict(ctx context.Context, sample [][]float32) ([]datastore
 			Timing("prediction-invoke", time.Since(start)).
 			Build()
 
-		span.SetTag("error", "true")
-		span.SetData("error_type", "invoke_failed")
-
-		if m := getMetrics(); m != nil {
-			m.RecordPrediction(bn.ModelInfo.ID, time.Since(start).Seconds(), err)
-		}
-
+		recordPredictionFailure(span, bn.ModelInfo.ID, errTypeInvokeFailed, start, err)
 		return nil, err
 	}
 
 	invokeDuration := time.Since(invokeStart)
-	span.SetData("invoke_duration_ms", invokeDuration.Milliseconds())
+	span.SetData(dataKeyInvokeDurationMs, invokeDuration.Milliseconds())
 
 	// Record model invoke timing separately
 	if m := getMetrics(); m != nil {
@@ -102,30 +88,19 @@ func (bn *BirdNET) Predict(ctx context.Context, sample [][]float32) ([]datastore
 			Timing("prediction-total", time.Since(start)).
 			Build()
 
-		span.SetTag("error", "true")
-		span.SetData("error_type", "label_mismatch")
-
-		// Record error in metrics
-		if m := getMetrics(); m != nil {
-			m.RecordPrediction(bn.ModelInfo.ID, time.Since(start).Seconds(), err)
-		}
-
+		recordPredictionFailure(span, bn.ModelInfo.ID, errTypeLabelMismatch, start, err)
 		return nil, err
 	}
 
 	// Use optimized top-k algorithm instead of full sort + trim
-	topResults := getTopKResults(results, 10)
+	topResults := getTopKResults(results, defaultTopKResults)
 
 	// Log prediction timing for performance monitoring
 	duration := time.Since(start)
 	bn.Debug("Prediction completed in %v with %d results", duration, len(topResults))
 
-	// Record metrics
-	span.SetData("total_duration_ms", duration.Milliseconds())
-	span.SetData("result_count", len(topResults))
-	span.SetTag("error", "false")
-
-	// The span.Finish() will automatically record the prediction metrics
+	// Record metrics. Finish() records the single success because the span is not errored.
+	recordPredictionSuccess(span, len(topResults), start)
 
 	// Return the top 10 results
 	return topResults, nil
@@ -244,19 +219,34 @@ func getTopKResults(results []datastore.Results, k int) []datastore.Results {
 		return []datastore.Results{}
 	}
 
+	// Number of elements the caller will receive.
+	n := min(k, len(results))
+
 	if k >= len(results) {
-		// If k is greater than or equal to the number of results, sort everything
+		// If k is greater than or equal to the number of results, sort everything.
 		sortResults(results)
-		return results
+	} else {
+		// Use partial sort to move the top k elements to the front, then sort
+		// just those k in descending order.
+		partialSort(results, k)
+		sortResults(results[:k])
 	}
 
-	// Use partial sort to find top k elements
-	partialSort(results, k)
-
-	// Sort the top k elements in descending order
-	sortResults(results[:k])
-
-	return results[:k]
+	// Return a freshly-allocated copy so the result never aliases the caller's
+	// backing array. BirdNET.Predict passes a reused per-instance scratch buffer
+	// (bn.resultsBuffer) that the next inference window overwrites in place via
+	// pairLabelsAndConfidenceReuse; without this copy a top-K slice already handed
+	// to classifier.ResultsQueue would be mutated concurrently with the queue
+	// consumer reading it, an unsynchronized read/write data race that can corrupt
+	// queued detections. The Bat and Perch Predict paths pass
+	// freshly-allocated slices, so the copy is redundant-but-harmless there; doing
+	// it unconditionally keeps the ownership contract uniform for every model. n
+	// is small (defaultTopKResults = 10), so the copy is cheap and the upstream
+	// large-buffer reuse optimization stays intact: bn.resultsBuffer remains
+	// internal scratch that never escapes.
+	out := make([]datastore.Results, n)
+	copy(out, results[:n])
+	return out
 }
 
 // partialSort performs a partial sort to move the top k elements to the front.

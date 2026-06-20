@@ -21,6 +21,18 @@ type Bat struct {
 	batClassifier      inference.CustomClassifier
 	info               ModelInfo
 	mu                 sync.Mutex
+	// device is the compute device the bat pipeline bound to. Both the embedding
+	// extractor and the classifier run on the ONNX Runtime CPU EP today (there is
+	// no OpenVINO path for the bat model), so this is deviceCPU. Kept as a field
+	// rather than a constant so a future OpenVINO bat path can set the real device
+	// at construction. Reported via Device().
+	device string
+	// backend is the live execution backend (BackendONNX today; the bat pipeline is
+	// ONNX-only), and precision is the weight precision detected from the classifier
+	// model filename (empty when no token). Both set once at construction; reported
+	// via Backend()/Precision().
+	backend   string
+	precision string
 }
 
 // BatModelConfig holds configuration for creating a Bat model instance.
@@ -91,6 +103,12 @@ func NewBat(cfg *BatModelConfig) (*Bat, error) {
 		embeddingExtractor: embExtractor,
 		batClassifier:      batCC,
 		info:               info,
+		// The bat embedding + classifier pipeline is ONNX-only (CPU EP) today.
+		device:  deviceCPU,
+		backend: BackendONNX,
+		// Surface the weight precision detected from the classifier model filename
+		// (empty when no token, which is the common case for the bat model).
+		precision: string(detectQuantization(cfg.ClassifierModelPath)),
 	}, nil
 }
 
@@ -98,7 +116,15 @@ func NewBat(cfg *BatModelConfig) (*Bat, error) {
 func (b *Bat) Predict(ctx context.Context, samples [][]float32) ([]datastore.Results, error) {
 	log := GetLogger()
 
+	span, _ := startPredictSpan(ctx, RegistryIDBat, samples)
+	defer span.Finish()
+
+	start := time.Now()
+
+	// Guard against empty sample slice. Pre-inference rejections are tagged but
+	// not counted as predictions, mirroring BirdNET.Predict.
 	if len(samples) == 0 || len(samples[0]) == 0 {
+		span.markErrored(errTypeEmptySample)
 		return nil, errors.Newf("empty audio sample").
 			Category(errors.CategoryValidation).
 			Build()
@@ -108,6 +134,7 @@ func (b *Bat) Predict(ctx context.Context, samples [][]float32) ([]datastore.Res
 	defer b.mu.Unlock()
 
 	if b.embeddingExtractor == nil || b.batClassifier == nil {
+		span.markErrored(errTypeClassifierNil)
 		return nil, errors.Newf("bat classifier is not initialized").
 			Category(errors.CategoryModelInit).
 			Build()
@@ -124,19 +151,23 @@ func (b *Bat) Predict(ctx context.Context, samples [][]float32) ([]datastore.Res
 		log.Error("bat embedding extraction failed",
 			logger.Error(err),
 			logger.Duration("duration", embDuration))
-		return nil, errors.New(err).
+		err = errors.New(err).
 			Category(errors.CategoryAudio).
-			Context("model", "Bat").
+			Context("model", RegistryIDBat).
 			Context("stage", "embedding_extraction").
 			Build()
+		recordPredictionFailure(span, RegistryIDBat, errTypeEmbeddingExtraction, start, err)
+		return nil, err
 	}
 
 	if embeddings == nil {
 		log.Error("bat embedding model produced nil embeddings")
-		return nil, errors.Newf("embedding model did not produce embeddings").
+		err = errors.Newf("embedding model did not produce embeddings").
 			Category(errors.CategoryModelInit).
-			Context("model", "Bat").
+			Context("model", RegistryIDBat).
 			Build()
+		recordPredictionFailure(span, RegistryIDBat, errTypeNilEmbeddings, start, err)
+		return nil, err
 	}
 
 	log.Debug("bat embeddings extracted",
@@ -150,11 +181,13 @@ func (b *Bat) Predict(ctx context.Context, samples [][]float32) ([]datastore.Res
 		log.Error("bat classification failed",
 			logger.Error(err),
 			logger.Duration("duration", classDuration))
-		return nil, errors.New(err).
+		err = errors.New(err).
 			Category(errors.CategoryAudio).
-			Context("model", "Bat").
+			Context("model", RegistryIDBat).
 			Context("stage", "bat_classification").
 			Build()
+		recordPredictionFailure(span, RegistryIDBat, errTypeBatClassification, start, err)
+		return nil, err
 	}
 
 	log.Debug("bat classification complete",
@@ -163,6 +196,7 @@ func (b *Bat) Predict(ctx context.Context, samples [][]float32) ([]datastore.Res
 
 	results, err := pairLabelsAndConfidence(b.batClassifier.Labels(), scores)
 	if err != nil {
+		recordPredictionFailure(span, RegistryIDBat, errTypeLabelMismatch, start, err)
 		return nil, err
 	}
 
@@ -178,13 +212,17 @@ func (b *Bat) Predict(ctx context.Context, samples [][]float32) ([]datastore.Res
 		results = filtered
 	}
 
-	if len(results) > 0 {
+	// Sort and trim before logging so top_species reflects the highest-confidence
+	// detection rather than the first label that cleared the threshold (results is
+	// in label order, not confidence order).
+	topResults := getTopKResults(results, defaultTopKResults)
+	if len(topResults) > 0 {
 		log.Debug("bat detections after threshold",
 			logger.Int("pre_filter", preFilterCount),
 			logger.Int("post_filter", len(results)),
 			logger.Float64("threshold", threshold),
-			logger.String("top_species", results[0].Species),
-			logger.Float64("top_confidence", float64(results[0].Confidence)),
+			logger.String("top_species", topResults[0].Species),
+			logger.Float64("top_confidence", float64(topResults[0].Confidence)),
 			logger.Duration("total_duration", embDuration+classDuration))
 	} else {
 		log.Debug("bat no detections above threshold",
@@ -193,7 +231,10 @@ func (b *Bat) Predict(ctx context.Context, samples [][]float32) ([]datastore.Res
 			logger.Duration("total_duration", embDuration+classDuration))
 	}
 
-	return getTopKResults(results, 10), nil
+	// Success: Finish records the single prediction because the span is not errored.
+	recordPredictionSuccess(span, len(topResults), start)
+
+	return topResults, nil
 }
 
 // Spec returns the audio requirements for the bat model.
@@ -227,6 +268,21 @@ func (b *Bat) Labels() []string {
 	}
 	return b.batClassifier.Labels()
 }
+
+// Device returns the compute device the bat pipeline bound to ("CPU" today; the
+// model is ONNX-only). Set once at construction and never mutated, so no lock is
+// needed. Implements ModelInstance.
+func (b *Bat) Device() string { return b.device }
+
+// Backend returns the live execution backend the bat pipeline bound to
+// (BackendONNX today). Set once at construction and never mutated, so no lock is
+// needed. Implements ModelInstance.
+func (b *Bat) Backend() string { return b.backend }
+
+// Precision returns the weight precision detected from the bat classifier model
+// filename (empty when no token). Set once at construction and never mutated, so
+// no lock is needed. Implements ModelInstance.
+func (b *Bat) Precision() string { return b.precision }
 
 // Close releases resources held by the bat model.
 func (b *Bat) Close() error {
