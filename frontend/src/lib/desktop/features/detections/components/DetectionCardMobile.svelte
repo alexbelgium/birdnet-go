@@ -51,16 +51,16 @@
     <img
       src={spectrogramUrl}
       alt={t('components.audio.spectrogramAlt')}
-      class="absolute inset-0 w-full h-full object-cover opacity-20"
+      class="absolute inset-0 w-full h-full object-cover opacity-40"
       onerror={() => (spectrogramError = true)}
     />
-    <div class="absolute inset-0 bg-[var(--color-base-100)]/60"></div>
+    <div class="absolute inset-0 bg-[var(--color-base-100)]/25"></div>
   {/if}
   <div class="card-body p-3 space-y-3 relative">
     <!-- Header: Names and confidence -->
     <div class="flex items-start gap-3">
       <div class="flex-1 min-w-0">
-        <div class="text-base font-semibold leading-tight truncate">
+        <div class="text-sm font-semibold leading-tight truncate">
           {displayName}
         </div>
         <div class="text-xs opacity-70 truncate">
