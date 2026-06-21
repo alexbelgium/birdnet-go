@@ -72,10 +72,7 @@
   });
 </script>
 
-<article
-  bind:this={cardElement}
-  class={`detection-card-mobile relative rounded-xl ${className}`}
->
+<article bind:this={cardElement} class={`detection-card-mobile relative rounded-xl ${className}`}>
   <div class="detection-card-inner">
     <!-- Spectrogram Background -->
     <div class="spectrogram-container">
