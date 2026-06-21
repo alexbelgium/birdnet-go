@@ -1400,7 +1400,6 @@ export type TranslationKey =
   | 'analytics.species.manage.deleteWarning'
   | 'analytics.species.manage.deleteFailed'
   | 'analytics.species.manage.membershipFailed'
-  | 'analytics.advanced.title'
   | 'analytics.advanced.chartControls'
   | 'analytics.advanced.dateRange'
   | 'analytics.advanced.chartOptions'
