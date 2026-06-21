@@ -1,10 +1,6 @@
 # BirdNET-Go Feature Prompt
 
-> Fill story → send. Rules embedded — skip CLAUDE.md/CONTRIBUTING.md.
-
----
-
-## Story
+## Feature
 
 **As a** [user / admin / developer]
 **I want** [what]
@@ -92,7 +88,7 @@ Report ≤5 bullets:
 Min code to satisfy story. Apply rules above.
 
 - New API endpoint → update `internal/api/v2/README.md`
-- New i18n key → add to all `frontend/static/messages/` files
+- New i18n key → add to all `frontend/static/messages/` files in the appropriate language (double check)
 
 ---
 
