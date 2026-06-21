@@ -608,7 +608,7 @@
       "categoryYear": "Nowy w tym roku",
       "categorySeason": "Nowy w tym sezonie",
       "categorySeasonNamed": "Nowy w tym {season}",
-      "categoryInfrequent": "Infrequent visitor",
+      "categoryInfrequent": "Rzadki gość",
       "maxConfidenceShort": "Maks {confidence}%",
       "detections": "{count, plural, one {# wykrycie} few {# wykrycia} many {# wykryć} other {# wykrycia}}",
       "lastSeen": "Ostatnio: {days, plural, =0 {dzisiaj} one {# dzień temu} few {# dni temu} many {# dni temu} other {# dnia temu}}"
@@ -644,11 +644,11 @@
         "hourlyDetections": "{count} detekcji o {hour}:00 - Kliknij aby wyświetlić",
         "biHourlyDetections": "{count} detekcji od {startHour}:00-{endHour}:00 - Kliknij aby wyświetlić",
         "sixHourlyDetections": "{count} detekcji od {startHour}:00-{endHour}:00 - Kliknij aby wyświetlić",
-        "noveltyLifetime": "New species (first seen {days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltyYear": "First time this year ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltySeason": "First time this season ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltySeasonNamed": "First time this {season} ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltyInfrequent": "Infrequent visitor ({days, plural, one {# day} other {# days}} since last seen)"
+        "noveltyLifetime": "Nowy gatunek (pierwszy raz widziany {days, plural, =0 {dzisiaj} one {# dzień temu} few {# dni temu} many {# dni temu} other {# dnia temu}})",
+        "noveltyYear": "Pierwszy raz w tym roku ({days, plural, =0 {dzisiaj} one {# dzień temu} few {# dni temu} many {# dni temu} other {# dnia temu}})",
+        "noveltySeason": "Pierwszy raz w tym sezonie ({days, plural, =0 {dzisiaj} one {# dzień temu} few {# dni temu} many {# dni temu} other {# dnia temu}})",
+        "noveltySeasonNamed": "Pierwszy raz w tym {season} ({days, plural, =0 {dzisiaj} one {# dzień temu} few {# dni temu} many {# dni temu} other {# dnia temu}})",
+        "noveltyInfrequent": "Rzadki gość (ostatnio widziany {days, plural, =0 {dzisiaj} one {# dzień temu} few {# dni temu} many {# dni temu} other {# dnia temu}})"
       },
       "loading": {
         "preparing": "Przygotowywanie danych...",
@@ -3949,15 +3949,15 @@
           }
         },
         "infrequent": {
-          "title": "Infrequent Tracking",
-          "description": "Highlight species that have not been seen for a long time when they return",
+          "title": "Śledzenie rzadkich gatunków",
+          "description": "Wyróżniaj gatunki, które nie były widziane przez długi czas, gdy powracają",
           "enabled": {
-            "label": "Enable Infrequent Tracking",
-            "helpText": "Show a special indicator when a species returns after a long absence"
+            "label": "Włącz śledzenie rzadkich gatunków",
+            "helpText": "Pokaż specjalny wskaźnik, gdy gatunek powraca po długiej nieobecności"
           },
           "days": {
-            "label": "Absence Threshold (days)",
-            "helpText": "Minimum number of days a species must be absent before it is flagged as infrequent (1-365)"
+            "label": "Próg nieobecności (dni)",
+            "helpText": "Minimalna liczba dni nieobecności gatunku, zanim zostanie oznaczony jako rzadki (1–365)"
           }
         },
         "months": {

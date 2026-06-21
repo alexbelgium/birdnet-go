@@ -608,7 +608,7 @@
       "categoryYear": "Ny i år",
       "categorySeason": "Ny denna säsong",
       "categorySeasonNamed": "Ny detta {season}",
-      "categoryInfrequent": "Infrequent visitor",
+      "categoryInfrequent": "Sällsynt besökare",
       "maxConfidenceShort": "Max {confidence} %",
       "detections": "{count, plural, one {# upptäckt} other {# upptäckter}}",
       "lastSeen": "Senast: {days, plural, =0 {idag} one {för # dag sedan} other {för # dagar sedan}}"
@@ -644,11 +644,11 @@
         "hourlyDetections": "{count} detekteringar kl. {hour}:00 - Klicka för att visa",
         "biHourlyDetections": "{count} detekteringar från {startHour}:00-{endHour}:00 - Klicka för att visa",
         "sixHourlyDetections": "{count} detekteringar från {startHour}:00-{endHour}:00 - Klicka för att visa",
-        "noveltyLifetime": "New species (first seen {days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltyYear": "First time this year ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltySeason": "First time this season ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltySeasonNamed": "First time this {season} ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltyInfrequent": "Infrequent visitor ({days, plural, one {# day} other {# days}} since last seen)"
+        "noveltyLifetime": "Ny art (först sedd {days, plural, =0 {idag} one {för # dag sedan} other {för # dagar sedan}})",
+        "noveltyYear": "Första gången i år ({days, plural, =0 {idag} one {för # dag sedan} other {för # dagar sedan}})",
+        "noveltySeason": "Första gången denna säsong ({days, plural, =0 {idag} one {för # dag sedan} other {för # dagar sedan}})",
+        "noveltySeasonNamed": "Första gången detta {season} ({days, plural, =0 {idag} one {för # dag sedan} other {för # dagar sedan}})",
+        "noveltyInfrequent": "Sällsynt besökare (senast sedd {days, plural, =0 {idag} one {för # dag sedan} other {för # dagar sedan}})"
       },
       "loading": {
         "preparing": "Förbereder data...",
@@ -3949,15 +3949,15 @@
           }
         },
         "infrequent": {
-          "title": "Infrequent Tracking",
-          "description": "Highlight species that have not been seen for a long time when they return",
+          "title": "Spårning av sällsynta arter",
+          "description": "Markera arter som inte har setts på länge när de återvänder",
           "enabled": {
-            "label": "Enable Infrequent Tracking",
-            "helpText": "Show a special indicator when a species returns after a long absence"
+            "label": "Aktivera spårning av sällsynta arter",
+            "helpText": "Visa en särskild indikator när en art återvänder efter en lång frånvaro"
           },
           "days": {
-            "label": "Absence Threshold (days)",
-            "helpText": "Minimum number of days a species must be absent before it is flagged as infrequent (1-365)"
+            "label": "Frånvarotröskel (dagar)",
+            "helpText": "Minsta antal dagar en art måste vara frånvarande innan den markeras som sällsynt (1–365)"
           }
         },
         "months": {

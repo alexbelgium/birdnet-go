@@ -608,7 +608,7 @@
       "categoryYear": "Ny i år",
       "categorySeason": "Ny denne sæson",
       "categorySeasonNamed": "Ny denne {season}",
-      "categoryInfrequent": "Infrequent visitor",
+      "categoryInfrequent": "Sjælden gæst",
       "maxConfidenceShort": "Maks {confidence} %",
       "detections": "{count, plural, one {# registrering} other {# registreringer}}",
       "lastSeen": "Senest: {days, plural, =0 {i dag} one {for # dag siden} other {for # dage siden}}"
@@ -644,11 +644,11 @@
         "hourlyDetections": "{count} registreringer kl. {hour}:00 - Klik for at se",
         "biHourlyDetections": "{count} registreringer fra {startHour}:00-{endHour}:00 - Klik for at se",
         "sixHourlyDetections": "{count} registreringer fra {startHour}:00-{endHour}:00 - Klik for at se",
-        "noveltyLifetime": "New species (first seen {days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltyYear": "First time this year ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltySeason": "First time this season ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltySeasonNamed": "First time this {season} ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltyInfrequent": "Infrequent visitor ({days, plural, one {# day} other {# days}} since last seen)"
+        "noveltyLifetime": "Ny art (først set {days, plural, =0 {i dag} one {for # dag siden} other {for # dage siden}})",
+        "noveltyYear": "Første gang i år ({days, plural, =0 {i dag} one {for # dag siden} other {for # dage siden}})",
+        "noveltySeason": "Første gang denne sæson ({days, plural, =0 {i dag} one {for # dag siden} other {for # dage siden}})",
+        "noveltySeasonNamed": "Første gang denne {season} ({days, plural, =0 {i dag} one {for # dag siden} other {for # dage siden}})",
+        "noveltyInfrequent": "Sjælden gæst (sidst set {days, plural, =0 {i dag} one {for # dag siden} other {for # dage siden}})"
       },
       "loading": {
         "preparing": "Forbereder data...",
@@ -3949,15 +3949,15 @@
           }
         },
         "infrequent": {
-          "title": "Infrequent Tracking",
-          "description": "Highlight species that have not been seen for a long time when they return",
+          "title": "Sporing af sjældne arter",
+          "description": "Fremhæv arter, der ikke er set i lang tid, når de vender tilbage",
           "enabled": {
-            "label": "Enable Infrequent Tracking",
-            "helpText": "Show a special indicator when a species returns after a long absence"
+            "label": "Aktivér sporing af sjældne arter",
+            "helpText": "Vis en særlig indikator, når en art vender tilbage efter et langt fravær"
           },
           "days": {
-            "label": "Absence Threshold (days)",
-            "helpText": "Minimum number of days a species must be absent before it is flagged as infrequent (1-365)"
+            "label": "Fraværsgrænse (dage)",
+            "helpText": "Mindste antal dage en art skal være fraværende, før den markeres som sjælden (1-365)"
           }
         },
         "months": {

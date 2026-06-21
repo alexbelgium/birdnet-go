@@ -608,7 +608,7 @@
       "categoryYear": "Nouvelle cette année",
       "categorySeason": "Nouvelle cette saison",
       "categorySeasonNamed": "Nouvelle ce {season}",
-      "categoryInfrequent": "Infrequent visitor",
+      "categoryInfrequent": "Visiteur occasionnel",
       "maxConfidenceShort": "Max {confidence} %",
       "detections": "{count, plural, one {# détection} other {# détections}}",
       "lastSeen": "Dernier : {days, plural, =0 {aujourd'hui} one {il y a # jour} other {il y a # jours}}"
@@ -644,11 +644,11 @@
         "hourlyDetections": "{count} détections à {hour}h00 - Cliquer pour voir",
         "biHourlyDetections": "{count} détections de {startHour}h00 à {endHour}h00 - Cliquer pour voir",
         "sixHourlyDetections": "{count} détections de {startHour}h00 à {endHour}h00 - Cliquer pour voir",
-        "noveltyLifetime": "New species (first seen {days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltyYear": "First time this year ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltySeason": "First time this season ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltySeasonNamed": "First time this {season} ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
-        "noveltyInfrequent": "Infrequent visitor ({days, plural, one {# day} other {# days}} since last seen)"
+        "noveltyLifetime": "Nouvelle espèce (observée pour la première fois {days, plural, =0 {aujourd'hui} one {il y a # jour} other {il y a # jours}})",
+        "noveltyYear": "Première fois cette année ({days, plural, =0 {aujourd'hui} one {il y a # jour} other {il y a # jours}})",
+        "noveltySeason": "Première fois cette saison ({days, plural, =0 {aujourd'hui} one {il y a # jour} other {il y a # jours}})",
+        "noveltySeasonNamed": "Première fois ce {season} ({days, plural, =0 {aujourd'hui} one {il y a # jour} other {il y a # jours}})",
+        "noveltyInfrequent": "Visiteur occasionnel (vu pour la dernière fois {days, plural, =0 {aujourd'hui} one {il y a # jour} other {il y a # jours}})"
       },
       "loading": {
         "preparing": "Préparation des données...",
@@ -3949,15 +3949,15 @@
           }
         },
         "infrequent": {
-          "title": "Infrequent Tracking",
-          "description": "Highlight species that have not been seen for a long time when they return",
+          "title": "Suivi des espèces occasionnelles",
+          "description": "Mettre en évidence les espèces qui n'ont pas été observées depuis longtemps lorsqu'elles reviennent",
           "enabled": {
-            "label": "Enable Infrequent Tracking",
-            "helpText": "Show a special indicator when a species returns after a long absence"
+            "label": "Activer le suivi des espèces occasionnelles",
+            "helpText": "Afficher un indicateur spécial lorsqu’une espèce revient après une longue absence"
           },
           "days": {
-            "label": "Absence Threshold (days)",
-            "helpText": "Minimum number of days a species must be absent before it is flagged as infrequent (1-365)"
+            "label": "Seuil d'absence (jours)",
+            "helpText": "Nombre minimal de jours d’absence d’une espèce avant qu’elle soit marquée comme occasionnelle (1-365)"
           }
         },
         "months": {
