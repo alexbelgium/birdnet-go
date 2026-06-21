@@ -1,5 +1,6 @@
 <script lang="ts">
   // Use prop callback instead of legacy event dispatcher
+  import { onMount, onDestroy } from 'svelte';
   import ConfidenceCircle from '$lib/desktop/components/data/ConfidenceCircle.svelte';
   import VerificationBadges from '$lib/desktop/components/ui/VerificationBadges.svelte';
   import SourceBadge from '$lib/desktop/features/dashboard/components/SourceBadge.svelte';
@@ -9,6 +10,7 @@
   import { navigation } from '$lib/stores/navigation.svelte';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
+  import { createSpectrogramLoader } from '$lib/utils/spectrogramLoader.svelte';
 
   interface Props {
     detection: Detection;
@@ -27,8 +29,18 @@
   // server-provided common name then the scientific name (mirrors DetectionRow).
   const displayName = $derived(localizeSpeciesName(detection.scientificName, detection.commonName));
 
-  let spectrogramError = $state(false);
-  let spectrogramUrl = $derived(buildAppUrl(`/api/v2/spectrogram/${detection.id}?size=md`));
+  const loader = createSpectrogramLoader({ size: 'md', raw: true });
+  let cardElement = $state<HTMLElement | undefined>(undefined);
+  let isVisible = $state(false);
+
+  // Start/stop loader based on visibility, matching the recent detections card.
+  $effect(() => {
+    if (isVisible) {
+      loader.start(detection.id);
+    } else {
+      loader.stop();
+    }
+  });
 
   function handlePlay() {
     const audioUrl = buildAppUrl(`/api/v2/audio/${detection.id}`);
@@ -44,17 +56,51 @@
       navigation.navigate(`/ui/detections/${detection.id}`);
     }
   }
+
+  // eslint-disable-next-line no-undef -- browser global
+  let observer: IntersectionObserver | undefined;
+
+  onMount(() => {
+    if (!cardElement) return;
+
+    // eslint-disable-next-line no-undef -- browser global
+    observer = new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          isVisible = entry.isIntersecting;
+        }
+      },
+      { rootMargin: '200px 0px' }
+    );
+    observer.observe(cardElement);
+  });
+
+  onDestroy(() => {
+    observer?.disconnect();
+    loader.destroy();
+  });
 </script>
 
-<section class={`card bg-[var(--color-base-100)] shadow-xs relative overflow-hidden ${className}`}>
-  {#if spectrogramUrl && !spectrogramError}
+<section
+  bind:this={cardElement}
+  class={`card bg-[var(--color-base-100)] shadow-xs relative overflow-hidden ${className}`}
+>
+  {#if loader.showSpinner}
+    <div class="absolute inset-0 flex items-center justify-center bg-[var(--color-base-200)]/50">
+      <span class="loading loading-spinner loading-md text-[var(--color-base-content)]/50"></span>
+    </div>
+  {/if}
+  {#if !loader.error && loader.spectrogramUrl}
     <img
-      src={spectrogramUrl}
+      src={loader.spectrogramUrl}
       alt={t('components.audio.spectrogramAlt')}
-      class="absolute inset-0 w-full h-full object-cover opacity-70"
-      onerror={() => (spectrogramError = true)}
+      class="absolute left-0 bottom-0 w-full min-h-full object-cover object-bottom transition-opacity duration-300"
+      class:opacity-0={loader.state === 'loading'}
+      style="image-rendering: pixelated;"
+      decoding="async"
+      onload={() => loader.handleImageLoad()}
+      onerror={() => loader.handleImageError()}
     />
-    <div class="absolute inset-0 bg-[var(--color-base-100)]/5"></div>
   {/if}
   <div class="card-body p-3 space-y-3 relative">
     <!-- Header: Names and confidence -->
