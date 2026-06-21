@@ -643,7 +643,12 @@
         "viewSixHourly": "Ver todas as detecções de {startHour}:00 a {endHour}:00",
         "hourlyDetections": "{count} detecções às {hour}:00 - Clique para ver",
         "biHourlyDetections": "{count} detecções de {startHour}:00 a {endHour}:00 - Clique para ver",
-        "sixHourlyDetections": "{count} detecções de {startHour}:00 a {endHour}:00 - Clique para ver"
+        "sixHourlyDetections": "{count} detecções de {startHour}:00 a {endHour}:00 - Clique para ver",
+        "noveltyLifetime": "New species (first seen {days, plural, =0 {today} one {# day ago} other {# days ago}})",
+        "noveltyYear": "First time this year ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
+        "noveltySeason": "First time this season ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
+        "noveltySeasonNamed": "First time this {season} ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
+        "noveltyInfrequent": "Infrequent visitor ({days, plural, one {# day} other {# days}} since last seen)"
       },
       "loading": {
         "preparing": "Preparando dados...",

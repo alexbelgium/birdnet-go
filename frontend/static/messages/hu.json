@@ -643,7 +643,12 @@
         "viewSixHourly": "Összes detektálás megtekintése {startHour}:00-{endHour}:00-kor",
         "hourlyDetections": "{count} detektálás {hour}:00-kor - Kattintson a megtekintéshez",
         "biHourlyDetections": "{count} detektálás {startHour}:00-{endHour}:00-kor - Kattintson a megtekintéshez",
-        "sixHourlyDetections": "{count} detektálás {startHour}:00-{endHour}:00-kor - Kattintson a megtekintéshez"
+        "sixHourlyDetections": "{count} detektálás {startHour}:00-{endHour}:00-kor - Kattintson a megtekintéshez",
+        "noveltyLifetime": "New species (first seen {days, plural, =0 {today} one {# day ago} other {# days ago}})",
+        "noveltyYear": "First time this year ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
+        "noveltySeason": "First time this season ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
+        "noveltySeasonNamed": "First time this {season} ({days, plural, =0 {today} one {# day ago} other {# days ago}})",
+        "noveltyInfrequent": "Infrequent visitor ({days, plural, one {# day} other {# days}} since last seen)"
       },
       "loading": {
         "preparing": "Adatok előkészítése...",

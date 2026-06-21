@@ -1051,6 +1051,7 @@ Responsive Breakpoints:
           <div class="flex flex-col" style:gap="var(--grid-gap)">
             {#each sortedData as item, index (`${item.scientific_name}_${index}`)}
               {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
+              {@const noveltyCategory = resolveNoveltyCategory(item)}
               <div
                 class="flex items-center species-row"
                 class:new-species={item.isNew && !prefersReducedMotion}
@@ -1084,35 +1085,48 @@ Responsive Breakpoints:
                     title={displayName}
                   >
                     <span class="truncate flex-1">{displayName}</span>
-                    {#if resolveNoveltyCategory(item) === 'lifetime'}
+                    {#if noveltyCategory === 'lifetime'}
                       <span
                         class="inline-block shrink-0"
                         style:color={noveltyCategoryColorVar('lifetime')}
-                        title={`New species (first seen ${item.days_since_first_seen ?? 0} day${(item.days_since_first_seen ?? 0) === 1 ? '' : 's'} ago)`}
+                        title={t('dashboard.dailySummary.tooltips.noveltyLifetime', {
+                          days: item.days_since_first_seen ?? 0,
+                        })}
                       >
                         <Star class="size-3 fill-current" />
                       </span>
-                    {:else if resolveNoveltyCategory(item) === 'year'}
+                    {:else if noveltyCategory === 'year'}
                       <span
                         class="shrink-0"
                         style:color={noveltyCategoryColorVar('year')}
-                        title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
+                        title={t('dashboard.dailySummary.tooltips.noveltyYear', {
+                          days: item.days_this_year ?? 0,
+                        })}
                       >
                         📅
                       </span>
-                    {:else if resolveNoveltyCategory(item) === 'season'}
+                    {:else if noveltyCategory === 'season'}
                       <span
                         class="shrink-0"
                         style:color={noveltyCategoryColorVar('season')}
-                        title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
+                        title={item.current_season
+                          ? t('dashboard.dailySummary.tooltips.noveltySeasonNamed', {
+                              season: item.current_season,
+                              days: item.days_this_season ?? 0,
+                            })
+                          : t('dashboard.dailySummary.tooltips.noveltySeason', {
+                              days: item.days_this_season ?? 0,
+                            })}
                       >
                         🌿
                       </span>
-                    {:else if resolveNoveltyCategory(item) === 'infrequent'}
+                    {:else if noveltyCategory === 'infrequent'}
                       <span
                         class="shrink-0"
                         style:color={noveltyCategoryColorVar('infrequent')}
-                        title={`Infrequent visitor (${item.days_since_last_seen ?? 0} day${(item.days_since_last_seen ?? 0) === 1 ? '' : 's'} since last seen)`}
+                        title={t('dashboard.dailySummary.tooltips.noveltyInfrequent', {
+                          days: item.days_since_last_seen ?? 0,
+                        })}
                       >
                         <History class="size-3" />
                       </span>

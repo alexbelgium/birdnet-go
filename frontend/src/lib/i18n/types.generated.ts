@@ -520,6 +520,11 @@ export type TranslationKey =
   | 'dashboard.dailySummary.tooltips.hourlyDetections' // params: count, hour
   | 'dashboard.dailySummary.tooltips.biHourlyDetections' // params: count, startHour, endHour
   | 'dashboard.dailySummary.tooltips.sixHourlyDetections' // params: count, startHour, endHour
+  | 'dashboard.dailySummary.tooltips.noveltyLifetime' // params: days
+  | 'dashboard.dailySummary.tooltips.noveltyYear' // params: days
+  | 'dashboard.dailySummary.tooltips.noveltySeason' // params: days
+  | 'dashboard.dailySummary.tooltips.noveltySeasonNamed' // params: season, days
+  | 'dashboard.dailySummary.tooltips.noveltyInfrequent' // params: days
   | 'dashboard.dailySummary.loading.preparing'
   | 'dashboard.dailySummary.loading.fetching'
   | 'dashboard.dailySummary.loading.error'
@@ -3834,6 +3839,14 @@ export type TranslationParams = {
     startHour: string | number;
     endHour: string | number;
   };
+  'dashboard.dailySummary.tooltips.noveltyLifetime': { days: string | number };
+  'dashboard.dailySummary.tooltips.noveltyYear': { days: string | number };
+  'dashboard.dailySummary.tooltips.noveltySeason': { days: string | number };
+  'dashboard.dailySummary.tooltips.noveltySeasonNamed': {
+    season: string | number;
+    days: string | number;
+  };
+  'dashboard.dailySummary.tooltips.noveltyInfrequent': { days: string | number };
   'dashboard.recentDetections.modals.showSpecies': { species: string | number };
   'dashboard.recentDetections.modals.ignoreSpecies': { species: string | number };
   'dashboard.recentDetections.modals.showSpeciesConfirm': { species: string | number };
