@@ -18,6 +18,7 @@
   import NotificationsSettingsSection from '$lib/desktop/features/settings/pages/NotificationsSettingsPage.svelte';
   import UserInterfaceSettingsSection from '$lib/desktop/features/settings/pages/UserInterfaceSettingsPage.svelte';
   import AnalysisSettingsSection from '$lib/desktop/features/settings/pages/AnalysisSettingsPage.svelte';
+  import SearchSettingsSection from '$lib/desktop/features/settings/pages/SearchSettingsPage.svelte';
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import LoadingSpinner from '$lib/desktop/components/ui/LoadingSpinner.svelte';
 
@@ -33,6 +34,7 @@
     species: 'species',
     notifications: 'notifications',
     support: 'support',
+    search: 'search',
   };
 
   // Get current section from a path
@@ -79,7 +81,9 @@
   {:else}
     <!-- Settings Content -->
     <div class="space-y-6">
-      {#if currentSection === 'analysis'}
+      {#if currentSection === 'search'}
+        <SearchSettingsSection />
+      {:else if currentSection === 'analysis'}
         <AnalysisSettingsSection />
       {:else if currentSection === 'node'}
         <MainSettingsSection />
