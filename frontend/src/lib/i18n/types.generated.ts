@@ -185,7 +185,6 @@ export type TranslationKey =
   | 'pageTitle.serverError'
   | 'pageTitle.componentError'
   | 'pageTitle.speciesAnalytics'
-  | 'pageTitle.advancedAnalytics'
   | 'pageTitle.detectionDetails'
   | 'pageTitle.settingsNotAvailable'
   | 'navigation.dashboard'

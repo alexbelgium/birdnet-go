@@ -205,7 +205,6 @@
     "serverError": "500 - Wewnętrzny błąd serwera",
     "componentError": "Błąd ładowania komponentu",
     "speciesAnalytics": "Analityka gatunków",
-    "advancedAnalytics": "Zaawansowana analityka",
     "detectionDetails": "Szczegóły wykrycia",
     "settingsNotAvailable": "Ustawienia niedostępne"
   },
@@ -1804,7 +1803,6 @@
       }
     },
     "advanced": {
-      "title": "Zaawansowana analityka",
       "chartControls": "Kontrolki wykresu",
       "dateRange": "Zakres dat",
       "chartOptions": "Opcje wykresu",
