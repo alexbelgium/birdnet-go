@@ -189,7 +189,8 @@ Performance Optimizations:
     analyticsBiodiversity: actualRoute === '/ui/analytics/biodiversity',
     analyticsNocturnal: actualRoute === '/ui/analytics/nocturnal',
     analyticsSpecies: actualRoute === '/ui/analytics/species',
-    search: actualRoute.startsWith('/ui/search'),
+    search: actualRoute.startsWith('/ui/search') && !actualRoute.startsWith('/ui/search-settings'),
+    searchSettings: actualRoute.startsWith('/ui/search-settings'),
     about: actualRoute.startsWith('/ui/about'),
     system: actualRoute.startsWith('/ui/system'),
     systemOverview: actualRoute === '/ui/system',
@@ -246,6 +247,7 @@ Performance Optimizations:
     analyticsNocturnal: onNavigate ? '/analytics/nocturnal' : '/ui/analytics/nocturnal',
     analyticsSpecies: onNavigate ? '/analytics/species' : '/ui/analytics/species',
     search: onNavigate ? '/search' : '/ui/search',
+    searchSettings: onNavigate ? '/search-settings' : '/ui/search-settings',
     about: onNavigate ? '/about' : '/ui/about',
     help: onNavigate ? '/help' : '/ui/help',
     helpReportBug: onNavigate ? '/help/report-bug' : '/ui/help/report-bug',
@@ -660,6 +662,27 @@ Performance Optimizations:
             {/each}
           </div>
         {/each}
+
+        <!-- Search Settings -->
+        <div class="relative">
+          <button
+            onclick={() => navigate(navigationUrls.searchSettings)}
+            onmouseenter={e => isCollapsed && showTooltip(e, 'Search settings')}
+            onmouseleave={hideTooltip}
+            class={cn(
+              menuItemBase,
+              menuItemCollapsed,
+              routeCache.searchSettings ? menuItemActive : menuItemDefault
+            )}
+            role="menuitem"
+          >
+            <Settings class="size-5 shrink-0" />
+            {#if !isCollapsed}
+              <span>Search settings</span>
+            {/if}
+          </button>
+        </div>
+
 
         {#if !securityEnabled || accessAllowed}
           <!-- Divider -->
