@@ -96,7 +96,7 @@
       alt={t('components.audio.spectrogramAlt')}
       class="absolute left-0 bottom-0 w-full min-h-full object-cover object-bottom transition-opacity duration-300"
       class:opacity-0={loader.state === 'loading'}
-      style="image-rendering: pixelated;"
+      style:image-rendering="pixelated"
       decoding="async"
       onload={() => loader.handleImageLoad()}
       onerror={() => loader.handleImageError()}
