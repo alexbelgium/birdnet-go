@@ -51,22 +51,22 @@
     <img
       src={spectrogramUrl}
       alt={t('components.audio.spectrogramAlt')}
-      class="absolute inset-0 w-full h-full object-cover opacity-40
+      class="absolute inset-0 w-full h-full object-cover opacity-60"
       onerror={() => (spectrogramError = true)}
     />
-    <div class="absolute inset-0 bg-[var(--color-base-100)]/25"></div>
+    <div class="absolute inset-0 bg-[var(--color-base-100)]/10"></div>
   {/if}
-  <div class="card-body p-3 space-y-3 relative">
+  <div class="card-body p-2 space-y-2 relative">
     <!-- Header: Names and confidence -->
-    <div class="flex items-start gap-3">
+    <div class="flex items-start gap-2">
       <div class="flex-1 min-w-0">
-        <div class="text-sm font-semibold leading-tight truncate">
+        <div class="text-xs font-semibold leading-tight truncate">
           {displayName}
         </div>
-        <div class="text-xs opacity-70 truncate">
+        <div class="text-[11px] opacity-70 truncate">
           {detection.scientificName}
         </div>
-        <div class="mt-1 text-xs opacity-70">
+        <div class="mt-1 text-[11px] opacity-70">
           {detection.date}
           {detection.time}
         </div>
@@ -89,7 +89,7 @@
     <!-- Actions -->
     <div class="flex items-center gap-2">
       <button
-        class="btn btn-primary btn-sm"
+        class="btn btn-primary btn-sm text-xs"
         onclick={handlePlay}
         aria-label={t('search.detailsPanel.playAudio', { species: displayName })}
       >
@@ -97,7 +97,7 @@
         {t('common.actions.play')}
       </button>
       <button
-        class="btn btn-outline btn-sm"
+        class="btn btn-outline btn-sm text-xs"
         onclick={goToDetails}
         aria-label={t('search.detailsPanel.viewDetails', { species: displayName })}
       >
