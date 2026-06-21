@@ -52,9 +52,37 @@
   const MAX_RESULTS = 100;
 
   // Top-level keys that are not user-facing settings; never indexed.
-  const META_KEYS = new Set(['version', 'buildDate', 'systemId', 'input', 'debug']);
+  const META_KEYS = new Set([
+    'version',
+    'buildDate',
+    'systemId',
+    'validationWarnings',
+    'input',
+    'debug',
+  ]);
   // Plain objects we treat as a single complex (non-recursed) leaf.
   const OPAQUE_OBJECT_KEYS = new Set(['taxonomySynonyms', 'layout']);
+
+  // Scalar settings the backend silently refuses to update (getBlockedFieldMap in
+  // internal/api/v2/settings.go: runtime/internal fields). Editing them would look
+  // like it succeeded but be skipped server-side and reverted on reload, so they
+  // are excluded from the index entirely. Compared case-insensitively against the
+  // dotted store path.
+  const READONLY_PATHS = new Set([
+    'realtime.audio.ffmpegpath',
+    'realtime.audio.soxpath',
+    'realtime.audio.soxaudiotypes',
+    'birdnet.labels',
+    'birdnet.rangefilter.model',
+    'birdnet.rangefilter.species',
+    'birdnet.rangefilter.lastupdated',
+    'security.sessionsecret',
+    'security.sessionduration',
+    'security.basicauth.clientid',
+    'security.basicauth.clientsecret',
+    'security.basicauth.authcodeexp',
+    'security.basicauth.accesstokenexp',
+  ]);
 
   // Field-name patterns that should be masked as password inputs.
   const SECRET_RE = /(password|secret|token|apikey|api_key|dsn|key)$/i;
@@ -159,6 +187,8 @@
       for (const key of Object.keys(node)) {
         if (trail.length === 0 && META_KEYS.has(key)) continue;
         const segments = [...trail, key];
+        // Skip fields the backend will not persist (would falsely appear saved).
+        if (READONLY_PATHS.has(segments.join('.').toLowerCase())) continue;
         const value = safeGet(node, key, undefined);
 
         if (typeof value === 'boolean') {

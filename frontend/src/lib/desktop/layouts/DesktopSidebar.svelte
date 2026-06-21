@@ -172,8 +172,8 @@ Performance Optimizations:
     analyticsExact: actualRoute === '/ui/analytics',
     analyticsAdvanced: actualRoute === '/ui/analytics/advanced',
     analyticsSpecies: actualRoute === '/ui/analytics/species',
-    search: actualRoute.startsWith('/ui/search') && !actualRoute.startsWith('/ui/search-settings'),
-    searchSettings: actualRoute.startsWith('/ui/search-settings'),
+    search: actualRoute.startsWith('/ui/search'),
+    searchSettings: actualRoute === '/ui/settings/search',
     about: actualRoute.startsWith('/ui/about'),
     system: actualRoute.startsWith('/ui/system'),
     systemOverview: actualRoute === '/ui/system',
@@ -223,7 +223,7 @@ Performance Optimizations:
     analyticsAdvanced: '/ui/analytics/advanced',
     analyticsSpecies: onNavigate ? '/analytics/species' : '/ui/analytics/species',
     search: onNavigate ? '/search' : '/ui/search',
-    searchSettings: onNavigate ? '/search-settings' : '/ui/search-settings',
+    searchSettings: onNavigate ? '/settings/search' : '/ui/settings/search',
     about: onNavigate ? '/about' : '/ui/about',
     help: onNavigate ? '/help' : '/ui/help',
     helpReportBug: onNavigate ? '/help/report-bug' : '/ui/help/report-bug',
@@ -598,26 +598,6 @@ Performance Optimizations:
           </button>
         </div>
 
-        <!-- Search Settings -->
-        <div class="relative">
-          <button
-            onclick={() => navigate(navigationUrls.searchSettings)}
-            onmouseenter={e => isCollapsed && showTooltip(e, 'Search settings')}
-            onmouseleave={hideTooltip}
-            class={cn(
-              menuItemBase,
-              menuItemCollapsed,
-              routeCache.searchSettings ? menuItemActive : menuItemDefault
-            )}
-            role="menuitem"
-          >
-            <Settings class="size-5 shrink-0" />
-            {#if !isCollapsed}
-              <span>Search settings</span>
-            {/if}
-          </button>
-        </div>
-
         <!-- About -->
         <div class="relative">
           <button
@@ -641,6 +621,26 @@ Performance Optimizations:
         {#if !securityEnabled || accessAllowed}
           <!-- Divider -->
           <div class="my-2 border-t border-[var(--color-base-200)]/50"></div>
+
+          <!-- Search Settings (auth-gated like the settings pages it edits) -->
+          <div class="relative">
+            <button
+              onclick={() => navigate(navigationUrls.searchSettings)}
+              onmouseenter={e => isCollapsed && showTooltip(e, 'Search settings')}
+              onmouseleave={hideTooltip}
+              class={cn(
+                menuItemBase,
+                menuItemCollapsed,
+                routeCache.searchSettings ? menuItemActive : menuItemDefault
+              )}
+              role="menuitem"
+            >
+              <Settings class="size-5 shrink-0" />
+              {#if !isCollapsed}
+                <span>Search settings</span>
+              {/if}
+            </button>
+          </div>
 
           <!-- System (Collapsible) -->
           <CollapsibleNavSection

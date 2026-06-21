@@ -146,7 +146,7 @@
     { route: 'search', page: 'search', titleKey: 'navigation.search', component: 'search' },
     {
       route: 'search-settings',
-      page: 'search-settings',
+      page: 'settings/search',
       titleKey: 'navigation.settings',
       component: 'search-settings',
     },
@@ -375,7 +375,7 @@
     [uiPath('analytics', 'advanced')]: findRouteConfig('advanced-analytics'),
     [uiPath('analytics')]: findRouteConfig('analytics'),
     [uiPath('search')]: findRouteConfig('search'),
-    [uiPath('search-settings')]: findRouteConfig('search-settings'),
+    [uiPath('settings', 'search')]: findRouteConfig('search-settings'),
     [uiPath('detections')]: findRouteConfig('detections'),
     [uiPath('about')]: findRouteConfig('about'),
     [uiPath('help')]: findRouteConfig('help'),
@@ -451,6 +451,18 @@
     }
 
     if (UI_SETTINGS_PREFIX_RE.test(path)) {
+      // Settings subpaths that have their own component (e.g. /ui/settings/search)
+      // are routed exactly, like the system branch does; everything else falls
+      // through to the shared Settings shell via handleSubpageRouting.
+      const normalizedPath = path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
+      const exactMatch = pathToRouteMap.get(normalizedPath);
+      if (exactMatch?.component === 'search-settings') {
+        currentRoute = exactMatch.route;
+        currentPage = exactMatch.page;
+        pageTitleKey = exactMatch.titleKey;
+        loadComponent(exactMatch.component);
+        return;
+      }
       handleSubpageRouting(path, 'settings', settingsSubpages, 'pageTitle.settingsNotAvailable');
       return;
     }
