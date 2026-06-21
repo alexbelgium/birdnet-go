@@ -92,6 +92,81 @@ func TestCheckAndUpdateSpeciesWithNovelty_NoEpisodeForSameDayDetection(t *testin
 	assert.Equal(t, inactiveNoveltyValue, novelty.NoveltyEpisodeDays)
 }
 
+func testInfrequentTracker(windowDays, infrequentDays int) *SpeciesTracker {
+	return NewTrackerFromSettings(nil, &conf.SpeciesTrackingSettings{
+		Enabled:              true,
+		NewSpeciesWindowDays: windowDays,
+		YearlyTracking:       conf.YearlyTrackingSettings{Enabled: false},
+		SeasonalTracking:     conf.SeasonalTrackingSettings{Enabled: false},
+		InfrequentTracking: conf.InfrequentTrackingSettings{
+			Enabled: true,
+			Days:    infrequentDays,
+		},
+	})
+}
+
+func TestSpeciesStatus_InfrequentSurvivesSameDayRedetection(t *testing.T) {
+	t.Parallel()
+
+	const scientificName = "Setophaga castanea"
+	// Absence (45d) must exceed windowDays (14d) so the first-ever episode
+	// expires and a fresh return episode forms carrying the real 45-day gap,
+	// which clears the 30-day infrequent threshold.
+	tracker := testInfrequentTracker(14, 30)
+
+	firstTime := time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC)
+	returnTime := firstTime.AddDate(0, 0, 45)
+	nextDay := returnTime.AddDate(0, 0, 1)
+
+	_, _, _ = tracker.CheckAndUpdateSpeciesWithNovelty(scientificName, firstTime)
+	_, _, _ = tracker.CheckAndUpdateSpeciesWithNovelty(scientificName, returnTime)
+
+	// On return, the 45-day absence flags the species as infrequent.
+	assert.True(t, tracker.GetSpeciesStatus(scientificName, returnTime).IsInfrequent,
+		"species should be infrequent on the day it returns after a 45-day absence")
+
+	// A next-day re-detection collapses DaysSinceLastSeen to 1, but the episode
+	// still represents the original 45-day absence, so the flag must persist.
+	_, _, _ = tracker.CheckAndUpdateSpeciesWithNovelty(scientificName, nextDay)
+	status := tracker.GetSpeciesStatus(scientificName, nextDay)
+	assert.Equal(t, 1, status.DaysSinceLastSeen)
+	assert.True(t, status.IsInfrequent,
+		"infrequent flag must survive a same-/next-day re-detection within the episode")
+}
+
+func TestSpeciesStatus_InfrequentExcludesFirstEverAndShortAbsence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("first-ever detection is not infrequent", func(t *testing.T) {
+		t.Parallel()
+		const scientificName = "Setophaga castanea"
+		tracker := testInfrequentTracker(14, 30)
+		firstTime := time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC)
+
+		_, _, _ = tracker.CheckAndUpdateSpeciesWithNovelty(scientificName, firstTime)
+
+		// NoveltyEpisodeDays is the firstEverNoveltyEpisodeDays sentinel (~100y);
+		// it must not be mistaken for a long absence.
+		assert.False(t, tracker.GetSpeciesStatus(scientificName, firstTime).IsInfrequent)
+	})
+
+	t.Run("absence below threshold is not infrequent", func(t *testing.T) {
+		t.Parallel()
+		const scientificName = "Setophaga castanea"
+		tracker := testInfrequentTracker(14, 30)
+		firstTime := time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC)
+		// 20-day absence: exceeds windowDays (14) so a fresh return episode forms,
+		// but is below the 30-day infrequent threshold.
+		returnTime := firstTime.AddDate(0, 0, 20)
+
+		_, _, _ = tracker.CheckAndUpdateSpeciesWithNovelty(scientificName, firstTime)
+		_, _, _ = tracker.CheckAndUpdateSpeciesWithNovelty(scientificName, returnTime)
+
+		require.Equal(t, 20, tracker.GetSpeciesStatus(scientificName, returnTime).DaysSinceLastSeen)
+		assert.False(t, tracker.GetSpeciesStatus(scientificName, returnTime).IsInfrequent)
+	})
+}
+
 func TestLoadNoveltyEpisodesFromDatabase_RestoresActiveEpisode(t *testing.T) {
 	t.Parallel()
 

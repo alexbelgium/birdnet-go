@@ -1120,7 +1120,10 @@ Responsive Breakpoints:
                       >
                         🌿
                       </span>
-                    {:else if noveltyCategory === 'infrequent'}
+                    {:else if isToday && noveltyCategory === 'infrequent'}
+                      <!-- is_infrequent reflects the live tracker's current return
+                           episode, not the historical state of a past date, so the
+                           badge is only meaningful on today's summary. -->
                       <span
                         class="shrink-0"
                         style:color={noveltyCategoryColorVar('infrequent')}

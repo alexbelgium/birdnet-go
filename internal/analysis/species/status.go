@@ -202,7 +202,15 @@ func (t *SpeciesTracker) buildSpeciesStatusWithBuffer(scientificName string, cur
 func (t *SpeciesTracker) applyNoveltyStatus(status *SpeciesStatus, scientificName string) {
 	if episode, exists := t.noveltyEpisodes[scientificName]; exists {
 		status.DaysSinceLastSeen = episode.DaysSinceLastSeen
-		if t.infrequentEnabled && t.infrequentDays > 0 && status.DaysSinceLastSeen >= t.infrequentDays {
+		// Infrequent is keyed off the absence that opened this return episode.
+		// NoveltyEpisodeDays stays fixed for the episode's lifetime, whereas
+		// DaysSinceLastSeen collapses to 0/1 on the next same-day or next-day
+		// re-detection, which would otherwise drop the flag mid-episode. The
+		// first-ever sentinel is excluded: a never-before-seen species is "new",
+		// not a returning infrequent visitor.
+		if t.infrequentEnabled && t.infrequentDays > 0 &&
+			episode.NoveltyEpisodeDays != firstEverNoveltyEpisodeDays &&
+			episode.NoveltyEpisodeDays >= t.infrequentDays {
 			status.IsInfrequent = true
 		}
 	}
