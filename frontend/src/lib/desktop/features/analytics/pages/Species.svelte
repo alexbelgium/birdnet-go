@@ -346,7 +346,211 @@
         is_confirmed: confirmedSpecies.has(commonName),
       };
     });
-    return sortSpeciesList(rows.filter(matchesSearch), appliedSortOrder);
+    const searchLower = debouncedSearchTerm.trim().toLowerCase();
+    const filtered = searchLower
+      ? rows.filter(
+          s =>
+            s.common_name.toLowerCase().includes(searchLower) ||
+            s.scientific_name.toLowerCase().includes(searchLower)
+        )
+      : rows;
+    const locale = getLocale();
+    switch (appliedSortOrder) {
+      case 'count_desc':
+        filtered.sort((a, b) => b.count - a.count);
+        break;
+      case 'count_asc':
+        filtered.sort((a, b) => a.count - b.count);
+        break;
+      case 'name_asc':
+        filtered.sort((a, b) => a.common_name.localeCompare(b.common_name, locale));
+        break;
+      case 'name_desc':
+        filtered.sort((a, b) => b.common_name.localeCompare(a.common_name, locale));
+        break;
+      case 'first_seen_desc':
+        filtered.sort((a, b) => b.first_heard.localeCompare(a.first_heard));
+        break;
+      case 'first_seen_asc':
+        filtered.sort((a, b) => a.first_heard.localeCompare(b.first_heard));
+        break;
+      case 'last_seen_desc':
+        filtered.sort((a, b) => b.last_heard.localeCompare(a.last_heard));
+        break;
+      case 'last_seen_asc':
+        filtered.sort((a, b) => a.last_heard.localeCompare(b.last_heard));
+        break;
+      case 'confidence_desc':
+        filtered.sort((a, b) => b.avg_confidence - a.avg_confidence);
+        break;
+      case 'confidence_asc':
+        filtered.sort((a, b) => a.avg_confidence - b.avg_confidence);
+        break;
+      case 'max_confidence_desc':
+        filtered.sort((a, b) => b.max_confidence - a.max_confidence);
+        break;
+      case 'max_confidence_asc':
+        filtered.sort((a, b) => a.max_confidence - b.max_confidence);
+        break;
+      case 'excluded_desc':
+        filtered.sort((a, b) => Number(b.is_excluded ?? false) - Number(a.is_excluded ?? false));
+        break;
+      case 'excluded_asc':
+        filtered.sort((a, b) => Number(a.is_excluded ?? false) - Number(b.is_excluded ?? false));
+        break;
+      case 'included_desc':
+        filtered.sort((a, b) => Number(b.is_included ?? false) - Number(a.is_included ?? false));
+        break;
+      case 'included_asc':
+        filtered.sort((a, b) => Number(a.is_included ?? false) - Number(b.is_included ?? false));
+        break;
+      case 'review_ratio_desc':
+        filtered.sort((a, b) => (reviewedRatio(b) ?? -1) - (reviewedRatio(a) ?? -1));
+        break;
+      case 'review_ratio_asc':
+        filtered.sort((a, b) => (reviewedRatio(a) ?? -1) - (reviewedRatio(b) ?? -1));
+        break;
+      case 'range_score_desc':
+        filtered.sort((a, b) => (b.range_score ?? -1) - (a.range_score ?? -1));
+        break;
+      case 'range_score_asc':
+        filtered.sort((a, b) => (a.range_score ?? -1) - (b.range_score ?? -1));
+        break;
+      case 'confirmed_desc':
+        filtered.sort((a, b) => Number(b.is_confirmed ?? false) - Number(a.is_confirmed ?? false));
+        break;
+      case 'confirmed_asc':
+        filtered.sort((a, b) => Number(a.is_confirmed ?? false) - Number(b.is_confirmed ?? false));
+        break;
+      default: {
+        const _exhaustive: never = appliedSortOrder;
+        void _exhaustive;
+      }
+    }
+    return filtered;
+  });
+
+  // Filtered + sorted rows for display. Search and name-sort operate on the
+  // visitor-localized common name (displayName) so they match what the user
+  // sees, while scientific name and the server common name stay searchable too.
+  // Because localizeSpeciesName reads the species-dictionary $state, this
+  // $derived re-runs when the dictionary loads or the locale changes — so the
+  // page no longer needs an imperative applyFilters(). Sorting uses the
+  // committed appliedSortOrder, never the pending filters.sortOrder dropdown.
+  const filteredSpecies: SpeciesData[] = $derived.by(() => {
+    // Read the locale once for the name comparators below (avoids an O(n log n)
+    // getLocale() per comparison). The locale/dictionary dependency is already
+    // tracked via localizeSpeciesName, so this still re-runs on a locale switch.
+    const locale = getLocale();
+    // localize once per row; reused for search + sort below (small dataset: one
+    // row per detected species, so a per-row Map lookup is negligible).
+    const rows: LocalizedRow[] = speciesData.map(species => ({
+      species,
+      displayName: localizeSpeciesName(species.scientific_name, species.common_name),
+    }));
+
+    const searchLower = debouncedSearchTerm.trim().toLowerCase();
+    const filtered = searchLower
+      ? rows.filter(
+          ({ species, displayName }) =>
+            displayName.toLowerCase().includes(searchLower) ||
+            species.common_name.toLowerCase().includes(searchLower) ||
+            species.scientific_name.toLowerCase().includes(searchLower)
+        )
+      : rows;
+
+    switch (appliedSortOrder) {
+      case 'count_desc':
+        filtered.sort((a, b) => b.species.count - a.species.count);
+        break;
+      case 'count_asc':
+        filtered.sort((a, b) => a.species.count - b.species.count);
+        break;
+      case 'name_asc':
+        filtered.sort((a, b) => a.displayName.localeCompare(b.displayName, locale));
+        break;
+      case 'name_desc':
+        filtered.sort((a, b) => b.displayName.localeCompare(a.displayName, locale));
+        break;
+      case 'first_seen_desc':
+        filtered.sort(makeDateComparator('first_heard', false));
+        break;
+      case 'first_seen_asc':
+        filtered.sort(makeDateComparator('first_heard', true));
+        break;
+      case 'last_seen_desc':
+        filtered.sort(makeDateComparator('last_heard', false));
+        break;
+      case 'last_seen_asc':
+        filtered.sort(makeDateComparator('last_heard', true));
+        break;
+      case 'confidence_desc':
+        filtered.sort((a, b) => b.species.avg_confidence - a.species.avg_confidence);
+        break;
+      case 'confidence_asc':
+        filtered.sort((a, b) => a.species.avg_confidence - b.species.avg_confidence);
+        break;
+      case 'max_confidence_desc':
+        filtered.sort((a, b) => b.species.max_confidence - a.species.max_confidence);
+        break;
+      case 'max_confidence_asc':
+        filtered.sort((a, b) => a.species.max_confidence - b.species.max_confidence);
+        break;
+      case 'excluded_desc':
+        filtered.sort(
+          (a, b) => Number(b.species.is_excluded ?? false) - Number(a.species.is_excluded ?? false)
+        );
+        break;
+      case 'excluded_asc':
+        filtered.sort(
+          (a, b) => Number(a.species.is_excluded ?? false) - Number(b.species.is_excluded ?? false)
+        );
+        break;
+      case 'included_desc':
+        filtered.sort(
+          (a, b) => Number(b.species.is_included ?? false) - Number(a.species.is_included ?? false)
+        );
+        break;
+      case 'included_asc':
+        filtered.sort(
+          (a, b) => Number(a.species.is_included ?? false) - Number(b.species.is_included ?? false)
+        );
+        break;
+      case 'review_ratio_desc':
+        filtered.sort(
+          (a, b) => (reviewedRatio(b.species) ?? -1) - (reviewedRatio(a.species) ?? -1)
+        );
+        break;
+      case 'review_ratio_asc':
+        filtered.sort(
+          (a, b) => (reviewedRatio(a.species) ?? -1) - (reviewedRatio(b.species) ?? -1)
+        );
+        break;
+      case 'range_score_desc':
+        filtered.sort((a, b) => (b.species.range_score ?? -1) - (a.species.range_score ?? -1));
+        break;
+      case 'range_score_asc':
+        filtered.sort((a, b) => (a.species.range_score ?? -1) - (b.species.range_score ?? -1));
+        break;
+      case 'confirmed_desc':
+        filtered.sort(
+          (a, b) =>
+            Number(b.species.is_confirmed ?? false) - Number(a.species.is_confirmed ?? false)
+        );
+        break;
+      case 'confirmed_asc':
+        filtered.sort(
+          (a, b) =>
+            Number(a.species.is_confirmed ?? false) - Number(b.species.is_confirmed ?? false)
+        );
+        break;
+      default: {
+        const _exhaustive: never = appliedSortOrder;
+        void _exhaustive;
+      }
+    }
+
+    return filtered.map(row => row.species);
   });
 
   // Rows rendered by the shared list/manage table.
@@ -538,116 +742,6 @@
     };
   }
 
-  // Filtered + sorted rows for display. Search and name-sort operate on the
-  // visitor-localized common name (displayName) so they match what the user
-  // sees, while scientific name and the server common name stay searchable too.
-  // Because localizeSpeciesName reads the species-dictionary $state, this
-  // $derived re-runs when the dictionary loads or the locale changes - so the
-  // page no longer needs an imperative applyFilters(). Sorting uses the
-  // committed appliedSortOrder, never the pending filters.sortOrder dropdown.
-  let filteredSpecies = $derived.by<SpeciesData[]>(() => {
-    // Read the locale once for the name comparators below (avoids an O(n log n)
-    // getLocale() per comparison). The locale/dictionary dependency is already
-    // tracked via localizeSpeciesName, so this still re-runs on a locale switch.
-    const locale = getLocale();
-    // localize once per row; reused for search + sort below (small dataset: one
-    // row per detected species, so a per-row Map lookup is negligible).
-    const rows: LocalizedRow[] = speciesData.map(species => ({
-      species,
-      displayName: localizeSpeciesName(species.scientific_name, species.common_name),
-    }));
-
-    const searchLower = debouncedSearchTerm.trim().toLowerCase();
-    const filtered = searchLower
-      ? rows.filter(
-          ({ species, displayName }) =>
-            displayName.toLowerCase().includes(searchLower) ||
-            species.common_name.toLowerCase().includes(searchLower) ||
-            species.scientific_name.toLowerCase().includes(searchLower)
-        )
-      : rows;
-
-    switch (appliedSortOrder) {
-      case 'count_desc':
-        filtered.sort((a, b) => b.species.count - a.species.count);
-        break;
-      case 'count_asc':
-        filtered.sort((a, b) => a.species.count - b.species.count);
-        break;
-      case 'name_asc':
-        filtered.sort((a, b) => a.displayName.localeCompare(b.displayName, locale));
-        break;
-      case 'name_desc':
-        filtered.sort((a, b) => b.displayName.localeCompare(a.displayName, locale));
-        break;
-      case 'first_seen_desc':
-        sorted.sort(makeDateComparator('first_heard', false));
-        break;
-      case 'first_seen_asc':
-        sorted.sort(makeDateComparator('first_heard', true));
-        break;
-      case 'last_seen_desc':
-        sorted.sort(makeDateComparator('last_heard', false));
-        break;
-      case 'last_seen_asc':
-        sorted.sort(makeDateComparator('last_heard', true));
-        break;
-      case 'confidence_desc':
-        filtered.sort((a, b) => b.species.avg_confidence - a.species.avg_confidence);
-        break;
-      case 'confidence_asc':
-        filtered.sort((a, b) => a.species.avg_confidence - b.species.avg_confidence);
-        break;
-      case 'max_confidence_desc':
-        filtered.sort((a, b) => b.species.max_confidence - a.species.max_confidence);
-        break;
-      case 'max_confidence_asc':
-        filtered.sort((a, b) => a.species.max_confidence - b.species.max_confidence);
-        break;
-      case 'excluded_desc':
-        sorted.sort((a, b) => Number(b.is_excluded ?? false) - Number(a.is_excluded ?? false));
-        break;
-      case 'excluded_asc':
-        sorted.sort((a, b) => Number(a.is_excluded ?? false) - Number(b.is_excluded ?? false));
-        break;
-      case 'included_desc':
-        sorted.sort((a, b) => Number(b.is_included ?? false) - Number(a.is_included ?? false));
-        break;
-      case 'included_asc':
-        sorted.sort((a, b) => Number(a.is_included ?? false) - Number(b.is_included ?? false));
-        break;
-      case 'review_ratio_desc':
-        // Unreviewed species (null ratio) sort last in both directions via the -1 sentinel.
-        sorted.sort((a, b) => (reviewedRatio(b) ?? -1) - (reviewedRatio(a) ?? -1));
-        break;
-      case 'review_ratio_asc':
-        sorted.sort((a, b) => (reviewedRatio(a) ?? -1) - (reviewedRatio(b) ?? -1));
-        break;
-      case 'range_score_desc':
-        // Species with no geomodel score (undefined) sort last via the -1 sentinel.
-        sorted.sort((a, b) => (b.range_score ?? -1) - (a.range_score ?? -1));
-        break;
-      case 'range_score_asc':
-        sorted.sort((a, b) => (a.range_score ?? -1) - (b.range_score ?? -1));
-        break;
-      case 'confirmed_desc':
-        sorted.sort((a, b) => Number(b.is_confirmed ?? false) - Number(a.is_confirmed ?? false));
-        break;
-      case 'confirmed_asc':
-        sorted.sort((a, b) => Number(a.is_confirmed ?? false) - Number(b.is_confirmed ?? false));
-        break;
-      default: {
-        // Exhaustiveness guard: adding a SortOrder value without a case is a compile error.
-        const _exhaustive: never = order;
-        void _exhaustive;
-      }
-    }
-    return sorted;
-  }
-
-    return filtered.map(row => row.species);
-  });
-
   // Fraction of manually reviewed detections marked correct, or null when none reviewed.
   function reviewedRatio(species: SpeciesData): number | null {
     const verified = species.verified_count ?? 0;
@@ -688,7 +782,6 @@
       );
       appliedSortOrder = restored;
       filters.sortOrder = restored;
-      applyFilters();
     }
     viewMode = mode;
   }
