@@ -185,7 +185,6 @@ export type TranslationKey =
   | 'pageTitle.serverError'
   | 'pageTitle.componentError'
   | 'pageTitle.speciesAnalytics'
-  | 'pageTitle.advancedAnalytics'
   | 'pageTitle.detectionDetails'
   | 'pageTitle.settingsNotAvailable'
   | 'navigation.dashboard'
@@ -1424,7 +1423,6 @@ export type TranslationKey =
   | 'analytics.species.card.detections'
   | 'analytics.species.card.confidence'
   | 'analytics.species.card.first'
-  | 'analytics.advanced.title'
   | 'analytics.advanced.chartControls'
   | 'analytics.advanced.dateRange'
   | 'analytics.advanced.chartOptions'
@@ -1460,6 +1458,28 @@ export type TranslationKey =
   | 'analytics.advanced.charts.diversity.noDataHint'
   | 'analytics.advanced.charts.diversity.axisDate'
   | 'analytics.advanced.charts.diversity.axisUniqueSpecies'
+  | 'analytics.advanced.charts.heatmap.title'
+  | 'analytics.advanced.charts.heatmap.description'
+  | 'analytics.advanced.charts.heatmap.noData'
+  | 'analytics.advanced.charts.heatmap.noDataHint'
+  | 'analytics.advanced.charts.heatmap.axisDate'
+  | 'analytics.advanced.charts.heatmap.axisTime'
+  | 'analytics.advanced.charts.heatmap.tooltipTime'
+  | 'analytics.advanced.charts.heatmap.tooltipCount'
+  | 'analytics.advanced.charts.heatmap.legendLess'
+  | 'analytics.advanced.charts.heatmap.legendMore' // params: max
+  | 'analytics.advanced.charts.heatmap.ariaLabel'
+  | 'analytics.advanced.charts.heatmap.summary' // params: total, days, time, date
+  | 'analytics.advanced.charts.ridgeline.title'
+  | 'analytics.advanced.charts.ridgeline.description'
+  | 'analytics.advanced.charts.ridgeline.noData'
+  | 'analytics.advanced.charts.ridgeline.noDataHint'
+  | 'analytics.advanced.charts.ridgeline.ariaLabel'
+  | 'analytics.advanced.charts.ridgeline.axisTime'
+  | 'analytics.advanced.charts.ridgeline.note' // params: count
+  | 'analytics.advanced.charts.ridgeline.tooltipDetections'
+  | 'analytics.advanced.charts.ridgeline.tooltipPeak'
+  | 'analytics.advanced.charts.ridgeline.summary' // params: count, species, time
   | 'analytics.advanced.charts.tooltips.date'
   | 'analytics.advanced.charts.tooltips.percentage'
   | 'analytics.advanced.charts.tooltips.detections'
@@ -3991,6 +4011,19 @@ export type TranslationParams = {
   'analytics.species.manage.removedFromConfirmed': { species: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
   'analytics.advanced.detections': { count: string | number };
+  'analytics.advanced.charts.heatmap.legendMore': { max: string | number };
+  'analytics.advanced.charts.heatmap.summary': {
+    total: string | number;
+    days: string | number;
+    time: string | number;
+    date: string | number;
+  };
+  'analytics.advanced.charts.ridgeline.note': { count: string | number };
+  'analytics.advanced.charts.ridgeline.summary': {
+    count: string | number;
+    species: string | number;
+    time: string | number;
+  };
   'settings.notFound.message': { section: string | number };
   'settings.main.sections.falsePositiveFilter.detectionCount': {
     count: string | number;
