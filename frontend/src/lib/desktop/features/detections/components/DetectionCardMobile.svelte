@@ -51,10 +51,10 @@
     <img
       src={spectrogramUrl}
       alt={t('components.audio.spectrogramAlt')}
-      class="absolute inset-0 w-full h-full object-cover opacity-40"
+      class="absolute inset-0 w-full h-full object-cover opacity-60
       onerror={() => (spectrogramError = true)}
     />
-    <div class="absolute inset-0 bg-[var(--color-base-100)]/25"></div>
+    <div class="absolute inset-0 bg-[var(--color-base-100)]/10"></div>
   {/if}
   <div class="card-body p-3 space-y-3 relative">
     <!-- Header: Names and confidence -->
