@@ -1,20 +1,21 @@
 <script lang="ts">
-  // Use prop callback instead of legacy event dispatcher
   import { onMount, onDestroy } from 'svelte';
-  import ConfidenceCircle from '$lib/desktop/components/data/ConfidenceCircle.svelte';
-  import VerificationBadges from '$lib/desktop/components/ui/VerificationBadges.svelte';
-  import SourceBadge from '$lib/desktop/features/dashboard/components/SourceBadge.svelte';
-  import { Volume2 } from '@lucide/svelte';
-  import { t } from '$lib/i18n';
   import type { Detection } from '$lib/types/detection.types';
+  import ConfidenceBadge from '$lib/desktop/features/dashboard/components/ConfidenceBadge.svelte';
+  import SourceBadge from '$lib/desktop/features/dashboard/components/SourceBadge.svelte';
+  import PlayOverlay from '$lib/desktop/features/dashboard/components/PlayOverlay.svelte';
+  import SpeciesInfoBar from '$lib/desktop/features/dashboard/components/SpeciesInfoBar.svelte';
+  import { ExternalLink } from '@lucide/svelte';
+  import { t } from '$lib/i18n';
   import { navigation } from '$lib/stores/navigation.svelte';
-  import { buildAppUrl } from '$lib/utils/urlHelpers';
-  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { createSpectrogramLoader } from '$lib/utils/spectrogramLoader.svelte';
+  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
 
   interface Props {
     detection: Detection;
     onDetailsClick?: (_id: number) => void;
+    // Kept for backward compat with DetectionsList.svelte; audio is now handled
+    // inline by PlayOverlay so this callback is never invoked.
     onPlayMobileAudio?: (_payload: {
       audioUrl: string;
       speciesName: string;
@@ -23,17 +24,14 @@
     className?: string;
   }
 
-  let { detection, onDetailsClick, onPlayMobileAudio, className = '' }: Props = $props();
+  let { detection, onDetailsClick, className = '' }: Props = $props();
 
-  // Localize the common name for the visitor's UI locale, falling back to the
-  // server-provided common name then the scientific name (mirrors DetectionRow).
   const displayName = $derived(localizeSpeciesName(detection.scientificName, detection.commonName));
 
   const loader = createSpectrogramLoader({ size: 'md', raw: true });
   let cardElement = $state<HTMLElement | undefined>(undefined);
   let isVisible = $state(false);
 
-  // Start/stop loader based on visibility, matching the recent detections card.
   $effect(() => {
     if (isVisible) {
       loader.start(detection.id);
@@ -41,13 +39,6 @@
       loader.stop();
     }
   });
-
-  function handlePlay() {
-    const audioUrl = buildAppUrl(`/api/v2/audio/${detection.id}`);
-    if (onPlayMobileAudio) {
-      onPlayMobileAudio({ audioUrl, speciesName: displayName, detectionId: detection.id });
-    }
-  }
 
   function goToDetails() {
     if (onDetailsClick) {
@@ -81,74 +72,114 @@
   });
 </script>
 
-<section
+<article
   bind:this={cardElement}
-  class={`card bg-[var(--color-base-100)] shadow-xs relative overflow-hidden ${className}`}
+  class={`detection-card-mobile relative rounded-xl ${className}`}
 >
-  {#if loader.showSpinner}
-    <div class="absolute inset-0 flex items-center justify-center bg-[var(--color-base-200)]/50">
-      <span class="loading loading-spinner loading-md text-[var(--color-base-content)]/50"></span>
-    </div>
-  {/if}
-  {#if !loader.error && loader.spectrogramUrl}
-    <img
-      src={loader.spectrogramUrl}
-      alt={t('components.audio.spectrogramAlt')}
-      class="absolute left-0 bottom-0 w-full min-h-full object-cover object-bottom transition-opacity duration-300"
-      class:opacity-0={loader.state === 'loading'}
-      style:image-rendering="pixelated"
-      decoding="async"
-      onload={() => loader.handleImageLoad()}
-      onerror={() => loader.handleImageError()}
-    />
-  {/if}
-  <div class="card-body p-3 space-y-3 relative">
-    <!-- Header: Names and confidence -->
-    <div class="flex items-start gap-3">
-      <div class="flex-1 min-w-0">
-        <div class="text-xs font-semibold leading-tight truncate">
-          {displayName}
+  <div class="detection-card-inner">
+    <!-- Spectrogram Background -->
+    <div class="spectrogram-container">
+      {#if loader.showSpinner}
+        <div class="spectrogram-loading">
+          <span class="loading loading-spinner loading-md text-[var(--color-base-content)]/50"
+          ></span>
+          {#if loader.isQueued}
+            <span class="text-xs text-[var(--color-base-content)]/40 mt-1">Waiting...</span>
+          {:else if loader.isGenerating}
+            <span class="text-xs text-[var(--color-base-content)]/40 mt-1">Generating...</span>
+          {/if}
         </div>
-        <div class="text-[11px] opacity-70 truncate">
-          {detection.scientificName}
+      {/if}
+
+      {#if loader.error}
+        <div class="spectrogram-error">
+          <span class="text-sm text-[var(--color-base-content)]/50">Spectrogram unavailable</span>
         </div>
-        <div class="mt-1 text-[11px] opacity-70">
-          {detection.date}
-          {detection.time}
-        </div>
-        {#if detection.source}
-          <div class="mt-1">
-            <SourceBadge {detection} variant="inline" />
-          </div>
-        {/if}
-      </div>
-      <div class="shrink-0">
-        <ConfidenceCircle confidence={detection.confidence} size="sm" />
-      </div>
+      {:else if loader.spectrogramUrl}
+        <img
+          src={loader.spectrogramUrl}
+          alt="Spectrogram for {detection.commonName}"
+          class="spectrogram-image"
+          class:opacity-0={loader.state === 'loading'}
+          decoding="async"
+          style:image-rendering="pixelated"
+          onload={() => loader.handleImageLoad()}
+          onerror={() => loader.handleImageError()}
+        />
+      {/if}
     </div>
 
-    <!-- Status badges -->
-    <div class="flex flex-wrap gap-2">
-      <VerificationBadges {detection} />
+    <!-- Top-Left Badges: Confidence + Source -->
+    <div class="absolute top-2 left-2 flex items-center gap-1.5 z-10">
+      <ConfidenceBadge confidence={detection.confidence} />
+      <SourceBadge {detection} variant="overlay" />
     </div>
 
-    <!-- Actions -->
-    <div class="flex items-center gap-2">
+    <!-- Top-Right: View Details -->
+    <div class="absolute top-2 right-2 z-10">
       <button
-        class="btn btn-primary btn-sm text-xs bg-primary/70 border-primary/70 hover:bg-primary/80 hover:border-primary/80"
-        onclick={handlePlay}
-        aria-label={t('search.detailsPanel.playAudio', { species: displayName })}
-      >
-        <Volume2 class="h-4 w-4" />
-        {t('common.actions.play')}
-      </button>
-      <button
-        class="btn btn-outline btn-sm text-xs"
+        class="btn btn-circle btn-xs bg-black/30 border-0 text-white hover:bg-black/50"
         onclick={goToDetails}
         aria-label={t('search.detailsPanel.viewDetails', { species: displayName })}
       >
-        {t('common.actions.view')}
+        <ExternalLink class="size-3" />
       </button>
     </div>
+
+    <!-- Center Play Button -->
+    <PlayOverlay detectionId={detection.id} />
+
+    <!-- Bottom Species Info Bar -->
+    <SpeciesInfoBar {detection} />
   </div>
-</section>
+</article>
+
+<style>
+  .detection-card-mobile {
+    background-color: var(--color-base-100);
+  }
+
+  .detection-card-inner {
+    position: relative;
+    height: 12rem;
+    border-radius: 0.75rem;
+    overflow: hidden;
+  }
+
+  .spectrogram-container {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+
+  .spectrogram-image {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    min-height: 100%;
+    object-fit: cover;
+    object-position: center bottom;
+    transition: opacity 0.3s ease;
+  }
+
+  .spectrogram-loading,
+  .spectrogram-error {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--color-base-200) 80%, transparent) 0%,
+      color-mix(in srgb, var(--color-base-300) 60%, transparent) 100%
+    );
+  }
+
+  :global([data-theme='dark']) .spectrogram-loading,
+  :global([data-theme='dark']) .spectrogram-error {
+    background: linear-gradient(135deg, rgb(30 41 59 / 0.9) 0%, rgb(15 23 42 / 0.95) 100%);
+  }
+</style>
