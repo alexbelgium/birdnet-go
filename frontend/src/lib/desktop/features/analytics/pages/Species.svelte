@@ -603,10 +603,12 @@
         : field === SPECIES_COLUMN_FIELD
           ? column.asc
           : column.desc;
-    filters.sortOrder = next;
     appliedSortOrder = next;
     // Persist only list/grid orders; manage-only sorts are session-scoped.
+    // Keep filters.sortOrder (the dropdown binding) constrained to list/grid values
+    // so the dropdown never ends up blank when a manage-only sort is active.
     if (isListSortOrder(next)) {
+      filters.sortOrder = next;
       setStoredValue<SortOrder>(SORT_STORAGE_KEY, next);
     }
     // filteredSpecies is $derived and re-sorts automatically on appliedSortOrder.

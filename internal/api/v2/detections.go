@@ -1692,24 +1692,25 @@ func (c *Controller) IncludeSpecies(ctx echo.Context) error {
 	if err := ctx.Bind(req); err != nil {
 		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
 	}
-	if req.CommonName == "" {
+	species := strings.TrimSpace(req.CommonName)
+	if species == "" {
 		return c.HandleError(ctx, nil, "Missing species name", http.StatusBadRequest)
 	}
 
-	action, isIncluded, err := c.toggleSpeciesInIncludeList(req.CommonName)
+	action, isIncluded, err := c.toggleSpeciesInIncludeList(species)
 	if err != nil {
 		return c.HandleError(ctx, err, "Failed to update species filter", http.StatusInternalServerError)
 	}
 
 	c.logInfoIfEnabled("Species inclusion toggled",
-		logger.String("species", req.CommonName),
+		logger.String("species", species),
 		logger.String("action", action),
 		logger.Bool("is_included", isIncluded),
 		logger.String("ip", ctx.RealIP()),
 	)
 
 	return ctx.JSON(http.StatusOK, IncludeSpeciesResponse{
-		CommonName: req.CommonName,
+		CommonName: species,
 		Action:     action,
 		IsIncluded: isIncluded,
 	})
@@ -1735,24 +1736,25 @@ func (c *Controller) ConfirmSpecies(ctx echo.Context) error {
 	if err := ctx.Bind(req); err != nil {
 		return c.HandleError(ctx, err, "Invalid request format", http.StatusBadRequest)
 	}
-	if req.CommonName == "" {
+	species := strings.TrimSpace(req.CommonName)
+	if species == "" {
 		return c.HandleError(ctx, nil, "Missing species name", http.StatusBadRequest)
 	}
 
-	action, isConfirmed, err := c.toggleSpeciesInConfirmedList(req.CommonName)
+	action, isConfirmed, err := c.toggleSpeciesInConfirmedList(species)
 	if err != nil {
 		return c.HandleError(ctx, err, "Failed to update confirmed species", http.StatusInternalServerError)
 	}
 
 	c.logInfoIfEnabled("Species confirmation toggled",
-		logger.String("species", req.CommonName),
+		logger.String("species", species),
 		logger.String("action", action),
 		logger.Bool("is_confirmed", isConfirmed),
 		logger.String("ip", ctx.RealIP()),
 	)
 
 	return ctx.JSON(http.StatusOK, ConfirmSpeciesResponse{
-		CommonName:  req.CommonName,
+		CommonName:  species,
 		Action:      action,
 		IsConfirmed: isConfirmed,
 	})

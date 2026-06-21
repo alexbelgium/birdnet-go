@@ -496,6 +496,7 @@
           >
             <button
               type="button"
+              aria-pressed={speciesSortMode === 'confidence'}
               class={cn(
                 'px-3 py-1.5 text-sm font-medium transition-colors',
                 speciesSortMode === 'confidence'
@@ -508,6 +509,7 @@
             </button>
             <button
               type="button"
+              aria-pressed={speciesSortMode === 'date'}
               class={cn(
                 'px-3 py-1.5 text-sm font-medium transition-colors border-l border-[var(--color-base-300)]',
                 speciesSortMode === 'date'
@@ -520,6 +522,7 @@
             </button>
             <button
               type="button"
+              aria-pressed={speciesSortMode === 'locked'}
               class={cn(
                 'px-3 py-1.5 text-sm font-medium transition-colors border-l border-[var(--color-base-300)]',
                 speciesSortMode === 'locked'

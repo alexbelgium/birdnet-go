@@ -41,6 +41,7 @@
 
 <button
   type="button"
+  disabled={!onclick}
   onclick={onclick ? handleClick : undefined}
   class={cn(
     'card bg-[var(--color-base-200)] text-left w-full',
