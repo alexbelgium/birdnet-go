@@ -324,6 +324,12 @@ Performance Optimizations:
 
   let settingsItems: NavItem[] = $derived([
     {
+      icon: Search,
+      label: 'Search settings',
+      url: navigationUrls.searchSettings,
+      routeKey: 'searchSettings',
+    },
+    {
       icon: SlidersHorizontal,
       label: t('settings.sections.node'),
       url: navigationUrls.settingsMain,
@@ -621,26 +627,6 @@ Performance Optimizations:
         {#if !securityEnabled || accessAllowed}
           <!-- Divider -->
           <div class="my-2 border-t border-[var(--color-base-200)]/50"></div>
-
-          <!-- Search Settings (auth-gated like the settings pages it edits) -->
-          <div class="relative">
-            <button
-              onclick={() => navigate(navigationUrls.searchSettings)}
-              onmouseenter={e => isCollapsed && showTooltip(e, 'Search settings')}
-              onmouseleave={hideTooltip}
-              class={cn(
-                menuItemBase,
-                menuItemCollapsed,
-                routeCache.searchSettings ? menuItemActive : menuItemDefault
-              )}
-              role="menuitem"
-            >
-              <Settings class="size-5 shrink-0" />
-              {#if !isCollapsed}
-                <span>Search settings</span>
-              {/if}
-            </button>
-          </div>
 
           <!-- System (Collapsible) -->
           <CollapsibleNavSection
