@@ -51,14 +51,14 @@
     <img
       src={spectrogramUrl}
       alt={t('components.audio.spectrogramAlt')}
-      class="absolute inset-0 w-full h-full object-cover opacity-60"
+      class="absolute inset-0 w-full h-full object-cover opacity-70"
       onerror={() => (spectrogramError = true)}
     />
-    <div class="absolute inset-0 bg-[var(--color-base-100)]/10"></div>
+    <div class="absolute inset-0 bg-[var(--color-base-100)]/5"></div>
   {/if}
-  <div class="card-body p-2 space-y-2 relative">
+  <div class="card-body p-3 space-y-3 relative">
     <!-- Header: Names and confidence -->
-    <div class="flex items-start gap-2">
+    <div class="flex items-start gap-3">
       <div class="flex-1 min-w-0">
         <div class="text-xs font-semibold leading-tight truncate">
           {displayName}
@@ -89,7 +89,7 @@
     <!-- Actions -->
     <div class="flex items-center gap-2">
       <button
-        class="btn btn-primary btn-sm text-xs"
+        class="btn btn-primary btn-sm text-xs bg-primary/70 border-primary/70 hover:bg-primary/80 hover:border-primary/80"
         onclick={handlePlay}
         aria-label={t('search.detailsPanel.playAudio', { species: displayName })}
       >
