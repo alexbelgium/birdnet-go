@@ -47,6 +47,8 @@ describe('Settings Store - Range Filter Dynamic Updates', () => {
         latitude: 40.7128,
         longitude: -74.006,
         locationConfigured: true,
+        backend: '',
+        openVinoDevice: '',
         rangeFilter: {
           threshold: 0.03,
           passUnmappedSpecies: false,
@@ -309,6 +311,8 @@ describe('Range Filter - View Species uses filtered threshold (#2393)', () => {
         latitude: LATITUDE,
         longitude: LONGITUDE,
         locationConfigured: true,
+        backend: '',
+        openVinoDevice: '',
         rangeFilter: {
           threshold: THRESHOLD,
           passUnmappedSpecies: false,

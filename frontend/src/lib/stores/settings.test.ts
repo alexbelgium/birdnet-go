@@ -45,6 +45,8 @@ describe('Settings Store - Dynamic Threshold and Range Filter', () => {
           latitude: 40.7128,
           longitude: -74.006,
           locationConfigured: true,
+          backend: '',
+          openVinoDevice: '',
           rangeFilter: {
             threshold: 0.03,
             passUnmappedSpecies: false,
@@ -255,6 +257,8 @@ describe('Settings Store - Model/Label Path Null Conversion', () => {
           latitude: 40.7128,
           longitude: -74.006,
           locationConfigured: true,
+          backend: '',
+          openVinoDevice: '',
           rangeFilter: {
             threshold: 0.03,
             passUnmappedSpecies: false,
@@ -276,6 +280,8 @@ describe('Settings Store - Model/Label Path Null Conversion', () => {
           latitude: 40.7128,
           longitude: -74.006,
           locationConfigured: true,
+          backend: '',
+          openVinoDevice: '',
           rangeFilter: {
             threshold: 0.03,
             passUnmappedSpecies: false,

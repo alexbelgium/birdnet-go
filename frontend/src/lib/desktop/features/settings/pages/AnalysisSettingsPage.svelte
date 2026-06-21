@@ -1398,11 +1398,15 @@
         threads: store.originalData.birdnet?.threads,
         modelPath: store.originalData.birdnet?.modelPath,
         labelPath: store.originalData.birdnet?.labelPath,
+        backend: store.originalData.birdnet?.backend,
+        openVinoDevice: store.originalData.birdnet?.openVinoDevice,
       }}
       currentData={{
         threads: birdnet?.threads,
         modelPath: birdnet?.modelPath,
         labelPath: birdnet?.labelPath,
+        backend: birdnet?.backend,
+        openVinoDevice: birdnet?.openVinoDevice,
       }}
     >
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1415,6 +1419,40 @@
           step={1}
           helpText={t('settings.main.fields.tensorflowThreads.helpText')}
           disabled={store.isLoading || store.isSaving}
+        />
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+        <SelectDropdown
+          options={[
+            { value: '', label: t('analysis.advanced.inferenceBackend.options.auto') },
+            { value: 'onnx', label: t('analysis.advanced.inferenceBackend.options.onnx') },
+            { value: 'openvino', label: t('analysis.advanced.inferenceBackend.options.openvino') },
+          ] satisfies SelectOption[]}
+          value={birdnet?.backend ?? ''}
+          label={t('analysis.advanced.inferenceBackend.label')}
+          helpText={t('analysis.advanced.inferenceBackend.helpText')}
+          disabled={store.isLoading || store.isSaving}
+          variant="select"
+          groupBy={false}
+          searchable={false}
+          onChange={value => updateBirdnetSetting('backend', value as string)}
+        />
+
+        <SelectDropdown
+          options={[
+            { value: '', label: t('analysis.advanced.openVinoDevice.options.auto') },
+            { value: 'cpu', label: t('analysis.advanced.openVinoDevice.options.cpu') },
+            { value: 'gpu', label: t('analysis.advanced.openVinoDevice.options.gpu') },
+          ] satisfies SelectOption[]}
+          value={birdnet?.openVinoDevice ?? ''}
+          label={t('analysis.advanced.openVinoDevice.label')}
+          helpText={t('analysis.advanced.openVinoDevice.helpText')}
+          disabled={store.isLoading || store.isSaving}
+          variant="select"
+          groupBy={false}
+          searchable={false}
+          onChange={value => updateBirdnetSetting('openVinoDevice', value as string)}
         />
       </div>
 

@@ -74,6 +74,8 @@ export interface BirdNetSettings {
   latitude: number;
   longitude: number;
   locationConfigured: boolean; // true when location has been explicitly configured
+  backend: string; // "auto", "onnx", or "openvino"
+  openVinoDevice: string; // "auto", "cpu", or "gpu"
   rangeFilter: RangeFilterSettings;
 }
 
@@ -863,6 +865,8 @@ function createEmptySettings(): SettingsFormData {
       latitude: 0,
       longitude: 0,
       locationConfigured: false,
+      backend: '',
+      openVinoDevice: '',
       rangeFilter: {
         threshold: 0.03,
         passUnmappedSpecies: false,

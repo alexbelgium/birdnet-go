@@ -4904,7 +4904,25 @@
     },
     "advanced": {
       "title": "Avancerat",
-      "description": "Bearbetning och anpassad modellkonfiguration."
+      "description": "Bearbetning och anpassad modellkonfiguration.",
+      "inferenceBackend": {
+        "label": "Inference Backend",
+        "helpText": "Select the inference backend. Auto-detect uses OpenVINO when a supported device is available, otherwise falls back to ONNX Runtime.",
+        "options": {
+          "auto": "Auto-detect",
+          "onnx": "ONNX Runtime",
+          "openvino": "OpenVINO"
+        }
+      },
+      "openVinoDevice": {
+        "label": "OpenVINO Device",
+        "helpText": "Select the OpenVINO execution device. Auto-detect picks an Intel iGPU when available. CPU requires setting the model path to an ONNX model file (e.g. /models/BirdNET_INT8_ARM.onnx).",
+        "options": {
+          "auto": "Auto-detect",
+          "cpu": "CPU",
+          "gpu": "GPU (Intel iGPU)"
+        }
+      }
     },
     "gallery": {
       "title": "Modellgalleri",

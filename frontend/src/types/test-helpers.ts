@@ -32,6 +32,8 @@ export function createEmptySettings(): SettingsFormData {
       latitude: 0,
       longitude: 0,
       locationConfigured: false,
+      backend: '',
+      openVinoDevice: '',
       rangeFilter: {
         threshold: 0.03,
         passUnmappedSpecies: false,
