@@ -45,6 +45,7 @@
   let AdvancedAnalytics = $state<Component | null>(null);
   let Species = $state<Component | null>(null);
   let Search = $state<Component | null>(null);
+  let SettingsSearch = $state<Component | null>(null);
   let About = $state<Component | null>(null);
   let Help = $state<Component | null>(null);
   let ReportBug = $state<Component | null>(null);
@@ -144,6 +145,12 @@
     },
     { route: 'search', page: 'search', titleKey: 'navigation.search', component: 'search' },
     {
+      route: 'search-settings',
+      page: 'search-settings',
+      titleKey: 'navigation.settings',
+      component: 'search-settings',
+    },
+    {
       route: 'detections',
       page: 'detections',
       titleKey: 'navigation.detections',
@@ -230,6 +237,12 @@
           if (!Search) {
             const module = await import('./lib/desktop/views/Search.svelte');
             Search = module.default;
+          }
+          break;
+        case 'search-settings':
+          if (!SettingsSearch) {
+            const module = await import('./lib/desktop/views/SearchSettings.svelte');
+            SettingsSearch = module.default;
           }
           break;
         case 'about':
@@ -362,6 +375,7 @@
     [uiPath('analytics', 'advanced')]: findRouteConfig('advanced-analytics'),
     [uiPath('analytics')]: findRouteConfig('analytics'),
     [uiPath('search')]: findRouteConfig('search'),
+    [uiPath('search-settings')]: findRouteConfig('search-settings'),
     [uiPath('detections')]: findRouteConfig('detections'),
     [uiPath('about')]: findRouteConfig('about'),
     [uiPath('help')]: findRouteConfig('help'),
@@ -676,6 +690,8 @@
       {@render renderRoute(Species)}
     {:else if currentRoute === 'search'}
       {@render renderRoute(Search)}
+    {:else if currentRoute === 'search-settings'}
+      {@render renderRoute(SettingsSearch)}
     {:else if currentRoute === 'about'}
       {@render renderRoute(About)}
     {:else if currentRoute === 'help'}
