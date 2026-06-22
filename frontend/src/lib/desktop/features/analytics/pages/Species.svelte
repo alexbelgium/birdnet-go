@@ -246,7 +246,10 @@
 
   // Species management (manage view): per-species review stats + delete confirmation.
   let reviewStats = $state<SpeciesReviewStat[]>([]);
-  let isLoadingStats = $state(false);
+  // All-time species summary for the manage view (unaffected by the period filter).
+  let allTimeSpeciesData = $state<SpeciesData[]>([]);
+  // True while ALL manage fetches (stats + membership lists) are in progress.
+  let isLoadingManage = $state(false);
   let showDeleteModal = $state(false);
   let deleteTarget = $state<{ scientific_name: string; common_name: string; count: number } | null>(
     null
@@ -317,15 +320,17 @@
     inactiveTooltipKey: 'analytics.species.manage.confirmSpeciesTooltip',
   };
 
-  // True while the manage view is loading its review stats.
-  let manageLoading = $derived(viewMode === 'manage' && isLoadingStats);
+  // True while the manage view is loading (stats + all membership lists must finish before
+  // toggles are enabled, to prevent optimistic updates firing in the wrong direction).
+  let manageLoading = $derived(viewMode === 'manage' && isLoadingManage);
 
   // Manage rows: authoritative species set from review-stats (so fully-rejected mislabels
   // appear even though they are excluded from the false-positive-filtered summary),
-  // enriched with summary display fields (thumbnail/confidence/dates) where available,
+  // enriched with all-time summary display fields (thumbnail/confidence/dates),
   // and with list-membership flags for the sortable Excluded/Whitelisted columns.
   let manageSpecies = $derived.by(() => {
-    const summaryByName = new Map(speciesData.map(s => [s.scientific_name, s]));
+    // Use all-time summary so confidence/dates are never 0/blank due to an active period filter.
+    const summaryByName = new Map(allTimeSpeciesData.map(s => [s.scientific_name, s]));
     const rows: SpeciesData[] = reviewStats.map(stat => {
       const summary = summaryByName.get(stat.scientific_name);
       const commonName = stat.common_name || summary?.common_name || stat.scientific_name;
@@ -753,7 +758,6 @@
   }
 
   async function fetchReviewStats() {
-    isLoadingStats = true;
     try {
       reviewStats = await fetchWithCSRF<SpeciesReviewStat[]>(
         '/api/v2/analytics/species/review-stats'
@@ -762,8 +766,6 @@
       logger.error('Error fetching species review stats:', error);
       reviewStats = [];
       toastActions.error(t('analytics.species.manage.statsError'));
-    } finally {
-      isLoadingStats = false;
     }
   }
 
@@ -789,13 +791,34 @@
   }
 
   async function fetchManageData() {
-    await Promise.all([
-      fetchReviewStats(),
-      fetchExcludedSpecies(),
-      fetchIncludedSpecies(),
-      fetchConfirmedSpecies(),
-      fetchRangeScores(),
-    ]);
+    isLoadingManage = true;
+    try {
+      await Promise.all([
+        fetchReviewStats(),
+        fetchExcludedSpecies(),
+        fetchIncludedSpecies(),
+        fetchConfirmedSpecies(),
+        fetchRangeScores(),
+        fetchAllTimeSpeciesSummary(),
+      ]);
+    } finally {
+      isLoadingManage = false;
+    }
+  }
+
+  async function fetchAllTimeSpeciesSummary() {
+    try {
+      const response = await fetch(buildAppUrl('/api/v2/analytics/species/summary'));
+      if (!response.ok) return;
+      const rawSpecies: SpeciesData[] = await response.json();
+      allTimeSpeciesData = rawSpecies.map(species =>
+        species.thumbnail_url
+          ? { ...species, thumbnail_url: buildAppUrl(species.thumbnail_url) }
+          : species
+      );
+    } catch {
+      allTimeSpeciesData = [];
+    }
   }
 
   async function fetchExcludedSpecies() {

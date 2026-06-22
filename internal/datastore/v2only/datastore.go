@@ -2594,17 +2594,39 @@ func (ds *Datastore) GetSpeciesReviewStats(ctx context.Context) ([]datastore.Spe
 		return nil, err
 	}
 
-	result := make([]datastore.SpeciesReviewStats, 0, len(v2Data))
+	// Merge rows that resolve to the same scientific name after label normalisation.
+	// v2 databases may contain both clean ("Turdus merula") and legacy concatenated
+	// ("Turdus merula_Eurasian Blackbird") labels; ExtractScientificName strips the
+	// suffix so both map to the same species — without merging they would appear as
+	// two separate rows with partial counts in the manage view.
+	type merged struct {
+		commonName          string
+		total, verified, rejected int
+	}
+	byName := make(map[string]*merged, len(v2Data))
 	for _, d := range v2Data {
-		// Labels may use the legacy concatenated "ScientificName_CommonName" format, so
-		// extract only the scientific name portion (matching GetSpeciesSummaryData).
 		sciName := detection.ExtractScientificName(d.ScientificName)
+		if m, ok := byName[sciName]; ok {
+			m.total += int(d.Total)
+			m.verified += int(d.Verified)
+			m.rejected += int(d.Rejected)
+		} else {
+			byName[sciName] = &merged{
+				commonName: ds.resolveCommonName(sciName),
+				total:      int(d.Total),
+				verified:   int(d.Verified),
+				rejected:   int(d.Rejected),
+			}
+		}
+	}
+	result := make([]datastore.SpeciesReviewStats, 0, len(byName))
+	for sciName, m := range byName {
 		result = append(result, datastore.SpeciesReviewStats{
 			ScientificName: sciName,
-			CommonName:     ds.resolveCommonName(sciName),
-			Total:          int(d.Total),
-			Verified:       int(d.Verified),
-			Rejected:       int(d.Rejected),
+			CommonName:     m.commonName,
+			Total:          m.total,
+			Verified:       m.verified,
+			Rejected:       m.rejected,
 		})
 	}
 	return result, nil
