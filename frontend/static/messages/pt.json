@@ -4786,16 +4786,6 @@
         "formatLabel": "Formato",
         "rangeLabel": "{start}s - {end}s"
       },
-      "batExpand": {
-        "title": "Reprodução audível de morcegos",
-        "factorTooltip": "Fator de expansão temporal",
-        "play": "Reproduzir versão audível",
-        "pause": "Pausar",
-        "download": "Baixar WAV audível",
-        "generating": "A gerar…",
-        "error": "Falha ao gerar a reprodução audível",
-        "disabledTooltip": "A gravação de origem está abaixo de {minRate} kHz – nenhum conteúdo ultrassónico disponível"
-      },
       "processing": {
         "playSelection": "Reproduzir seleção",
         "skipToStart": "Saltar para o início da seleção",

@@ -4786,16 +4786,6 @@
         "formatLabel": "Formát",
         "rangeLabel": "{start}s - {end}s"
       },
-      "batExpand": {
-        "title": "Počuteľné prehrávanie netopierov",
-        "factorTooltip": "Faktor časového roztiahnutia",
-        "play": "Prehrať počuteľnú verziu",
-        "pause": "Pozastaviť",
-        "download": "Stiahnuť počuteľný WAV",
-        "generating": "Generuje sa…",
-        "error": "Nepodarilo sa vygenerovať počuteľné prehrávanie",
-        "disabledTooltip": "Zdrojová nahrávka je pod {minRate} kHz – nie je dostupný žiadny ultrazvukový obsah"
-      },
       "processing": {
         "playSelection": "Prehrať výber",
         "skipToStart": "Preskočiť na začiatok výberu",

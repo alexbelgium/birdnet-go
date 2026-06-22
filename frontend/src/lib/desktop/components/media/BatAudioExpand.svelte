@@ -22,7 +22,6 @@
   import { untrack } from 'svelte';
   import { Ear, Download, ChevronDown, Loader2, Play, Pause } from '@lucide/svelte';
   import { dropdown } from '$lib/utils/transitions';
-  import { t } from '$lib/i18n';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { getCsrfToken } from '$lib/utils/api';
   import { loggers } from '$lib/utils/logger';
@@ -30,6 +29,17 @@
   const logger = loggers.audio;
   const STORAGE_KEY = 'birdnet-bat-expand-factor';
   const ALLOWED_FACTORS = [5, 10, 16, 20];
+
+  // Hard-coded English labels (feature is intentionally self-contained, no i18n).
+  const LABELS = {
+    title: 'Audible bat playback',
+    factorTooltip: 'Time expansion factor',
+    play: 'Play audible version',
+    pause: 'Pause',
+    download: 'Download audible WAV',
+    generating: 'Generating…',
+    error: 'Failed to generate audible playback',
+  };
 
   interface ExpandInfo {
     supported: boolean;
@@ -149,7 +159,7 @@
         { method: 'POST', headers: csrfHeaders() }
       );
       if (!res.ok) {
-        let msg = t('components.audioPlayer.batExpand.error');
+        let msg = LABELS.error;
         try {
           const errData: unknown = await res.json();
           if (
@@ -186,8 +196,7 @@
       await audioEl.play();
       isPlayingExpanded = true;
     } catch (err) {
-      expandError =
-        err instanceof Error ? err.message : t('components.audioPlayer.batExpand.error');
+      expandError = err instanceof Error ? err.message : LABELS.error;
       logger.error('bat expand play failed', err as Error);
     } finally {
       isGenerating = false;
@@ -205,7 +214,7 @@
         ),
         { method: 'POST', headers: csrfHeaders() }
       );
-      if (!res.ok) throw new Error(t('components.audioPlayer.batExpand.error'));
+      if (!res.ok) throw new Error(LABELS.error);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -216,8 +225,7 @@
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
-      expandError =
-        err instanceof Error ? err.message : t('components.audioPlayer.batExpand.error');
+      expandError = err instanceof Error ? err.message : LABELS.error;
     } finally {
       isGenerating = false;
     }
@@ -285,22 +293,18 @@
 
 {#if expandInfo?.isBat}
   {@const disabled = !expandInfo.supported}
-  {@const disabledReason = t('components.audioPlayer.batExpand.disabledTooltip', {
-    minRate: Math.round(expandInfo.minSourceRate / 1000),
-  })}
+  {@const disabledReason = `Source recording is below ${Math.round(
+    expandInfo.minSourceRate / 1000
+  )} kHz — no ultrasonic content available`}
   {@const helpId = `bat-expand-help-${detectionId}`}
   {@const statusId = `bat-expand-status-${detectionId}`}
   {@const describedBy = disabled ? helpId : isGenerating ? statusId : undefined}
 
-  <div
-    class="bat-expand-toolbar"
-    role="group"
-    aria-label={t('components.audioPlayer.batExpand.title')}
-  >
+  <div class="bat-expand-toolbar" role="group" aria-label={LABELS.title}>
     <!-- Section label -->
     <div class="bat-expand-label" aria-hidden="true">
       <Ear size={14} />
-      <span>{t('components.audioPlayer.batExpand.title')}</span>
+      <span>{LABELS.title}</span>
     </div>
 
     <!-- Factor dropdown (how many times slower) -->
@@ -308,8 +312,8 @@
       <button
         class="expand-btn"
         disabled={disabled || isGenerating}
-        title={disabled ? disabledReason : t('components.audioPlayer.batExpand.factorTooltip')}
-        aria-label={t('components.audioPlayer.batExpand.factorTooltip')}
+        title={disabled ? disabledReason : LABELS.factorTooltip}
+        aria-label={LABELS.factorTooltip}
         aria-describedby={describedBy}
         aria-expanded={showFactorMenu}
         aria-haspopup="listbox"
@@ -324,7 +328,7 @@
         <div
           class="factor-menu"
           role="listbox"
-          aria-label={t('components.audioPlayer.batExpand.factorTooltip')}
+          aria-label={LABELS.factorTooltip}
           in:dropdown={{ y: -4, duration: 120 }}
           out:dropdown={{ y: -4, duration: 80 }}
         >
@@ -353,14 +357,8 @@
       class="expand-btn"
       class:active={isPlayingExpanded}
       disabled={disabled || isGenerating}
-      title={disabled
-        ? disabledReason
-        : isPlayingExpanded
-          ? t('components.audioPlayer.batExpand.pause')
-          : t('components.audioPlayer.batExpand.play')}
-      aria-label={isPlayingExpanded
-        ? t('components.audioPlayer.batExpand.pause')
-        : t('components.audioPlayer.batExpand.play')}
+      title={disabled ? disabledReason : isPlayingExpanded ? LABELS.pause : LABELS.play}
+      aria-label={isPlayingExpanded ? LABELS.pause : LABELS.play}
       aria-describedby={describedBy}
       onclick={playExpanded}
     >
@@ -377,8 +375,8 @@
     <button
       class="expand-btn"
       disabled={disabled || isGenerating}
-      title={disabled ? disabledReason : t('components.audioPlayer.batExpand.download')}
-      aria-label={t('components.audioPlayer.batExpand.download')}
+      title={disabled ? disabledReason : LABELS.download}
+      aria-label={LABELS.download}
       aria-describedby={describedBy}
       onclick={downloadExpanded}
     >
@@ -388,7 +386,7 @@
     <!-- Generating status: labelled, not a bare spinner (announced to SR). -->
     {#if isGenerating}
       <span id={statusId} class="expand-status" role="status" aria-live="polite">
-        {t('components.audioPlayer.batExpand.generating')}
+        {LABELS.generating}
       </span>
     {/if}
 

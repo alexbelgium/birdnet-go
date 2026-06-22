@@ -4786,16 +4786,6 @@
         "formatLabel": "Format",
         "rangeLabel": "{start}s – {end}s"
       },
-      "batExpand": {
-        "title": "Lecture audible des chauves-souris",
-        "factorTooltip": "Facteur d'expansion temporelle",
-        "play": "Lire la version audible",
-        "pause": "Pause",
-        "download": "Télécharger le WAV audible",
-        "generating": "Génération…",
-        "error": "Échec de la génération de la lecture audible",
-        "disabledTooltip": "L'enregistrement source est inférieur à {minRate} kHz — aucun contenu ultrasonore disponible"
-      },
       "processing": {
         "playSelection": "Lire la sélection",
         "skipToStart": "Aller au début de la sélection",

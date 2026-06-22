@@ -4786,16 +4786,6 @@
         "formatLabel": "Formato",
         "rangeLabel": "{start}s - {end}s"
       },
-      "batExpand": {
-        "title": "Reproducción audible de murciélagos",
-        "factorTooltip": "Factor de expansión temporal",
-        "play": "Reproducir versión audible",
-        "pause": "Pausa",
-        "download": "Descargar WAV audible",
-        "generating": "Generando…",
-        "error": "No se pudo generar la reproducción audible",
-        "disabledTooltip": "La grabación de origen está por debajo de {minRate} kHz: no hay contenido ultrasónico disponible"
-      },
       "processing": {
         "playSelection": "Reproducir selección",
         "skipToStart": "Ir al inicio de la selección",
