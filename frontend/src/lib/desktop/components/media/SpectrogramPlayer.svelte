@@ -23,6 +23,7 @@
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { t } from '$lib/i18n';
   import { loggers } from '$lib/utils/logger';
+  import BatAudioExpand from './BatAudioExpand.svelte';
 
   const logger = loggers.audio;
 
@@ -202,6 +203,7 @@
     </div>
   {/if}
 </div>
+<BatAudioExpand {detectionId} />
 
 <style>
   .spectrogram-player {
