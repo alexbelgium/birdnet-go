@@ -3035,6 +3035,88 @@ func (ds *Datastore) GetSpeciesDiversityData(ctx context.Context, startDate, end
 	return results, nil
 }
 
+// GetActivityHeatmap returns detection counts bucketed by (station-local date, intra-day slot)
+// over [startDate, endDate]. It fetches the raw detection timestamps in range (false positives
+// excluded) and buckets them in Go (buildActivityHeatmap), keeping the slot/date math out of
+// dialect SQL and correct across DST. species is an optional scientific-name filter; an unknown
+// species yields an empty grid that still carries the full date axis.
+func (ds *Datastore) GetActivityHeatmap(ctx context.Context, startDate, endDate, species string) (datastore.ActivityHeatmapData, error) {
+	start, end, err := ds.parseDateRange(startDate, endDate)
+	if err != nil {
+		return datastore.ActivityHeatmapData{}, err
+	}
+
+	labelID, err := ds.resolveLabelID(ctx, species)
+	if err != nil {
+		if errors.Is(err, errNotFound) {
+			return buildActivityHeatmap(nil, ds.timezone, startDate, endDate)
+		}
+		return datastore.ActivityHeatmapData{}, err
+	}
+
+	timestamps, err := ds.detection.GetDetectionTimestamps(ctx, start, end, labelID)
+	if err != nil {
+		return datastore.ActivityHeatmapData{}, err
+	}
+
+	return buildActivityHeatmap(timestamps, ds.timezone, startDate, endDate)
+}
+
+// GetHourlyDistributionBySpecies returns the normalized hour-of-day activity distribution for the
+// top `limit` species by detection volume over [startDate, endDate], ordered by descending volume.
+// It selects the top-N label IDs by volume (GetTopSpecies), fetches their false-positive-excluded
+// per-hour counts in a single batched (label_id, hour) group-by (GetBatchHourlyOccurrences), then
+// merges and normalizes per species in Go (buildSpeciesHourlyDistribution). minConfidence is 0 so it
+// counts every detection, matching the heatmap and the other time-based analytics endpoints.
+func (ds *Datastore) GetHourlyDistributionBySpecies(ctx context.Context, startDate, endDate string, limit int) ([]datastore.SpeciesHourlyDistribution, error) {
+	start, end, err := ds.parseDateRange(startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+
+	// minConfidence 0 counts every detection (no confidence floor), matching the heatmap and the
+	// other time-based analytics; named to avoid a bare magic literal at the two call sites.
+	const noConfidenceFloor = 0.0
+
+	// Top-N species by raw detection volume across all models (modelID nil). GetTopSpecies uses an
+	// inclusive end (<= end) while GetBatchHourlyOccurrences below uses an exclusive end (< end), so
+	// subtract one second to cover the exact same range; otherwise ranking and bucket totals could
+	// disagree on a detection landing exactly on the end boundary.
+	topEnd := end
+	if end != math.MaxInt64 {
+		topEnd--
+	}
+	top, err := ds.detection.GetTopSpecies(ctx, start, topEnd, noConfidenceFloor, nil, limit)
+	if err != nil {
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryDatabase).
+			Context("operation", "get_hourly_distribution_by_species_top").
+			Build()
+	}
+	if len(top) == 0 {
+		return []datastore.SpeciesHourlyDistribution{}, nil
+	}
+
+	// One label ID per top row; fetch their false-positive-excluded hourly counts in a single
+	// batched query (chunked internally for large label sets).
+	labelIDs := make([]uint, 0, len(top))
+	for i := range top {
+		labelIDs = append(labelIDs, top[i].LabelID)
+	}
+
+	hourlyByLabel, err := ds.detection.GetBatchHourlyOccurrences(ctx, labelIDs, start, end, ds.zoneOffsetSeconds(start), noConfidenceFloor)
+	if err != nil {
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryDatabase).
+			Context("operation", "get_hourly_distribution_by_species_hourly").
+			Build()
+	}
+
+	return buildSpeciesHourlyDistribution(top, hourlyByLabel), nil
+}
+
 // ============================================================
 // Dynamic Threshold Methods
 // ============================================================
