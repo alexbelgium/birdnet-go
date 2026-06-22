@@ -4787,13 +4787,14 @@
         "rangeLabel": "{start}s - {end}s"
       },
       "batExpand": {
-        "title": "Audible bat playback",
-        "factorTooltip": "Time expansion factor",
-        "play": "Play audible version",
-        "pause": "Pause",
-        "download": "Download audible WAV",
-        "error": "Failed to generate audible playback",
-        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+        "title": "Dzirdama sikspārņu atskaņošana",
+        "factorTooltip": "Laika izstiepšanas koeficients",
+        "play": "Atskaņot dzirdamo versiju",
+        "pause": "Pauze",
+        "download": "Lejupielādēt dzirdamo WAV",
+        "generating": "Ģenerē…",
+        "error": "Neizdevās ģenerēt dzirdamo atskaņošanu",
+        "disabledTooltip": "Avota ieraksts ir zem {minRate} kHz – nav pieejama ultraskaņas satura"
       },
       "processing": {
         "playSelection": "Atskaņot atlasi",

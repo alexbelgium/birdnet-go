@@ -4787,13 +4787,14 @@
         "rangeLabel": "{start}s – {end}s"
       },
       "batExpand": {
-        "title": "Audible bat playback",
-        "factorTooltip": "Time expansion factor",
-        "play": "Play audible version",
-        "pause": "Pause",
-        "download": "Download audible WAV",
-        "error": "Failed to generate audible playback",
-        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+        "title": "Riproduzione udibile dei pipistrelli",
+        "factorTooltip": "Fattore di espansione temporale",
+        "play": "Riproduci versione udibile",
+        "pause": "Pausa",
+        "download": "Scarica WAV udibile",
+        "generating": "Generazione…",
+        "error": "Impossibile generare la riproduzione udibile",
+        "disabledTooltip": "La registrazione di origine è inferiore a {minRate} kHz: nessun contenuto ultrasonico disponibile"
       },
       "processing": {
         "playSelection": "Riproduci selezione",

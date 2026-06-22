@@ -4787,13 +4787,14 @@
         "rangeLabel": "{start}s - {end}s"
       },
       "batExpand": {
-        "title": "Audible bat playback",
-        "factorTooltip": "Time expansion factor",
-        "play": "Play audible version",
-        "pause": "Pause",
-        "download": "Download audible WAV",
-        "error": "Failed to generate audible playback",
-        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+        "title": "Kuultava lepakoiden toisto",
+        "factorTooltip": "Ajan venytyskerroin",
+        "play": "Toista kuultava versio",
+        "pause": "Keskeytä",
+        "download": "Lataa kuultava WAV",
+        "generating": "Luodaan…",
+        "error": "Kuultavan toiston luominen epäonnistui",
+        "disabledTooltip": "Lähdeäänitys on alle {minRate} kHz – ultraäänisisältöä ei ole saatavilla"
       },
       "processing": {
         "playSelection": "Toista valinta",

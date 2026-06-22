@@ -4787,13 +4787,14 @@
         "rangeLabel": "{start}s – {end}s"
       },
       "batExpand": {
-        "title": "Audible bat playback",
-        "factorTooltip": "Time expansion factor",
-        "play": "Play audible version",
-        "pause": "Pause",
-        "download": "Download audible WAV",
-        "error": "Failed to generate audible playback",
-        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+        "title": "Hörbar fladdermusuppspelning",
+        "factorTooltip": "Tidsutvidgningsfaktor",
+        "play": "Spela hörbar version",
+        "pause": "Paus",
+        "download": "Ladda ner hörbar WAV",
+        "generating": "Genererar…",
+        "error": "Det gick inte att generera hörbar uppspelning",
+        "disabledTooltip": "Källinspelningen är under {minRate} kHz – inget ultraljudsinnehåll tillgängligt"
       },
       "processing": {
         "playSelection": "Spela markering",

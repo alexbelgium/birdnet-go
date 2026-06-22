@@ -180,3 +180,19 @@ func TestBuildProbeArgs(t *testing.T) {
 		assert.Contains(t, args, "json")
 	})
 }
+
+func TestBuildFileProbeArgs(t *testing.T) {
+	t.Parallel()
+
+	args := buildFileProbeArgs("/data/clips/bat_2026-06-22.wav")
+
+	// The local path must be the final argument.
+	assert.Equal(t, "/data/clips/bat_2026-06-22.wav", args[len(args)-1])
+	// The network protocol whitelist must be absent, otherwise ffprobe
+	// rejects the local "file" protocol path.
+	assert.NotContains(t, args, "-protocol_whitelist")
+	assert.NotContains(t, args, "-rtsp_transport")
+	assert.Contains(t, args, "-show_streams")
+	assert.Contains(t, args, "-select_streams")
+	assert.Contains(t, args, "a:0")
+}

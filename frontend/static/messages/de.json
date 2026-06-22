@@ -4787,13 +4787,14 @@
         "rangeLabel": "{start}s – {end}s"
       },
       "batExpand": {
-        "title": "Audible bat playback",
-        "factorTooltip": "Time expansion factor",
-        "play": "Play audible version",
+        "title": "Hörbare Fledermaus-Wiedergabe",
+        "factorTooltip": "Zeitdehnungsfaktor",
+        "play": "Hörbare Version abspielen",
         "pause": "Pause",
-        "download": "Download audible WAV",
-        "error": "Failed to generate audible playback",
-        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+        "download": "Hörbare WAV herunterladen",
+        "generating": "Wird erzeugt…",
+        "error": "Hörbare Wiedergabe konnte nicht erzeugt werden",
+        "disabledTooltip": "Quellaufnahme liegt unter {minRate} kHz – keine Ultraschallinhalte verfügbar"
       },
       "processing": {
         "playSelection": "Auswahl abspielen",

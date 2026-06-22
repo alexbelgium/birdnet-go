@@ -17,7 +17,7 @@
   POST endpoint requires authentication (same as /process).
 -->
 <script lang="ts">
-  /* global Audio */
+  /* global Audio, DOMException */
   import { onMount } from 'svelte';
   import { untrack } from 'svelte';
   import { Ear, Download, ChevronDown, Loader2, Play, Pause } from '@lucide/svelte';
@@ -55,6 +55,25 @@
   let isPlayingExpanded = $state(false);
   let expandError = $state<string | null>(null);
   let audioEl: HTMLAudioElement | null = null;
+  // Tracks the in-flight capability request so a slow response for an old
+  // detection cannot overwrite the state of a newer one.
+  let infoAbort: AbortController | null = null;
+
+  // Runtime validation of the capability payload — guards against contract
+  // drift rather than trusting an unchecked `as` cast.
+  function isExpandInfo(v: unknown): v is ExpandInfo {
+    if (typeof v !== 'object' || v === null) return false;
+    const o = v as Record<string, unknown>;
+    return (
+      typeof o.supported === 'boolean' &&
+      typeof o.isBat === 'boolean' &&
+      typeof o.sourceRate === 'number' &&
+      typeof o.minSourceRate === 'number' &&
+      typeof o.outputRate === 'number' &&
+      typeof o.defaultFactor === 'number' &&
+      Array.isArray(o.factors)
+    );
+  }
 
   function loadStoredFactor(): number {
     try {
@@ -82,17 +101,25 @@
     return tok ? { 'X-CSRF-Token': tok } : {};
   }
 
-  async function fetchInfo(id: string) {
+  async function fetchInfo(id: string, signal: AbortSignal) {
     try {
-      const res = await fetch(buildAppUrl(`/api/v2/audio/${encodeURIComponent(id)}/expand`));
+      const res = await fetch(buildAppUrl(`/api/v2/audio/${encodeURIComponent(id)}/expand`), {
+        signal,
+      });
       if (!res.ok) return;
-      const data = (await res.json()) as ExpandInfo;
+      const data: unknown = await res.json();
+      if (!isExpandInfo(data)) {
+        logger.warn('bat expand info: unexpected payload shape', { id });
+        return;
+      }
       expandInfo = data;
       // Apply server default only if user has no stored preference
       if (localStorage.getItem(STORAGE_KEY) === null) {
         factor = data.defaultFactor;
       }
     } catch (err) {
+      // Aborted requests are expected when the detection changes; ignore them.
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       logger.debug('bat expand info fetch failed', { id, error: err });
     }
   }
@@ -124,8 +151,14 @@
       if (!res.ok) {
         let msg = t('components.audioPlayer.batExpand.error');
         try {
-          const errData = (await res.json()) as { message?: string };
-          msg = errData.message ?? msg;
+          const errData: unknown = await res.json();
+          if (
+            typeof errData === 'object' &&
+            errData !== null &&
+            typeof (errData as Record<string, unknown>).message === 'string'
+          ) {
+            msg = (errData as { message: string }).message;
+          }
         } catch {
           // use default
         }
@@ -215,6 +248,7 @@
   onMount(() => {
     factor = loadStoredFactor();
     return () => {
+      infoAbort?.abort();
       if (audioEl) {
         audioEl.pause();
         audioEl = null;
@@ -231,6 +265,10 @@
   $effect(() => {
     const id = detectionId;
     untrack(() => {
+      // Cancel any in-flight request so its (stale) response cannot land
+      // after this newer detection's response.
+      infoAbort?.abort();
+      infoAbort = new AbortController();
       expandInfo = null;
       expandError = null;
       isPlayingExpanded = false;
@@ -238,7 +276,7 @@
       const url = expandedBlobUrl;
       expandedBlobUrl = null;
       if (url) URL.revokeObjectURL(url);
-      fetchInfo(id);
+      fetchInfo(id, infoAbort.signal);
     });
   });
 </script>
@@ -250,6 +288,9 @@
   {@const disabledReason = t('components.audioPlayer.batExpand.disabledTooltip', {
     minRate: Math.round(expandInfo.minSourceRate / 1000),
   })}
+  {@const helpId = `bat-expand-help-${detectionId}`}
+  {@const statusId = `bat-expand-status-${detectionId}`}
+  {@const describedBy = disabled ? helpId : isGenerating ? statusId : undefined}
 
   <div
     class="bat-expand-toolbar"
@@ -269,6 +310,7 @@
         disabled={disabled || isGenerating}
         title={disabled ? disabledReason : t('components.audioPlayer.batExpand.factorTooltip')}
         aria-label={t('components.audioPlayer.batExpand.factorTooltip')}
+        aria-describedby={describedBy}
         aria-expanded={showFactorMenu}
         aria-haspopup="listbox"
         onclick={() => {
@@ -319,6 +361,7 @@
       aria-label={isPlayingExpanded
         ? t('components.audioPlayer.batExpand.pause')
         : t('components.audioPlayer.batExpand.play')}
+      aria-describedby={describedBy}
       onclick={playExpanded}
     >
       {#if isGenerating}
@@ -336,15 +379,28 @@
       disabled={disabled || isGenerating}
       title={disabled ? disabledReason : t('components.audioPlayer.batExpand.download')}
       aria-label={t('components.audioPlayer.batExpand.download')}
+      aria-describedby={describedBy}
       onclick={downloadExpanded}
     >
       <Download size={14} />
     </button>
 
+    <!-- Generating status: labelled, not a bare spinner (announced to SR). -->
+    {#if isGenerating}
+      <span id={statusId} class="expand-status" role="status" aria-live="polite">
+        {t('components.audioPlayer.batExpand.generating')}
+      </span>
+    {/if}
+
     {#if expandError}
       <span class="expand-error" role="alert" aria-live="assertive">{expandError}</span>
     {/if}
   </div>
+
+  <!-- Persistent reason the controls are disabled (discoverable, not tooltip-only). -->
+  {#if disabled}
+    <p id={helpId} class="bat-expand-help">{disabledReason}</p>
+  {/if}
 {/if}
 
 <style>
@@ -455,5 +511,18 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     margin-left: 0.25rem;
+  }
+
+  .expand-status {
+    font-size: 0.6875rem;
+    opacity: 0.7;
+    white-space: nowrap;
+    margin-left: 0.25rem;
+  }
+
+  .bat-expand-help {
+    font-size: 0.6875rem;
+    opacity: 0.7;
+    margin: 0.25rem 0 0;
   }
 </style>
