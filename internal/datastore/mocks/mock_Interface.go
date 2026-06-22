@@ -961,6 +961,67 @@ func (_c *MockInterface_Get_Call) RunAndReturn(run func(string) (datastore.Note,
 	return _c
 }
 
+// GetAcousticSuccession provides a mock function with given fields: ctx, startDate, endDate, limit
+func (_m *MockInterface) GetAcousticSuccession(ctx context.Context, startDate string, endDate string, limit int) ([]datastore.SpeciesHourlyCounts, error) {
+	ret := _m.Called(ctx, startDate, endDate, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAcousticSuccession")
+	}
+
+	var r0 []datastore.SpeciesHourlyCounts
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) ([]datastore.SpeciesHourlyCounts, error)); ok {
+		return rf(ctx, startDate, endDate, limit)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) []datastore.SpeciesHourlyCounts); ok {
+		r0 = rf(ctx, startDate, endDate, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]datastore.SpeciesHourlyCounts)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int) error); ok {
+		r1 = rf(ctx, startDate, endDate, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockInterface_GetAcousticSuccession_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAcousticSuccession'
+type MockInterface_GetAcousticSuccession_Call struct {
+	*mock.Call
+}
+
+// GetAcousticSuccession is a helper method to define mock.On call
+//   - ctx context.Context
+//   - startDate string
+//   - endDate string
+//   - limit int
+func (_e *MockInterface_Expecter) GetAcousticSuccession(ctx interface{}, startDate interface{}, endDate interface{}, limit interface{}) *MockInterface_GetAcousticSuccession_Call {
+	return &MockInterface_GetAcousticSuccession_Call{Call: _e.mock.On("GetAcousticSuccession", ctx, startDate, endDate, limit)}
+}
+
+func (_c *MockInterface_GetAcousticSuccession_Call) Run(run func(ctx context.Context, startDate string, endDate string, limit int)) *MockInterface_GetAcousticSuccession_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int))
+	})
+	return _c
+}
+
+func (_c *MockInterface_GetAcousticSuccession_Call) Return(_a0 []datastore.SpeciesHourlyCounts, _a1 error) *MockInterface_GetAcousticSuccession_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockInterface_GetAcousticSuccession_Call) RunAndReturn(run func(context.Context, string, string, int) ([]datastore.SpeciesHourlyCounts, error)) *MockInterface_GetAcousticSuccession_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetActiveNotificationHistory provides a mock function with given fields: ctx, after
 func (_m *MockInterface) GetActiveNotificationHistory(ctx context.Context, after time.Time) ([]datastore.NotificationHistory, error) {
 	ret := _m.Called(ctx, after)
@@ -1840,6 +1901,130 @@ func (_c *MockInterface_GetCommentsBatch_Call) Return(_a0 []datastore.NoteCommen
 }
 
 func (_c *MockInterface_GetCommentsBatch_Call) RunAndReturn(run func(uint, int) ([]datastore.NoteComment, error)) *MockInterface_GetCommentsBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetConfidenceHistogram provides a mock function with given fields: ctx, startDate, endDate, species, bins, limit
+func (_m *MockInterface) GetConfidenceHistogram(ctx context.Context, startDate string, endDate string, species string, bins int, limit int) ([]datastore.SpeciesConfidenceHistogram, error) {
+	ret := _m.Called(ctx, startDate, endDate, species, bins, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetConfidenceHistogram")
+	}
+
+	var r0 []datastore.SpeciesConfidenceHistogram
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, int, int) ([]datastore.SpeciesConfidenceHistogram, error)); ok {
+		return rf(ctx, startDate, endDate, species, bins, limit)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, int, int) []datastore.SpeciesConfidenceHistogram); ok {
+		r0 = rf(ctx, startDate, endDate, species, bins, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]datastore.SpeciesConfidenceHistogram)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, string, int, int) error); ok {
+		r1 = rf(ctx, startDate, endDate, species, bins, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockInterface_GetConfidenceHistogram_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetConfidenceHistogram'
+type MockInterface_GetConfidenceHistogram_Call struct {
+	*mock.Call
+}
+
+// GetConfidenceHistogram is a helper method to define mock.On call
+//   - ctx context.Context
+//   - startDate string
+//   - endDate string
+//   - species string
+//   - bins int
+//   - limit int
+func (_e *MockInterface_Expecter) GetConfidenceHistogram(ctx interface{}, startDate interface{}, endDate interface{}, species interface{}, bins interface{}, limit interface{}) *MockInterface_GetConfidenceHistogram_Call {
+	return &MockInterface_GetConfidenceHistogram_Call{Call: _e.mock.On("GetConfidenceHistogram", ctx, startDate, endDate, species, bins, limit)}
+}
+
+func (_c *MockInterface_GetConfidenceHistogram_Call) Run(run func(ctx context.Context, startDate string, endDate string, species string, bins int, limit int)) *MockInterface_GetConfidenceHistogram_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(int), args[5].(int))
+	})
+	return _c
+}
+
+func (_c *MockInterface_GetConfidenceHistogram_Call) Return(_a0 []datastore.SpeciesConfidenceHistogram, _a1 error) *MockInterface_GetConfidenceHistogram_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockInterface_GetConfidenceHistogram_Call) RunAndReturn(run func(context.Context, string, string, string, int, int) ([]datastore.SpeciesConfidenceHistogram, error)) *MockInterface_GetConfidenceHistogram_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetDailyActivityOnset provides a mock function with given fields: ctx, startDate, endDate, species
+func (_m *MockInterface) GetDailyActivityOnset(ctx context.Context, startDate string, endDate string, species string) ([]datastore.DailyActivityOnset, error) {
+	ret := _m.Called(ctx, startDate, endDate, species)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDailyActivityOnset")
+	}
+
+	var r0 []datastore.DailyActivityOnset
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) ([]datastore.DailyActivityOnset, error)); ok {
+		return rf(ctx, startDate, endDate, species)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) []datastore.DailyActivityOnset); ok {
+		r0 = rf(ctx, startDate, endDate, species)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]datastore.DailyActivityOnset)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, string) error); ok {
+		r1 = rf(ctx, startDate, endDate, species)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockInterface_GetDailyActivityOnset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDailyActivityOnset'
+type MockInterface_GetDailyActivityOnset_Call struct {
+	*mock.Call
+}
+
+// GetDailyActivityOnset is a helper method to define mock.On call
+//   - ctx context.Context
+//   - startDate string
+//   - endDate string
+//   - species string
+func (_e *MockInterface_Expecter) GetDailyActivityOnset(ctx interface{}, startDate interface{}, endDate interface{}, species interface{}) *MockInterface_GetDailyActivityOnset_Call {
+	return &MockInterface_GetDailyActivityOnset_Call{Call: _e.mock.On("GetDailyActivityOnset", ctx, startDate, endDate, species)}
+}
+
+func (_c *MockInterface_GetDailyActivityOnset_Call) Run(run func(ctx context.Context, startDate string, endDate string, species string)) *MockInterface_GetDailyActivityOnset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *MockInterface_GetDailyActivityOnset_Call) Return(_a0 []datastore.DailyActivityOnset, _a1 error) *MockInterface_GetDailyActivityOnset_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockInterface_GetDailyActivityOnset_Call) RunAndReturn(run func(context.Context, string, string, string) ([]datastore.DailyActivityOnset, error)) *MockInterface_GetDailyActivityOnset_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3511,6 +3696,66 @@ func (_c *MockInterface_GetReviewsBatch_Call) RunAndReturn(run func(uint, int) (
 	return _c
 }
 
+// GetSpeciesAccumulation provides a mock function with given fields: ctx, startDate, endDate
+func (_m *MockInterface) GetSpeciesAccumulation(ctx context.Context, startDate string, endDate string) ([]datastore.SpeciesAccumulationPoint, error) {
+	ret := _m.Called(ctx, startDate, endDate)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpeciesAccumulation")
+	}
+
+	var r0 []datastore.SpeciesAccumulationPoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) ([]datastore.SpeciesAccumulationPoint, error)); ok {
+		return rf(ctx, startDate, endDate)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) []datastore.SpeciesAccumulationPoint); ok {
+		r0 = rf(ctx, startDate, endDate)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]datastore.SpeciesAccumulationPoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, startDate, endDate)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockInterface_GetSpeciesAccumulation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSpeciesAccumulation'
+type MockInterface_GetSpeciesAccumulation_Call struct {
+	*mock.Call
+}
+
+// GetSpeciesAccumulation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - startDate string
+//   - endDate string
+func (_e *MockInterface_Expecter) GetSpeciesAccumulation(ctx interface{}, startDate interface{}, endDate interface{}) *MockInterface_GetSpeciesAccumulation_Call {
+	return &MockInterface_GetSpeciesAccumulation_Call{Call: _e.mock.On("GetSpeciesAccumulation", ctx, startDate, endDate)}
+}
+
+func (_c *MockInterface_GetSpeciesAccumulation_Call) Run(run func(ctx context.Context, startDate string, endDate string)) *MockInterface_GetSpeciesAccumulation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockInterface_GetSpeciesAccumulation_Call) Return(_a0 []datastore.SpeciesAccumulationPoint, _a1 error) *MockInterface_GetSpeciesAccumulation_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockInterface_GetSpeciesAccumulation_Call) RunAndReturn(run func(context.Context, string, string) ([]datastore.SpeciesAccumulationPoint, error)) *MockInterface_GetSpeciesAccumulation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSpeciesDiversityData provides a mock function with given fields: ctx, startDate, endDate
 func (_m *MockInterface) GetSpeciesDiversityData(ctx context.Context, startDate string, endDate string) ([]datastore.DailyAnalyticsData, error) {
 	ret := _m.Called(ctx, startDate, endDate)
@@ -3629,6 +3874,67 @@ func (_c *MockInterface_GetSpeciesFirstDetectionInPeriod_Call) Return(_a0 []data
 }
 
 func (_c *MockInterface_GetSpeciesFirstDetectionInPeriod_Call) RunAndReturn(run func(context.Context, string, string, int, int) ([]datastore.NewSpeciesData, error)) *MockInterface_GetSpeciesFirstDetectionInPeriod_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetSpeciesPhenology provides a mock function with given fields: ctx, startDate, endDate, limit
+func (_m *MockInterface) GetSpeciesPhenology(ctx context.Context, startDate string, endDate string, limit int) ([]datastore.SpeciesPhenologyPoint, error) {
+	ret := _m.Called(ctx, startDate, endDate, limit)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpeciesPhenology")
+	}
+
+	var r0 []datastore.SpeciesPhenologyPoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) ([]datastore.SpeciesPhenologyPoint, error)); ok {
+		return rf(ctx, startDate, endDate, limit)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int) []datastore.SpeciesPhenologyPoint); ok {
+		r0 = rf(ctx, startDate, endDate, limit)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]datastore.SpeciesPhenologyPoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int) error); ok {
+		r1 = rf(ctx, startDate, endDate, limit)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockInterface_GetSpeciesPhenology_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSpeciesPhenology'
+type MockInterface_GetSpeciesPhenology_Call struct {
+	*mock.Call
+}
+
+// GetSpeciesPhenology is a helper method to define mock.On call
+//   - ctx context.Context
+//   - startDate string
+//   - endDate string
+//   - limit int
+func (_e *MockInterface_Expecter) GetSpeciesPhenology(ctx interface{}, startDate interface{}, endDate interface{}, limit interface{}) *MockInterface_GetSpeciesPhenology_Call {
+	return &MockInterface_GetSpeciesPhenology_Call{Call: _e.mock.On("GetSpeciesPhenology", ctx, startDate, endDate, limit)}
+}
+
+func (_c *MockInterface_GetSpeciesPhenology_Call) Run(run func(ctx context.Context, startDate string, endDate string, limit int)) *MockInterface_GetSpeciesPhenology_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int))
+	})
+	return _c
+}
+
+func (_c *MockInterface_GetSpeciesPhenology_Call) Return(_a0 []datastore.SpeciesPhenologyPoint, _a1 error) *MockInterface_GetSpeciesPhenology_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockInterface_GetSpeciesPhenology_Call) RunAndReturn(run func(context.Context, string, string, int) ([]datastore.SpeciesPhenologyPoint, error)) *MockInterface_GetSpeciesPhenology_Call {
 	_c.Call.Return(run)
 	return _c
 }

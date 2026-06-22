@@ -759,6 +759,7 @@ export type TranslationKey =
   | 'detections.row.viewDetails' // params: species
   | 'detections.row.play'
   | 'detections.row.playAudio'
+  | 'detections.row.imageFailedToLoad'
   | 'detections.media.title'
   | 'detections.media.clipHint'
   | 'detections.tabs.overview'
@@ -1458,6 +1459,29 @@ export type TranslationKey =
   | 'analytics.advanced.charts.diversity.noDataHint'
   | 'analytics.advanced.charts.diversity.axisDate'
   | 'analytics.advanced.charts.diversity.axisUniqueSpecies'
+  | 'analytics.advanced.charts.accumulation.title'
+  | 'analytics.advanced.charts.accumulation.description'
+  | 'analytics.advanced.charts.accumulation.noData'
+  | 'analytics.advanced.charts.accumulation.noDataHint'
+  | 'analytics.advanced.charts.accumulation.ariaLabel'
+  | 'analytics.advanced.charts.accumulation.axisDate'
+  | 'analytics.advanced.charts.accumulation.axisSpecies'
+  | 'analytics.advanced.charts.accumulation.totalSpecies' // params: species
+  | 'analytics.advanced.charts.accumulation.tooltipCumulative'
+  | 'analytics.advanced.charts.accumulation.tooltipNew'
+  | 'analytics.advanced.charts.accumulation.summary' // params: days, species
+  | 'analytics.advanced.charts.phenology.title'
+  | 'analytics.advanced.charts.phenology.description'
+  | 'analytics.advanced.charts.phenology.noData'
+  | 'analytics.advanced.charts.phenology.noDataHint'
+  | 'analytics.advanced.charts.phenology.ariaLabel'
+  | 'analytics.advanced.charts.phenology.axisDate'
+  | 'analytics.advanced.charts.phenology.summary' // params: species
+  | 'analytics.advanced.charts.phenology.tooltipFirst'
+  | 'analytics.advanced.charts.phenology.tooltipLast'
+  | 'analytics.advanced.charts.phenology.tooltipResidency'
+  | 'analytics.advanced.charts.phenology.tooltipCount'
+  | 'analytics.advanced.charts.phenology.residencyDays' // params: days
   | 'analytics.advanced.charts.heatmap.title'
   | 'analytics.advanced.charts.heatmap.description'
   | 'analytics.advanced.charts.heatmap.noData'
@@ -1480,6 +1504,52 @@ export type TranslationKey =
   | 'analytics.advanced.charts.ridgeline.tooltipDetections'
   | 'analytics.advanced.charts.ridgeline.tooltipPeak'
   | 'analytics.advanced.charts.ridgeline.summary' // params: count, species, time
+  | 'analytics.advanced.charts.succession.title'
+  | 'analytics.advanced.charts.succession.description'
+  | 'analytics.advanced.charts.succession.noData'
+  | 'analytics.advanced.charts.succession.noDataHint'
+  | 'analytics.advanced.charts.succession.ariaLabel'
+  | 'analytics.advanced.charts.succession.axisTime'
+  | 'analytics.advanced.charts.succession.note' // params: count
+  | 'analytics.advanced.charts.succession.tooltipDetections'
+  | 'analytics.advanced.charts.succession.tooltipPeak'
+  | 'analytics.advanced.charts.succession.summary' // params: count, species, time
+  | 'analytics.advanced.charts.dawnOnset.title'
+  | 'analytics.advanced.charts.dawnOnset.description'
+  | 'analytics.advanced.charts.dawnOnset.noData'
+  | 'analytics.advanced.charts.dawnOnset.noDataHint'
+  | 'analytics.advanced.charts.dawnOnset.ariaLabel'
+  | 'analytics.advanced.charts.dawnOnset.axisDate'
+  | 'analytics.advanced.charts.dawnOnset.axisOnset'
+  | 'analytics.advanced.charts.dawnOnset.civilDawn'
+  | 'analytics.advanced.charts.dawnOnset.tooltipOnset'
+  | 'analytics.advanced.charts.dawnOnset.tooltipOnsetAfter' // params: minutes
+  | 'analytics.advanced.charts.dawnOnset.tooltipOnsetBefore' // params: minutes
+  | 'analytics.advanced.charts.dawnOnset.tooltipOnsetAt'
+  | 'analytics.advanced.charts.dawnOnset.tooltipCount'
+  | 'analytics.advanced.charts.dawnOnset.summary' // params: days, plotted
+  | 'analytics.advanced.charts.nocturnal.title'
+  | 'analytics.advanced.charts.nocturnal.description'
+  | 'analytics.advanced.charts.nocturnal.noData'
+  | 'analytics.advanced.charts.nocturnal.noDataHint'
+  | 'analytics.advanced.charts.nocturnal.ariaLabel'
+  | 'analytics.advanced.charts.nocturnal.axisHour'
+  | 'analytics.advanced.charts.nocturnal.tooltipHour' // params: start, end
+  | 'analytics.advanced.charts.nocturnal.tooltipCount'
+  | 'analytics.advanced.charts.nocturnal.summary' // params: total, peak
+  | 'analytics.advanced.charts.nocturnal.legendDay'
+  | 'analytics.advanced.charts.nocturnal.legendTwilight'
+  | 'analytics.advanced.charts.nocturnal.legendNight'
+  | 'analytics.advanced.charts.confidence.title'
+  | 'analytics.advanced.charts.confidence.description'
+  | 'analytics.advanced.charts.confidence.noData'
+  | 'analytics.advanced.charts.confidence.noDataHint'
+  | 'analytics.advanced.charts.confidence.ariaLabel'
+  | 'analytics.advanced.charts.confidence.axisLabel'
+  | 'analytics.advanced.charts.confidence.note' // params: count
+  | 'analytics.advanced.charts.confidence.tooltipCount'
+  | 'analytics.advanced.charts.confidence.tooltipPeak'
+  | 'analytics.advanced.charts.confidence.summary' // params: count, species, time
   | 'analytics.advanced.charts.tooltips.date'
   | 'analytics.advanced.charts.tooltips.percentage'
   | 'analytics.advanced.charts.tooltips.detections'
@@ -3316,8 +3386,10 @@ export type TranslationKey =
   | 'components.audio.spectrogramLoaded'
   | 'components.audio.spectrogramLoadingAria'
   | 'components.audio.spectrogramAlt'
+  | 'components.audio.spectrogramForSpecies' // params: species
   | 'components.audio.spectrogramGeneratingAria'
   | 'components.audio.generating'
+  | 'components.audio.waiting'
   | 'components.audio.queuePosition' // params: position
   | 'components.audio.loadError'
   | 'components.forms.numberField.adjustedToMinimum' // params: value
@@ -4011,6 +4083,13 @@ export type TranslationParams = {
   'analytics.species.manage.removedFromConfirmed': { species: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
   'analytics.advanced.detections': { count: string | number };
+  'analytics.advanced.charts.accumulation.totalSpecies': { species: string | number };
+  'analytics.advanced.charts.accumulation.summary': {
+    days: string | number;
+    species: string | number;
+  };
+  'analytics.advanced.charts.phenology.summary': { species: string | number };
+  'analytics.advanced.charts.phenology.residencyDays': { days: string | number };
   'analytics.advanced.charts.heatmap.legendMore': { max: string | number };
   'analytics.advanced.charts.heatmap.summary': {
     total: string | number;
@@ -4020,6 +4099,29 @@ export type TranslationParams = {
   };
   'analytics.advanced.charts.ridgeline.note': { count: string | number };
   'analytics.advanced.charts.ridgeline.summary': {
+    count: string | number;
+    species: string | number;
+    time: string | number;
+  };
+  'analytics.advanced.charts.succession.note': { count: string | number };
+  'analytics.advanced.charts.succession.summary': {
+    count: string | number;
+    species: string | number;
+    time: string | number;
+  };
+  'analytics.advanced.charts.dawnOnset.tooltipOnsetAfter': { minutes: string | number };
+  'analytics.advanced.charts.dawnOnset.tooltipOnsetBefore': { minutes: string | number };
+  'analytics.advanced.charts.dawnOnset.summary': {
+    days: string | number;
+    plotted: string | number;
+  };
+  'analytics.advanced.charts.nocturnal.tooltipHour': {
+    start: string | number;
+    end: string | number;
+  };
+  'analytics.advanced.charts.nocturnal.summary': { total: string | number; peak: string | number };
+  'analytics.advanced.charts.confidence.note': { count: string | number };
+  'analytics.advanced.charts.confidence.summary': {
     count: string | number;
     species: string | number;
     time: string | number;
@@ -4114,6 +4216,7 @@ export type TranslationParams = {
   'media.audio.nowPlaying': { source: string | number };
   'media.audio.streamTitle': { source: string | number };
   'media.audio.playbackError': { details: string | number };
+  'components.audio.spectrogramForSpecies': { species: string | number };
   'components.audio.queuePosition': { position: string | number };
   'components.forms.numberField.adjustedToMinimum': { value: string | number };
   'components.forms.numberField.adjustedToMaximum': { value: string | number };
