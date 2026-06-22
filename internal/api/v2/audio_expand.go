@@ -41,12 +41,22 @@ const (
 	expandProcessTimeout = 60 * time.Second
 )
 
-// expandAllowedFactors lists the fixed time-expansion factors offered to users.
-// Kept as an ordered slice (for UI) plus a set (for O(1) validation).
+// expandAllowedFactors lists the fixed time-expansion factors offered to users
+// (ordered, for the UI). expandFactorSet is derived from it for O(1) validation,
+// so the two can never drift out of sync.
 var (
 	expandAllowedFactors = []int{5, 10, 16, 20}
-	expandFactorSet      = map[int]bool{5: true, 10: true, 16: true, 20: true}
+	expandFactorSet      = newFactorSet(expandAllowedFactors)
 )
+
+// newFactorSet builds a lookup set from the ordered factor slice.
+func newFactorSet(factors []int) map[int]bool {
+	set := make(map[int]bool, len(factors))
+	for _, f := range factors {
+		set[f] = true
+	}
+	return set
+}
 
 // initAudioExpandRoutes registers the audible-bat-playback routes. It is invoked
 // from initMediaRoutes after the datastore-dependent routes are confirmed
@@ -256,9 +266,10 @@ func (c *Controller) resolveExpandSourcePath(noteID string) (absPath string, ok 
 }
 
 // probeSourceSampleRate returns the sample rate (Hz) of the given local audio
-// file. ffprobe accepts a filesystem path as its input URL.
+// file. ProbeFileInfo (not ProbeStreamInfo) is used because the latter applies
+// a network protocol whitelist that rejects local filesystem paths.
 func (c *Controller) probeSourceSampleRate(ctx context.Context, absPath string) (int, error) {
-	info, err := ffmpeg.ProbeStreamInfo(ctx, absPath)
+	info, err := ffmpeg.ProbeFileInfo(ctx, absPath)
 	if err != nil {
 		return 0, fmt.Errorf("probe source sample rate: %w", err)
 	}

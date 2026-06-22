@@ -4598,13 +4598,14 @@
         "rangeLabel": "{start} s – {end} s"
       },
       "batExpand": {
-        "title": "Audible bat playback",
-        "factorTooltip": "Time expansion factor",
-        "play": "Play audible version",
-        "pause": "Pause",
-        "download": "Download audible WAV",
-        "error": "Failed to generate audible playback",
-        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+        "title": "Slyšitelné přehrávání netopýrů",
+        "factorTooltip": "Faktor časového roztažení",
+        "play": "Přehrát slyšitelnou verzi",
+        "pause": "Pozastavit",
+        "download": "Stáhnout slyšitelný WAV",
+        "generating": "Generování…",
+        "error": "Nepodařilo se vygenerovat slyšitelné přehrávání",
+        "disabledTooltip": "Zdrojová nahrávka je pod {minRate} kHz – není dostupný žádný ultrazvukový obsah"
       },
       "processing": {
         "playSelection": "Přehrát výběr",

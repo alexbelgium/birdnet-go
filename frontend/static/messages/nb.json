@@ -4598,13 +4598,14 @@
         "rangeLabel": "{start}s – {end}s"
       },
       "batExpand": {
-        "title": "Audible bat playback",
-        "factorTooltip": "Time expansion factor",
-        "play": "Play audible version",
+        "title": "Hørbar flaggermus-avspilling",
+        "factorTooltip": "Tidsutvidelsesfaktor",
+        "play": "Spill av hørbar versjon",
         "pause": "Pause",
-        "download": "Download audible WAV",
-        "error": "Failed to generate audible playback",
-        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+        "download": "Last ned hørbar WAV",
+        "generating": "Genererer…",
+        "error": "Kunne ikke generere hørbar avspilling",
+        "disabledTooltip": "Kildeopptaket er under {minRate} kHz – ingen ultralydinnhold tilgjengelig"
       },
       "processing": {
         "playSelection": "Spill av valgt område",

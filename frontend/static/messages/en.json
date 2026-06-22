@@ -4603,6 +4603,7 @@
         "play": "Play audible version",
         "pause": "Pause",
         "download": "Download audible WAV",
+        "generating": "Generating…",
         "error": "Failed to generate audible playback",
         "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
       },

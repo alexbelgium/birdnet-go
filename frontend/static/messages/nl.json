@@ -4598,13 +4598,14 @@
         "rangeLabel": "{start}s – {end}s"
       },
       "batExpand": {
-        "title": "Audible bat playback",
-        "factorTooltip": "Time expansion factor",
-        "play": "Play audible version",
-        "pause": "Pause",
-        "download": "Download audible WAV",
-        "error": "Failed to generate audible playback",
-        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+        "title": "Hoorbare vleermuisweergave",
+        "factorTooltip": "Tijdsuitrekkingsfactor",
+        "play": "Hoorbare versie afspelen",
+        "pause": "Pauze",
+        "download": "Hoorbare WAV downloaden",
+        "generating": "Genereren…",
+        "error": "Kan hoorbare weergave niet genereren",
+        "disabledTooltip": "Bronopname is lager dan {minRate} kHz – geen ultrasone inhoud beschikbaar"
       },
       "processing": {
         "playSelection": "Selectie afspelen",

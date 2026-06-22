@@ -3347,6 +3347,7 @@ export type TranslationKey =
   | 'components.audioPlayer.batExpand.play'
   | 'components.audioPlayer.batExpand.pause'
   | 'components.audioPlayer.batExpand.download'
+  | 'components.audioPlayer.batExpand.generating'
   | 'components.audioPlayer.batExpand.error'
   | 'components.audioPlayer.batExpand.disabledTooltip' // params: minRate
   | 'components.audioPlayer.processing.playSelection'
