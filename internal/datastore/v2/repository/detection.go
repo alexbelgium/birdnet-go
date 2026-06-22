@@ -277,6 +277,19 @@ type DetectionRepository interface {
 	// GetSpeciesFirstDetection (per-species first ever).
 	GetSpeciesFirstDetectionInPeriod(ctx context.Context, start, end int64, limit, offset int) ([]SpeciesFirstSeen, error)
 
+	// GetSpeciesFirstSeenInPeriod returns the first detection (MIN detected_at) of each species
+	// within the half-open range [start, end), false positives excluded, grouped by scientific name
+	// so multi-model labels collapse to one species. Unlike GetSpeciesFirstDetectionInPeriod it
+	// excludes false positives and is not paginated (every species is returned), as required by the
+	// species accumulation analytics. Results are ordered by first-seen ascending.
+	GetSpeciesFirstSeenInPeriod(ctx context.Context, start, end int64) ([]SpeciesFirstSeen, error)
+
+	// GetSpeciesPhenologyInPeriod returns each species' residency span within the half-open range
+	// [start, end): MIN/MAX detected_at and the detection COUNT, false positives excluded, grouped by
+	// scientific name so multi-model labels collapse to one species. Results are the top `limit` species
+	// by detection volume (ORDER BY count DESC), as required by the arrival/departure phenology chart.
+	GetSpeciesPhenologyInPeriod(ctx context.Context, start, end int64, limit int) ([]SpeciesPhenology, error)
+
 	// === Utilities ===
 
 	// GetClipPath returns the clip path for a detection.

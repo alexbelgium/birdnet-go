@@ -1750,6 +1750,49 @@ func (r *detectionRepository) GetSpeciesFirstDetectionInPeriod(ctx context.Conte
 	return results, err
 }
 
+// GetSpeciesFirstSeenInPeriod returns the in-period first detection of each species over the
+// half-open range [start, end), false positives excluded, grouped by scientific name so a species
+// with one label per model collapses to a single first-seen. Unlike GetSpeciesFirstDetectionInPeriod
+// (which omits the false-positive exclusion and is paginated for the species tracker), this goes
+// through buildAnalyticsBaseQuery so it shares the analytics false-positive filter, and returns every
+// species (no LIMIT) for the accumulation curve. GROUP BY scientific_name with MIN(detected_at) makes
+// the reviews LEFT JOIN immune to fan-out: duplicate joined rows for one detection collapse under the
+// aggregate. label_id is not selected (it is irrelevant to accumulation and stays zero).
+func (r *detectionRepository) GetSpeciesFirstSeenInPeriod(ctx context.Context, start, end int64) ([]SpeciesFirstSeen, error) {
+	var results []SpeciesFirstSeen
+
+	err := r.buildAnalyticsBaseQuery(ctx, start, end, nil, nil).
+		Joins(fmt.Sprintf("JOIN %s l ON l.id = d.label_id", r.labelsTable())).
+		Select("l.scientific_name as scientific_name, MIN(d.detected_at) as first_detected").
+		Group("l.scientific_name").
+		Order("first_detected ASC, l.scientific_name ASC").
+		Scan(&results).Error
+
+	return results, err
+}
+
+// GetSpeciesPhenologyInPeriod returns each species' residency span (MIN/MAX detected_at and the
+// detection COUNT) over the half-open range [start, end), false positives excluded, grouped by
+// scientific name so a species with one label per model collapses to a single span. It shares the
+// analytics false-positive filter via buildAnalyticsBaseQuery and returns the top `limit` species by
+// volume (ORDER BY count DESC) for the arrival/departure phenology chart. GROUP BY scientific_name
+// makes the reviews LEFT JOIN immune to fan-out under MIN/MAX, and because DetectionReview has a
+// unique index on detection_id (reviews are 1:1 with detections) the LEFT JOIN never multiplies rows,
+// so COUNT(*) counts each detection once (the same basis as GetHourlyDistribution).
+func (r *detectionRepository) GetSpeciesPhenologyInPeriod(ctx context.Context, start, end int64, limit int) ([]SpeciesPhenology, error) {
+	var results []SpeciesPhenology
+
+	err := r.buildAnalyticsBaseQuery(ctx, start, end, nil, nil).
+		Joins(fmt.Sprintf("JOIN %s l ON l.id = d.label_id", r.labelsTable())).
+		Select("l.scientific_name as scientific_name, MIN(d.detected_at) as first_detected, MAX(d.detected_at) as last_detected, COUNT(*) as count").
+		Group("l.scientific_name").
+		Order("count DESC, l.scientific_name ASC").
+		Limit(limit).
+		Scan(&results).Error
+
+	return results, err
+}
+
 // ============================================================================
 // Utilities
 // ============================================================================

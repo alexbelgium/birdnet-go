@@ -66,6 +66,54 @@ func buildSpeciesHourlyDistribution(top []repository.SpeciesCount, hourlyByLabel
 	return result
 }
 
+// buildAcousticSuccession turns per-label hourly counts into per-species raw hour-of-day counts for
+// the acoustic succession streamgraph.
+//
+// top is the top-N species by volume from GetTopSpecies, in descending-volume order; each row is one
+// label ID. hourlyByLabel maps a label ID to its [24]int false-positive-excluded hourly counts.
+// Label IDs that resolve to the same scientific name (one per model) are merged into a single series
+// whose buckets are the summed counts, preserving the first-seen volume order. Unlike
+// buildSpeciesHourlyDistribution the counts are NOT normalized: the streamgraph stacks raw volume,
+// so band width is detection count; Total carries the per-species sum for the tooltip.
+//
+// A species whose merged FP-excluded total is zero is dropped: GetTopSpecies ranks by raw volume
+// without excluding false positives, so an all-false-positive species can rank into the top-N yet
+// contribute no real detections; stacking an empty band would add a flat, meaningless layer. The
+// result is always non-nil.
+func buildAcousticSuccession(top []repository.SpeciesCount, hourlyByLabel map[uint][24]int) []datastore.SpeciesHourlyCounts {
+	// Merge label rows that share a scientific name, preserving first-seen (descending-volume)
+	// order. Each distinct species accumulates the hourly counts of all its label IDs.
+	order := make([]string, 0, len(top))
+	countsByName := make(map[string]*[hoursPerDay]int, len(top))
+	for i := range top {
+		name := top[i].ScientificName
+		acc, ok := countsByName[name]
+		if !ok {
+			acc = &[hoursPerDay]int{}
+			countsByName[name] = acc
+			order = append(order, name)
+		}
+		hours := hourlyByLabel[top[i].LabelID] // zero [24]int when the label has no detections
+		for h := range hoursPerDay {
+			acc[h] += hours[h]
+		}
+	}
+
+	result := make([]datastore.SpeciesHourlyCounts, 0, len(order))
+	for _, name := range order {
+		acc := countsByName[name]
+		total := 0
+		for h := range hoursPerDay {
+			total += acc[h]
+		}
+		if total == 0 {
+			continue // ranked by raw volume but no FP-excluded detections; skip the empty band
+		}
+		result = append(result, datastore.SpeciesHourlyCounts{ScientificName: name, Counts: *acc, Total: total})
+	}
+	return result
+}
+
 // minConfidenceHistogramDetections is the per-species floor for the confidence distribution (design
 // spec section 6.5). Below this, a ~20-bin histogram averages under one detection per bin and reads
 // as noise rather than a distribution, so the species is dropped from the top-N set. A single
@@ -351,4 +399,112 @@ func buildDailyActivityOnset(timestamps []int64, loc *time.Location, startDate, 
 		result = append(result, item)
 	}
 	return result, nil
+}
+
+// buildSpeciesAccumulation turns per-species in-period first-seen timestamps into the cumulative
+// species accumulation curve (the biodiversity collector's curve).
+//
+// firstSeen carries each species' first detection (Unix epoch seconds) within the queried window,
+// false positives already excluded upstream. Each timestamp is mapped to its station-local calendar
+// date in loc; the count of species whose first-seen lands on a date is that day's NewSpecies, and
+// CumulativeSpecies is the running total. One point is emitted for every calendar day in the inclusive
+// [startDate, endDate] range so the client gets a continuous date axis whose flat tail reads as the
+// curve's asymptote. First-seen dates outside the enumerated range are ignored (the SQL already bounds
+// them, but a row skewed by loc onto an out-of-range day must never inflate the curve or index past
+// the axis). startDate/endDate are inclusive YYYY-MM-DD bounds; the per-detection bucketing is done
+// in loc (nil -> UTC), while the date axis is enumerated in UTC (see below). The result is always
+// non-nil.
+func buildSpeciesAccumulation(firstSeen []repository.SpeciesFirstSeen, loc *time.Location, startDate, endDate string) ([]datastore.SpeciesAccumulationPoint, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+
+	// Enumerate the date axis in UTC, not loc. We only need the sequence of calendar dates from
+	// startDate to endDate, and UTC has no DST, so AddDate(0,0,1) steps exactly one calendar day every
+	// iteration. Parsing the bounds in a loc whose DST transition skips midnight (clocks jump
+	// 23:59:59 -> 01:00:00, e.g. America/Havana) would normalize the skipped 00:00 forward to 01:00,
+	// drift the loop's wall-clock hour, and drop the final day at the !d.After(end) comparison. The
+	// per-detection bucketing below stays in loc, which is the only place the station timezone matters.
+	start, err := time.Parse(time.DateOnly, startDate)
+	if err != nil {
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryValidation).
+			Context("operation", "build_species_accumulation").
+			Context("start_date", startDate).
+			Build()
+	}
+	end, err := time.Parse(time.DateOnly, endDate)
+	if err != nil {
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryValidation).
+			Context("operation", "build_species_accumulation").
+			Context("end_date", endDate).
+			Build()
+	}
+
+	// Tally how many species are first seen on each station-local calendar date. Dates outside the
+	// enumerated range are never looked up below, so they are ignored without an explicit filter. The
+	// (year, month, day) key is timezone-frame-independent, so the loc-bucketed keys here line up with
+	// the UTC-enumerated lookups below for the same calendar date.
+	newByDate := make(map[dateKey]int, len(firstSeen))
+	for i := range firstSeen {
+		lt := time.Unix(firstSeen[i].FirstDetected, 0).In(loc)
+		y, m, day := lt.Date()
+		newByDate[dateKey{year: y, month: m, day: day}]++
+	}
+
+	result := make([]datastore.SpeciesAccumulationPoint, 0)
+	cumulative := 0
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		y, m, day := d.Date()
+		n := newByDate[dateKey{year: y, month: m, day: day}]
+		cumulative += n
+		result = append(result, datastore.SpeciesAccumulationPoint{
+			Date:              d.Format(time.DateOnly),
+			CumulativeSpecies: cumulative,
+			NewSpecies:        n,
+		})
+	}
+	return result, nil
+}
+
+// buildSpeciesPhenology turns the per-species residency rows (Unix MIN/MAX detection timestamps plus
+// the detection count) into the wire shape for the arrival/departure phenology chart: first and last
+// detection formatted as station-local YYYY-MM-DD dates. Timestamps are projected into loc (nil ->
+// UTC) with a single time.Unix(...).In(loc).Format call per row, so there is no date-range
+// enumeration loop and therefore no DST midnight-skip pitfall.
+//
+// The input rows are top-N by volume (the query's ORDER BY count DESC); this re-sorts the returned
+// rows by arrival (FirstSeen asc, then LastSeen asc, then ScientificName asc) so the Gantt reads
+// top-to-bottom in arrival order, deterministically. The result is always non-nil.
+func buildSpeciesPhenology(rows []repository.SpeciesPhenology, loc *time.Location) []datastore.SpeciesPhenologyPoint {
+	if loc == nil {
+		loc = time.UTC
+	}
+
+	result := make([]datastore.SpeciesPhenologyPoint, 0, len(rows))
+	for i := range rows {
+		first := time.Unix(rows[i].FirstDetected, 0).In(loc).Format(time.DateOnly)
+		last := time.Unix(rows[i].LastDetected, 0).In(loc).Format(time.DateOnly)
+		result = append(result, datastore.SpeciesPhenologyPoint{
+			ScientificName: rows[i].ScientificName,
+			FirstSeen:      first,
+			LastSeen:       last,
+			Count:          rows[i].Count,
+		})
+	}
+
+	sort.SliceStable(result, func(a, b int) bool {
+		if result[a].FirstSeen != result[b].FirstSeen {
+			return result[a].FirstSeen < result[b].FirstSeen
+		}
+		if result[a].LastSeen != result[b].LastSeen {
+			return result[a].LastSeen < result[b].LastSeen
+		}
+		return result[a].ScientificName < result[b].ScientificName
+	})
+
+	return result
 }
