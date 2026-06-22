@@ -1376,6 +1376,7 @@ export type TranslationKey =
   | 'analytics.species.speciesList'
   | 'analytics.species.switchToGrid'
   | 'analytics.species.switchToList'
+  | 'analytics.species.switchToManage'
   | 'analytics.species.noSpeciesFound'
   | 'analytics.species.headers.species'
   | 'analytics.species.headers.detections'
@@ -1386,6 +1387,19 @@ export type TranslationKey =
   | 'analytics.species.card.detections'
   | 'analytics.species.card.confidence'
   | 'analytics.species.card.first'
+  | 'analytics.species.manage.headers.excluded'
+  | 'analytics.species.manage.headers.included'
+  | 'analytics.species.manage.headers.reviewRatio'
+  | 'analytics.species.manage.headers.rangeProbability'
+  | 'analytics.species.manage.headers.confirmed'
+  | 'analytics.species.manage.headers.actions'
+  | 'analytics.species.manage.delete'
+  | 'analytics.species.manage.deleteTitle'
+  | 'analytics.species.manage.deleteConfirm'
+  | 'analytics.species.manage.deleteMessage' // params: count, species
+  | 'analytics.species.manage.deleteWarning'
+  | 'analytics.species.manage.deleteFailed'
+  | 'analytics.species.manage.membershipFailed'
   | 'analytics.advanced.chartControls'
   | 'analytics.advanced.dateRange'
   | 'analytics.advanced.chartOptions'
@@ -3945,6 +3959,7 @@ export type TranslationParams = {
   'system.database.migration.prerequisites.warningCount': { count: string | number };
   'system.inference.coDetectedHelp': { seconds: string | number };
   'analytics.hub.card.notEnoughDataHint': { min: string | number };
+  'analytics.species.manage.deleteMessage': { count: string | number; species: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
   'analytics.advanced.detections': { count: string | number };
   'analytics.advanced.charts.heatmap.legendMore': { max: string | number };

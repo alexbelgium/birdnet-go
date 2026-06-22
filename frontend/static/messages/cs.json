@@ -1769,6 +1769,7 @@
       "speciesList": "Seznam druhů",
       "switchToGrid": "Přepnout na mřížku",
       "switchToList": "Přepnout na seznam",
+      "switchToManage": "Přepnout na správu",
       "noSpeciesFound": "Nebyly nalezeny žádné druhy odpovídající vašim filtrům.",
       "headers": {
         "species": "Druh",
@@ -1782,6 +1783,23 @@
         "detections": "Detekce:",
         "confidence": "Spolehlivost:",
         "first": "Poprvé:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Vyloučeno",
+          "included": "Zahrnuto",
+          "reviewRatio": "Správně",
+          "rangeProbability": "Výskyt",
+          "confirmed": "Potvrzeno",
+          "actions": "Akce"
+        },
+        "delete": "Smazat všechny detekce tohoto druhu",
+        "deleteTitle": "Smazat detekce druhu",
+        "deleteConfirm": "Smazat",
+        "deleteMessage": "Smazat všech {count} detekcí druhu {species}? Uzamčené detekce zůstanou zachovány.",
+        "deleteWarning": "Tímto trvale odstraníte detekce i jejich zvukové nahrávky a tuto akci nelze vrátit zpět.",
+        "deleteFailed": "Smazání detekcí se nezdařilo. Zkuste to prosím znovu.",
+        "membershipFailed": "Nepodařilo se aktualizovat seznamy druhů. Zkuste to znovu."
       }
     },
     "advanced": {

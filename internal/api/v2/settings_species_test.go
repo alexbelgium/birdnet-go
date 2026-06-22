@@ -479,6 +479,24 @@ func patchRealtime(t *testing.T, e *echo.Echo, c *Controller, payload any) *http
 	return rec
 }
 
+// patchSpecies creates a PATCH request context for the species section
+func patchSpecies(t *testing.T, e *echo.Echo, c *Controller, payload any) *httptest.ResponseRecorder {
+	t.Helper()
+
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v2/settings/species", bytes.NewReader(data))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetPath("/api/v2/settings/:section")
+	ctx.SetParamNames("section")
+	ctx.SetParamValues("species")
+
+	require.NoError(t, c.UpdateSectionSettings(ctx))
+	return rec
+}
+
 // getRealtime creates a GET request context for the realtime section
 func getRealtime(t *testing.T, e *echo.Echo, c *Controller) *httptest.ResponseRecorder {
 	t.Helper()
@@ -492,6 +510,65 @@ func getRealtime(t *testing.T, e *echo.Echo, c *Controller) *httptest.ResponseRe
 
 	require.NoError(t, c.GetSectionSettings(ctx))
 	return rec
+}
+
+// TestPatchDoesNotClobberConfirmedSpecies verifies that the analytics-only
+// Realtime.Species.Confirmed list cannot be modified through the settings PATCH
+// endpoint, which (unlike the PUT flow) does not enforce the blocked-field map.
+// Confirmed is managed exclusively via /api/v2/detections/confirm. A PATCH carrying
+// an explicit "confirmed" value must be ignored while other species fields apply.
+func TestPatchDoesNotClobberConfirmedSpecies(t *testing.T) {
+	t.Parallel()
+
+	newController := func() (*echo.Echo, *Controller) {
+		e := echo.New()
+		settings := newValidTestSettings()
+		settings.Realtime.Species = conf.SpeciesSettings{
+			Include:   []string{"Blue Jay"},
+			Exclude:   []string{},
+			Config:    map[string]conf.SpeciesConfig{},
+			Confirmed: []string{"American Robin"},
+		}
+		controller := &Controller{DisableSaveSettings: true}
+		controller.Settings.Store(settings)
+		return e, controller
+	}
+
+	t.Run("realtime section ignores confirmed", func(t *testing.T) {
+		t.Parallel()
+		e, controller := newController()
+
+		rec := patchRealtime(t, e, controller, map[string]any{
+			"species": map[string]any{
+				"confirmed": []string{},
+				"include":   []string{"Northern Cardinal"},
+			},
+		})
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		got := controller.Settings.Load().Realtime.Species
+		assert.Equal(t, []string{"American Robin"}, got.Confirmed,
+			"confirmed must stay immutable via the settings PATCH path")
+		assert.Equal(t, []string{"Northern Cardinal"}, got.Include,
+			"other species fields must still update")
+	})
+
+	t.Run("species section ignores confirmed", func(t *testing.T) {
+		t.Parallel()
+		e, controller := newController()
+
+		rec := patchSpecies(t, e, controller, map[string]any{
+			"confirmed": []string{"Injected Species"},
+			"include":   []string{"Northern Cardinal"},
+		})
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		got := controller.Settings.Load().Realtime.Species
+		assert.Equal(t, []string{"American Robin"}, got.Confirmed,
+			"confirmed must stay immutable via the settings PATCH path")
+		assert.Equal(t, []string{"Northern Cardinal"}, got.Include,
+			"other species fields must still update")
+	})
 }
 
 // TestSpeciesConfigNormalizationOnAPIUpdate tests that species config keys

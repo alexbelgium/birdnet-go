@@ -1033,9 +1033,42 @@ func handleGenericSection(sectionPtr any, data json.RawMessage, sectionName stri
 		return fmt.Errorf("failed to normalize species config keys: %w", err)
 	}
 
+	// Realtime.Species.Confirmed is analytics-only and managed exclusively via
+	// /api/v2/detections/confirm (see getBlockedFieldMap). The generic merge below
+	// does NOT enforce the blocked-field map — that enforcement only runs in the PUT
+	// flow via updateAllowedFieldsRecursivelyWithTracking — so snapshot Confirmed here
+	// and restore it after the merge to keep it immutable through the settings PATCH
+	// path. Without this, a PATCH carrying an explicit "confirmed" value would clobber
+	// the confirmed list.
+	var savedConfirmed []string
+	confirmedTracked := true
+	switch s := sectionPtr.(type) {
+	case *conf.SpeciesSettings:
+		savedConfirmed = s.Confirmed
+	case *conf.RealtimeSettings:
+		savedConfirmed = s.Species.Confirmed
+	default:
+		confirmedTracked = false
+	}
+
 	// Use mergeJSONIntoStruct to preserve fields not included in the update
 	if err := mergeJSONIntoStruct(normalizedData, sectionPtr); err != nil {
 		return fmt.Errorf("failed to merge settings for section %s: %w", sectionName, err)
+	}
+
+	if confirmedTracked {
+		switch s := sectionPtr.(type) {
+		case *conf.SpeciesSettings:
+			if !slices.Equal(s.Confirmed, savedConfirmed) {
+				*skippedFields = append(*skippedFields, "Realtime.Species.Confirmed")
+			}
+			s.Confirmed = savedConfirmed
+		case *conf.RealtimeSettings:
+			if !slices.Equal(s.Species.Confirmed, savedConfirmed) {
+				*skippedFields = append(*skippedFields, "Realtime.Species.Confirmed")
+			}
+			s.Species.Confirmed = savedConfirmed
+		}
 	}
 
 	// Apply field-level permissions if needed
@@ -1056,11 +1089,14 @@ func handleGenericSection(sectionPtr any, data json.RawMessage, sectionName stri
 		}
 	}
 
+	// NOTE: This PATCH/merge path does NOT enforce the full blocked-field map; only
+	// the deep merge above runs here. Fields that must stay immutable on this path
+	// have to be handled explicitly (see the Confirmed snapshot/restore above). The
+	// recursive blocked-field enforcement only runs in the PUT flow
+	// (updateAllowedFieldsRecursivelyWithTracking). The note below is informational.
 	blockedFieldsMap := getBlockedFieldMap()
 	if blockedFields, exists := blockedFieldsMap[capitalizedSectionName]; exists {
 		if _, ok := blockedFields.(map[string]any); ok {
-			// For now, just note that we have blocked fields
-			// The actual blocking happens in updateAllowedFieldsRecursivelyWithTracking
 			*skippedFields = append(*skippedFields, fmt.Sprintf("Section %s has field-level restrictions", sectionName))
 		}
 	}
@@ -2111,6 +2147,12 @@ func getBlockedFieldMap() map[string]any {
 		// Realtime section - block runtime fields
 		"Realtime": map[string]any{
 			"Audio": getAudioBlockedFields(),
+			// Species.Confirmed is analytics-only and managed exclusively via
+			// /api/v2/detections/confirm. Block it so a Settings save (which omits
+			// it) cannot clobber the confirmed list.
+			"Species": map[string]any{
+				"Confirmed": true,
+			},
 		},
 
 		// All other fields are allowed by default
