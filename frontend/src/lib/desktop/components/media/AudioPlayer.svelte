@@ -2203,8 +2203,8 @@
     onNormalizeToggle={handleNormalizeToggle}
     onExport={handleToolbarExport}
   />
-  <BatAudioExpand {detectionId} />
 {/if}
+<BatAudioExpand {detectionId} />
 
 <style>
   .processing-badge {
