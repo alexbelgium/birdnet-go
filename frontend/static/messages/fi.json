@@ -4597,16 +4597,6 @@
         "formatLabel": "Muoto",
         "rangeLabel": "{start}s - {end}s"
       },
-      "batExpand": {
-        "title": "Kuultava lepakoiden toisto",
-        "factorTooltip": "Ajan venytyskerroin",
-        "play": "Toista kuultava versio",
-        "pause": "Keskeytä",
-        "download": "Lataa kuultava WAV",
-        "generating": "Luodaan…",
-        "error": "Kuultavan toiston luominen epäonnistui",
-        "disabledTooltip": "Lähdeäänitys on alle {minRate} kHz – ultraäänisisältöä ei ole saatavilla"
-      },
       "processing": {
         "playSelection": "Toista valinta",
         "skipToStart": "Siirry valinnan alkuun",

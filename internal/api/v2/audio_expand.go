@@ -16,6 +16,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -26,8 +27,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/tphakala/birdnet-go/internal/audiocore/ffmpeg"
-	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
@@ -37,8 +36,15 @@ const (
 	expandOutputSampleRate = 48000
 	// expandDefaultFactor is the default time-expansion factor.
 	expandDefaultFactor = 5
+	// expandMinSourceRate is the minimum source capture rate (Hz) that can carry
+	// ultrasonic bat content. Hard-coded here to keep the feature self-contained.
+	expandMinSourceRate = 96000
+	// expandModelType is the stored model type string that denotes a bat model.
+	expandModelType = "bat"
 	// expandProcessTimeout bounds the FFmpeg time-expansion run.
 	expandProcessTimeout = 60 * time.Second
+	// expandProbeTimeout bounds the ffprobe source-rate probe.
+	expandProbeTimeout = 10 * time.Second
 )
 
 // expandAllowedFactors lists the fixed time-expansion factors offered to users
@@ -82,7 +88,7 @@ type AudioExpandInfo struct {
 
 // isBatModelType reports whether the stored model type denotes a bat model.
 func isBatModelType(modelType string) bool {
-	return strings.EqualFold(modelType, string(entities.ModelTypeBat))
+	return strings.EqualFold(modelType, expandModelType)
 }
 
 // GetAudioExpandInfo returns the capability metadata for the audible bat
@@ -108,7 +114,7 @@ func (c *Controller) GetAudioExpandInfo(ctx echo.Context) error {
 
 	info := AudioExpandInfo{
 		IsBat:         isBatModelType(modelType),
-		MinSourceRate: ffmpeg.MinBatSampleRate,
+		MinSourceRate: expandMinSourceRate,
 		OutputRate:    expandOutputSampleRate,
 		DefaultFactor: expandDefaultFactor,
 		Factors:       expandAllowedFactors,
@@ -139,7 +145,7 @@ func (c *Controller) GetAudioExpandInfo(ctx echo.Context) error {
 		info.Supported = false
 	case probeOK:
 		// Authoritative rate known: gate on the ultrasonic floor.
-		info.Supported = info.SourceRate >= ffmpeg.MinBatSampleRate
+		info.Supported = info.SourceRate >= expandMinSourceRate
 	default:
 		// Rate could not be determined (probe unavailable/failed). Stay enabled
 		// rather than mislabeling a bat clip as sub-96 kHz; the POST handler
@@ -194,9 +200,9 @@ func (c *Controller) ExpandBatAudioByID(ctx echo.Context) error {
 	if err != nil {
 		return c.HandleError(ctx, err, "Failed to probe source audio", http.StatusInternalServerError)
 	}
-	if sourceRate < ffmpeg.MinBatSampleRate {
-		return c.HandleError(ctx, fmt.Errorf("source rate %d below minimum %d", sourceRate, ffmpeg.MinBatSampleRate),
-			fmt.Sprintf("Source recording is below %d kHz and has no ultrasonic content", ffmpeg.MinBatSampleRate/1000),
+	if sourceRate < expandMinSourceRate {
+		return c.HandleError(ctx, fmt.Errorf("source rate %d below minimum %d", sourceRate, expandMinSourceRate),
+			fmt.Sprintf("Source recording is below %d kHz and has no ultrasonic content", expandMinSourceRate/1000),
 			http.StatusBadRequest)
 	}
 
@@ -284,14 +290,54 @@ func (c *Controller) resolveExpandSourcePath(noteID string) (absPath string, ok 
 }
 
 // probeSourceSampleRate returns the sample rate (Hz) of the given local audio
-// file. ProbeFileInfo (not ProbeStreamInfo) is used because the latter applies
-// a network protocol whitelist that rejects local filesystem paths.
+// file by invoking ffprobe directly. It deliberately does NOT pass
+// -protocol_whitelist (the shared stream-probe helper omits "file", which
+// rejects local filesystem paths) so that on-disk clips probe correctly.
 func (c *Controller) probeSourceSampleRate(ctx context.Context, absPath string) (int, error) {
-	info, err := ffmpeg.ProbeFileInfo(ctx, absPath)
-	if err != nil {
-		return 0, fmt.Errorf("probe source sample rate: %w", err)
+	ffprobePath := c.currentSettings().Realtime.Audio.FfprobePath
+	if ffprobePath == "" {
+		ffprobePath = "ffprobe"
 	}
-	return info.SampleRate, nil
+
+	probeCtx, cancel := context.WithTimeout(ctx, expandProbeTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(probeCtx, ffprobePath, //nolint:gosec // G204: ffprobePath from app config or fixed default; absPath validated by resolveExpandSourcePath
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_streams",
+		"-select_streams", "a:0",
+		absPath,
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return 0, fmt.Errorf("ffprobe failed: %w (stderr: %s)", err, stderr.String())
+	}
+
+	var out struct {
+		Streams []struct {
+			SampleRate string `json:"sample_rate"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		return 0, fmt.Errorf("parse ffprobe output: %w", err)
+	}
+	if len(out.Streams) == 0 {
+		return 0, fmt.Errorf("no audio streams found")
+	}
+
+	// sample_rate may be reported as a fraction (e.g. "44100/1").
+	rateStr := out.Streams[0].SampleRate
+	if i := strings.Index(rateStr, "/"); i != -1 {
+		rateStr = rateStr[:i]
+	}
+	rate, err := strconv.Atoi(rateStr)
+	if err != nil || rate <= 0 {
+		return 0, fmt.Errorf("invalid sample rate %q", out.Streams[0].SampleRate)
+	}
+	return rate, nil
 }
 
 // expandSanitizeID neutralises path-traversal characters in a note ID so it is
@@ -315,8 +361,8 @@ func expandCacheKey(noteID string, sourceRate, factor int) string {
 // is forced to mono 16-bit PCM. Writing to a seekable file lets FFmpeg fix the
 // WAV header sizes (piping to stdout produces broken headers).
 func expandAudioToFile(ctx context.Context, srcPath, ffmpegPath string, sourceRate, factor int, outputPath string) error {
-	if err := ffmpeg.ValidateFFmpegPath(ffmpegPath); err != nil {
-		return fmt.Errorf("invalid FFmpeg path: %w", err)
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
 	}
 	if factor <= 0 || sourceRate <= 0 {
 		return fmt.Errorf("invalid expansion parameters: sourceRate=%d factor=%d", sourceRate, factor)
@@ -328,7 +374,7 @@ func expandAudioToFile(ctx context.Context, srcPath, ffmpegPath string, sourceRa
 	newRate := sourceRate / factor
 	filterChain := fmt.Sprintf("asetrate=%d,aresample=%d", newRate, expandOutputSampleRate)
 
-	cmd := exec.CommandContext(ctx, ffmpegPath, //nolint:gosec // G204: ffmpegPath validated above; remaining args are integer-derived or app-controlled paths
+	cmd := exec.CommandContext(ctx, ffmpegPath, //nolint:gosec // G204: ffmpegPath from app config or fixed default; remaining args are integer-derived or app-controlled paths
 		"-hide_banner",
 		"-loglevel", "error",
 		"-y",

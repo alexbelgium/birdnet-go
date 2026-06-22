@@ -4597,16 +4597,6 @@
         "formatLabel": "Format",
         "rangeLabel": "{start}s – {end}s"
       },
-      "batExpand": {
-        "title": "Hørbar flaggermus-avspilling",
-        "factorTooltip": "Tidsutvidelsesfaktor",
-        "play": "Spill av hørbar versjon",
-        "pause": "Pause",
-        "download": "Last ned hørbar WAV",
-        "generating": "Genererer…",
-        "error": "Kunne ikke generere hørbar avspilling",
-        "disabledTooltip": "Kildeopptaket er under {minRate} kHz – ingen ultralydinnhold tilgjengelig"
-      },
       "processing": {
         "playSelection": "Spill av valgt område",
         "skipToStart": "Hopp til starten av valgt område",

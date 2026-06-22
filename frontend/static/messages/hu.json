@@ -4597,16 +4597,6 @@
         "formatLabel": "Formátum",
         "rangeLabel": "{start}s - {end}s"
       },
-      "batExpand": {
-        "title": "Hallható denevér-lejátszás",
-        "factorTooltip": "Időnyújtási tényező",
-        "play": "Hallható verzió lejátszása",
-        "pause": "Szünet",
-        "download": "Hallható WAV letöltése",
-        "generating": "Generálás…",
-        "error": "Nem sikerült létrehozni a hallható lejátszást",
-        "disabledTooltip": "A forrásfelvétel {minRate} kHz alatt van – nincs elérhető ultrahangos tartalom"
-      },
       "processing": {
         "playSelection": "Kijelölés lejátszása",
         "skipToStart": "Ugrás a kijelölés kezdetére",

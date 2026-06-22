@@ -64,20 +64,6 @@ type ffprobeStream struct {
 // audio properties. It applies a 10-second timeout and sanitizes the URL
 // in error messages to avoid leaking credentials.
 func ProbeStreamInfo(ctx context.Context, url string) (*StreamInfo, error) {
-	return runProbe(ctx, url, buildProbeArgs(url))
-}
-
-// ProbeFileInfo probes a local audio file via ffprobe and returns its audio
-// properties. Unlike ProbeStreamInfo it does not apply the network
-// protocol whitelist, which would otherwise reject local filesystem paths
-// (treated by ffprobe as "file" protocol URLs).
-func ProbeFileInfo(ctx context.Context, path string) (*StreamInfo, error) {
-	return runProbe(ctx, path, buildFileProbeArgs(path))
-}
-
-// runProbe executes ffprobe with the given arguments and parses the result.
-// input is used only for sanitized error messages.
-func runProbe(ctx context.Context, input string, args []string) (*StreamInfo, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
@@ -86,13 +72,15 @@ func runProbe(ctx context.Context, input string, args []string) (*StreamInfo, er
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(probeCtx, ffprobeBinary, args...) //nolint:gosec // G204: ffprobeBinary validated by config or exec.LookPath, input from user config or validated local path
+	args := buildProbeArgs(url)
+
+	cmd := exec.CommandContext(probeCtx, ffprobeBinary, args...) //nolint:gosec // G204: ffprobeBinary validated by config or exec.LookPath, URL from user config
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		safeURL := privacy.SanitizeStreamUrl(input)
+		safeURL := privacy.SanitizeStreamUrl(url)
 		if probeCtx.Err() != nil {
 			return nil, fmt.Errorf("stream probe timed out for %s: %w", safeURL, probeCtx.Err())
 		}
@@ -101,7 +89,7 @@ func runProbe(ctx context.Context, input string, args []string) (*StreamInfo, er
 
 	info, err := parseProbeOutput(stdout.Bytes())
 	if err != nil {
-		safeURL := privacy.SanitizeStreamUrl(input)
+		safeURL := privacy.SanitizeStreamUrl(url)
 		return nil, fmt.Errorf("failed to parse probe output for %s: %w", safeURL, err)
 	}
 
@@ -168,17 +156,4 @@ func buildProbeArgs(url string) []string {
 	)
 
 	return args
-}
-
-// buildFileProbeArgs constructs the ffprobe argument list for a local file.
-// It omits the network protocol whitelist so that local filesystem paths
-// (which ffprobe resolves via the "file" protocol) are accepted.
-func buildFileProbeArgs(path string) []string {
-	return []string{
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_streams",
-		"-select_streams", "a:0",
-		path,
-	}
 }

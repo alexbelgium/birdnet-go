@@ -4597,16 +4597,6 @@
         "formatLabel": "Formaat",
         "rangeLabel": "{start}s – {end}s"
       },
-      "batExpand": {
-        "title": "Hoorbare vleermuisweergave",
-        "factorTooltip": "Tijdsuitrekkingsfactor",
-        "play": "Hoorbare versie afspelen",
-        "pause": "Pauze",
-        "download": "Hoorbare WAV downloaden",
-        "generating": "Genereren…",
-        "error": "Kan hoorbare weergave niet genereren",
-        "disabledTooltip": "Bronopname is lager dan {minRate} kHz – geen ultrasone inhoud beschikbaar"
-      },
       "processing": {
         "playSelection": "Selectie afspelen",
         "skipToStart": "Ga naar begin van selectie",

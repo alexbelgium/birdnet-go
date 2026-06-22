@@ -3342,14 +3342,6 @@ export type TranslationKey =
   | 'components.audioPlayer.clipExtraction.extractError'
   | 'components.audioPlayer.clipExtraction.formatLabel'
   | 'components.audioPlayer.clipExtraction.rangeLabel' // params: start, end
-  | 'components.audioPlayer.batExpand.title'
-  | 'components.audioPlayer.batExpand.factorTooltip'
-  | 'components.audioPlayer.batExpand.play'
-  | 'components.audioPlayer.batExpand.pause'
-  | 'components.audioPlayer.batExpand.download'
-  | 'components.audioPlayer.batExpand.generating'
-  | 'components.audioPlayer.batExpand.error'
-  | 'components.audioPlayer.batExpand.disabledTooltip' // params: minRate
   | 'components.audioPlayer.processing.playSelection'
   | 'components.audioPlayer.processing.skipToStart'
   | 'components.audioPlayer.processing.clearSelection'
@@ -4088,7 +4080,6 @@ export type TranslationParams = {
     start: string | number;
     end: string | number;
   };
-  'components.audioPlayer.batExpand.disabledTooltip': { minRate: string | number };
   'components.birdThumbnail.viewDetections': { name: string | number };
   'components.birdThumbnail.largeView': { name: string | number };
   'quietHours.indicator.tooltip': { count: string | number };
