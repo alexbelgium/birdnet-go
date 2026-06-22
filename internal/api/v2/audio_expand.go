@@ -112,45 +112,14 @@ func (c *Controller) GetAudioExpandInfo(ctx echo.Context) error {
 			logger.String("note_id", noteID), logger.Error(mtErr))
 	}
 
+	isBat := isBatModelType(modelType)
 	info := AudioExpandInfo{
-		IsBat:         isBatModelType(modelType),
+		IsBat:         isBat,
+		Supported:     isBat, // POST does the authoritative rate check; no ffprobe here
 		MinSourceRate: expandMinSourceRate,
 		OutputRate:    expandOutputSampleRate,
 		DefaultFactor: expandDefaultFactor,
 		Factors:       expandAllowedFactors,
-	}
-
-	// Probe the source sample rate best-effort so the UI can disable the
-	// control with an explanatory tooltip when the recording is below 96 kHz.
-	// probeOK distinguishes "confirmed rate" from "could not determine": we must
-	// not silently disable a genuine bat recording just because the probe failed.
-	probeOK := false
-	if info.IsBat {
-		if absPath, ok := c.resolveExpandSourcePath(noteID); ok {
-			if sr, err := c.probeSourceSampleRate(ctx.Request().Context(), absPath); err == nil {
-				info.SourceRate = sr
-				probeOK = true
-			} else {
-				c.logAPIRequest(ctx, logger.LogLevelWarn, "expand info: source probe failed",
-					logger.String("note_id", noteID), logger.Error(err))
-			}
-		} else {
-			c.logAPIRequest(ctx, logger.LogLevelWarn, "expand info: could not resolve source clip path",
-				logger.String("note_id", noteID))
-		}
-	}
-
-	switch {
-	case !info.IsBat:
-		info.Supported = false
-	case probeOK:
-		// Authoritative rate known: gate on the ultrasonic floor.
-		info.Supported = info.SourceRate >= expandMinSourceRate
-	default:
-		// Rate could not be determined (probe unavailable/failed). Stay enabled
-		// rather than mislabeling a bat clip as sub-96 kHz; the POST handler
-		// re-probes and performs the authoritative rate check before encoding.
-		info.Supported = true
 	}
 	return ctx.JSON(http.StatusOK, info)
 }
