@@ -4597,6 +4597,15 @@
         "formatLabel": "Format",
         "rangeLabel": "{start}s – {end}s"
       },
+      "batExpand": {
+        "title": "Audible bat playback",
+        "factorTooltip": "Time expansion factor",
+        "play": "Play audible version",
+        "pause": "Pause",
+        "download": "Download audible WAV",
+        "error": "Failed to generate audible playback",
+        "disabledTooltip": "Source recording is below {minRate} kHz — no ultrasonic content available"
+      },
       "processing": {
         "playSelection": "Lire la sélection",
         "skipToStart": "Aller au début de la sélection",

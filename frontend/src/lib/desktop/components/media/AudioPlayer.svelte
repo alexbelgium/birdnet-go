@@ -33,6 +33,7 @@
   import { Play, Pause, Download, XCircle } from '@lucide/svelte';
   import AudioSettingsButton from '$lib/desktop/features/dashboard/components/AudioSettingsButton.svelte';
   import AudioToolbar from './AudioToolbar.svelte';
+  import BatAudioExpand from './BatAudioExpand.svelte';
   import { t } from '$lib/i18n';
   import { loggers } from '$lib/utils/logger';
   import { useDelayedLoading } from '$lib/utils/delayedLoading.svelte.js';
@@ -2190,6 +2191,7 @@
     onNormalizeToggle={handleNormalizeToggle}
     onExport={handleToolbarExport}
   />
+  <BatAudioExpand {detectionId} />
 {/if}
 
 <style>
