@@ -211,6 +211,9 @@ func (c *Controller) initMediaRoutes() {
 	// Audio processing / preview (requires authentication)
 	c.Echo.POST("/api/v2/audio/:id/process", c.ProcessAudioByID, c.AuthMiddleware)
 
+	// Audible bat playback (time-expansion). Self-contained in audio_expand.go.
+	c.initAudioExpandRoutes()
+
 	// Processed spectrogram preview (requires authentication)
 	c.Echo.POST("/api/v2/spectrogram/:id/process", c.ProcessedSpectrogramByID, c.AuthMiddleware)
 
