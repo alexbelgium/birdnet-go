@@ -143,21 +143,26 @@
       return;
     }
 
-    // Re-use cached blob for the same factor
-    if (expandedBlobUrl && audioEl) {
-      audioEl.currentTime = 0;
-      await audioEl.play();
-      isPlayingExpanded = true;
-      return;
-    }
-
     isGenerating = true;
     expandError = null;
+    // Capture the detection this request belongs to; a later detection change
+    // must not let this (now stale) response create/play the wrong clip.
+    const requestId = detectionId;
     try {
+      // Re-use cached blob for the same factor
+      if (expandedBlobUrl && audioEl) {
+        audioEl.currentTime = 0;
+        await audioEl.play();
+        isPlayingExpanded = true;
+        return;
+      }
+
       const res = await fetch(
-        buildAppUrl(`/api/v2/audio/${encodeURIComponent(detectionId)}/expand?factor=${factor}`),
+        buildAppUrl(`/api/v2/audio/${encodeURIComponent(requestId)}/expand?factor=${factor}`),
         { method: 'POST', headers: csrfHeaders() }
       );
+      // Detection changed while generating: discard this response.
+      if (requestId !== detectionId) return;
       if (!res.ok) {
         let msg = LABELS.error;
         try {
@@ -175,6 +180,7 @@
         throw new Error(msg);
       }
       const blob = await res.blob();
+      if (requestId !== detectionId) return;
 
       const prev = expandedBlobUrl;
       expandedBlobUrl = URL.createObjectURL(blob);
@@ -207,19 +213,24 @@
     if (isGenerating || !expandInfo?.supported) return;
     isGenerating = true;
     expandError = null;
+    // Capture the detection this download belongs to (see playExpanded).
+    const requestId = detectionId;
     try {
       const res = await fetch(
         buildAppUrl(
-          `/api/v2/audio/${encodeURIComponent(detectionId)}/expand?factor=${factor}&download=1`
+          `/api/v2/audio/${encodeURIComponent(requestId)}/expand?factor=${factor}&download=1`
         ),
         { method: 'POST', headers: csrfHeaders() }
       );
+      // Detection changed while generating: discard this response.
+      if (requestId !== detectionId) return;
       if (!res.ok) throw new Error(LABELS.error);
       const blob = await res.blob();
+      if (requestId !== detectionId) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `detection_${detectionId}_${factor}x_audible.wav`;
+      a.download = `detection_${requestId}_${factor}x_audible.wav`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -292,13 +303,8 @@
 <svelte:document onclick={handleOutsideClick} />
 
 {#if expandInfo?.isBat}
-  {@const disabled = !expandInfo.supported}
-  {@const disabledReason = `Source recording is below ${Math.round(
-    expandInfo.minSourceRate / 1000
-  )} kHz — no ultrasonic content available`}
-  {@const helpId = `bat-expand-help-${detectionId}`}
   {@const statusId = `bat-expand-status-${detectionId}`}
-  {@const describedBy = disabled ? helpId : isGenerating ? statusId : undefined}
+  {@const describedBy = isGenerating ? statusId : undefined}
 
   <div class="bat-expand-toolbar" role="group" aria-label={LABELS.title}>
     <!-- Section label -->
@@ -311,14 +317,14 @@
     <div class="bat-factor-dropdown">
       <button
         class="expand-btn"
-        disabled={disabled || isGenerating}
-        title={disabled ? disabledReason : LABELS.factorTooltip}
+        disabled={isGenerating}
+        title={LABELS.factorTooltip}
         aria-label={LABELS.factorTooltip}
         aria-describedby={describedBy}
         aria-expanded={showFactorMenu}
         aria-haspopup="listbox"
         onclick={() => {
-          if (!disabled) showFactorMenu = !showFactorMenu;
+          showFactorMenu = !showFactorMenu;
         }}
       >
         <span>{factor}×</span>
@@ -356,8 +362,8 @@
     <button
       class="expand-btn"
       class:active={isPlayingExpanded}
-      disabled={disabled || isGenerating}
-      title={disabled ? disabledReason : isPlayingExpanded ? LABELS.pause : LABELS.play}
+      disabled={isGenerating}
+      title={isPlayingExpanded ? LABELS.pause : LABELS.play}
       aria-label={isPlayingExpanded ? LABELS.pause : LABELS.play}
       aria-describedby={describedBy}
       onclick={playExpanded}
@@ -374,8 +380,8 @@
     <!-- Download button -->
     <button
       class="expand-btn"
-      disabled={disabled || isGenerating}
-      title={disabled ? disabledReason : LABELS.download}
+      disabled={isGenerating}
+      title={LABELS.download}
       aria-label={LABELS.download}
       aria-describedby={describedBy}
       onclick={downloadExpanded}
@@ -394,11 +400,6 @@
       <span class="expand-error" role="alert" aria-live="assertive">{expandError}</span>
     {/if}
   </div>
-
-  <!-- Persistent reason the controls are disabled (discoverable, not tooltip-only). -->
-  {#if disabled}
-    <p id={helpId} class="bat-expand-help">{disabledReason}</p>
-  {/if}
 {/if}
 
 <style>
@@ -516,11 +517,5 @@
     opacity: 0.7;
     white-space: nowrap;
     margin-left: 0.25rem;
-  }
-
-  .bat-expand-help {
-    font-size: 0.6875rem;
-    opacity: 0.7;
-    margin: 0.25rem 0 0;
   }
 </style>

@@ -298,10 +298,7 @@ func (c *Controller) probeSourceSampleRate(ctx context.Context, absPath string) 
 	}
 
 	// sample_rate may be reported as a fraction (e.g. "44100/1").
-	rateStr := out.Streams[0].SampleRate
-	if i := strings.Index(rateStr, "/"); i != -1 {
-		rateStr = rateStr[:i]
-	}
+	rateStr, _, _ := strings.Cut(out.Streams[0].SampleRate, "/")
 	rate, err := strconv.Atoi(rateStr)
 	if err != nil || rate <= 0 {
 		return 0, fmt.Errorf("invalid sample rate %q", out.Streams[0].SampleRate)
