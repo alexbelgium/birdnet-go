@@ -71,27 +71,29 @@
       class="mobile-summary-row"
       aria-label="{displayName}: {pct}% confidence, {formatDetectionCount(item.count)} detections"
     >
-      <!-- Thumbnail or initials badge -->
-      {#if showThumbnails}
-        <img
-          src={item.thumbnail_url
-            ? buildAppUrl(item.thumbnail_url)
-            : buildAppUrl(
-                `/api/v2/media/species-image?name=${encodeURIComponent(item.scientific_name)}`
-              )}
-          alt=""
-          class="mobile-thumb"
-          loading="lazy"
-        />
-      {:else}
-        <span
-          class="mobile-badge"
-          style:background-color={getSpeciesBadgeColor(item.scientific_name)}
-          aria-hidden="true"
-        >
-          {getSpeciesInitials(displayName)}
-        </span>
-      {/if}
+      <!-- Thumbnail or initials badge — hidden in portrait, visible in landscape -->
+      <div class="mobile-thumb-col">
+        {#if showThumbnails}
+          <img
+            src={item.thumbnail_url
+              ? buildAppUrl(item.thumbnail_url)
+              : buildAppUrl(
+                  `/api/v2/media/species-image?name=${encodeURIComponent(item.scientific_name)}`
+                )}
+            alt=""
+            class="mobile-thumb"
+            loading="lazy"
+          />
+        {:else}
+          <span
+            class="mobile-badge"
+            style:background-color={getSpeciesBadgeColor(item.scientific_name)}
+            aria-hidden="true"
+          >
+            {getSpeciesInitials(displayName)}
+          </span>
+        {/if}
+      </div>
 
       <!-- Species name -->
       <span class="col-name text-sm font-medium truncate leading-tight">
@@ -128,32 +130,24 @@
 <style>
   .mobile-summary-table {
     --thumb-w: 2rem;
-    --col-conf-w: 2.75rem;
-    --col-count-w: 2.5rem;
+    --col-conf-w: 2.5rem;
+    --col-count-w: 2.25rem;
     --col-chart-w: 6.25rem;
   }
 
+  /* Portrait default: 4-column grid, no thumbnail */
   .mobile-summary-header {
     display: grid;
-
-    /* thumbnail column + name + conf + count + chart */
-    grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
-        --col-chart-w
-      );
+    grid-template-columns: 1fr var(--col-conf-w) var(--col-count-w) var(--col-chart-w);
     align-items: center;
-    gap: 0.375rem;
-    padding: 0 0.25rem 0.375rem;
+    gap: 0.25rem;
+    padding: 0 0.125rem 0.375rem;
     margin-bottom: 0.125rem;
     border-bottom: 1px solid var(--color-base-200);
     font-size: 0.625rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: color-mix(in srgb, var(--color-base-content) 50%, transparent);
-  }
-
-  /* The header's first cell spans thumbnail+name columns */
-  .col-header-species {
-    grid-column: 1 / 3;
   }
 
   .col-header-conf,
@@ -164,12 +158,10 @@
 
   .mobile-summary-row {
     display: grid;
-    grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
-        --col-chart-w
-      );
+    grid-template-columns: 1fr var(--col-conf-w) var(--col-count-w) var(--col-chart-w);
     align-items: center;
-    gap: 0.375rem;
-    padding: 0.2rem 0.25rem;
+    gap: 0.25rem;
+    padding: 0.15rem 0.125rem;
     min-height: 2.25rem;
     border-radius: 0.375rem;
     text-decoration: none;
@@ -180,6 +172,11 @@
   .mobile-summary-row:hover,
   .mobile-summary-row:active {
     background-color: color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  }
+
+  /* Thumbnail column hidden by default (portrait) */
+  .mobile-thumb-col {
+    display: none;
   }
 
   .mobile-thumb {
@@ -216,5 +213,30 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
+  }
+
+  /* Landscape: restore thumbnail column */
+  @media (orientation: landscape) {
+    .mobile-summary-header {
+      grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
+          --col-chart-w
+        );
+    }
+
+    /* Span thumbnail + name columns in header */
+    .col-header-species {
+      grid-column: 1 / 3;
+    }
+
+    .mobile-summary-row {
+      grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
+          --col-chart-w
+        );
+    }
+
+    .mobile-thumb-col {
+      display: flex;
+      align-items: center;
+    }
   }
 </style>

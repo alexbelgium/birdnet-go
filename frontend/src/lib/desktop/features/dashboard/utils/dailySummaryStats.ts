@@ -42,9 +42,9 @@ export function computeConfidenceColor(percent: number): string {
 // Color palette for mini bar chart — mirrors daylight class colors from DailySummaryCard.svelte
 // but as solid hex values suitable for SVG fill attributes.
 const DAYLIGHT_COLORS = {
-  deepNight: '#1e1b4b',
-  night: '#312e81',
-  preDawn: '#6366f1',
+  deepNight: '#3730a3',
+  night: '#4338ca',
+  preDawn: '#818cf8',
   sunrise: '#fb923c',
   earlyDay: '#fbbf24',
   day: '#86efac',
@@ -52,7 +52,7 @@ const DAYLIGHT_COLORS = {
   lateDay: '#86efac',
   sunset: '#f472b6',
   dusk: '#a78bfa',
-  evening: '#4338ca',
+  evening: '#6366f1',
 } as const;
 
 const DAWN_DUSK_OFFSET = 2;
