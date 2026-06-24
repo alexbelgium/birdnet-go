@@ -3252,6 +3252,8 @@ export type TranslationKey =
   | 'settings.alerts.builtInRules.mqttPublishFailed.description'
   | 'settings.alerts.builtInRules.birdWeatherFailed.name'
   | 'settings.alerts.builtInRules.birdWeatherFailed.description'
+  | 'settings.alerts.builtInRules.infrequentSpecies.name'
+  | 'settings.alerts.builtInRules.infrequentSpecies.description'
   | 'settings.appearance.colorScheme'
   | 'settings.appearance.colorSchemeDescription'
   | 'settings.appearance.schemeBlue'

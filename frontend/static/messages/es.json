@@ -4453,6 +4453,10 @@
         "birdWeatherFailed": {
           "name": "Carga a BirdWeather fallida",
           "description": "Notifica cuando falla una carga a BirdWeather"
+        },
+        "infrequentSpecies": {
+          "name": "Infrequent species return",
+          "description": "Notifies when a species returns after more than 14 days absence"
         }
       }
     },

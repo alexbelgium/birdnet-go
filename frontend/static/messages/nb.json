@@ -4453,6 +4453,10 @@
         "birdWeatherFailed": {
           "name": "BirdWeather-opplasting mislyktes",
           "description": "Varsler når en BirdWeather-opplasting mislyktes"
+        },
+        "infrequentSpecies": {
+          "name": "Infrequent species return",
+          "description": "Notifies when a species returns after more than 14 days absence"
         }
       }
     },

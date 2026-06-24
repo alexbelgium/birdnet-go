@@ -168,5 +168,24 @@ func DefaultRules() []entities.AlertRule {
 				{Target: TargetBell, SortOrder: 0},
 			},
 		},
+		{
+			Name:           "Infrequent species return",
+			Description:    "Notifies when a species returns after more than 14 days absence",
+			NameKey:        RuleKeyInfrequentSpeciesName,
+			DescriptionKey: RuleKeyInfrequentSpeciesDesc,
+			Enabled:        true,
+			BuiltIn:        true,
+			ObjectType:     ObjectTypeDetection,
+			TriggerType:    TriggerTypeEvent,
+			EventName:      EventDetectionOccurred,
+			CooldownSec:    3600,
+			Conditions: []entities.AlertCondition{
+				{Property: PropertyDaysSinceLastSeen, Operator: OperatorGreaterThan, Value: "14", SortOrder: 0},
+			},
+			Actions: []entities.AlertAction{
+				{Target: TargetBell, SortOrder: 0},
+				{Target: TargetPush, SortOrder: 1},
+			},
+		},
 	}
 }

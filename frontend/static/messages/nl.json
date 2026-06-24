@@ -4453,6 +4453,10 @@
         "birdWeatherFailed": {
           "name": "BirdWeather-upload mislukt",
           "description": "Meldt wanneer een BirdWeather-upload mislukt"
+        },
+        "infrequentSpecies": {
+          "name": "Infrequent species return",
+          "description": "Notifies when a species returns after more than 14 days absence"
         }
       }
     },

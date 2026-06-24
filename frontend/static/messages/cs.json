@@ -4453,6 +4453,10 @@
         "birdWeatherFailed": {
           "name": "Nahrání do BirdWeather selhalo",
           "description": "Upozorní, když selže nahrávání do BirdWeather"
+        },
+        "infrequentSpecies": {
+          "name": "Infrequent species return",
+          "description": "Notifies when a species returns after more than 14 days absence"
         }
       }
     },
