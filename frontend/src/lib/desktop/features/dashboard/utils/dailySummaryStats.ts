@@ -39,6 +39,67 @@ export function computeConfidenceColor(percent: number): string {
   return `hsl(${Math.round(hue)}, 75%, 42%)`;
 }
 
+// Color palette for mini bar chart — mirrors daylight class colors from DailySummaryCard.svelte
+// but as solid hex values suitable for SVG fill attributes.
+const DAYLIGHT_COLORS = {
+  deepNight: '#1e1b4b',
+  night: '#312e81',
+  preDawn: '#6366f1',
+  sunrise: '#fb923c',
+  earlyDay: '#fbbf24',
+  day: '#86efac',
+  midDay: '#4ade80',
+  lateDay: '#86efac',
+  sunset: '#f472b6',
+  dusk: '#a78bfa',
+  evening: '#4338ca',
+} as const;
+
+const DAWN_DUSK_OFFSET = 2;
+const MIDDAY_THRESHOLD = 0.3;
+const DAY_THRESHOLD = 0.7;
+
+/**
+ * Returns a solid CSS hex color for an SVG bar at `hour`, based on its
+ * position relative to sunrise and sunset. Mirrors getDaylightClass() in
+ * DailySummaryCard.svelte but as a pure, exportable function.
+ * Falls back to day/night split at hours 6 and 20 when sun times are unknown.
+ */
+export function computeHourDaylightColor(
+  hour: number,
+  sunriseHour: number | null,
+  sunsetHour: number | null
+): string {
+  if (sunriseHour === null || sunsetHour === null) {
+    return hour >= 6 && hour < 20 ? DAYLIGHT_COLORS.day : DAYLIGHT_COLORS.deepNight;
+  }
+  if (hour === sunriseHour) return DAYLIGHT_COLORS.sunrise;
+  if (hour === sunsetHour) return DAYLIGHT_COLORS.sunset;
+  if (hour >= sunriseHour - DAWN_DUSK_OFFSET && hour < sunriseHour) return DAYLIGHT_COLORS.preDawn;
+  if (hour > sunsetHour && hour <= sunsetHour + DAWN_DUSK_OFFSET) return DAYLIGHT_COLORS.dusk;
+  if (hour > sunriseHour && hour < sunsetHour) {
+    const midday = (sunriseHour + sunsetHour) / 2;
+    const halfDay = (sunsetHour - sunriseHour) / 2;
+    const dist = Math.abs(hour - midday) / halfDay;
+    if (dist < MIDDAY_THRESHOLD) return DAYLIGHT_COLORS.midDay;
+    if (dist < DAY_THRESHOLD) return DAYLIGHT_COLORS.day;
+    return hour < midday ? DAYLIGHT_COLORS.earlyDay : DAYLIGHT_COLORS.lateDay;
+  }
+  if (hour <= 3 || hour >= 22) return DAYLIGHT_COLORS.deepNight;
+  if (hour <= 5 || hour >= 20) return DAYLIGHT_COLORS.night;
+  return DAYLIGHT_COLORS.evening;
+}
+
+/**
+ * Formats a detection count for compact display (≤4 chars).
+ * < 1000 → "987", 1000–9999 → "1.2k", ≥ 10000 → "12k".
+ */
+export function formatDetectionCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10000) return `${(n / 1000).toFixed(1)}k`;
+  return `${Math.round(n / 1000)}k`;
+}
+
 export interface OverviewStats {
   total: number;
   lastHour: number;

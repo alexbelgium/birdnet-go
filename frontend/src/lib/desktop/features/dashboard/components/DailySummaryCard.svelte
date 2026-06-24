@@ -85,6 +85,7 @@ Responsive Breakpoints:
   import SunTimeTooltip from './SunTimeTooltip.svelte';
   import DailySummaryOverview from './daily-summary/DailySummaryOverview.svelte';
   import DailySummaryStatColumns from './daily-summary/DailySummaryStatColumns.svelte';
+  import MobileSummaryTable from './daily-summary/MobileSummaryTable.svelte';
   import SpeciesEbirdLink from './daily-summary/SpeciesEbirdLink.svelte';
   import TaxonFilterDropdown from './daily-summary/TaxonFilterDropdown.svelte';
   import {
@@ -901,355 +902,372 @@ Responsive Breakpoints:
     <!-- Grid Content -->
     <div class="p-6 pt-8">
       <DailySummaryOverview data={visibleData} {selectedDate} />
-      <div class="overflow-x-auto overflow-y-visible">
-        <div
-          class="daily-summary-grid min-w-[900px]"
-          style:--species-col-width={speciesColumnWidth}
-        >
-          <!-- Hourly weather visualization row (only shown if weather data exists) -->
-          {#if hourlyWeather.length > 0}
-            <div class="flex mb-1">
-              <DailySummaryStatColumns variant="spacer" />
-              <!-- Empty label column to align with other rows -->
-              <div class="species-label-col shrink-0"></div>
 
-              <!-- Hourly weather (desktop) -->
-              <div class="hourly-grid flex-1 grid">
-                {#each Array(24) as _, hour (hour)}
-                  {@const emoji = getHourlyWeatherEmoji(hour)}
-                  <div
-                    class="h-5 flex items-center justify-center text-sm weather-cell"
-                    title={getHourlyWeatherTooltip(hour)}
-                  >
-                    {emoji || ''}
-                  </div>
-                {/each}
-              </div>
+      <!-- Mobile compact table (<768px) -->
+      <div class="block md:hidden">
+        <MobileSummaryTable
+          data={sortedData}
+          {sunriseHour}
+          {sunsetHour}
+          getSpeciesUrl={urlBuilders.species}
+          {showThumbnails}
+          {selectedDate}
+        />
+      </div>
 
-              <!-- Bi-hourly weather (tablet/mobile) -->
-              <div class="bi-hourly-grid flex-1 grid">
-                {#each Array(12) as _, i (i)}
-                  {@const hour = i * 2}
-                  {@const emoji = getHourlyWeatherEmoji(hour)}
-                  <div
-                    class="h-5 flex items-center justify-center text-sm weather-cell"
-                    title={getHourlyWeatherTooltip(hour)}
-                  >
-                    {emoji || ''}
-                  </div>
-                {/each}
-              </div>
+      <!-- Desktop/tablet heatmap (≥768px) -->
+      <div class="hidden md:block">
+        <div class="overflow-x-auto overflow-y-visible">
+          <div
+            class="daily-summary-grid min-w-[900px]"
+            style:--species-col-width={speciesColumnWidth}
+          >
+            <!-- Hourly weather visualization row (only shown if weather data exists) -->
+            {#if hourlyWeather.length > 0}
+              <div class="flex mb-1">
+                <DailySummaryStatColumns variant="spacer" />
+                <!-- Empty label column to align with other rows -->
+                <div class="species-label-col shrink-0"></div>
 
-              <!-- Six-hourly weather (small mobile) -->
-              <div class="six-hourly-grid flex-1 grid">
-                {#each Array(4) as _, i (i)}
-                  {@const hour = i * 6}
-                  {@const emoji = getHourlyWeatherEmoji(hour)}
-                  <div
-                    class="h-5 flex items-center justify-center text-base weather-cell"
-                    title={getHourlyWeatherTooltip(hour)}
-                  >
-                    {emoji || ''}
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
-
-          <!-- Daylight visualization row -->
-          <div class="flex mb-1">
-            <DailySummaryStatColumns variant="spacer" />
-            <div class="species-label-col shrink-0 flex items-center">
-              <span
-                class="text-xs text-[var(--color-base-content)]/60 font-normal whitespace-nowrap"
-                >{t('dashboard.dailySummary.daylight.label')}</span
-              >
-            </div>
-            <!-- Hourly daylight (desktop) -->
-            <div class="hourly-grid flex-1 grid">
-              {#each Array(24) as _, hour (hour)}
-                {@const daylightClass = getDaylightClass(hour)}
-                <div
-                  class="h-5 rounded-sm daylight-cell daylight-{daylightClass} relative flex items-center justify-center"
-                >
-                  {@render sunIcon('sunrise', sunTimes?.sunrise, hour === sunriseHour)}
-                  {@render sunIcon('sunset', sunTimes?.sunset, hour === sunsetHour)}
-                </div>
-              {/each}
-            </div>
-            <!-- Bi-hourly daylight (tablet/mobile) -->
-            <div class="bi-hourly-grid flex-1 grid">
-              {#each Array(12) as _, i (i)}
-                {@const hour = i * 2}
-                {@const daylightClass = getDaylightClass(hour)}
-                {@const showSunrise =
-                  sunriseHour !== null && hour <= sunriseHour && sunriseHour < hour + 2}
-                {@const showSunset =
-                  sunsetHour !== null &&
-                  hour <= sunsetHour &&
-                  sunsetHour < hour + 2 &&
-                  !showSunrise}
-                <div
-                  class="h-5 rounded-sm daylight-cell daylight-{daylightClass} relative flex items-center justify-center"
-                >
-                  {@render sunIcon('sunrise', sunTimes?.sunrise, showSunrise)}
-                  {@render sunIcon('sunset', sunTimes?.sunset, showSunset)}
-                </div>
-              {/each}
-            </div>
-            <!-- Six-hourly daylight (small mobile) -->
-            <div class="six-hourly-grid flex-1 grid">
-              {#each Array(4) as _, i (i)}
-                {@const hour = i * 6}
-                {@const daylightClass = getDaylightClass(hour)}
-                {@const showSunrise =
-                  sunriseHour !== null && hour <= sunriseHour && sunriseHour < hour + 6}
-                {@const showSunset =
-                  sunsetHour !== null &&
-                  hour <= sunsetHour &&
-                  sunsetHour < hour + 6 &&
-                  !showSunrise}
-                <div
-                  class="h-5 rounded-sm daylight-cell daylight-{daylightClass} relative flex items-center justify-center"
-                >
-                  {@render sunIcon('sunrise', sunTimes?.sunrise, showSunrise)}
-                  {@render sunIcon('sunset', sunTimes?.sunset, showSunset)}
-                </div>
-              {/each}
-            </div>
-          </div>
-
-          <!-- Hours header row -->
-          <div class="flex mb-1">
-            <DailySummaryStatColumns variant="header" />
-            <div class="species-label-col shrink-0"></div>
-            <!-- Hourly headers (desktop) -->
-            <div class="hourly-grid flex-1 grid text-xs">
-              {#each Array(24) as _, hour (hour)}
-                <a
-                  href={urlBuilders.hourly(hour, 1)}
-                  class="text-center hover:text-[var(--color-primary)] cursor-pointer"
-                  style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
-                  title={t('dashboard.dailySummary.tooltips.viewHourly', {
-                    hour: hour.toString().padStart(2, '0'),
-                  })}
-                >
-                  {hour.toString().padStart(2, '0')}
-                </a>
-              {/each}
-            </div>
-            <!-- Bi-hourly headers (tablet/mobile) -->
-            <div class="bi-hourly-grid flex-1 grid text-xs">
-              {#each Array(12) as _, i (i)}
-                {@const hour = i * 2}
-                <a
-                  href={urlBuilders.hourly(hour, 2)}
-                  class="text-center hover:text-[var(--color-primary)] cursor-pointer"
-                  style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
-                  title={t('dashboard.dailySummary.tooltips.viewBiHourly', {
-                    startHour: hour.toString().padStart(2, '0'),
-                    endHour: (hour + 2).toString().padStart(2, '0'),
-                  })}
-                >
-                  {hour.toString().padStart(2, '0')}
-                </a>
-              {/each}
-            </div>
-            <!-- Six-hourly headers (small mobile) -->
-            <div class="six-hourly-grid flex-1 grid text-xs">
-              {#each Array(4) as _, i (i)}
-                {@const hour = i * 6}
-                <a
-                  href={urlBuilders.hourly(hour, 6)}
-                  class="text-center hover:text-[var(--color-primary)] cursor-pointer"
-                  style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
-                  title={t('dashboard.dailySummary.tooltips.viewSixHourly', {
-                    startHour: hour.toString().padStart(2, '0'),
-                    endHour: (hour + 6).toString().padStart(2, '0'),
-                  })}
-                >
-                  {hour.toString().padStart(2, '0')}
-                </a>
-              {/each}
-            </div>
-          </div>
-
-          <!-- Species rows -->
-          <div class="flex flex-col" style:gap="var(--grid-gap)">
-            {#each sortedData as item, index (`${item.scientific_name}_${index}`)}
-              {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
-              <div
-                class="flex items-center species-row"
-                class:new-species={item.isNew && !prefersReducedMotion}
-              >
-                <DailySummaryStatColumns variant="data" {item} />
-                <!-- Species info column -->
-                <div class="species-label-col shrink-0 flex items-center gap-2 pr-4">
-                  {#if showThumbnails}
-                    <BirdThumbnailPopup
-                      thumbnailUrl={item.thumbnail_url
-                        ? buildAppUrl(item.thumbnail_url)
-                        : buildAppUrl(
-                            `/api/v2/media/species-image?name=${encodeURIComponent(item.scientific_name)}`
-                          )}
-                      commonName={item.common_name}
-                      scientificName={item.scientific_name}
-                      detectionUrl={urlBuilders.species(item)}
-                    />
-                  {:else}
-                    <a
-                      href={urlBuilders.species(item)}
-                      class="species-badge shrink-0"
-                      style:background-color={getSpeciesBadgeColor(item.scientific_name)}
-                      title={item.scientific_name}
-                    >
-                      {getSpeciesInitials(displayName)}
-                    </a>
-                  {/if}
-                  <a
-                    href={urlBuilders.species(item)}
-                    class="text-sm hover:text-[var(--color-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
-                    title={displayName}
-                  >
-                    <span class="truncate flex-1">{displayName}</span>
-                    {#if resolveNoveltyCategory(item) === 'lifetime'}
-                      <span
-                        class="inline-block shrink-0"
-                        style:color={noveltyCategoryColorVar('lifetime')}
-                        title={`New species (first seen ${item.days_since_first_seen ?? 0} day${(item.days_since_first_seen ?? 0) === 1 ? '' : 's'} ago)`}
-                      >
-                        <Star class="size-3 fill-current" />
-                      </span>
-                    {:else if resolveNoveltyCategory(item) === 'year'}
-                      <span
-                        class="shrink-0"
-                        style:color={noveltyCategoryColorVar('year')}
-                        title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
-                      >
-                        📅
-                      </span>
-                    {:else if resolveNoveltyCategory(item) === 'season'}
-                      <span
-                        class="shrink-0"
-                        style:color={noveltyCategoryColorVar('season')}
-                        title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
-                      >
-                        🌿
-                      </span>
-                    {/if}
-                  </a>
-                  <SpeciesEbirdLink speciesCode={item.species_code} {displayName} />
-                </div>
-
-                <!-- Hourly heatmap cells (desktop) -->
+                <!-- Hourly weather (desktop) -->
                 <div class="hourly-grid flex-1 grid">
                   {#each Array(24) as _, hour (hour)}
-                    {@const count = safeArrayAccess(item.hourly_counts, hour, 0) ?? 0}
-                    {@const intensity = getHeatmapIntensity(count)}
+                    {@const emoji = getHourlyWeatherEmoji(hour)}
                     <div
-                      class="heatmap-cell h-8 rounded-sm heatmap-color-{intensity} flex items-center justify-center text-xs font-medium"
-                      class:hour-updated={item.hourlyUpdated?.includes(hour) &&
-                        !prefersReducedMotion}
+                      class="h-5 flex items-center justify-center text-sm weather-cell"
+                      title={getHourlyWeatherTooltip(hour)}
                     >
-                      {#if count > 0}
-                        <a
-                          href={urlBuilders.speciesHour(item, hour, 1)}
-                          class="w-full h-full flex items-center justify-center cursor-pointer hover:opacity-80"
-                          title={t('dashboard.dailySummary.tooltips.hourlyDetections', {
-                            count,
-                            hour: hour.toString().padStart(2, '0'),
-                          })}
-                        >
-                          <AnimatedCounter value={count} />
-                        </a>
-                      {/if}
+                      {emoji || ''}
                     </div>
                   {/each}
                 </div>
 
-                <!-- Bi-hourly heatmap cells (tablet/mobile) -->
+                <!-- Bi-hourly weather (tablet/mobile) -->
                 <div class="bi-hourly-grid flex-1 grid">
                   {#each Array(12) as _, i (i)}
                     {@const hour = i * 2}
-                    {@const count = renderFunctions['bi-hourly'](item, hour)}
-                    {@const intensity = getHeatmapIntensity(count)}
+                    {@const emoji = getHourlyWeatherEmoji(hour)}
                     <div
-                      class="heatmap-cell h-8 rounded-sm heatmap-color-{intensity} flex items-center justify-center text-xs font-medium"
+                      class="h-5 flex items-center justify-center text-sm weather-cell"
+                      title={getHourlyWeatherTooltip(hour)}
                     >
-                      {#if count > 0}
-                        <a
-                          href={urlBuilders.speciesHour(item, hour, 2)}
-                          class="w-full h-full flex items-center justify-center cursor-pointer hover:opacity-80"
-                          title={t('dashboard.dailySummary.tooltips.biHourlyDetections', {
-                            count,
-                            startHour: hour.toString().padStart(2, '0'),
-                            endHour: (hour + 2).toString().padStart(2, '0'),
-                          })}
-                        >
-                          <AnimatedCounter value={count} />
-                        </a>
-                      {/if}
+                      {emoji || ''}
                     </div>
                   {/each}
                 </div>
 
-                <!-- Six-hourly heatmap cells (small mobile) -->
+                <!-- Six-hourly weather (small mobile) -->
                 <div class="six-hourly-grid flex-1 grid">
                   {#each Array(4) as _, i (i)}
                     {@const hour = i * 6}
-                    {@const count = renderFunctions['six-hourly'](item, hour)}
-                    {@const intensity = getHeatmapIntensity(count)}
+                    {@const emoji = getHourlyWeatherEmoji(hour)}
                     <div
-                      class="heatmap-cell h-8 rounded-sm heatmap-color-{intensity} flex items-center justify-center text-xs font-medium"
+                      class="h-5 flex items-center justify-center text-base weather-cell"
+                      title={getHourlyWeatherTooltip(hour)}
                     >
-                      {#if count > 0}
-                        <a
-                          href={urlBuilders.speciesHour(item, hour, 6)}
-                          class="w-full h-full flex items-center justify-center cursor-pointer hover:opacity-80"
-                          title={t('dashboard.dailySummary.tooltips.sixHourlyDetections', {
-                            count,
-                            startHour: hour.toString().padStart(2, '0'),
-                            endHour: (hour + 6).toString().padStart(2, '0'),
-                          })}
-                        >
-                          <AnimatedCounter value={count} />
-                        </a>
-                      {/if}
+                      {emoji || ''}
                     </div>
                   {/each}
                 </div>
               </div>
-            {/each}
-          </div>
-        </div>
+            {/if}
 
-        {#if sortedData.length === 0}
-          <div
-            class="text-center py-8"
-            style:color="color-mix(in srgb, var(--color-base-content) 60%, transparent)"
-          >
-            {t('dashboard.dailySummary.noSpecies')}
-          </div>
-        {/if}
+            <!-- Daylight visualization row -->
+            <div class="flex mb-1">
+              <DailySummaryStatColumns variant="spacer" />
+              <div class="species-label-col shrink-0 flex items-center">
+                <span
+                  class="text-xs text-[var(--color-base-content)]/60 font-normal whitespace-nowrap"
+                  >{t('dashboard.dailySummary.daylight.label')}</span
+                >
+              </div>
+              <!-- Hourly daylight (desktop) -->
+              <div class="hourly-grid flex-1 grid">
+                {#each Array(24) as _, hour (hour)}
+                  {@const daylightClass = getDaylightClass(hour)}
+                  <div
+                    class="h-5 rounded-sm daylight-cell daylight-{daylightClass} relative flex items-center justify-center"
+                  >
+                    {@render sunIcon('sunrise', sunTimes?.sunrise, hour === sunriseHour)}
+                    {@render sunIcon('sunset', sunTimes?.sunset, hour === sunsetHour)}
+                  </div>
+                {/each}
+              </div>
+              <!-- Bi-hourly daylight (tablet/mobile) -->
+              <div class="bi-hourly-grid flex-1 grid">
+                {#each Array(12) as _, i (i)}
+                  {@const hour = i * 2}
+                  {@const daylightClass = getDaylightClass(hour)}
+                  {@const showSunrise =
+                    sunriseHour !== null && hour <= sunriseHour && sunriseHour < hour + 2}
+                  {@const showSunset =
+                    sunsetHour !== null &&
+                    hour <= sunsetHour &&
+                    sunsetHour < hour + 2 &&
+                    !showSunrise}
+                  <div
+                    class="h-5 rounded-sm daylight-cell daylight-{daylightClass} relative flex items-center justify-center"
+                  >
+                    {@render sunIcon('sunrise', sunTimes?.sunrise, showSunrise)}
+                    {@render sunIcon('sunset', sunTimes?.sunset, showSunset)}
+                  </div>
+                {/each}
+              </div>
+              <!-- Six-hourly daylight (small mobile) -->
+              <div class="six-hourly-grid flex-1 grid">
+                {#each Array(4) as _, i (i)}
+                  {@const hour = i * 6}
+                  {@const daylightClass = getDaylightClass(hour)}
+                  {@const showSunrise =
+                    sunriseHour !== null && hour <= sunriseHour && sunriseHour < hour + 6}
+                  {@const showSunset =
+                    sunsetHour !== null &&
+                    hour <= sunsetHour &&
+                    sunsetHour < hour + 6 &&
+                    !showSunrise}
+                  <div
+                    class="h-5 rounded-sm daylight-cell daylight-{daylightClass} relative flex items-center justify-center"
+                  >
+                    {@render sunIcon('sunrise', sunTimes?.sunrise, showSunrise)}
+                    {@render sunIcon('sunset', sunTimes?.sunset, showSunset)}
+                  </div>
+                {/each}
+              </div>
+            </div>
 
-        <!-- Heatmap Legend -->
-        {#if sortedData.length > 0}
-          <div
-            class="flex justify-end items-center gap-1.5 mt-3 text-xs text-[var(--color-base-content)]/60"
-          >
-            <span>{t('dashboard.dailySummary.legend.less')}</span>
-            <div class="flex gap-0.5">
-              {#each [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as intensity (intensity)}
+            <!-- Hours header row -->
+            <div class="flex mb-1">
+              <DailySummaryStatColumns variant="header" />
+              <div class="species-label-col shrink-0"></div>
+              <!-- Hourly headers (desktop) -->
+              <div class="hourly-grid flex-1 grid text-xs">
+                {#each Array(24) as _, hour (hour)}
+                  <a
+                    href={urlBuilders.hourly(hour, 1)}
+                    class="text-center hover:text-[var(--color-primary)] cursor-pointer"
+                    style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
+                    title={t('dashboard.dailySummary.tooltips.viewHourly', {
+                      hour: hour.toString().padStart(2, '0'),
+                    })}
+                  >
+                    {hour.toString().padStart(2, '0')}
+                  </a>
+                {/each}
+              </div>
+              <!-- Bi-hourly headers (tablet/mobile) -->
+              <div class="bi-hourly-grid flex-1 grid text-xs">
+                {#each Array(12) as _, i (i)}
+                  {@const hour = i * 2}
+                  <a
+                    href={urlBuilders.hourly(hour, 2)}
+                    class="text-center hover:text-[var(--color-primary)] cursor-pointer"
+                    style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
+                    title={t('dashboard.dailySummary.tooltips.viewBiHourly', {
+                      startHour: hour.toString().padStart(2, '0'),
+                      endHour: (hour + 2).toString().padStart(2, '0'),
+                    })}
+                  >
+                    {hour.toString().padStart(2, '0')}
+                  </a>
+                {/each}
+              </div>
+              <!-- Six-hourly headers (small mobile) -->
+              <div class="six-hourly-grid flex-1 grid text-xs">
+                {#each Array(4) as _, i (i)}
+                  {@const hour = i * 6}
+                  <a
+                    href={urlBuilders.hourly(hour, 6)}
+                    class="text-center hover:text-[var(--color-primary)] cursor-pointer"
+                    style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
+                    title={t('dashboard.dailySummary.tooltips.viewSixHourly', {
+                      startHour: hour.toString().padStart(2, '0'),
+                      endHour: (hour + 6).toString().padStart(2, '0'),
+                    })}
+                  >
+                    {hour.toString().padStart(2, '0')}
+                  </a>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Species rows -->
+            <div class="flex flex-col" style:gap="var(--grid-gap)">
+              {#each sortedData as item, index (`${item.scientific_name}_${index}`)}
+                {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
                 <div
-                  class="w-3 h-3 rounded-sm heatmap-color-{intensity}"
-                  title="Intensity {intensity}"
-                ></div>
+                  class="flex items-center species-row"
+                  class:new-species={item.isNew && !prefersReducedMotion}
+                >
+                  <DailySummaryStatColumns variant="data" {item} />
+                  <!-- Species info column -->
+                  <div class="species-label-col shrink-0 flex items-center gap-2 pr-4">
+                    {#if showThumbnails}
+                      <BirdThumbnailPopup
+                        thumbnailUrl={item.thumbnail_url
+                          ? buildAppUrl(item.thumbnail_url)
+                          : buildAppUrl(
+                              `/api/v2/media/species-image?name=${encodeURIComponent(item.scientific_name)}`
+                            )}
+                        commonName={item.common_name}
+                        scientificName={item.scientific_name}
+                        detectionUrl={urlBuilders.species(item)}
+                      />
+                    {:else}
+                      <a
+                        href={urlBuilders.species(item)}
+                        class="species-badge shrink-0"
+                        style:background-color={getSpeciesBadgeColor(item.scientific_name)}
+                        title={item.scientific_name}
+                      >
+                        {getSpeciesInitials(displayName)}
+                      </a>
+                    {/if}
+                    <a
+                      href={urlBuilders.species(item)}
+                      class="text-sm hover:text-[var(--color-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
+                      title={displayName}
+                    >
+                      <span class="truncate flex-1">{displayName}</span>
+                      {#if resolveNoveltyCategory(item) === 'lifetime'}
+                        <span
+                          class="inline-block shrink-0"
+                          style:color={noveltyCategoryColorVar('lifetime')}
+                          title={`New species (first seen ${item.days_since_first_seen ?? 0} day${(item.days_since_first_seen ?? 0) === 1 ? '' : 's'} ago)`}
+                        >
+                          <Star class="size-3 fill-current" />
+                        </span>
+                      {:else if resolveNoveltyCategory(item) === 'year'}
+                        <span
+                          class="shrink-0"
+                          style:color={noveltyCategoryColorVar('year')}
+                          title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
+                        >
+                          📅
+                        </span>
+                      {:else if resolveNoveltyCategory(item) === 'season'}
+                        <span
+                          class="shrink-0"
+                          style:color={noveltyCategoryColorVar('season')}
+                          title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
+                        >
+                          🌿
+                        </span>
+                      {/if}
+                    </a>
+                    <SpeciesEbirdLink speciesCode={item.species_code} {displayName} />
+                  </div>
+
+                  <!-- Hourly heatmap cells (desktop) -->
+                  <div class="hourly-grid flex-1 grid">
+                    {#each Array(24) as _, hour (hour)}
+                      {@const count = safeArrayAccess(item.hourly_counts, hour, 0) ?? 0}
+                      {@const intensity = getHeatmapIntensity(count)}
+                      <div
+                        class="heatmap-cell h-8 rounded-sm heatmap-color-{intensity} flex items-center justify-center text-xs font-medium"
+                        class:hour-updated={item.hourlyUpdated?.includes(hour) &&
+                          !prefersReducedMotion}
+                      >
+                        {#if count > 0}
+                          <a
+                            href={urlBuilders.speciesHour(item, hour, 1)}
+                            class="w-full h-full flex items-center justify-center cursor-pointer hover:opacity-80"
+                            title={t('dashboard.dailySummary.tooltips.hourlyDetections', {
+                              count,
+                              hour: hour.toString().padStart(2, '0'),
+                            })}
+                          >
+                            <AnimatedCounter value={count} />
+                          </a>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+
+                  <!-- Bi-hourly heatmap cells (tablet/mobile) -->
+                  <div class="bi-hourly-grid flex-1 grid">
+                    {#each Array(12) as _, i (i)}
+                      {@const hour = i * 2}
+                      {@const count = renderFunctions['bi-hourly'](item, hour)}
+                      {@const intensity = getHeatmapIntensity(count)}
+                      <div
+                        class="heatmap-cell h-8 rounded-sm heatmap-color-{intensity} flex items-center justify-center text-xs font-medium"
+                      >
+                        {#if count > 0}
+                          <a
+                            href={urlBuilders.speciesHour(item, hour, 2)}
+                            class="w-full h-full flex items-center justify-center cursor-pointer hover:opacity-80"
+                            title={t('dashboard.dailySummary.tooltips.biHourlyDetections', {
+                              count,
+                              startHour: hour.toString().padStart(2, '0'),
+                              endHour: (hour + 2).toString().padStart(2, '0'),
+                            })}
+                          >
+                            <AnimatedCounter value={count} />
+                          </a>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+
+                  <!-- Six-hourly heatmap cells (small mobile) -->
+                  <div class="six-hourly-grid flex-1 grid">
+                    {#each Array(4) as _, i (i)}
+                      {@const hour = i * 6}
+                      {@const count = renderFunctions['six-hourly'](item, hour)}
+                      {@const intensity = getHeatmapIntensity(count)}
+                      <div
+                        class="heatmap-cell h-8 rounded-sm heatmap-color-{intensity} flex items-center justify-center text-xs font-medium"
+                      >
+                        {#if count > 0}
+                          <a
+                            href={urlBuilders.speciesHour(item, hour, 6)}
+                            class="w-full h-full flex items-center justify-center cursor-pointer hover:opacity-80"
+                            title={t('dashboard.dailySummary.tooltips.sixHourlyDetections', {
+                              count,
+                              startHour: hour.toString().padStart(2, '0'),
+                              endHour: (hour + 6).toString().padStart(2, '0'),
+                            })}
+                          >
+                            <AnimatedCounter value={count} />
+                          </a>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                </div>
               {/each}
             </div>
-            <span>{t('dashboard.dailySummary.legend.more')}</span>
           </div>
-        {/if}
+
+          {#if sortedData.length === 0}
+            <div
+              class="text-center py-8"
+              style:color="color-mix(in srgb, var(--color-base-content) 60%, transparent)"
+            >
+              {t('dashboard.dailySummary.noSpecies')}
+            </div>
+          {/if}
+
+          <!-- Heatmap Legend -->
+          {#if sortedData.length > 0}
+            <div
+              class="flex justify-end items-center gap-1.5 mt-3 text-xs text-[var(--color-base-content)]/60"
+            >
+              <span>{t('dashboard.dailySummary.legend.less')}</span>
+              <div class="flex gap-0.5">
+                {#each [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as intensity (intensity)}
+                  <div
+                    class="w-3 h-3 rounded-sm heatmap-color-{intensity}"
+                    title="Intensity {intensity}"
+                  ></div>
+                {/each}
+              </div>
+              <span>{t('dashboard.dailySummary.legend.more')}</span>
+            </div>
+          {/if}
+        </div>
       </div>
+      <!-- end hidden md:block -->
     </div>
   </section>
 {/if}
