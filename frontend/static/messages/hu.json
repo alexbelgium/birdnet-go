@@ -4455,8 +4455,8 @@
           "description": "Értesít, amikor egy BirdWeather feltöltés sikertelen"
         },
         "infrequentSpecies": {
-          "name": "Infrequent species return",
-          "description": "Notifies when a species returns after more than 14 days absence"
+          "name": "Ritkán visszatérő faj",
+          "description": "Értesít, ha egy faj 14 napnál hosszabb hiány után tér vissza"
         }
       }
     },

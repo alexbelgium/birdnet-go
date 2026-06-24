@@ -4455,8 +4455,8 @@
           "description": "Ilmoittaa kun BirdWeather-lähetys epäonnistuu"
         },
         "infrequentSpecies": {
-          "name": "Infrequent species return",
-          "description": "Notifies when a species returns after more than 14 days absence"
+          "name": "Harvoin havaitun lajin paluu",
+          "description": "Ilmoittaa, kun laji palaa yli 14 päivän poissaolon jälkeen"
         }
       }
     },

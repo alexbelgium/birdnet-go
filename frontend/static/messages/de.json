@@ -4455,8 +4455,8 @@
           "description": "Benachrichtigt, wenn ein BirdWeather-Upload fehlschlägt"
         },
         "infrequentSpecies": {
-          "name": "Infrequent species return",
-          "description": "Notifies when a species returns after more than 14 days absence"
+          "name": "Seltene Art kehrt zurück",
+          "description": "Benachrichtigt, wenn eine Art nach mehr als 14 Tagen Abwesenheit zurückkehrt"
         }
       }
     },

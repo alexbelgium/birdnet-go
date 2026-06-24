@@ -4455,8 +4455,8 @@
           "description": "Paziņo, kad BirdWeather augšupielāde neizdodas"
         },
         "infrequentSpecies": {
-          "name": "Infrequent species return",
-          "description": "Notifies when a species returns after more than 14 days absence"
+          "name": "Reti sastopamas sugas atgriešanās",
+          "description": "Paziņo, kad suga atgriežas pēc vairāk nekā 14 dienu prombūtnes"
         }
       }
     },

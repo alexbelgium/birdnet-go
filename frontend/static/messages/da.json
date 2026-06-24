@@ -4455,8 +4455,8 @@
           "description": "Notificerer, når en BirdWeather-upload mislykkes"
         },
         "infrequentSpecies": {
-          "name": "Infrequent species return",
-          "description": "Notifies when a species returns after more than 14 days absence"
+          "name": "Sjælden art vender tilbage",
+          "description": "Notificerer, når en art vender tilbage efter mere end 14 dages fravær"
         }
       }
     },
