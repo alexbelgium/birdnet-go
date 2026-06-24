@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "Caricamento BirdWeather fallito",
           "description": "Notifica quando un caricamento BirdWeather non riesce"
-        },
-        "infrequentSpecies": {
-          "name": "Ritorno di specie infrequente",
-          "description": "Notifica quando una specie ritorna dopo più di 14 giorni di assenza"
         }
       }
     },

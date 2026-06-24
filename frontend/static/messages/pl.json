@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "Przesyłanie do BirdWeather nie powiodło się",
           "description": "Powiadamia, gdy przesyłanie do BirdWeather nie powiedzie się"
-        },
-        "infrequentSpecies": {
-          "name": "Powrót rzadkiego gatunku",
-          "description": "Powiadamia, gdy gatunek powróci po ponad 14 dniach nieobecności"
         }
       }
     },

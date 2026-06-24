@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "BirdWeather-Upload fehlgeschlagen",
           "description": "Benachrichtigt, wenn ein BirdWeather-Upload fehlschlägt"
-        },
-        "infrequentSpecies": {
-          "name": "Seltene Art kehrt zurück",
-          "description": "Benachrichtigt, wenn eine Art nach mehr als 14 Tagen Abwesenheit zurückkehrt"
         }
       }
     },

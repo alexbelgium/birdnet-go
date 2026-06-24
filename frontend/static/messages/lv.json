@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "BirdWeather augšupielāde neizdevās",
           "description": "Paziņo, kad BirdWeather augšupielāde neizdodas"
-        },
-        "infrequentSpecies": {
-          "name": "Reti sastopamas sugas atgriešanās",
-          "description": "Paziņo, kad suga atgriežas pēc vairāk nekā 14 dienu prombūtnes"
         }
       }
     },

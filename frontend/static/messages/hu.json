@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "BirdWeather feltöltés sikertelen",
           "description": "Értesít, amikor egy BirdWeather feltöltés sikertelen"
-        },
-        "infrequentSpecies": {
-          "name": "Ritkán visszatérő faj",
-          "description": "Értesít, ha egy faj 14 napnál hosszabb hiány után tér vissza"
         }
       }
     },

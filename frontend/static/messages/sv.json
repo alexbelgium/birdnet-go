@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "BirdWeather-uppladdning misslyckades",
           "description": "Meddelar när en BirdWeather-uppladdning misslyckas"
-        },
-        "infrequentSpecies": {
-          "name": "Sällsynt art återvänder",
-          "description": "Meddelar när en art återkommer efter mer än 14 dagars frånvaro"
         }
       }
     },

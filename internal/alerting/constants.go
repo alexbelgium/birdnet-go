@@ -118,9 +118,6 @@ const (
 	RuleKeyMQTTPublishDesc = "settings.alerts.builtInRules.mqttPublishFailed.description"
 	RuleKeyBirdWeatherName = "settings.alerts.builtInRules.birdWeatherFailed.name"
 	RuleKeyBirdWeatherDesc = "settings.alerts.builtInRules.birdWeatherFailed.description"
-
-	RuleKeyInfrequentSpeciesName = "settings.alerts.builtInRules.infrequentSpecies.name"
-	RuleKeyInfrequentSpeciesDesc = "settings.alerts.builtInRules.infrequentSpecies.description"
 )
 
 // Alert notification i18n key constants.

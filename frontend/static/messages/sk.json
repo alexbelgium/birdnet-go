@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "Nahrávanie do BirdWeather zlyhalo",
           "description": "Upozorní, keď nahrávanie do BirdWeather zlyhá"
-        },
-        "infrequentSpecies": {
-          "name": "Návrat zriedkavého druhu",
-          "description": "Upozorní, keď sa druh vráti po viac ako 14 dňoch neprítomnosti"
         }
       }
     },

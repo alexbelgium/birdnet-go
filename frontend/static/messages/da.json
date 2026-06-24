@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "BirdWeather-upload mislykkedes",
           "description": "Notificerer, når en BirdWeather-upload mislykkes"
-        },
-        "infrequentSpecies": {
-          "name": "Sjælden art vender tilbage",
-          "description": "Notificerer, når en art vender tilbage efter mere end 14 dages fravær"
         }
       }
     },

@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "BirdWeather-lähetys epäonnistui",
           "description": "Ilmoittaa kun BirdWeather-lähetys epäonnistuu"
-        },
-        "infrequentSpecies": {
-          "name": "Harvoin havaitun lajin paluu",
-          "description": "Ilmoittaa, kun laji palaa yli 14 päivän poissaolon jälkeen"
         }
       }
     },

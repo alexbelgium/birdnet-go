@@ -4453,10 +4453,6 @@
         "birdWeatherFailed": {
           "name": "BirdWeather-opplasting mislyktes",
           "description": "Varsler når en BirdWeather-opplasting mislyktes"
-        },
-        "infrequentSpecies": {
-          "name": "Sjelden art vender tilbake",
-          "description": "Varsler når en art kommer tilbake etter mer enn 14 dagers fravær"
         }
       }
     },
