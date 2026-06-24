@@ -132,13 +132,19 @@
     --thumb-w: 2rem;
     --col-conf-w: 2.5rem;
     --col-count-w: 2.25rem;
-    --col-chart-w: 6.25rem;
+
+    /* chart min keeps the 96 px SVG intact; name:chart fr ratio = φ (1.618) */
+    --col-chart-min: 6rem;
   }
 
-  /* Portrait default: 4-column grid, no thumbnail */
+  /* Portrait default: 4-column grid, no thumbnail.
+     Name (1.618fr) : chart (1fr) = golden ratio. */
   .mobile-summary-header {
     display: grid;
-    grid-template-columns: 1fr var(--col-conf-w) var(--col-count-w) var(--col-chart-w);
+    grid-template-columns: 1.618fr var(--col-conf-w) var(--col-count-w) minmax(
+        var(--col-chart-min),
+        1fr
+      );
     align-items: center;
     gap: 0.25rem;
     padding: 0 0.125rem 0.375rem;
@@ -158,7 +164,10 @@
 
   .mobile-summary-row {
     display: grid;
-    grid-template-columns: 1fr var(--col-conf-w) var(--col-count-w) var(--col-chart-w);
+    grid-template-columns: 1.618fr var(--col-conf-w) var(--col-count-w) minmax(
+        var(--col-chart-min),
+        1fr
+      );
     align-items: center;
     gap: 0.25rem;
     padding: 0.15rem 0.125rem;
@@ -218,8 +227,9 @@
   /* Landscape: restore thumbnail column */
   @media (orientation: landscape) {
     .mobile-summary-header {
-      grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
-          --col-chart-w
+      grid-template-columns: var(--thumb-w) 1.618fr var(--col-conf-w) var(--col-count-w) minmax(
+          var(--col-chart-min),
+          1fr
         );
     }
 
@@ -229,8 +239,9 @@
     }
 
     .mobile-summary-row {
-      grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
-          --col-chart-w
+      grid-template-columns: var(--thumb-w) 1.618fr var(--col-conf-w) var(--col-count-w) minmax(
+          var(--col-chart-min),
+          1fr
         );
     }
 
