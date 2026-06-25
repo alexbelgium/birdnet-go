@@ -4,8 +4,9 @@
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
   import { buildHourlyDetectionUrl } from '$lib/utils/detectionUrls';
+  import { getLocalDateString } from '$lib/utils/date';
   import HourlyMiniChart from './HourlyMiniChart.svelte';
-  import SpeciesEbirdLink from './SpeciesEbirdLink.svelte';
+  import MobileSpeciesExpandedCard from './MobileSpeciesExpandedCard.svelte';
 
   interface Props {
     data: DailySpeciesSummary[];
@@ -58,6 +59,10 @@
 
   // Full-day detections URL for the selected date.
   const dailyUrl = $derived(buildHourlyDetectionUrl(selectedDate, 0, 24));
+
+  // Truncate chart at current hour when viewing today (avoids empty future bars).
+  const isToday = $derived(selectedDate === getLocalDateString());
+  const currentHour = $derived(isToday ? new Date().getHours() : 23);
 </script>
 
 <!--
@@ -81,108 +86,124 @@
     {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
     {@const pct = Math.round(Math.max(0, Math.min(1, item.max_confidence ?? 0)) * 100)}
     {@const isExpanded = expandedSpecies === item.scientific_name}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="mobile-summary-row"
-      class:expanded={isExpanded}
-      data-scientific={item.scientific_name}
-      ondblclick={(e: MouseEvent) => {
-        const target = e.target as HTMLElement | null;
-        if (!target?.closest('a') && !target?.closest('[role="button"]')) {
-          window.location.href = dailyUrl;
-        }
-      }}
-    >
-      <!-- Thumbnail or initials badge — portrait hides at default, shown in landscape -->
-      <div class="mobile-thumb-col">
-        {#if showThumbnails}
-          <img
-            src={item.thumbnail_url
-              ? buildAppUrl(item.thumbnail_url)
-              : buildAppUrl(
-                  `/api/v2/media/species-image?name=${encodeURIComponent(item.scientific_name)}`
-                )}
-            alt=""
-            class="mobile-thumb"
-            loading="lazy"
-          />
-        {:else}
-          <span
-            class="mobile-badge"
-            style:background-color={getSpeciesBadgeColor(item.scientific_name)}
-            aria-hidden="true"
-          >
-            {getSpeciesInitials(displayName)}
-          </span>
-        {/if}
-      </div>
 
-      <!-- Species name + eBird link + scientific name -->
-      <div class="col-name-group">
-        <div class="col-name-row">
-          <a
-            href={getSpeciesUrl(item)}
-            class="col-name text-sm font-medium truncate leading-tight"
-            aria-label="{displayName}: {pct}% confidence, {formatDetectionCount(
-              item.count
-            )} detections"
-            onclick={(e: MouseEvent) => {
-              const sci = item.scientific_name;
-              if (clickTimers.has(sci)) {
-                clearTimeout(clickTimers.get(sci)!);
-                clickTimers.delete(sci);
-                e.preventDefault();
-                window.location.href = dailyUrl;
-              } else {
-                const t = setTimeout(() => {
-                  clickTimers.delete(sci);
-                }, 250);
-                clickTimers.set(sci, t);
-                // single-tap: default href navigation proceeds after 250 ms window
-              }
-            }}
-          >
-            {displayName}
-          </a>
-          <SpeciesEbirdLink speciesCode={item.species_code} {displayName} />
-        </div>
-        <span class="col-scientific-name">{item.scientific_name}</span>
-      </div>
-
-      <!-- Max confidence, color-coded -->
-      <span
-        class="col-conf text-xs tabular-nums font-semibold"
-        style:color={computeConfidenceColor(pct)}
-      >
-        {pct}%
-      </span>
-
-      <!-- Detection count, abbreviated -->
-      <span class="col-count text-xs tabular-nums">
-        {formatDetectionCount(item.count)}
-      </span>
-
-      <!-- 24-bar hourly frequency chart — tap to expand -->
-      <div
-        class="col-chart"
-        role="button"
-        tabindex="0"
-        aria-expanded={isExpanded}
-        aria-label="Toggle hourly chart for {displayName}"
-        onclick={(e: MouseEvent) => {
-          e.stopPropagation();
-          expandedSpecies = isExpanded ? null : item.scientific_name;
+    {#if isExpanded}
+      <!-- Expanded: full species card replaces the compact row -->
+      <MobileSpeciesExpandedCard
+        {item}
+        {sunriseHour}
+        {sunsetHour}
+        {displayName}
+        speciesUrl={getSpeciesUrl(item)}
+        maxHour={currentHour}
+        onCollapse={() => {
+          expandedSpecies = null;
         }}
-        onkeydown={(e: KeyboardEvent) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            expandedSpecies = isExpanded ? null : item.scientific_name;
+        {dailyUrl}
+      />
+    {:else}
+      <!-- Compact row — no eBird icon; chart truncated at currentHour -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="mobile-summary-row"
+        data-scientific={item.scientific_name}
+        ondblclick={(e: MouseEvent) => {
+          const target = e.target as HTMLElement | null;
+          if (!target?.closest('a') && !target?.closest('[role="button"]')) {
+            window.location.href = dailyUrl;
           }
         }}
       >
-        <HourlyMiniChart {item} {sunriseHour} {sunsetHour} tall={isExpanded} />
+        <!-- Thumbnail or initials badge — portrait hides at default, shown in landscape -->
+        <div class="mobile-thumb-col">
+          {#if showThumbnails}
+            <img
+              src={item.thumbnail_url
+                ? buildAppUrl(item.thumbnail_url)
+                : buildAppUrl(
+                    `/api/v2/media/species-image?name=${encodeURIComponent(item.scientific_name)}`
+                  )}
+              alt=""
+              class="mobile-thumb"
+              loading="lazy"
+            />
+          {:else}
+            <span
+              class="mobile-badge"
+              style:background-color={getSpeciesBadgeColor(item.scientific_name)}
+              aria-hidden="true"
+            >
+              {getSpeciesInitials(displayName)}
+            </span>
+          {/if}
+        </div>
+
+        <!-- Species name + scientific name (no eBird icon in compact view) -->
+        <div class="col-name-group">
+          <div class="col-name-row">
+            <a
+              href={getSpeciesUrl(item)}
+              class="col-name text-sm font-medium truncate leading-tight"
+              aria-label="{displayName}: {pct}% confidence, {formatDetectionCount(
+                item.count
+              )} detections"
+              onclick={(e: MouseEvent) => {
+                const sci = item.scientific_name;
+                if (clickTimers.has(sci)) {
+                  clearTimeout(clickTimers.get(sci)!);
+                  clickTimers.delete(sci);
+                  e.preventDefault();
+                  window.location.href = dailyUrl;
+                } else {
+                  const t = setTimeout(() => {
+                    clickTimers.delete(sci);
+                  }, 250);
+                  clickTimers.set(sci, t);
+                  // single-tap: default href navigation proceeds after 250 ms window
+                }
+              }}
+            >
+              {displayName}
+            </a>
+          </div>
+          <span class="col-scientific-name">{item.scientific_name}</span>
+        </div>
+
+        <!-- Max confidence, color-coded -->
+        <span
+          class="col-conf text-xs tabular-nums font-semibold"
+          style:color={computeConfidenceColor(pct)}
+        >
+          {pct}%
+        </span>
+
+        <!-- Detection count, abbreviated -->
+        <span class="col-count text-xs tabular-nums">
+          {formatDetectionCount(item.count)}
+        </span>
+
+        <!-- Hourly chart truncated at currentHour — tap to expand into card -->
+        <div
+          class="col-chart"
+          role="button"
+          tabindex="0"
+          aria-expanded={false}
+          aria-label="Expand hourly chart for {displayName}"
+          onclick={(e: MouseEvent) => {
+            e.stopPropagation();
+            expandedSpecies = item.scientific_name;
+          }}
+          onkeydown={(e: KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              expandedSpecies = item.scientific_name;
+            }
+          }}
+        >
+          <HourlyMiniChart {item} {sunriseHour} {sunsetHour} maxHour={currentHour} />
+        </div>
       </div>
-    </div>
+    {/if}
   {/each}
 
   {#if data.length === 0}
@@ -239,17 +260,10 @@
       );
     align-items: center;
     gap: 0.25rem;
-    padding: 0.15rem 0.125rem;
-    min-height: 2.25rem;
+    padding: 0.075rem 0.125rem;
+    min-height: 1.875rem;
     border-radius: 0.375rem;
     color: var(--color-base-content);
-    transition: min-height 0.15s ease;
-  }
-
-  .mobile-summary-row.expanded {
-    align-items: flex-start;
-    padding-top: 0.375rem;
-    padding-bottom: 0.375rem;
   }
 
   /* Thumbnail column hidden by default (portrait) */
