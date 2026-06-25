@@ -260,8 +260,8 @@
       );
     align-items: center;
     gap: 0.25rem;
-    padding: 0.075rem 0.125rem;
-    min-height: 1.875rem;
+    padding: 0 0.125rem;
+    min-height: 1.25rem;
     border-radius: 0.375rem;
     color: var(--color-base-content);
   }

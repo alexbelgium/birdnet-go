@@ -6,6 +6,7 @@
   import HourlyMiniChart from './HourlyMiniChart.svelte';
   import { buildEbirdUrl, isValidEbirdCode } from '../../utils/dailySummaryStats';
   import { getLocale } from '$lib/i18n';
+  import { safeArrayAccess } from '$lib/utils/security';
 
   interface Props {
     item: DailySpeciesSummary;
@@ -82,6 +83,28 @@
       ? buildAppUrl(item.thumbnail_url)
       : buildAppUrl(`/api/v2/media/species-image?name=${encodeURIComponent(item.scientific_name)}`)
   );
+
+  // Peak bars: local maxima (count >= both neighbors) in 0..maxHour, top 6 by count.
+  const CHART_H = 64;
+  const MAX_BAR_H = CHART_H - 2; // headroom reserve matches HourlyMiniChart
+
+  const peakBars = $derived.by(() => {
+    const counts = item.hourly_counts.slice(0, maxHour + 1);
+    const maxC = Math.max(...counts, 1);
+    const peaks: Array<{ hour: number; count: number; labelTopPx: number }> = [];
+    for (let h = 0; h <= maxHour; h++) {
+      const c = safeArrayAccess(counts, h, 0) ?? 0;
+      if (c === 0) continue;
+      const prev = safeArrayAccess(counts, h - 1, 0) ?? 0;
+      const next = safeArrayAccess(counts, h + 1, 0) ?? 0;
+      if (c >= prev && c >= next) {
+        const barH = Math.max(2, Math.round((c / maxC) * MAX_BAR_H));
+        const barTopPx = CHART_H - barH;
+        peaks.push({ hour: h, count: c, labelTopPx: Math.max(0, barTopPx - 9) });
+      }
+    }
+    return peaks.sort((a, b) => b.count - a.count).slice(0, 6);
+  });
 </script>
 
 <!--
@@ -191,6 +214,17 @@
     <div class="card-chart-wrap">
       <HourlyMiniChart {item} {sunriseHour} {sunsetHour} {maxHour} chartHeight={64} />
     </div>
+
+    <!-- Peak count labels overlay -->
+    {#if peakBars.length > 0}
+      <div class="card-peak-labels" aria-hidden="true">
+        {#each peakBars as { hour, count, labelTopPx } (hour)}
+          <span class="card-peak-label" style:left={tickPct(hour)} style:top="{labelTopPx}px">
+            {formatDetectionCount(count)}
+          </span>
+        {/each}
+      </div>
+    {/if}
 
     <!-- Hour axis labels -->
     <div class="card-axis" aria-hidden="true">
@@ -413,6 +447,27 @@
     width: 100%;
     height: 64px;
     display: block;
+  }
+
+  /* Peak count labels floating above bars */
+  .card-peak-labels {
+    position: absolute;
+    top: 0.375rem; /* matches card-chart-section padding-top */
+    left: 0.5rem;
+    right: 0.5rem;
+    height: 64px;
+    pointer-events: none;
+  }
+
+  .card-peak-label {
+    position: absolute;
+    transform: translateX(-50%);
+    font-size: 0.4rem;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-base-content) 70%, transparent);
+    white-space: nowrap;
   }
 
   .card-axis {
