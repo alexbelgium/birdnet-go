@@ -32,28 +32,14 @@
 
   const pct = $derived(Math.round(Math.max(0, Math.min(1, item.max_confidence ?? 0)) * 100));
 
-  function formatDetectionTime(timeStr: string): string {
-    if (!timeStr) return '';
-    // Handle "HH:MM" or "HH:MM:SS" bare time strings
-    const timeOnly = timeStr.match(/^(\d{1,2}):(\d{2})/);
-    if (timeOnly) {
-      return `${(timeOnly[1] ?? '0').padStart(2, '0')}:${timeOnly[2] ?? '00'}`;
-    }
-    // Handle ISO 8601 / RFC3339 datetime strings
-    const d = new Date(timeStr);
-    if (!isNaN(d.getTime())) {
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    }
-    return '';
+  function formatLastSeen(days: number | undefined): string {
+    if (days === undefined || days === null) return '';
+    if (days === 0) return 'seen today';
+    if (days === 1) return 'last seen yesterday';
+    return `last seen ${days} days ago`;
   }
 
-  const firstTime = $derived(formatDetectionTime(item.first_heard));
-  const lastTime = $derived(formatDetectionTime(item.latest_heard));
-  const timeRange = $derived(
-    firstTime && lastTime && firstTime !== lastTime
-      ? `${firstTime}–${lastTime}`
-      : firstTime || lastTime
-  );
+  const lastSeen = $derived(formatLastSeen(item.days_since_last_seen));
 
   // Novelty pill: strongest badge wins, returns {label, bg} or null.
   const novelty = $derived(
@@ -159,16 +145,14 @@
       <!-- Scientific name -->
       <span class="card-sci">{item.scientific_name}</span>
 
-      <!-- Meta line: count det. · conf% conf. · time range -->
+      <!-- Meta line: 762 x - 99% max conf. - last seen 7 days ago -->
       <div class="card-meta">
-        <span class="card-count-badge">{formatDetectionCount(item.count)}</span>
-        <span class="card-stat-label">det.</span>
-        <span class="card-meta-sep">·</span>
-        <span class="card-conf-val" style:color={computeConfidenceColor(pct)}>{pct}%</span>
-        <span class="card-stat-label">conf.</span>
-        {#if timeRange}
-          <span class="card-meta-sep">·</span>
-          <span class="card-time">{timeRange}</span>
+        <span class="card-meta-plain">{formatDetectionCount(item.count)} x</span>
+        <span class="card-meta-sep">-</span>
+        <span class="card-conf-val" style:color={computeConfidenceColor(pct)}>{pct}% max conf.</span>
+        {#if lastSeen}
+          <span class="card-meta-sep">-</span>
+          <span class="card-meta-plain">{lastSeen}</span>
         {/if}
       </div>
 
@@ -345,22 +329,10 @@
     margin-top: 0.1rem;
   }
 
-  .card-count-badge {
-    display: inline-flex;
-    align-items: center;
-    background: #22c55e;
-    color: white;
-    font-size: 0.6rem;
+  .card-meta-plain {
+    font-size: 0.65rem;
     font-weight: 700;
-    padding: 0.1rem 0.35rem;
-    border-radius: 9999px;
-    line-height: 1.4;
-    flex-shrink: 0;
-  }
-
-  .card-stat-label {
-    font-size: 0.55rem;
-    color: color-mix(in srgb, var(--color-base-content) 45%, transparent);
+    color: var(--color-base-content);
     line-height: 1;
     flex-shrink: 0;
   }
@@ -372,17 +344,9 @@
   }
 
   .card-conf-val {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     font-weight: 700;
     line-height: 1;
-    flex-shrink: 0;
-  }
-
-  .card-time {
-    font-size: 0.6rem;
-    font-weight: 500;
-    color: color-mix(in srgb, var(--color-base-content) 60%, transparent);
-    font-variant-numeric: tabular-nums;
     flex-shrink: 0;
   }
 
