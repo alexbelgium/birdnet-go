@@ -45,6 +45,7 @@
   viewBox="0 0 {svgWidth} {chartHeight}"
   width={svgWidth}
   height={chartHeight}
+  preserveAspectRatio="none"
   role="img"
   aria-label="Hourly detection frequency"
 >
