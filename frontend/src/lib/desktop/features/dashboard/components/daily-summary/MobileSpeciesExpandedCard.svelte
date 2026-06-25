@@ -2,7 +2,7 @@
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
-  import { X, ExternalLink } from '@lucide/svelte';
+  import { X, ExternalLink, TrendingUp, TrendingDown } from '@lucide/svelte';
   import HourlyMiniChart from './HourlyMiniChart.svelte';
   import { buildEbirdUrl, isValidEbirdCode } from '../../utils/dailySummaryStats';
   import { getLocale } from '$lib/i18n';
@@ -43,6 +43,15 @@
 
   const lastSeen = $derived(formatLastSeen(item.days_since_last_seen));
   const detectionsUrl = $derived(buildSpeciesDetectionUrl(item.scientific_name, selectedDate));
+
+  // Peak hour: hour with the highest detection count in 0..maxHour.
+  const peakHour = $derived.by(() => {
+    const counts = item.hourly_counts.slice(0, maxHour + 1);
+    const maxVal = Math.max(...counts);
+    if (maxVal === 0) return null;
+    const idx = counts.indexOf(maxVal);
+    return idx >= 0 ? idx : null;
+  });
 
   // Novelty pill: strongest badge wins, returns {label, bg} or null.
   const novelty = $derived(
@@ -156,9 +165,16 @@
       <!-- Scientific name -->
       <span class="card-sci">{item.scientific_name}</span>
 
-      <!-- Meta line: 762 x - 99% max conf. - last seen 7 days ago -->
+      <!-- Meta line: 762 x ↑ - 99% max conf. - last seen 7d -->
       <div class="card-meta">
-        <span class="card-meta-plain">{formatDetectionCount(item.count)} x</span>
+        <span class="card-meta-plain">
+          {formatDetectionCount(item.count)} x
+        </span>
+        {#if item.countIncreased === true}
+          <TrendingUp class="card-trend trend-up size-3" />
+        {:else if item.countIncreased === false}
+          <TrendingDown class="card-trend trend-down size-3" />
+        {/if}
         <span class="card-meta-sep">-</span>
         <span class="card-conf-val" style:color={computeConfidenceColor(pct)}>{pct}% max conf.</span>
         {#if lastSeen}
@@ -166,6 +182,19 @@
           <span class="card-meta-plain">{lastSeen}</span>
         {/if}
       </div>
+
+      <!-- Secondary stats: peak hour · days this year -->
+      {#if peakHour !== null || item.days_this_year}
+        <div class="card-stats">
+          {#if peakHour !== null}
+            <span class="card-stat">peak {String(peakHour).padStart(2, '0')}h</span>
+          {/if}
+          {#if item.days_this_year}
+            {#if peakHour !== null}<span class="card-stats-sep">·</span>{/if}
+            <span class="card-stat">{item.days_this_year}d this year</span>
+          {/if}
+        </div>
+      {/if}
 
       <!-- Novelty pill (shown only when applicable) -->
       {#if novelty}
@@ -378,6 +407,38 @@
     font-weight: 700;
     line-height: 1;
     flex-shrink: 0;
+  }
+
+  :global(.card-trend) {
+    flex-shrink: 0;
+  }
+
+  :global(.card-trend.trend-up) {
+    color: #22c55e;
+  }
+
+  :global(.card-trend.trend-down) {
+    color: #f87171;
+  }
+
+  .card-stats {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.05rem;
+  }
+
+  .card-stat {
+    font-size: 0.575rem;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--color-base-content) 55%, transparent);
+    line-height: 1;
+  }
+
+  .card-stats-sep {
+    font-size: 0.5rem;
+    color: color-mix(in srgb, var(--color-base-content) 30%, transparent);
+    line-height: 1;
   }
 
   .card-novelty {
