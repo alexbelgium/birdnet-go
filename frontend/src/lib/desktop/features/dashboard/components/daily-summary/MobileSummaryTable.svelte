@@ -100,6 +100,7 @@
           expandedSpecies = null;
         }}
         {dailyUrl}
+        {selectedDate}
       />
     {:else}
       <!-- Compact row — no eBird icon; chart truncated at currentHour -->

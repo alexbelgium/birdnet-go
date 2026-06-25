@@ -7,6 +7,7 @@
   import { buildEbirdUrl, isValidEbirdCode } from '../../utils/dailySummaryStats';
   import { getLocale } from '$lib/i18n';
   import { safeArrayAccess } from '$lib/utils/security';
+  import { buildSpeciesDetectionUrl } from '$lib/utils/detectionUrls';
 
   interface Props {
     item: DailySpeciesSummary;
@@ -17,6 +18,7 @@
     maxHour: number;
     onCollapse: () => void;
     dailyUrl: string;
+    selectedDate: string;
   }
 
   let {
@@ -28,6 +30,7 @@
     maxHour,
     onCollapse,
     dailyUrl,
+    selectedDate,
   }: Props = $props();
 
   const pct = $derived(Math.round(Math.max(0, Math.min(1, item.max_confidence ?? 0)) * 100));
@@ -35,11 +38,11 @@
   function formatLastSeen(days: number | undefined): string {
     if (days === undefined || days === null) return '';
     if (days === 0) return 'seen today';
-    if (days === 1) return 'last seen yesterday';
-    return `last seen ${days} days ago`;
+    return `last seen ${days}d`;
   }
 
   const lastSeen = $derived(formatLastSeen(item.days_since_last_seen));
+  const detectionsUrl = $derived(buildSpeciesDetectionUrl(item.scientific_name, selectedDate));
 
   // Novelty pill: strongest badge wins, returns {label, bg} or null.
   const novelty = $derived(
@@ -140,6 +143,14 @@
             <ExternalLink class="size-3" />eBird
           </a>
         {/if}
+        <a
+          href={detectionsUrl}
+          class="card-detections-btn"
+          aria-label="View {displayName} detections for this day"
+          onclick={(e: MouseEvent) => e.stopPropagation()}
+        >
+          <ExternalLink class="size-3" />Detections
+        </a>
       </div>
 
       <!-- Scientific name -->
@@ -309,6 +320,25 @@
 
   .card-ebird-btn:hover {
     background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  }
+
+  .card-detections-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    flex-shrink: 0;
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--color-base-content);
+    text-decoration: none;
+    border: 1px solid color-mix(in srgb, var(--color-base-content) 30%, transparent);
+    border-radius: 9999px;
+    padding: 0.1rem 0.375rem;
+    line-height: 1.4;
+  }
+
+  .card-detections-btn:hover {
+    background: color-mix(in srgb, var(--color-base-content) 8%, transparent);
   }
 
   .card-sci {
