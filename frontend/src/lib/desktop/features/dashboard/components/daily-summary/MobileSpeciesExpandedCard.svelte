@@ -71,10 +71,9 @@
     return last !== maxHour ? [...base, maxHour] : base;
   });
 
-  // Tick position as a percentage of the chart width (bar centres).
+  // Tick position matches the SVG bar-centre: (h×4 + 1.5) / ((maxHour+1)×4) = (h+0.375)/(maxHour+1).
   function tickPct(hour: number): string {
-    if (maxHour === 0) return '0%';
-    return `${((hour / maxHour) * 100).toFixed(1)}%`;
+    return `${(((hour + 0.375) / (maxHour + 1)) * 100).toFixed(1)}%`;
   }
 
   const thumbSrc = $derived(
