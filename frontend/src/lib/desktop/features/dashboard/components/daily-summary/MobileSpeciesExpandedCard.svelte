@@ -2,9 +2,10 @@
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
-  import { X } from '@lucide/svelte';
+  import { X, ExternalLink } from '@lucide/svelte';
   import HourlyMiniChart from './HourlyMiniChart.svelte';
-  import SpeciesEbirdLink from './SpeciesEbirdLink.svelte';
+  import { buildEbirdUrl, isValidEbirdCode } from '../../utils/dailySummaryStats';
+  import { getLocale } from '$lib/i18n';
 
   interface Props {
     item: DailySpeciesSummary;
@@ -115,22 +116,33 @@
 
     <!-- Info column -->
     <div class="card-info">
-      <!-- Name + eBird (× button is absolute) -->
+      <!-- Name + eBird pill (× button is absolute) -->
       <div class="card-name-row">
         <a href={speciesUrl} class="card-name">{displayName}</a>
-        <span class="card-ebird-wrap">
-          <SpeciesEbirdLink speciesCode={item.species_code} {displayName} />
-        </span>
+        {#if isValidEbirdCode(item.species_code)}
+          <a
+            href={buildEbirdUrl(item.species_code, getLocale())}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="card-ebird-btn"
+            aria-label="View {displayName} on eBird"
+            onclick={(e: MouseEvent) => e.stopPropagation()}
+          >
+            <ExternalLink class="size-3" />eBird
+          </a>
+        {/if}
       </div>
 
       <!-- Scientific name -->
       <span class="card-sci">{item.scientific_name}</span>
 
-      <!-- Meta line: count · conf% · time range -->
+      <!-- Meta line: count det. · conf% conf. · time range -->
       <div class="card-meta">
         <span class="card-count-badge">{formatDetectionCount(item.count)}</span>
+        <span class="card-stat-label">det.</span>
         <span class="card-meta-sep">·</span>
         <span class="card-conf-val" style:color={computeConfidenceColor(pct)}>{pct}%</span>
+        <span class="card-stat-label">conf.</span>
         {#if timeRange}
           <span class="card-meta-sep">·</span>
           <span class="card-time">{timeRange}</span>
@@ -182,8 +194,14 @@
 
     <!-- Hour axis labels -->
     <div class="card-axis" aria-hidden="true">
-      {#each axisTicks as tick (tick)}
-        <span class="card-axis-tick" style:left={tickPct(tick)}>
+      {#each axisTicks as tick, i (tick)}
+        <span
+          class="card-axis-tick"
+          class:tick-first={i === 0}
+          class:tick-last={i === axisTicks.length - 1}
+          style:left={i === axisTicks.length - 1 ? undefined : tickPct(tick)}
+          style:right={i === axisTicks.length - 1 ? '0' : undefined}
+        >
           {String(tick).padStart(2, '0')}
         </span>
       {/each}
@@ -256,10 +274,23 @@
     text-decoration: underline;
   }
 
-  .card-ebird-wrap {
-    flex-shrink: 0;
-    display: flex;
+  .card-ebird-btn {
+    display: inline-flex;
     align-items: center;
+    gap: 0.2rem;
+    flex-shrink: 0;
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    text-decoration: none;
+    border: 1px solid color-mix(in srgb, var(--color-primary) 50%, transparent);
+    border-radius: 9999px;
+    padding: 0.1rem 0.375rem;
+    line-height: 1.4;
+  }
+
+  .card-ebird-btn:hover {
+    background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   }
 
   .card-sci {
@@ -290,6 +321,13 @@
     padding: 0.1rem 0.35rem;
     border-radius: 9999px;
     line-height: 1.4;
+    flex-shrink: 0;
+  }
+
+  .card-stat-label {
+    font-size: 0.55rem;
+    color: color-mix(in srgb, var(--color-base-content) 45%, transparent);
+    line-height: 1;
     flex-shrink: 0;
   }
 
@@ -392,5 +430,16 @@
     line-height: 1;
     color: color-mix(in srgb, var(--color-base-content) 42%, transparent);
     font-variant-numeric: tabular-nums;
+  }
+
+  .card-axis-tick.tick-first {
+    left: 0 !important;
+    transform: none;
+  }
+
+  .card-axis-tick.tick-last {
+    right: 0;
+    left: auto !important;
+    transform: none;
   }
 </style>
