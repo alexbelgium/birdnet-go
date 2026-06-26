@@ -71,7 +71,7 @@ func (c *Controller) initAudioExpandRoutes() {
 	// Capability info (sourceRate, gating) for the detection detail page.
 	c.Echo.GET("/api/v2/audio/:id/expand", c.GetAudioExpandInfo)
 	// Generate the slowed, audible review copy (protected, like /process).
-	c.Echo.POST("/api/v2/audio/:id/expand", c.ExpandBatAudioByID, c.authMiddleware)
+	c.Echo.POST("/api/v2/audio/:id/expand", c.ExpandBatAudioByID, c.AuthMiddleware)
 }
 
 // AudioExpandInfo describes whether a detection supports audible bat playback
@@ -96,7 +96,7 @@ func isBatModelType(modelType string) bool {
 //
 // GET /api/v2/audio/:id/expand
 func (c *Controller) GetAudioExpandInfo(ctx echo.Context) error {
-	if err := c.requireDatastore(ctx); err != nil {
+	if err := c.RequireDatastore(ctx); err != nil {
 		return err
 	}
 
@@ -108,7 +108,7 @@ func (c *Controller) GetAudioExpandInfo(ctx echo.Context) error {
 	// Default to non-bat on lookup failure (mirrors spectrogram handlers).
 	modelType, mtErr := c.DS.GetNoteModelType(noteID)
 	if mtErr != nil {
-		c.logDebugIfEnabled("GetNoteModelType failed for expand info, treating as non-bat",
+		c.LogDebugIfEnabled("GetNoteModelType failed for expand info, treating as non-bat",
 			logger.String("note_id", noteID), logger.Error(mtErr))
 	}
 
@@ -129,7 +129,7 @@ func (c *Controller) GetAudioExpandInfo(ctx echo.Context) error {
 //
 // POST /api/v2/audio/:id/expand?factor=5[&download=1]
 func (c *Controller) ExpandBatAudioByID(ctx echo.Context) error {
-	if err := c.requireDatastore(ctx); err != nil {
+	if err := c.RequireDatastore(ctx); err != nil {
 		return err
 	}
 
@@ -208,7 +208,7 @@ func (c *Controller) ExpandBatAudioByID(ctx echo.Context) error {
 	_ = tmpFile.Close()
 	defer os.Remove(tmpPath) //nolint:errcheck // best-effort cleanup
 
-	ffmpegPath := c.currentSettings().Realtime.Audio.FfmpegPath
+	ffmpegPath := c.CurrentSettings().Realtime.Audio.FfmpegPath
 	if err := expandAudioToFile(ctx.Request().Context(), absolutePath, ffmpegPath, sourceRate, factor, tmpPath); err != nil {
 		if ctx.Request().Context().Err() != nil {
 			return nil // Client disconnected
@@ -224,7 +224,7 @@ func (c *Controller) ExpandBatAudioByID(ctx echo.Context) error {
 	// Cache the result (non-fatal on failure).
 	if c.processingCache != nil {
 		if err := c.processingCache.put(cacheKey, wavData); err != nil {
-			c.logAPIRequest(ctx, logger.LogLevelWarn, "Failed to cache expanded audio",
+			c.LogAPIRequest(ctx, logger.LogLevelWarn, "Failed to cache expanded audio",
 				logger.String("cache_key", cacheKey), logger.Error(err))
 		}
 	}
@@ -248,7 +248,7 @@ func (c *Controller) resolveExpandSourcePath(noteID string) (absPath string, ok 
 	if err != nil || clipPath == "" {
 		return "", false
 	}
-	normalizedPath, err := c.normalizeAndValidatePathWithLogger(clipPath, c.apiLogger)
+	normalizedPath, err := c.normalizeAndValidatePathWithLogger(clipPath, c.APILogger)
 	if err != nil {
 		return "", false
 	}
@@ -263,7 +263,7 @@ func (c *Controller) resolveExpandSourcePath(noteID string) (absPath string, ok 
 // -protocol_whitelist (the shared stream-probe helper omits "file", which
 // rejects local filesystem paths) so that on-disk clips probe correctly.
 func (c *Controller) probeSourceSampleRate(ctx context.Context, absPath string) (int, error) {
-	ffprobePath := c.currentSettings().Realtime.Audio.FfprobePath
+	ffprobePath := c.CurrentSettings().Realtime.Audio.FfprobePath
 	if ffprobePath == "" {
 		ffprobePath = "ffprobe"
 	}
