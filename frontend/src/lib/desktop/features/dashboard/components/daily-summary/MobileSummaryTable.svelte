@@ -54,8 +54,8 @@
   // Per-row expansion state — scientific name of the expanded row, or null.
   let expandedSpecies: string | null = $state(null);
 
-  // Timer map for distinguishing single-tap (→ species) from double-tap (→ daily detections).
-  const clickTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Timer map for distinguishing single-tap (→ expand) from double-tap (→ daily detections).
+  const rowTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   // Full-day detections URL for the selected date.
   const dailyUrl = $derived(buildHourlyDetectionUrl(selectedDate, 0, 24));
@@ -68,10 +68,8 @@
 <!--
   Compact mobile species table — replaces the heatmap grid on screens <768 px.
   Interaction model:
-    - Tap species name → navigate to species detections (250 ms window)
-    - Double-tap name → navigate to daily detections
-    - Tap chart column → expand/collapse that row's chart inline
-    - Tap eBird icon → open species on eBird (new tab)
+    - Single tap anywhere on a row → expand into species card (300 ms guard)
+    - Double-tap anywhere on a row → navigate to daily detections
 -->
 <div class="mobile-summary-table w-full" aria-label="Species detected on {selectedDate}">
   <!-- Header -->
@@ -103,15 +101,33 @@
         {selectedDate}
       />
     {:else}
-      <!-- Compact row — no eBird icon; chart truncated at currentHour -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- Compact row — single tap → expand; double tap → daily log -->
       <div
         class="mobile-summary-row"
-        data-scientific={item.scientific_name}
-        ondblclick={(e: MouseEvent) => {
-          const target = e.target as HTMLElement | null;
-          if (!target?.closest('a') && !target?.closest('[role="button"]')) {
+        role="button"
+        tabindex="0"
+        aria-label="{displayName}: {pct}% confidence, {formatDetectionCount(
+          item.count
+        )} detections. Tap to expand."
+        onclick={(_e: MouseEvent) => {
+          const sci = item.scientific_name;
+          if (rowTimers.has(sci)) {
+            const t = rowTimers.get(sci);
+            if (t !== undefined) clearTimeout(t);
+            rowTimers.delete(sci);
             window.location.href = dailyUrl;
+          } else {
+            const t = setTimeout(() => {
+              rowTimers.delete(sci);
+              expandedSpecies = sci;
+            }, 300);
+            rowTimers.set(sci, t);
+          }
+        }}
+        onkeydown={(e: KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            expandedSpecies = item.scientific_name;
           }
         }}
       >
@@ -139,33 +155,12 @@
           {/if}
         </div>
 
-        <!-- Species name + scientific name (no eBird icon in compact view) -->
+        <!-- Species name + scientific name -->
         <div class="col-name-group">
           <div class="col-name-row">
-            <a
-              href={getSpeciesUrl(item)}
-              class="col-name text-sm font-medium truncate leading-tight"
-              aria-label="{displayName}: {pct}% confidence, {formatDetectionCount(
-                item.count
-              )} detections"
-              onclick={(e: MouseEvent) => {
-                const sci = item.scientific_name;
-                if (clickTimers.has(sci)) {
-                  clearTimeout(clickTimers.get(sci)!);
-                  clickTimers.delete(sci);
-                  e.preventDefault();
-                  window.location.href = dailyUrl;
-                } else {
-                  const t = setTimeout(() => {
-                    clickTimers.delete(sci);
-                  }, 250);
-                  clickTimers.set(sci, t);
-                  // single-tap: default href navigation proceeds after 250 ms window
-                }
-              }}
-            >
+            <span class="col-name text-sm font-medium truncate leading-tight">
               {displayName}
-            </a>
+            </span>
           </div>
           <span class="col-scientific-name">{item.scientific_name}</span>
         </div>
@@ -183,24 +178,8 @@
           {formatDetectionCount(item.count)}
         </span>
 
-        <!-- Hourly chart truncated at currentHour — tap to expand into card -->
-        <div
-          class="col-chart"
-          role="button"
-          tabindex="0"
-          aria-expanded={false}
-          aria-label="Expand hourly chart for {displayName}"
-          onclick={(e: MouseEvent) => {
-            e.stopPropagation();
-            expandedSpecies = item.scientific_name;
-          }}
-          onkeydown={(e: KeyboardEvent) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              expandedSpecies = item.scientific_name;
-            }
-          }}
-        >
+        <!-- Hourly chart (visual only — whole row handles tap) -->
+        <div class="col-chart" aria-hidden="true">
           <HourlyMiniChart {item} {sunriseHour} {sunsetHour} maxHour={currentHour} />
         </div>
       </div>
@@ -214,7 +193,7 @@
   {/if}
 
   {#if data.length > 0}
-    <div class="zoom-hint" aria-hidden="true">tap chart to expand · double-tap for daily log</div>
+    <div class="zoom-hint" aria-hidden="true">tap to expand · double-tap for daily log</div>
   {/if}
 </div>
 
@@ -265,6 +244,16 @@
     min-height: 1.25rem;
     border-radius: 0.375rem;
     color: var(--color-base-content);
+    cursor: pointer;
+    border: none;
+    background: none;
+    text-align: left;
+    width: 100%;
+  }
+
+  .mobile-summary-row:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
   }
 
   /* Thumbnail column hidden by default (portrait) */
@@ -318,11 +307,6 @@
     min-width: 0;
     flex: 1;
     color: var(--color-base-content);
-    text-decoration: none;
-  }
-
-  .col-name:hover {
-    text-decoration: underline;
   }
 
   .col-scientific-name {
@@ -346,14 +330,8 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    cursor: pointer;
     border-radius: 0.25rem;
     padding: 0.125rem 0;
-  }
-
-  .col-chart:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
   }
 
   /* Subtle hint below the species list */
