@@ -72,6 +72,10 @@
   // svelte-ignore state_referenced_locally
   let selectedLimit = $state(limit);
 
+  // Number of skeleton placeholders to show during the initial load. Capped so we
+  // don't paint dozens of placeholders for large limits — a few fill the viewport.
+  const SKELETON_CARD_COUNT = 6;
+
   // Shared action handlers (review, delete, lock, ignore species). Exclusion
   // state is the shared, server-hydrated excludedSpecies store.
   const actions = useDetectionActions({
@@ -255,9 +259,18 @@
         <XCircle class="size-6" />
         <span>{error}</span>
       </div>
+    {:else if loading && data.length === 0}
+      <!-- Initial load: skeleton cards so the grid layout appears instantly with
+           no layout shift when real cards arrive (better perceived speed on mobile). -->
+      <div class="detection-cards-grid gap-4" aria-hidden="true">
+        {#each Array(Math.min(selectedLimit, SKELETON_CARD_COUNT)) as _, i (i)}
+          <div class="detection-card-skeleton animate-pulse"></div>
+        {/each}
+      </div>
+      <span class="sr-only" role="status" aria-live="polite">{t('common.loading')}</span>
     {:else}
       <div class="relative">
-        <!-- Loading overlay -->
+        <!-- Refresh-over-existing-data overlay -->
         {#if loading}
           <div
             class="absolute inset-0 bg-[var(--color-base-100)]/80 z-20 flex items-center justify-center rounded-lg pointer-events-none"
@@ -439,5 +452,13 @@
     .detection-cards-grid {
       grid-template-columns: repeat(2, 1fr);
     }
+  }
+
+  /* Skeleton placeholder matching the DetectionCard footprint (height ~15rem)
+     so the grid reserves the right space and avoids layout shift on data arrival. */
+  .detection-card-skeleton {
+    height: 15rem;
+    border-radius: 0.5rem;
+    background-color: var(--color-base-300);
   }
 </style>

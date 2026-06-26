@@ -1267,6 +1267,9 @@ func (c *Controller) GetRecentDetections(ctx echo.Context) error {
 
 	detections := c.convertNotesToDetectionResponses(notes, includeWeather)
 	c.stripSourceForUnauthenticated(ctx, detections)
+	// Deliberately NOT cached: this is the live feed. The dashboard refetches it
+	// on SSE detection events, manual refresh, and reconnect — a browser cache
+	// would make new detections lag and the Refresh button serve stale data.
 	return ctx.JSON(http.StatusOK, detections)
 }
 

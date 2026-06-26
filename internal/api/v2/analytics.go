@@ -26,6 +26,13 @@ import (
 const placeholderImageURL = "/ui/assets/bird-placeholder.svg"
 const maxSpeciesBatch = 10
 
+// dailySummaryCacheControl is the Cache-Control header for the daily species
+// summary endpoint. A short private TTL keeps dashboard back/forward navigation
+// and quick re-visits instant (important on mobile) without hiding live updates:
+// today's summary is patched client-side via SSE, and other dates use distinct
+// URLs. "private" prevents shared proxies from caching per-user responses.
+const dailySummaryCacheControl = "private, max-age=15, stale-while-revalidate=60"
+
 // Analytics constants (file-local)
 const (
 	defaultConfidenceThreshold = 0.8              // Default confidence threshold for analytics
@@ -302,7 +309,11 @@ func (c *Controller) GetDailySpeciesSummary(ctx echo.Context) error {
 		logger.String("path", path),
 	)
 
-	// 7. Return JSON
+	// 7. Return JSON with a short private cache so dashboard re-visits and
+	// back/forward navigation (common on mobile) are instant. Safe here because
+	// today's summary is patched client-side via SSE (no same-URL refetch) and
+	// other dates use a distinct URL, so the brief TTL never hides live updates.
+	ctx.Response().Header().Set(echo.HeaderCacheControl, dailySummaryCacheControl)
 	return ctx.JSON(http.StatusOK, result)
 }
 

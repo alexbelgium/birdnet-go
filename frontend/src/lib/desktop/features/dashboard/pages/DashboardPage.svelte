@@ -63,6 +63,7 @@ Performance Optimizations:
   import { cn } from '$lib/utils/cn.js';
   import { createDebounce } from '$lib/utils/debounce';
   import { getStoredValue, setStoredValue } from '$lib/utils/storage';
+  import { isMobileViewport } from '$lib/utils/viewport.svelte';
   import { safeArrayAccess, isPlainObject } from '$lib/utils/security';
   import { api } from '$lib/utils/api';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
@@ -80,7 +81,10 @@ Performance Optimizations:
   import { guestDashboardLayout, saveGuestLayout } from '$lib/stores/guestDashboardLayout';
   import BannerCard from '$lib/desktop/features/dashboard/components/BannerCard.svelte';
   import VideoEmbedCard from '$lib/desktop/features/dashboard/components/VideoEmbedCard.svelte';
-  import MiniSpectrogram from '$lib/desktop/features/dashboard/components/MiniSpectrogram.svelte';
+  // MiniSpectrogram is lazy-loaded (it pulls in hls.js + Web-Audio code) so the
+  // heavy live-spectrogram stack stays out of the initial dashboard chunk and
+  // only loads when a live-spectrogram element is actually shown. See
+  // ensureMiniSpectrogram() below.
   import DashboardEditMode from '$lib/desktop/features/dashboard/components/DashboardEditMode.svelte';
   import DailySummaryConfigForm from '$lib/desktop/features/dashboard/components/DailySummaryConfigForm.svelte';
   import {
@@ -281,6 +285,10 @@ Performance Optimizations:
   // Valid detection limit options for card grid layout
   const VALID_DETECTION_LIMITS = [6, 12, 24, 48];
   const DEFAULT_DETECTION_LIMIT = 6;
+  // On phones each rendered card loads its own spectrogram, so cap the *initial*
+  // render to fewer cards for a faster first paint. The in-session limit dropdown
+  // can still raise it. 12 is a valid option so the dropdown reflects it cleanly.
+  const MOBILE_MAX_DETECTION_LIMIT = 12;
 
   // Migration map from old values to new card grid values
   const LIMIT_MIGRATION_MAP: Record<number, number> = {
@@ -290,7 +298,7 @@ Performance Optimizations:
     50: 48,
   };
 
-  function getInitialDetectionLimit(): number {
+  function resolveStoredDetectionLimit(): number {
     const stored = getStoredValue('recentDetectionLimit', DEFAULT_DETECTION_LIMIT);
     if (typeof stored !== 'number' || isNaN(stored)) return DEFAULT_DETECTION_LIMIT;
     if (VALID_DETECTION_LIMITS.includes(stored)) return stored;
@@ -302,6 +310,14 @@ Performance Optimizations:
       return migrated;
     }
     return DEFAULT_DETECTION_LIMIT;
+  }
+
+  function getInitialDetectionLimit(): number {
+    const resolved = resolveStoredDetectionLimit();
+    if (isMobileViewport()) {
+      return Math.min(resolved, MOBILE_MAX_DETECTION_LIMIT);
+    }
+    return resolved;
   }
 
   // Detection limit state to sync with DetectionCardGrid
@@ -954,6 +970,39 @@ Performance Optimizations:
   // Derived state to check if we're viewing today's data
   const isViewingToday = $derived(selectedDate === serverTodayDate);
 
+  // --- Lazy-loaded live spectrogram ---------------------------------------
+  // MiniSpectrogram drags in hls.js + Web-Audio code, so we only fetch its
+  // chunk when a live-spectrogram element is enabled and we're viewing today.
+  type MiniSpectrogramComponent =
+    (typeof import('$lib/desktop/features/dashboard/components/MiniSpectrogram.svelte'))['default'];
+  let MiniSpectrogram = $state<MiniSpectrogramComponent | null>(null);
+  let miniSpectrogramLoading = $state(false);
+
+  function ensureMiniSpectrogram(): void {
+    if (MiniSpectrogram || miniSpectrogramLoading) return;
+    miniSpectrogramLoading = true;
+    import('$lib/desktop/features/dashboard/components/MiniSpectrogram.svelte')
+      .then(module => {
+        MiniSpectrogram = module.default;
+      })
+      .catch((error: unknown) => {
+        logger.error('Failed to load live spectrogram component', error);
+      })
+      .finally(() => {
+        miniSpectrogramLoading = false;
+      });
+  }
+
+  let hasLiveSpectrogram = $derived(
+    layoutElements.some(element => element.type === 'live-spectrogram' && (element.enabled ?? true))
+  );
+
+  $effect(() => {
+    if (isViewingToday && hasLiveSpectrogram) {
+      ensureMiniSpectrogram();
+    }
+  });
+
   // Location availability for banner map toggle
   let birdnet = $derived($birdnetSettings);
   let hasLocation = $derived((birdnet?.latitude ?? 0) !== 0 || (birdnet?.longitude ?? 0) !== 0);
@@ -1285,8 +1334,10 @@ Performance Optimizations:
 
   // Reactive preloading - triggers when selectedDate changes or config finishes loading
   $effect(() => {
-    // Gate on configLoaded to prevent preloading with default summaryLimit before config is fetched
-    if (selectedDate && configLoaded) {
+    // Gate on configLoaded to prevent preloading with default summaryLimit before config is fetched.
+    // Skip adjacent-date prefetching on phones so it doesn't compete with the
+    // current day's data and spectrograms during first paint.
+    if (selectedDate && configLoaded && !isMobileViewport()) {
       triggerAdjacentPreload(selectedDate);
     }
   });
@@ -1576,7 +1627,18 @@ Performance Optimizations:
         <CurrentlyHearingCard detections={isViewingToday ? pendingDetections : []} />
       {:else if element.type === 'live-spectrogram'}
         {#if isViewingToday}
-          <MiniSpectrogram {pendingDetections} />
+          {#if MiniSpectrogram}
+            <MiniSpectrogram {pendingDetections} />
+          {:else}
+            <div
+              class="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-[var(--color-base-200)] p-4 text-sm text-[var(--color-base-content)]/60"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="loading loading-spinner loading-sm"></span>
+              <span>{t('common.loading')}</span>
+            </div>
+          {/if}
         {/if}
       {:else if element.type === 'detections-grid'}
         <DetectionCardGrid

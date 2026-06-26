@@ -28,6 +28,7 @@
   import { cn } from '$lib/utils/cn';
   import { downloadDetectionAudio } from '$lib/utils/audioDownload';
   import { createSpectrogramLoader } from '$lib/utils/spectrogramLoader.svelte';
+  import { isMobileViewport } from '$lib/utils/viewport.svelte';
   import { DEFAULT_PLAYBACK_SPEED } from '$lib/utils/audio';
   import { get } from 'svelte/store';
   import { dashboardSettings } from '$lib/stores/settings';
@@ -37,6 +38,15 @@
   // (cards are recycled via keyed {#each}, so a one-time const would go stale)
   const getDefaultAudioGain = () => get(dashboardSettings)?.defaultAudioGain ?? 0;
   const DEFAULT_AUDIO_FILTER_FREQ = 20;
+
+  // Mobile tuning: phones render cards far narrower than the desktop grid, so a
+  // smaller spectrogram (sm = 258px vs md = 514px) is visually sufficient while
+  // cutting the PNG payload ~4x. A tighter IntersectionObserver margin also keeps
+  // off-screen cards from competing with first paint on slow connections.
+  // Decided once at card creation (matches the page's mobile/desktop layout).
+  const isMobile = isMobileViewport();
+  const SPECTROGRAM_PRELOAD_MARGIN_MOBILE = '75px 0px';
+  const SPECTROGRAM_PRELOAD_MARGIN_DESKTOP = '200px 0px';
 
   interface Props {
     detection: Detection;
@@ -66,7 +76,7 @@
     onDelete,
   }: Props = $props();
 
-  const loader = createSpectrogramLoader({ size: 'md', raw: true });
+  const loader = createSpectrogramLoader({ size: isMobile ? 'sm' : 'md', raw: true });
 
   let cardElement = $state<HTMLElement | undefined>(undefined);
   let isVisible = $state(false);
@@ -139,7 +149,11 @@
           isVisible = entry.isIntersecting;
         }
       },
-      { rootMargin: '200px 0px' }
+      {
+        rootMargin: isMobile
+          ? SPECTROGRAM_PRELOAD_MARGIN_MOBILE
+          : SPECTROGRAM_PRELOAD_MARGIN_DESKTOP,
+      }
     );
     observer.observe(cardElement);
   });
