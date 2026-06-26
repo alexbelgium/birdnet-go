@@ -39,6 +39,13 @@
   const DEFAULT_DOWNLOAD_NAME = 'detection';
   const AUDIO_FILE_EXTENSION = '.wav';
 
+  // IntersectionObserver preload margins. Mobile uses a much smaller margin so
+  // far-offscreen cards don't all kick off spectrogram status/generation/image
+  // fetches at once, easing first-paint pressure on phones (HTTP/1.1 sockets).
+  const DESKTOP_PRELOAD_MARGIN = '200px 0px';
+  const MOBILE_PRELOAD_MARGIN = '50px 0px';
+  const MOBILE_VIEWPORT_QUERY = '(max-width: 767px)';
+
   interface Props {
     detection: Detection;
     isNew?: boolean;
@@ -153,6 +160,11 @@
   onMount(() => {
     if (!cardElement) return;
 
+    const isMobileViewport =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia(MOBILE_VIEWPORT_QUERY).matches
+        : false;
+
     // eslint-disable-next-line no-undef -- browser global
     observer = new IntersectionObserver(
       entries => {
@@ -160,7 +172,7 @@
           isVisible = entry.isIntersecting;
         }
       },
-      { rootMargin: '200px 0px' }
+      { rootMargin: isMobileViewport ? MOBILE_PRELOAD_MARGIN : DESKTOP_PRELOAD_MARGIN }
     );
     observer.observe(cardElement);
   });
