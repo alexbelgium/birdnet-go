@@ -43,11 +43,6 @@
 
   const lastSeen = $derived(formatLastSeen(item.days_since_last_seen));
   const detectionsUrl = $derived(buildSpeciesDetectionUrl(item.scientific_name, selectedDate));
-  const historyUrl = $derived(
-    buildAppUrl(
-      `/ui/detections?queryType=species&species=${encodeURIComponent(item.scientific_name)}`
-    )
-  );
 
   function getDayOfYear(dateStr: string): number {
     const d = new Date(dateStr + 'T00:00:00');
@@ -160,9 +155,29 @@
 
     <!-- Info column -->
     <div class="card-info">
-      <!-- Name only (pills moved below chart) -->
+      <!-- Name + action pills -->
       <div class="card-name-row">
         <a href={speciesUrl} class="card-name">{displayName}</a>
+        {#if isValidEbirdCode(item.species_code)}
+          <a
+            href={buildEbirdUrl(item.species_code, getLocale())}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="card-ebird-btn"
+            aria-label="View {displayName} on eBird"
+            onclick={(e: MouseEvent) => e.stopPropagation()}
+          >
+            <ExternalLink class="size-3" />eBird
+          </a>
+        {/if}
+        <a
+          href={detectionsUrl}
+          class="card-detections-btn"
+          aria-label="View {displayName} detections for this day"
+          onclick={(e: MouseEvent) => e.stopPropagation()}
+        >
+          <ExternalLink class="size-3" />Detections
+        </a>
       </div>
 
       <!-- Scientific name -->
@@ -272,38 +287,6 @@
       {/each}
     </div>
   </div>
-
-  <!-- Action pills below chart -->
-  <div class="card-pills">
-    {#if isValidEbirdCode(item.species_code)}
-      <a
-        href={buildEbirdUrl(item.species_code, getLocale())}
-        target="_blank"
-        rel="noopener noreferrer"
-        class="card-pill card-pill--ebird"
-        aria-label="View {displayName} on eBird"
-        onclick={(e: MouseEvent) => e.stopPropagation()}
-      >
-        <ExternalLink class="size-3" />eBird
-      </a>
-    {/if}
-    <a
-      href={detectionsUrl}
-      class="card-pill card-pill--detections"
-      aria-label="View {displayName} detections for this day"
-      onclick={(e: MouseEvent) => e.stopPropagation()}
-    >
-      <ExternalLink class="size-3" />Detections
-    </a>
-    <a
-      href={historyUrl}
-      class="card-pill card-pill--history"
-      aria-label="View all-time detections for {displayName}"
-      onclick={(e: MouseEvent) => e.stopPropagation()}
-    >
-      History
-    </a>
-  </div>
 </div>
 
 <style>
@@ -371,43 +354,41 @@
     text-decoration: underline;
   }
 
-  .card-pills {
-    display: flex;
-    gap: 0.375rem;
-    padding: 0.375rem 0.5rem 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .card-pill {
+  .card-ebird-btn {
     display: inline-flex;
     align-items: center;
     gap: 0.2rem;
+    flex-shrink: 0;
     font-size: 0.6rem;
     font-weight: 600;
-    text-decoration: none;
-    border-radius: 9999px;
-    padding: 0.15rem 0.45rem;
-    line-height: 1.4;
-    flex-shrink: 0;
-  }
-
-  .card-pill--ebird {
     color: var(--color-primary);
+    text-decoration: none;
     border: 1px solid color-mix(in srgb, var(--color-primary) 50%, transparent);
+    border-radius: 9999px;
+    padding: 0.1rem 0.375rem;
+    line-height: 1.4;
   }
 
-  .card-pill--ebird:hover {
+  .card-ebird-btn:hover {
     background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   }
 
-  .card-pill--detections,
-  .card-pill--history {
+  .card-detections-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    flex-shrink: 0;
+    font-size: 0.6rem;
+    font-weight: 600;
     color: var(--color-base-content);
+    text-decoration: none;
     border: 1px solid color-mix(in srgb, var(--color-base-content) 30%, transparent);
+    border-radius: 9999px;
+    padding: 0.1rem 0.375rem;
+    line-height: 1.4;
   }
 
-  .card-pill--detections:hover,
-  .card-pill--history:hover {
+  .card-detections-btn:hover {
     background: color-mix(in srgb, var(--color-base-content) 8%, transparent);
   }
 
