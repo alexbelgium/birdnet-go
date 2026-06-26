@@ -80,7 +80,7 @@ Performance Optimizations:
   import { guestDashboardLayout, saveGuestLayout } from '$lib/stores/guestDashboardLayout';
   import BannerCard from '$lib/desktop/features/dashboard/components/BannerCard.svelte';
   import VideoEmbedCard from '$lib/desktop/features/dashboard/components/VideoEmbedCard.svelte';
-  import MiniSpectrogram from '$lib/desktop/features/dashboard/components/MiniSpectrogram.svelte';
+  import LazyMiniSpectrogram from '$lib/desktop/features/dashboard/components/LazyMiniSpectrogram.svelte';
   import DashboardEditMode from '$lib/desktop/features/dashboard/components/DashboardEditMode.svelte';
   import DailySummaryConfigForm from '$lib/desktop/features/dashboard/components/DailySummaryConfigForm.svelte';
   import {
@@ -104,6 +104,18 @@ Performance Optimizations:
   // BUFFER_TARGET: After cleanup, keep limit + this many species to avoid frequent re-sorting
   const SPECIES_LIMIT_BUFFER_TRIGGER = 10;
   const SPECIES_LIMIT_BUFFER_TARGET = 5;
+
+  // Schedule non-critical startup work for when the browser is idle so it does
+  // not compete with first paint and the initial critical data fetches. Falls
+  // back to a short timeout where requestIdleCallback is unavailable.
+  function scheduleIdle(callback: () => void, fallbackDelay = 200): () => void {
+    if (typeof globalThis.requestIdleCallback === 'function') {
+      const id = globalThis.requestIdleCallback(callback, { timeout: 2000 });
+      return () => globalThis.cancelIdleCallback(id);
+    }
+    const id = setTimeout(callback, fallbackDelay);
+    return () => clearTimeout(id);
+  }
 
   // SSE Detection Data Type (camelCase per API v2 conventions)
   type SSEDetectionData = {
@@ -612,6 +624,8 @@ Performance Optimizations:
 
   // SSE connection for real-time detection updates
   let eventSource: ReconnectingEventSource | null = null;
+  // Canceller for the idle-deferred SSE connection setup (see onMount)
+  let cancelDeferredStreamConnect: (() => void) | null = null;
 
   // Process new detection from SSE - queue if updates are frozen, otherwise process immediately
   function handleNewDetection(detection: Detection) {
@@ -800,8 +814,13 @@ Performance Optimizations:
     });
     fetchRecentDetections();
 
-    // Setup SSE connection for real-time updates
-    connectToDetectionStream();
+    // Setup SSE connection for real-time updates. Deferred to browser idle time:
+    // the persistent stream holds one of the ~6 HTTP/1.1 sockets per origin, so
+    // connecting it after first paint lets the initial spectrogram image loads
+    // grab sockets first. Real-time updates simply begin a moment later.
+    cancelDeferredStreamConnect = scheduleIdle(() => {
+      connectToDetectionStream();
+    });
 
     // Handle browser navigation (back/forward)
     const handlePopState = () => {
@@ -826,6 +845,10 @@ Performance Optimizations:
     return () => {
       // Clean up browser navigation listener
       window.removeEventListener('popstate', handlePopState);
+
+      // Cancel the idle-deferred SSE connect if it hasn't run yet
+      cancelDeferredStreamConnect?.();
+      cancelDeferredStreamConnect = null;
 
       // Clean up SSE connection
       if (eventSource) {
@@ -1580,7 +1603,7 @@ Performance Optimizations:
         <CurrentlyHearingCard detections={isViewingToday ? pendingDetections : []} />
       {:else if element.type === 'live-spectrogram'}
         {#if isViewingToday}
-          <MiniSpectrogram {pendingDetections} />
+          <LazyMiniSpectrogram {pendingDetections} />
         {/if}
       {:else if element.type === 'detections-grid'}
         <DetectionCardGrid

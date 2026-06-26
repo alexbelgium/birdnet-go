@@ -364,11 +364,13 @@ Responsive Breakpoints:
     }
   }
 
-  // Update hourly weather when selected date changes
-  // Uses captured date to prevent stale data from overwriting fresh data on rapid date changes
+  // Update hourly weather when selected date changes.
+  // Uses captured date to prevent stale data from overwriting fresh data on rapid date changes.
+  // Skipped on mobile: only the desktop/tablet heatmap renders the hourly weather row,
+  // so fetching it on phones is wasted work that competes with first paint.
   $effect(() => {
     const currentDate = selectedDate;
-    if (currentDate) {
+    if (currentDate && !isMobileViewport) {
       fetchHourlyWeather(currentDate).then(data => {
         // Only update if this is still the current date (prevents race condition)
         if (selectedDate === currentDate) {
@@ -727,6 +729,29 @@ Responsive Breakpoints:
       : false
   );
 
+  // Viewport-aware rendering. On mobile (<768px) only the compact
+  // MobileSummaryTable is rendered; the desktop heatmap DOM is skipped
+  // entirely rather than hidden with CSS. Initialized synchronously so the
+  // very first render is already correct (no flash of desktop DOM on phones).
+  const MOBILE_VIEWPORT_QUERY = '(max-width: 767px)';
+  let isMobileViewport = $state(
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(MOBILE_VIEWPORT_QUERY).matches
+      : false
+  );
+  $effect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(MOBILE_VIEWPORT_QUERY);
+    isMobileViewport = mq.matches;
+    // Structural type avoids referencing the MediaQueryListEvent browser global
+    // (not in the eslint no-undef globals list); only `matches` is needed.
+    const handleChange = (e: { matches: boolean }) => {
+      isMobileViewport = e.matches;
+    };
+    mq.addEventListener('change', handleChange);
+    return () => mq.removeEventListener('change', handleChange);
+  });
+
   // Taxon filter (Birds / Bats / Others) selected via the header dropdown.
   // Classification logic lives in utils/taxonFilter.ts; the card only stores the
   // selection and applies it to the row list and the overview counts.
@@ -903,8 +928,11 @@ Responsive Breakpoints:
     <div class="p-6 pt-8">
       <DailySummaryOverview data={visibleData} {selectedDate} />
 
-      <!-- Mobile compact table (<768px) -->
-      <div class="block md:hidden">
+      {#if isMobileViewport}
+        <!-- Mobile compact table (<768px): render ONLY this so phones never
+             construct the desktop heatmap DOM (24 hourly + 12 bi-hourly + 6
+             six-hourly cells per species row). CSS-only hiding still builds
+             that DOM, which was a major first-paint cost on mobile. -->
         <MobileSummaryTable
           data={sortedData}
           {sunriseHour}
@@ -913,10 +941,8 @@ Responsive Breakpoints:
           {showThumbnails}
           {selectedDate}
         />
-      </div>
-
-      <!-- Desktop/tablet heatmap (≥768px) -->
-      <div class="hidden md:block">
+      {:else}
+        <!-- Desktop/tablet heatmap (≥768px) -->
         <div class="overflow-x-auto overflow-y-visible">
           <div
             class="daily-summary-grid min-w-[900px]"
@@ -1266,8 +1292,7 @@ Responsive Breakpoints:
             </div>
           {/if}
         </div>
-      </div>
-      <!-- end hidden md:block -->
+      {/if}
     </div>
   </section>
 {/if}
