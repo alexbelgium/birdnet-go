@@ -68,6 +68,9 @@
   // Tracks the in-flight capability request so a slow response for an old
   // detection cannot overwrite the state of a newer one.
   let infoAbort: AbortController | null = null;
+  // Tracks the in-flight play/download POST so it can be cancelled immediately
+  // when the detection changes (avoids leaving the toolbar stuck in Generating).
+  let expandAbort: AbortController | null = null;
 
   // Runtime validation of the capability payload — guards against contract
   // drift rather than trusting an unchecked `as` cast.
@@ -145,9 +148,12 @@
 
     isGenerating = true;
     expandError = null;
+    expandAbort?.abort();
+    expandAbort = new AbortController();
     // Capture the detection this request belongs to; a later detection change
     // must not let this (now stale) response create/play the wrong clip.
     const requestId = detectionId;
+    const signal = expandAbort.signal;
     try {
       // Re-use cached blob for the same factor
       if (expandedBlobUrl && audioEl) {
@@ -159,7 +165,7 @@
 
       const res = await fetch(
         buildAppUrl(`/api/v2/audio/${encodeURIComponent(requestId)}/expand?factor=${factor}`),
-        { method: 'POST', headers: csrfHeaders() }
+        { method: 'POST', headers: csrfHeaders(), signal }
       );
       // Detection changed while generating: discard this response.
       if (requestId !== detectionId) return;
@@ -202,6 +208,7 @@
       await audioEl.play();
       isPlayingExpanded = true;
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       expandError = err instanceof Error ? err.message : LABELS.error;
       logger.error('bat expand play failed', err as Error);
     } finally {
@@ -213,14 +220,17 @@
     if (isGenerating || !expandInfo?.supported) return;
     isGenerating = true;
     expandError = null;
+    expandAbort?.abort();
+    expandAbort = new AbortController();
     // Capture the detection this download belongs to (see playExpanded).
     const requestId = detectionId;
+    const signal = expandAbort.signal;
     try {
       const res = await fetch(
         buildAppUrl(
           `/api/v2/audio/${encodeURIComponent(requestId)}/expand?factor=${factor}&download=1`
         ),
-        { method: 'POST', headers: csrfHeaders() }
+        { method: 'POST', headers: csrfHeaders(), signal }
       );
       // Detection changed while generating: discard this response.
       if (requestId !== detectionId) return;
@@ -236,6 +246,7 @@
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       expandError = err instanceof Error ? err.message : LABELS.error;
     } finally {
       isGenerating = false;
@@ -268,6 +279,7 @@
     factor = loadStoredFactor();
     return () => {
       infoAbort?.abort();
+      expandAbort?.abort();
       if (audioEl) {
         audioEl.pause();
         audioEl = null;
@@ -284,10 +296,13 @@
   $effect(() => {
     const id = detectionId;
     untrack(() => {
-      // Cancel any in-flight request so its (stale) response cannot land
+      // Cancel any in-flight requests so stale responses cannot land
       // after this newer detection's response.
       infoAbort?.abort();
       infoAbort = new AbortController();
+      expandAbort?.abort();
+      expandAbort = null;
+      isGenerating = false;
       expandInfo = null;
       expandError = null;
       isPlayingExpanded = false;
