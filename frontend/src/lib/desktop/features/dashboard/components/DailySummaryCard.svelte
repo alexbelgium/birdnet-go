@@ -759,30 +759,22 @@ Responsive Breakpoints:
   const taxonCountsValue = $derived(taxonCounts(data));
   const visibleData = $derived(filterByTaxon(data, taxonFilter));
 
-  // Optimized data sorting using $derived.by for better performance
-  // Two-tier sorting: primary by count, secondary by latest detection time
-  // Also applies speciesLimit to cap the number of displayed species
-  const sortedData = $derived.by(() => {
-    // Early return for empty data (after the taxon filter is applied)
+  // All species sorted by count desc, then latest detection — no limit applied.
+  // Used by MobileSummaryTable to show every detected species.
+  const sortedUnlimited = $derived.by(() => {
     if (visibleData.length === 0) return [];
-
-    // Use spread + sort with stable ordering
-    const sorted = [...visibleData].sort((a: DailySpeciesSummary, b: DailySpeciesSummary) => {
-      // Primary sort: by detection count (descending)
-      if (b.count !== a.count) {
-        return b.count - a.count;
-      }
-      // Secondary sort: by latest detection time (descending - most recent first)
-      // This ensures stable ordering when counts are equal
+    return [...visibleData].sort((a: DailySpeciesSummary, b: DailySpeciesSummary) => {
+      if (b.count !== a.count) return b.count - a.count;
       return (b.latest_heard ?? '').localeCompare(a.latest_heard ?? '');
     });
+  });
 
-    // Apply species limit after sorting to ensure top N species are shown
-    if (speciesLimit > 0 && sorted.length > speciesLimit) {
-      return sorted.slice(0, speciesLimit);
+  // Desktop heatmap view: same sort order but capped to speciesLimit for performance.
+  const sortedData = $derived.by(() => {
+    if (speciesLimit > 0 && sortedUnlimited.length > speciesLimit) {
+      return sortedUnlimited.slice(0, speciesLimit);
     }
-
-    return sorted;
+    return sortedUnlimited;
   });
 
   // Calculate dynamic species column width based on longest name
@@ -934,7 +926,7 @@ Responsive Breakpoints:
              six-hourly cells per species row). CSS-only hiding still builds
              that DOM, which was a major first-paint cost on mobile. -->
         <MobileSummaryTable
-          data={sortedData}
+          data={sortedUnlimited}
           {sunriseHour}
           {sunsetHour}
           getSpeciesUrl={urlBuilders.species}

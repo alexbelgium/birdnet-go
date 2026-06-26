@@ -383,7 +383,7 @@ Performance Optimizations:
       // Cache miss or expired - fetch from API
       logger.debug(`Daily summary cache miss for ${selectedDate}, fetching from API`);
       const response = await fetch(
-        buildAppUrl(`/api/v2/analytics/species/daily?date=${selectedDate}&limit=${summaryLimit}`)
+        buildAppUrl(`/api/v2/analytics/species/daily?date=${selectedDate}&limit=500`)
       );
       if (!response.ok) {
         throw new Error(
