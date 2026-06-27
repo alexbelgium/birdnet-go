@@ -34,6 +34,7 @@ export interface Detection {
   // Species tracking metadata
   isNewSpecies?: boolean; // First seen within tracking window
   daysSinceFirstSeen?: number; // Days since species was first detected
+  daysSinceLastSeen?: number; // Days since previous detection before return; > 0 only on returning species
   // Multi-period tracking metadata
   isNewThisYear?: boolean; // First time this year
   isNewThisSeason?: boolean; // First time this season

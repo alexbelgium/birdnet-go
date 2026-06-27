@@ -133,6 +133,7 @@ Performance Optimizations:
     };
     isNewSpecies?: boolean;
     daysSinceFirstSeen?: number;
+    daysSinceLastSeen?: number;
   };
 
   function isSSEDetectionData(v: unknown): v is SSEDetectionData {
@@ -773,6 +774,7 @@ Performance Optimizations:
         clipName: detectionData.clipName,
         isNewSpecies: detectionData.isNewSpecies,
         daysSinceFirstSeen: detectionData.daysSinceFirstSeen,
+        daysSinceLastSeen: detectionData.daysSinceLastSeen,
       };
 
       handleNewDetection(detection);
@@ -1104,6 +1106,7 @@ Performance Optimizations:
         latest_heard: detection.time,
         thumbnail_url: '', // Empty string will trigger fallback in BirdThumbnailPopup
         isNew: true,
+        days_since_last_seen: detection.daysSinceLastSeen,
       };
       // Set the hourly count for the specific hour safely using splice
       if (hour >= 0 && hour < 24) {

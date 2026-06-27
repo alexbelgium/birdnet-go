@@ -182,7 +182,6 @@ func DefaultRules() []entities.AlertRule {
 			},
 			Actions: []entities.AlertAction{
 				{Target: TargetBell, SortOrder: 0},
-				{Target: TargetPush, SortOrder: 1},
 			},
 		},
 	}

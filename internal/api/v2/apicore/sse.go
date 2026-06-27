@@ -70,6 +70,7 @@ type SSEDetectionData struct {
 	// Species tracking metadata
 	IsNewSpecies       bool `json:"isNewSpecies,omitempty"`       // First seen within tracking window
 	DaysSinceFirstSeen int  `json:"daysSinceFirstSeen,omitempty"` // Days since species was first detected
+	DaysSinceLastSeen  int  `json:"daysSinceLastSeen,omitempty"`  // Days since previous detection before return; omitted unless > 0
 }
 
 // SSESourceInfo describes the audio source in SSE events.
@@ -432,6 +433,9 @@ func (c *Core) BroadcastDetection(note *datastore.Note, birdImage *imageprovider
 			detection.IsNewSpecies = !status.FirstSeenTime.IsZero() &&
 				note.Date == status.FirstSeenTime.Format(time.DateOnly)
 			detection.DaysSinceFirstSeen = status.DaysSinceFirst
+			if status.DaysSinceLastSeen > 0 {
+				detection.DaysSinceLastSeen = status.DaysSinceLastSeen
+			}
 		}
 	}
 
