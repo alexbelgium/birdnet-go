@@ -171,6 +171,7 @@ Performance Optimizations:
     analytics: actualRoute.startsWith('/ui/analytics'),
     analyticsExact: actualRoute === '/ui/analytics',
     analyticsSpecies: actualRoute === '/ui/analytics/species',
+    allSpecies: actualRoute.startsWith('/ui/allspecies'),
     search: actualRoute.startsWith('/ui/search'),
     about: actualRoute.startsWith('/ui/about'),
     system: actualRoute.startsWith('/ui/system'),
@@ -220,6 +221,7 @@ Performance Optimizations:
     liveStream: onNavigate ? '/live-stream' : '/ui/live-stream',
     analytics: onNavigate ? '/analytics' : '/ui/analytics',
     analyticsSpecies: onNavigate ? '/analytics/species' : '/ui/analytics/species',
+    allSpecies: onNavigate ? '/allspecies' : '/ui/allspecies',
     search: onNavigate ? '/search' : '/ui/search',
     about: onNavigate ? '/about' : '/ui/about',
     help: onNavigate ? '/help' : '/ui/help',
@@ -255,6 +257,12 @@ Performance Optimizations:
       label: t('analytics.species.title'),
       url: navigationUrls.analyticsSpecies,
       routeKey: 'analyticsSpecies',
+    },
+    {
+      icon: Bird,
+      label: 'All Species',
+      url: navigationUrls.allSpecies,
+      routeKey: 'allSpecies',
     },
   ]);
 

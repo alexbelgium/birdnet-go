@@ -616,6 +616,7 @@ func (c *Controller) initRoutes() {
 		{"app routes", func() { c.appHandler.RegisterAppRoutes(c.Group) }},
 		{"search routes", func() { c.detections.RegisterSearchRoutes(c.Group) }},
 		{"detection routes", func() { c.detections.RegisterDetectionRoutes(c.Group) }},
+		{"species curation routes", c.initSpeciesCurationRoutes},
 		{"analytics routes", func() { c.analytics.RegisterAnalyticsRoutes(c.Group) }},
 		{"weather routes", func() { c.weather.RegisterRoutes(c.Group) }},
 		{"system routes", c.initSystemRoutes},

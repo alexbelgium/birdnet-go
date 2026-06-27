@@ -42,6 +42,7 @@
 
   // Dynamic imports for heavy pages - properly typed component references
   let Analytics = $state<Component | null>(null);
+  let AllSpecies = $state<Component | null>(null);
   let Species = $state<Component | null>(null);
   let Search = $state<Component | null>(null);
   let About = $state<Component | null>(null);
@@ -135,6 +136,12 @@
       titleKey: 'navigation.analytics',
       component: 'analytics',
     },
+    {
+      route: 'allspecies',
+      page: 'allspecies',
+      titleKey: 'analytics.species.title',
+      component: 'allspecies',
+    },
     { route: 'search', page: 'search', titleKey: 'navigation.search', component: 'search' },
     {
       route: 'detections',
@@ -205,6 +212,12 @@
           if (!Analytics) {
             const module = await import('./lib/desktop/features/analytics/pages/Analytics.svelte');
             Analytics = module.default;
+          }
+          break;
+        case 'allspecies':
+          if (!AllSpecies) {
+            const module = await import('./lib/desktop/features/analytics/pages/AllSpecies.svelte');
+            AllSpecies = module.default;
           }
           break;
         case 'species':
@@ -347,6 +360,7 @@
     [uiPath('notifications')]: findRouteConfig('notifications'),
     [uiPath('analytics', 'species')]: findRouteConfig('species'),
     [uiPath('analytics')]: findRouteConfig('analytics'),
+    [uiPath('allspecies')]: findRouteConfig('allspecies'),
     [uiPath('search')]: findRouteConfig('search'),
     [uiPath('detections')]: findRouteConfig('detections'),
     [uiPath('about')]: findRouteConfig('about'),
@@ -672,6 +686,8 @@
       {@render renderRoute(Notifications)}
     {:else if currentRoute === 'analytics'}
       {@render renderRoute(Analytics)}
+    {:else if currentRoute === 'allspecies'}
+      {@render renderRoute(AllSpecies)}
     {:else if currentRoute === 'species'}
       {@render renderRoute(Species)}
     {:else if currentRoute === 'search'}
