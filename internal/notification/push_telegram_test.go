@@ -2,7 +2,6 @@
 package notification
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -41,10 +40,10 @@ func newTelegramAPIHandler(t *testing.T) *telegramAPIHandler {
 
 func (h *telegramAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
-	require.NoError(h.t, err)
+	assert.NoError(h.t, err)
 
 	vals := make(map[string]string)
-	for _, pair := range strings.Split(string(body), "&") {
+	for pair := range strings.SplitSeq(string(body), "&") {
 		if pair == "" {
 			continue
 		}
@@ -268,7 +267,7 @@ func TestShoutrrrProvider_SendPhoto_WithTelegramURL(t *testing.T) {
 		},
 	}
 
-	err := p.sendTelegramPhotos(context.Background(), n, extractPublicImageURL(n))
+	err := p.sendTelegramPhotos(t.Context(), n, extractPublicImageURL(n))
 	require.NoError(t, err)
 	require.Len(t, handler.requests, 1)
 

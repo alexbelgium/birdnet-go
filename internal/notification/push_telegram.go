@@ -57,7 +57,7 @@ func parseTelegramShoutrrrURLs(urls []string) []parsedTelegramChat {
 		if pass, hasPass := parsed.User.Password(); hasPass {
 			token += ":" + pass
 		}
-		for _, chatID := range strings.Split(parsed.Query().Get("chats"), ",") {
+		for chatID := range strings.SplitSeq(parsed.Query().Get("chats"), ",") {
 			chatID = strings.TrimSpace(chatID)
 			if chatID != "" {
 				chats = append(chats, parsedTelegramChat{token: token, chatID: chatID})
@@ -104,7 +104,7 @@ func callTelegramAPI(ctx context.Context, client *httpclient.Client, apiBase, to
 	if err != nil {
 		return privacy.WrapError(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	limitedBody, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 	if err != nil {
