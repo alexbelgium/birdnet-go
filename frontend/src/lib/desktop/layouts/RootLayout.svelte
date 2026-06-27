@@ -195,6 +195,11 @@
     min-width: 0;
   }
 
+  /* Keep the mobile drawer above detection cards and their overlay controls. */
+  :global(.drawer .drawer-side) {
+    z-index: 70;
+  }
+
   /* Prevent horizontal scroll while allowing max-width utilities */
   :global(.drawer-content > *:not(.mx-auto)) {
     max-width: 100%;
@@ -220,6 +225,7 @@
       display: block;
       position: sticky;
       width: 256px;
+      z-index: 10;
       transition: width 0.2s ease-in-out;
       overflow: visible;
     }
