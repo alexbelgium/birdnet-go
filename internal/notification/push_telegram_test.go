@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,9 @@ func (h *telegramAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		kv := strings.SplitN(pair, "=", 2)
 		if len(kv) == 2 {
-			vals[kv[0]] = kv[1]
+			key, _ := url.QueryUnescape(kv[0])
+			val, _ := url.QueryUnescape(kv[1])
+			vals[key] = val
 		}
 	}
 	h.requests = append(h.requests, telegramRequest{path: r.URL.Path, values: vals})
@@ -122,7 +125,6 @@ func TestParseTelegramShoutrrrURLs(t *testing.T) {
 		})
 	}
 }
-
 
 func TestBuildTelegramCaption(t *testing.T) {
 	t.Parallel()
