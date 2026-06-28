@@ -8,8 +8,14 @@ type VerificationFilter entities.VerificationStatus
 // SearchFilters provides advanced search criteria for detections.
 // All timestamps are Unix int64 for consistency and indexing performance.
 type SearchFilters struct {
-	// Query provides text search across scientific names.
+	// Query provides text search across scientific names (unbounded SQL LIKE).
 	Query string
+
+	// CommonLabelIDs holds label IDs whose common name (active locale) matched the free-text
+	// query. It is OR-ed with the scientific_name LIKE produced by Query in buildSearchJoins,
+	// so common-name search works even though the labels table has no common_name column.
+	// nil or empty means no common-name match (the OR branch is omitted).
+	CommonLabelIDs []uint
 
 	// LabelIDs filters by specific label IDs.
 	LabelIDs []uint
@@ -126,7 +132,8 @@ type SpeciesCount struct {
 // because daily aggregations are timezone-dependent and the string format
 // is more natural for display and grouping purposes.
 type DailyCount struct {
-	// Date in YYYY-MM-DD format (local timezone).
+	// Date in YYYY-MM-DD format, bucketed in the configured timezone (offset-adjusted),
+	// not necessarily the database/OS-local zone.
 	Date string
 
 	// Count is the number of detections on this date.
@@ -146,6 +153,46 @@ type SpeciesFirstSeen struct {
 
 	// DetectionID is the ID of the first detection.
 	DetectionID uint
+}
+
+// SpeciesPhenology represents a species' residency span within a time period: the first and last
+// (false-positive-excluded) detection timestamps plus the in-period detection count. Multi-model
+// labels are merged by scientific name in the query, so there is no LabelID here.
+type SpeciesPhenology struct {
+	// ScientificName is the species scientific name.
+	ScientificName string
+
+	// FirstDetected is the Unix timestamp of the first detection in the period.
+	FirstDetected int64
+
+	// LastDetected is the Unix timestamp of the last detection in the period.
+	LastDetected int64
+
+	// Count is the number of (false-positive-excluded) detections in the period.
+	Count int
+}
+
+// SourceActivitySummary represents one audio source's detection activity within a time period: the
+// source's identity columns plus its in-period (false-positive-excluded) detection count. Powers the
+// analytics source/mic filter's option list. Sources with no detections in the period, and
+// legacy-migrated detections with a NULL source_id, are absent because the query INNER JOINs
+// audio_sources.
+type SourceActivitySummary struct {
+	// SourceID is the audio_sources primary key: a stable, opaque source identifier.
+	SourceID uint
+
+	// DisplayName is the user-facing source name (nil when unset). The API layer anonymizes it for
+	// unauthenticated clients; the repository returns it verbatim.
+	DisplayName *string
+
+	// NodeName is the capture node name, used as a fallback label when DisplayName is unset.
+	NodeName string
+
+	// SourceType is the source kind (e.g. "rtsp", "alsa", "file"), used for anonymized labelling.
+	SourceType string
+
+	// Count is the number of (false-positive-excluded) detections from this source in the period.
+	Count int
 }
 
 // SpeciesSummaryData contains summary statistics for a species.

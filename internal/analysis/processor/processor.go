@@ -31,6 +31,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/mqtt"
 	"github.com/tphakala/birdnet-go/internal/notification"
 	"github.com/tphakala/birdnet-go/internal/observability"
+	"github.com/tphakala/birdnet-go/internal/openfauna"
 	"github.com/tphakala/birdnet-go/internal/privacy"
 	"github.com/tphakala/birdnet-go/internal/securefs"
 	"github.com/tphakala/birdnet-go/internal/spectrogram"
@@ -41,11 +42,6 @@ import (
 var _ PreRendererSubmit = (*spectrogram.PreRenderer)(nil)
 
 // Species identification constants for filtering
-const (
-	speciesDog   = "dog"
-	speciesHuman = "human"
-)
-
 // DefaultFlushInterval is the interval for checking and flushing pending detections
 const DefaultFlushInterval = 1 * time.Second
 
@@ -135,6 +131,15 @@ type Processor struct {
 	// Periodic pipeline stats (inference activity per source/model)
 	pipelineStats *PipelineStats
 
+	// Per-model recent-detection cache: a fixed-capacity, most-recent-first feed of
+	// the last lastDetectionCap detections per model, throttled per species so a
+	// continuously singing bird does not flood it. lastDetectionMu guards
+	// lastDetectionCache and every feed it holds. The map and per-model feeds are
+	// lazily initialised in updateLastDetection so zero-value Processors are safe to
+	// use in unit tests without a constructor call.
+	lastDetectionCache map[string]*recentDetectionList
+	lastDetectionMu    sync.RWMutex
+
 	// Extended capture fields
 	extendedCaptureSpecies map[string]bool // Resolved set of scientific names eligible for extended capture
 	extendedCaptureAll     bool            // True when all species qualify (empty species list)
@@ -223,6 +228,18 @@ type PendingDetection struct {
 // merged into a single entry for cross-model consensus evaluation.
 func pendingDetectionKey(sourceID, speciesName string) string {
 	return sourceID + ":" + speciesName
+}
+
+// pendingKeyForDetection builds the pendingDetections map key for a detection,
+// keying on the scientific name rather than the common name. Ingestion already
+// normalized the scientific name to its canonical form (parseAndValidateSpecies),
+// so two models reporting one taxon under different legacy/modern names merge into
+// a single pending entry for cross-model consensus. Keying on the scientific name
+// also fixes a latent bug where two genuinely different species sharing a localized
+// common name were wrongly merged. The empty-scientific-name guard in processResults
+// drops invalid detections before this point.
+func pendingKeyForDetection(sourceID string, det *Detections) string {
+	return pendingDetectionKey(sourceID, strings.ToLower(det.Result.Species.ScientificName))
 }
 
 // suggestLevelForDisabledFilter provides smart recommendations for filter levels
@@ -412,11 +429,11 @@ func initSpeciesTracker(settings *conf.Settings, ds datastore.Interface) *specie
 	}
 
 	tracker := species.NewTrackerFromSettings(ds, &hemisphereAwareTracking)
-	if err := tracker.InitFromDatabase(); err != nil {
-		GetLogger().Error("Failed to initialize species tracker from database, continuing with new detections",
-			logger.Error(err),
-			logger.String("operation", "species_tracker_init"))
-	}
+	// Load historical state in the background so the multi-query database scan
+	// does not block startup (it gates the HTTP server on large databases). The
+	// tracker suppresses new-species status until the load completes, so no
+	// spurious "new species" notifications fire from the not-yet-populated maps.
+	tracker.InitFromDatabaseAsync()
 
 	hemisphere := conf.DetectHemisphere(settings.BirdNET.Latitude)
 	GetLogger().Info("Species tracking enabled",
@@ -458,8 +475,7 @@ func (p *Processor) initDynamicThresholds(settings *conf.Settings) {
 			logger.String("operation", "load_dynamic_thresholds"))
 	}
 
-	p.startThresholdPersistence()
-	p.startThresholdCleanup()
+	p.startThresholdGoroutines()
 }
 
 // New creates a new Processor with the given dependencies.
@@ -706,7 +722,7 @@ func (p *Processor) processDetections(item classifier.Results) {
 		p.pendingMutex.Lock()
 
 		now := time.Now()
-		mapKey := pendingDetectionKey(item.Source.ID, commonName)
+		mapKey := pendingKeyForDetection(item.Source.ID, &det)
 
 		if existing, exists := p.pendingDetections[mapKey]; exists {
 			// Update the existing detection (may be from same or different model)
@@ -805,10 +821,18 @@ func (p *Processor) processResults(settings *conf.Settings, item classifier.Resu
 	// Sync species tracker if needed
 	p.syncSpeciesTrackerIfNeeded()
 
+	// Per-model "Last heard" feed parameters, computed once per chunk: the
+	// per-species throttle (from the model's segment length) and a single shared
+	// timestamp for every prediction in this chunk. ModelRegistry is read-only
+	// after init; an unknown model ID yields a zero clip length and the default
+	// throttle.
+	feedThrottle := detectionThrottle(classifier.ModelRegistry[item.ModelID].Spec.ClipLength)
+	feedTime := time.Now().Add(-detection.DetectionTimeOffset)
+
 	// Process each result in item.Results
 	for _, result := range item.Results {
 		// Parse and validate species information
-		scientificName, commonName, speciesCode, speciesLowercase := p.parseAndValidateSpecies(settings, result, item)
+		scientificName, commonName, speciesCode, speciesLowercase, rawScientificName := p.parseAndValidateSpecies(settings, result, item)
 		// Skip if either scientific or common name is missing (partial/invalid parsing)
 		if scientificName == "" || commonName == "" {
 			if settings.Debug {
@@ -826,20 +850,31 @@ func (p *Processor) processResults(settings *conf.Settings, item classifier.Resu
 
 		// Handle dog and human detection, this sets LastDogDetection and LastHumanDetection which is
 		// later used to discard detection if privacy filter or dog bark filters are enabled in settings.
-		p.handleDogDetection(settings, item, speciesLowercase, result)
-		p.handleHumanDetection(settings, item, speciesLowercase, result)
+		p.handleDogDetection(settings, item, result)
+		p.handleHumanDetection(settings, item, result)
 
 		// Determine confidence threshold and check filters
 		baseThreshold := p.getBaseConfidenceThreshold(settings, commonName, scientificName, item.ModelID)
 
 		// Check if detection should be filtered
 		shouldSkip, _ := p.shouldFilterDetection(settings, result, commonName, scientificName, speciesLowercase, baseThreshold, item.Source.ID, item.ModelID)
+
+		// Record every prediction above the base confidence threshold in the
+		// per-model "Last heard" diagnostic feed, including non-avian classes,
+		// human vocalizations, and out-of-range birds, tagged with whether the
+		// species passes the range filter. This is independent of whether the
+		// detection is saved below (saved detections also clear this bar).
+		if result.Confidence > baseThreshold {
+			inRange := !shouldApplyRangeFilter(item.ModelID, settings) || settings.IsSpeciesIncluded(result.Species)
+			p.updateLastDetection(item.ModelID, commonName, scientificName, float64(result.Confidence), feedTime, inRange, feedThrottle)
+		}
+
 		if shouldSkip {
 			continue
 		}
 
 		// Create the detection
-		det := p.createDetection(settings, item, result, scientificName, commonName, speciesCode)
+		det := p.createDetection(settings, item, result, scientificName, commonName, speciesCode, rawScientificName)
 		detections = append(detections, det)
 	}
 
@@ -908,7 +943,7 @@ func (p *Processor) applyUltrasonicFilter(settings *conf.Settings, item classifi
 // parseAndValidateSpecies parses species information and validates it
 //
 //nolint:gocritic // hugeParam: Pass by value is intentional - avoids pointer dereferencing in hot path
-func (p *Processor) parseAndValidateSpecies(settings *conf.Settings, result datastore.Results, item classifier.Results) (scientificName, commonName, speciesCode, speciesLowercase string) {
+func (p *Processor) parseAndValidateSpecies(settings *conf.Settings, result datastore.Results, item classifier.Results) (scientificName, commonName, speciesCode, speciesLowercase, rawScientificName string) {
 	// Use BirdNET's EnrichResultWithTaxonomy to get species information
 	scientificName, commonName, speciesCode = p.Bn.EnrichResultWithTaxonomy(result.Species)
 
@@ -921,8 +956,16 @@ func (p *Processor) parseAndValidateSpecies(settings *conf.Settings, result data
 				logger.Float32("confidence", result.Confidence),
 				logger.String("operation", "species_format_validation"))
 		}
-		return "", "", "", ""
+		return "", "", "", "", ""
 	}
+
+	// Single ingestion chokepoint for species de-duplication: collapse taxonomic
+	// aliases to the canonical scientific name so the same taxon emitted by different
+	// models is stored under one identity. This runs AFTER the inclusion gate (already
+	// alias-aware via the range filter, PR #3725) and BEFORE the detection is created,
+	// so the canonical name flows into the pending-merge key, storage, and tracker.
+	// rawScientificName preserves the model's original name (empty when no alias applied).
+	scientificName, commonName, speciesCode, rawScientificName = canonicalizeSpecies(p.Bn, scientificName, commonName, speciesCode)
 
 	// Use scientific name as fallback when common name is not available.
 	if commonName == "" {
@@ -969,8 +1012,9 @@ func shouldApplyRangeFilter(modelID string, settings *conf.Settings) bool {
 
 // shouldFilterDetection checks if a detection should be filtered out
 func (p *Processor) shouldFilterDetection(settings *conf.Settings, result datastore.Results, commonName, scientificName, speciesLowercase string, baseThreshold float32, source, modelID string) (shouldFilter bool, confidenceThreshold float32) {
-	// Check human detection privacy filter
-	if strings.Contains(strings.ToLower(commonName), speciesHuman) && result.Confidence > baseThreshold {
+	// Check human detection privacy filter. Match the raw label so Perch v2's
+	// FSD50K human classes are caught too, not just BirdNET's "Human *" classes.
+	if isHumanVocalization(result.Species) && result.Confidence > baseThreshold {
 		return true, 0 // Filter out human detections for privacy
 	}
 
@@ -1033,8 +1077,16 @@ func (p *Processor) shouldFilterDetection(settings *conf.Settings, result datast
 // in the exclude list. Matching is case-insensitive and supports either name form, consistent
 // with the range filter's matchesSpecies logic (see birdnet/range_filter.go).
 func isSpeciesExcluded(commonName, scientificName string, excludeList []string) bool {
+	// Canonicalize the detection's scientific name once so an exclude entry the user
+	// keyed on a legacy/alias scientific name still matches a detection that now
+	// carries the canonical name (and vice versa). CanonicalName is identity for
+	// non-aliased names, so non-reclassified species behave exactly as before.
+	canonicalSci := openfauna.CanonicalName(scientificName)
 	for _, excluded := range excludeList {
-		if strings.EqualFold(commonName, excluded) || strings.EqualFold(scientificName, excluded) {
+		if strings.EqualFold(commonName, excluded) {
+			return true
+		}
+		if scientificName != "" && strings.EqualFold(canonicalSci, openfauna.CanonicalName(excluded)) {
 			return true
 		}
 	}
@@ -1044,7 +1096,7 @@ func isSpeciesExcluded(commonName, scientificName string, excludeList []string) 
 // createDetection creates a detection object with all necessary information
 //
 //nolint:gocritic // hugeParam: Pass by value is intentional - avoids pointer dereferencing in hot path
-func (p *Processor) createDetection(settings *conf.Settings, item classifier.Results, result datastore.Results, scientificName, commonName, speciesCode string) Detections {
+func (p *Processor) createDetection(settings *conf.Settings, item classifier.Results, result datastore.Results, scientificName, commonName, speciesCode, rawScientificName string) Detections {
 	// Create file name for audio clip
 	clipName := p.generateClipName(settings, scientificName, result.Confidence)
 
@@ -1076,11 +1128,12 @@ func (p *Processor) createDetection(settings *conf.Settings, item classifier.Res
 	detectionResult := p.createDetectionResult(settings,
 		detectionTime,
 		beginTime, endTime,
-		scientificName, commonName, speciesCode,
+		scientificName, commonName, speciesCode, rawScientificName,
 		float64(result.Confidence),
 		item.Source, clipName,
 		item.ElapsedTime, occurrence,
-		item.ModelID)
+		item.ModelID,
+		result.Species)
 
 	// Convert additional results from datastore.Results to detection.AdditionalResult.
 	// Exclude the primary species since it's already stored as Detection.LabelID.
@@ -1110,11 +1163,12 @@ func (p *Processor) createDetection(settings *conf.Settings, item classifier.Res
 func (p *Processor) createDetectionResult(settings *conf.Settings,
 	detectionTime time.Time,
 	beginTime, endTime time.Time,
-	scientificName, commonName, speciesCode string,
+	scientificName, commonName, speciesCode, rawScientificName string,
 	confidence float64,
 	source datastore.AudioSource, clipName string,
 	elapsedTime time.Duration, occurrence float64,
-	modelID string) detection.Result {
+	modelID string,
+	rawLabel string) detection.Result {
 
 	// Resolve audio source info from registry
 	audioSource := p.resolveAudioSource(source)
@@ -1126,9 +1180,10 @@ func (p *Processor) createDetectionResult(settings *conf.Settings,
 		BeginTime:   beginTime,
 		EndTime:     endTime,
 		Species: detection.Species{
-			ScientificName: scientificName,
-			CommonName:     commonName,
-			Code:           speciesCode,
+			ScientificName:    scientificName,
+			CommonName:        commonName,
+			Code:              speciesCode,
+			RawScientificName: rawScientificName,
 		},
 		Confidence:     math.Round(confidence*100) / 100,
 		Latitude:       settings.BirdNET.Latitude,
@@ -1139,6 +1194,7 @@ func (p *Processor) createDetectionResult(settings *conf.Settings,
 		ProcessingTime: elapsedTime,
 		Occurrence:     math.Max(0.0, math.Min(1.0, occurrence)),
 		Model:          classifier.DetectionModelInfoForID(modelID),
+		RawLabel:       rawLabel,
 	}
 }
 
@@ -1191,7 +1247,12 @@ func convertToAdditionalResults(results []datastore.Results, primaryScientificNa
 	seen := make(map[string]int, len(results)) // scientificName → index in additional
 	for _, r := range results {
 		sp := detection.ParseSpeciesString(r.Species)
-		if sp.ScientificName == primaryScientificName {
+		// Canonicalize the candidate's scientific name so the primary species is
+		// excluded even when this prediction carries it under a legacy/alias name.
+		// primaryScientificName is the canonical name from parseAndValidateSpecies;
+		// without this the aliased primary would leak into the additional results under
+		// its legacy name and the same taxon would be stored twice for one detection.
+		if openfauna.CanonicalName(sp.ScientificName) == primaryScientificName {
 			continue
 		}
 		if idx, exists := seen[sp.ScientificName]; exists {
@@ -1200,6 +1261,7 @@ func convertToAdditionalResults(results []datastore.Results, primaryScientificNa
 				additional[idx] = detection.AdditionalResult{
 					Species:    sp,
 					Confidence: float64(r.Confidence),
+					RawLabel:   r.Species,
 				}
 			}
 			continue
@@ -1208,6 +1270,7 @@ func convertToAdditionalResults(results []datastore.Results, primaryScientificNa
 		additional = append(additional, detection.AdditionalResult{
 			Species:    sp,
 			Confidence: float64(r.Confidence),
+			RawLabel:   r.Species,
 		})
 	}
 	return additional
@@ -1244,8 +1307,8 @@ func (p *Processor) syncSpeciesTrackerIfNeeded() {
 // handleDogDetection handles the detection of dog barks and updates the last detection timestamp.
 //
 //nolint:gocritic // hugeParam: Pass by value is intentional - avoids pointer dereferencing in hot path
-func (p *Processor) handleDogDetection(settings *conf.Settings, item classifier.Results, speciesLowercase string, result datastore.Results) {
-	if settings.Realtime.DogBarkFilter.Enabled && strings.Contains(speciesLowercase, speciesDog) &&
+func (p *Processor) handleDogDetection(settings *conf.Settings, item classifier.Results, result datastore.Results) {
+	if settings.Realtime.DogBarkFilter.Enabled && isDogDetection(result.Species) &&
 		result.Confidence > settings.Realtime.DogBarkFilter.Confidence {
 		GetLogger().Info("dog detection filtered",
 			logger.Float32("confidence", result.Confidence),
@@ -1261,9 +1324,9 @@ func (p *Processor) handleDogDetection(settings *conf.Settings, item classifier.
 // handleHumanDetection handles the detection of human vocalizations and updates the last detection timestamp.
 //
 //nolint:gocritic // hugeParam: Pass by value is intentional - avoids pointer dereferencing in hot path
-func (p *Processor) handleHumanDetection(settings *conf.Settings, item classifier.Results, speciesLowercase string, result datastore.Results) {
+func (p *Processor) handleHumanDetection(settings *conf.Settings, item classifier.Results, result datastore.Results) {
 	// only check this if privacy filter is enabled
-	if settings.Realtime.PrivacyFilter.Enabled && strings.Contains(speciesLowercase, "human ") &&
+	if settings.Realtime.PrivacyFilter.Enabled && isHumanVocalization(result.Species) &&
 		result.Confidence > settings.Realtime.PrivacyFilter.Confidence {
 		GetLogger().Info("human detection filtered",
 			logger.Float32("confidence", result.Confidence),
@@ -1381,7 +1444,11 @@ func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *con
 		p.detectionMutex.RLock()
 		lastHumanDetection, exists := p.LastHumanDetection[item.Source]
 		p.detectionMutex.RUnlock()
-		if exists && lastHumanDetection.After(item.FirstDetected) {
+		// Discard when a human voice was detected at or after the bird detection
+		// started. Using !Before (>=) rather than After (>) so a human and a bird
+		// sharing the exact same audio chunk (equal timestamps) still trips the
+		// privacy filter instead of leaking the detection.
+		if exists && !lastHumanDetection.Before(item.FirstDetected) {
 			// Add structured logging for privacy filter
 			GetLogger().Debug("Detection discarded by privacy filter",
 				logger.String("species", item.Detection.Result.Species.CommonName),
@@ -2421,9 +2488,14 @@ func (p *Processor) ShutdownWithContext(ctx context.Context) error {
 	}
 	p.discoveryDebounceMu.Unlock()
 
-	// Stop threshold persistence and cleanup goroutines first
-	if p.thresholdsCancel != nil {
-		p.thresholdsCancel()
+	// Stop threshold persistence and cleanup goroutines first. Snapshot the cancel func
+	// under thresholdsMutex so this never races with StopDynamicThresholds rewriting the
+	// field when the feature is toggled off at runtime (see #1025). cancel() is idempotent.
+	p.thresholdsMutex.RLock()
+	thresholdsCancel := p.thresholdsCancel
+	p.thresholdsMutex.RUnlock()
+	if thresholdsCancel != nil {
+		thresholdsCancel()
 	}
 
 	// Cancel flusher goroutine

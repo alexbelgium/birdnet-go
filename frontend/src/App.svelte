@@ -9,8 +9,17 @@
   import { getLogger } from './lib/utils/logger';
   import { createSafeMap } from './lib/utils/security';
   import { sseNotifications } from './lib/stores/sseNotifications'; // Initialize SSE toast handler
-  import { t } from './lib/i18n';
-  import { appState, initApp, MAX_RETRIES } from './lib/stores/appState.svelte';
+  import { t, getLocale } from './lib/i18n';
+  import {
+    loadDictionary,
+    PER_VISITOR_SPECIES_LOCALE_ENABLED,
+  } from './lib/stores/speciesDictionary.svelte';
+  import {
+    appState,
+    initApp,
+    MAX_RETRIES,
+    getSpeciesDictVersion,
+  } from './lib/stores/appState.svelte';
   import { navigation } from './lib/stores/navigation.svelte';
   import { settingsActions } from './lib/stores/settings.js';
   import { activateWatchdog } from './lib/stores/connectionState.svelte';
@@ -33,7 +42,6 @@
 
   // Dynamic imports for heavy pages - properly typed component references
   let Analytics = $state<Component | null>(null);
-  let AdvancedAnalytics = $state<Component | null>(null);
   let Species = $state<Component | null>(null);
   let Search = $state<Component | null>(null);
   let About = $state<Component | null>(null);
@@ -127,12 +135,6 @@
       titleKey: 'navigation.analytics',
       component: 'analytics',
     },
-    {
-      route: 'advanced-analytics',
-      page: 'analytics/advanced',
-      titleKey: 'pageTitle.advancedAnalytics',
-      component: 'advanced-analytics',
-    },
     { route: 'search', page: 'search', titleKey: 'navigation.search', component: 'search' },
     {
       route: 'detections',
@@ -181,6 +183,8 @@
   const systemSubpages: Record<string, string> = {
     '/database': 'system.sections.database',
     '/terminal': 'system.sections.terminal',
+    '/inference': 'system.sections.inference',
+    '/import-export': 'system.sections.importExport',
   };
 
   // Dynamic import helper
@@ -201,13 +205,6 @@
           if (!Analytics) {
             const module = await import('./lib/desktop/features/analytics/pages/Analytics.svelte');
             Analytics = module.default;
-          }
-          break;
-        case 'advanced-analytics':
-          if (!AdvancedAnalytics) {
-            const module =
-              await import('./lib/desktop/features/analytics/pages/AdvancedAnalytics.svelte');
-            AdvancedAnalytics = module.default;
           }
           break;
         case 'species':
@@ -349,7 +346,6 @@
     [uiPath('live-stream')]: findRouteConfig('live-stream'),
     [uiPath('notifications')]: findRouteConfig('notifications'),
     [uiPath('analytics', 'species')]: findRouteConfig('species'),
-    [uiPath('analytics', 'advanced')]: findRouteConfig('advanced-analytics'),
     [uiPath('analytics')]: findRouteConfig('analytics'),
     [uiPath('search')]: findRouteConfig('search'),
     [uiPath('detections')]: findRouteConfig('detections'),
@@ -397,6 +393,22 @@
   }
 
   function handleRouting(path: string): void {
+    // Retired route: the Advanced Analytics page folded into the unified
+    // Analytics hub (PR0b). Redirect old deep links to the hub, defaulting to
+    // the Activity Patterns tab (the first charts tab; the former Advanced
+    // Analytics charts now live across Patterns/Trends/Biodiversity) and
+    // preserving any existing query params (range/species/source/tab/...). Uses
+    // replace so the dead URL does not linger in history.
+    const retiredAdvancedPath = uiPath('analytics', 'advanced');
+    if (path === retiredAdvancedPath || path === `${retiredAdvancedPath}/`) {
+      const search = typeof window !== 'undefined' ? window.location.search : '';
+      const sp = new URLSearchParams(search);
+      if (!sp.has('tab')) sp.set('tab', 'patterns');
+      const qs = sp.toString();
+      navigation.redirect(uiPath('analytics') + (qs ? `?${qs}` : ''));
+      return;
+    }
+
     // Special handling for detection detail pages
     if (UI_DETECTIONS_PREFIX_RE.test(path) && path.split('/').length > 3) {
       const pathParts = path.split('/');
@@ -560,6 +572,25 @@
     }
   });
 
+  // Load the per-visitor species-name display dictionary on first paint and
+  // refetch whenever the UI locale changes. getLocale() reads reactive state, so
+  // reading it here re-runs the effect on locale switch. Fire-and-forget: the
+  // dashboard falls back to server-provided common names until this resolves.
+  //
+  // PARKED behind PER_VISITOR_SPECIES_LOCALE_ENABLED: while off, we never fetch
+  // the dictionary, so species names follow the server-side species language
+  // (settings.BirdNET.Locale) instead of the visitor's UI locale.
+  $effect(() => {
+    if (!PER_VISITOR_SPECIES_LOCALE_ENABLED) return;
+    const locale = getLocale();
+    // Read the version so the effect re-runs once app config populates it, fetching
+    // the content-addressed URL instead of staying on the unversioned (short-cache) one.
+    getSpeciesDictVersion();
+    loadDictionary(locale).catch(err => {
+      logger.error('Failed to load species dictionary', err, { locale });
+    });
+  });
+
   // Use $effect for browser back/forward navigation with automatic cleanup
   $effect(() => {
     const handlePopState = () => {
@@ -641,8 +672,6 @@
       {@render renderRoute(Notifications)}
     {:else if currentRoute === 'analytics'}
       {@render renderRoute(Analytics)}
-    {:else if currentRoute === 'advanced-analytics'}
-      {@render renderRoute(AdvancedAnalytics)}
     {:else if currentRoute === 'species'}
       {@render renderRoute(Species)}
     {:else if currentRoute === 'search'}

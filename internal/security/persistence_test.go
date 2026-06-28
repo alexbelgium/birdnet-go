@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 // Shared context for tests in this file
 var ctx = context.Background()
 
+// osWindows is the runtime.GOOS value for Windows, used to guard assertions
+// that rely on Unix file-permission or read-only-directory semantics.
+const osWindows = "windows"
+
 // TestTokenPersistence tests saving and loading of access tokens
 func TestTokenPersistence(t *testing.T) {
 	// Create a temporary directory for testing
@@ -25,7 +30,7 @@ func TestTokenPersistence(t *testing.T) {
 
 	// Create test server with custom token file
 	server := &OAuth2Server{
-		Settings:      &conf.Settings{Security: conf.Security{BasicAuth: conf.BasicAuth{AccessTokenExp: time.Hour}}},
+		settings:      &conf.Settings{Security: conf.Security{BasicAuth: conf.BasicAuth{AccessTokenExp: time.Hour}}},
 		accessTokens:  make(map[string]AccessToken),
 		authCodes:     make(map[string]AuthCode),
 		tokensFile:    filepath.Join(tempDir, "tokens.json"),
@@ -52,7 +57,7 @@ func TestTokenPersistence(t *testing.T) {
 
 	// Create a new server instance to load tokens
 	newServer := &OAuth2Server{
-		Settings:      &conf.Settings{},
+		settings:      &conf.Settings{},
 		accessTokens:  make(map[string]AccessToken),
 		tokensFile:    filepath.Join(tempDir, "tokens.json"),
 		persistTokens: true,
@@ -77,7 +82,12 @@ func TestTokenPersistence(t *testing.T) {
 	// Verify file permissions
 	info, err := os.Stat(filepath.Join(tempDir, "tokens.json"))
 	require.NoError(t, err, "Failed to stat tokens file")
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "Tokens file should have 0600 permissions")
+	// Windows reports 0666 for regular files regardless of the mode saveTokens
+	// requests; the 0600 bits are not observable on NTFS. Skip only the perm
+	// comparison there.
+	if runtime.GOOS != osWindows {
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "Tokens file should have 0600 permissions")
+	}
 }
 
 // TestFilesystemStore tests that the FilesystemStore is initialized correctly
@@ -117,14 +127,19 @@ func TestFilesystemStore(t *testing.T) {
 	info, err := os.Stat(sessionsDir)
 	require.NoError(t, err, "Failed to stat sessions directory")
 	assert.True(t, info.IsDir(), "Sessions path should be a directory")
-	assert.Equal(t, os.FileMode(DirPermissions), info.Mode().Perm(), "Sessions directory should have secure permissions")
+	// Windows reports 0777 for directories regardless of the mode requested; the
+	// DirPermissions bits are not observable on NTFS. Skip only the perm
+	// comparison there.
+	if runtime.GOOS != osWindows {
+		assert.Equal(t, os.FileMode(DirPermissions), info.Mode().Perm(), "Sessions directory should have secure permissions")
+	}
 }
 
 // TestLocalNetworkCookieStore tests configuring cookie store for local network access
 func TestLocalNetworkCookieStore(t *testing.T) {
 	// Create test server with settings
 	server := &OAuth2Server{
-		Settings: &conf.Settings{
+		settings: &conf.Settings{
 			Security: conf.Security{
 				SessionSecret: "test-secret",
 			},
@@ -133,7 +148,7 @@ func TestLocalNetworkCookieStore(t *testing.T) {
 
 	// Test with CookieStore
 	gothic.Store = sessions.NewCookieStore([]byte("test-secret"))
-	server.configureLocalNetworkCookieStore()
+	server.configureLocalNetworkCookieStore(server.settings)
 
 	cookieStore, ok := gothic.Store.(*sessions.CookieStore)
 	assert.True(t, ok, "Gothic store should be a CookieStore")
@@ -143,7 +158,7 @@ func TestLocalNetworkCookieStore(t *testing.T) {
 	tempDir := t.TempDir()
 
 	gothic.Store = sessions.NewFilesystemStore(tempDir, []byte("test-secret"))
-	server.configureLocalNetworkCookieStore()
+	server.configureLocalNetworkCookieStore(server.settings)
 
 	fileStore, ok := gothic.Store.(*sessions.FilesystemStore)
 	assert.True(t, ok, "Gothic store should be a FilesystemStore")
@@ -159,7 +174,7 @@ func TestConfigureLocalNetworkWithUnknownStore(t *testing.T) {
 
 	// Create test server with settings
 	server := &OAuth2Server{
-		Settings: &conf.Settings{
+		settings: &conf.Settings{
 			Security: conf.Security{
 				SessionSecret: "test-secret",
 			},
@@ -171,7 +186,7 @@ func TestConfigureLocalNetworkWithUnknownStore(t *testing.T) {
 
 	// This should not panic - the function handles unknown store types gracefully
 	assert.NotPanics(t, func() {
-		server.configureLocalNetworkCookieStore()
+		server.configureLocalNetworkCookieStore(server.settings)
 	}, "configureLocalNetworkCookieStore should not panic with unknown store type")
 }
 
@@ -181,7 +196,7 @@ func TestConfigureLocalNetworkWithUnknownStore(t *testing.T) {
 func TestConfigureLocalNetworkWithMissingSessionSecret(t *testing.T) {
 	// Create test server with empty session secret
 	server := &OAuth2Server{
-		Settings: &conf.Settings{
+		settings: &conf.Settings{
 			Security: conf.Security{
 				SessionSecret: "", // Empty session secret - should not cause issues with unknown store
 			},
@@ -199,7 +214,7 @@ func TestConfigureLocalNetworkWithMissingSessionSecret(t *testing.T) {
 	// This should not panic - the function handles unknown store types gracefully
 	// even with an empty session secret
 	assert.NotPanics(t, func() {
-		server.configureLocalNetworkCookieStore()
+		server.configureLocalNetworkCookieStore(server.settings)
 	}, "configureLocalNetworkCookieStore should not panic with unknown store type and empty session secret")
 }
 
@@ -213,7 +228,7 @@ func TestLoadCorruptedTokensFile(t *testing.T) {
 	require.NoError(t, err, "Failed to write corrupted tokens file")
 
 	server := &OAuth2Server{
-		Settings: &conf.Settings{},
+		settings: &conf.Settings{},
 		accessTokens: map[string]AccessToken{
 			"test_token": {
 				Token:     "test_token",
@@ -233,8 +248,11 @@ func TestLoadCorruptedTokensFile(t *testing.T) {
 
 // Let's also add a test for unwritable directories
 func TestUnwritableTokensDirectory(t *testing.T) {
-	// Skip on Windows as permission handling differs
-	if os.Getenv("GOOS") == "windows" {
+	// Skip on Windows: chmod cannot make a directory unwritable for its owner
+	// there, so saveTokens succeeds and no error is returned. (The previous
+	// guard used os.Getenv("GOOS"), which is always empty because GOOS is a
+	// build constant, not an environment variable, so the skip never fired.)
+	if runtime.GOOS == osWindows {
 		t.Skip("Skipping on Windows as permission handling is different")
 	}
 
@@ -255,7 +273,7 @@ func TestUnwritableTokensDirectory(t *testing.T) {
 	}()
 
 	server := &OAuth2Server{
-		Settings: &conf.Settings{},
+		settings: &conf.Settings{},
 		accessTokens: map[string]AccessToken{
 			"test_token": {
 				Token:     "test_token",
@@ -283,7 +301,7 @@ func TestAtomicTokenSaving(t *testing.T) {
 	tokensFile := filepath.Join(tempDir, "tokens.json")
 
 	server := &OAuth2Server{
-		Settings: &conf.Settings{},
+		settings: &conf.Settings{},
 		accessTokens: map[string]AccessToken{
 			"test_token": {
 				Token:     "test_token",

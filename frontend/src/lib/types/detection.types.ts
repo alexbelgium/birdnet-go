@@ -23,6 +23,7 @@ export interface Detection {
   scientificName: string;
   commonName: string;
   confidence: number;
+  modelType?: string; // AI model type (e.g. 'bird', 'bat'); drives the spectrogram frequency range
   verified: 'correct' | 'false_positive' | 'unverified';
   locked: boolean;
   unlikely?: boolean;
@@ -176,12 +177,14 @@ export interface DailySpeciesSummary {
   count: number;
   hourly_counts: number[];
   high_confidence: boolean;
+  max_confidence?: number; // Highest detection confidence for the day (fraction 0..1)
   first_heard: string;
   latest_heard: string;
   thumbnail_url: string;
   // Species tracking metadata
   is_new_species?: boolean; // True if first seen within tracking window (persistent from API)
   days_since_first_seen?: number; // Days since species was first detected
+  days_since_last_seen?: number; // Days since the previous detection before this return (absence gap)
   // Multi-period tracking metadata
   is_new_this_year?: boolean; // First time this year
   is_new_this_season?: boolean; // First time this season

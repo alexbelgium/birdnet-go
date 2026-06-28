@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/conf/conftest"
 	"github.com/tphakala/birdnet-go/internal/events"
 	"go.uber.org/goleak"
 )
@@ -147,14 +147,6 @@ func TestDetectionNotificationConsumer_PreSanitizedLocations(t *testing.T) {
 		RateLimitWindow:    1 * time.Minute,
 		RateLimitMaxEvents: 100,
 	}
-	service := NewService(config)
-	require.NotNil(t, service)
-	defer service.Stop()
-
-	// Create detection consumer
-	consumer := NewDetectionNotificationConsumer(service)
-	require.NotNil(t, consumer)
-
 	// Test cases for pre-sanitized locations from audio source registry
 	// In the new architecture, detection events already contain sanitized display names
 	testCases := []struct {
@@ -191,6 +183,19 @@ func TestDetectionNotificationConsumer_PreSanitizedLocations(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Use a fresh service per case so the List below returns only this
+			// case's notification. The cases otherwise share one service and
+			// List(Limit:1) would rely on timestamp ordering to pick "the latest";
+			// on a coarse clock (Windows ~15ms) several cases get the same
+			// timestamp and the unstable sort returns an arbitrary one, picking a
+			// prior case's notification.
+			service := NewService(config)
+			require.NotNil(t, service)
+			t.Cleanup(service.Stop)
+
+			consumer := NewDetectionNotificationConsumer(service)
+			require.NotNil(t, consumer)
+
 			// Create a new species detection event with pre-sanitized location
 			// This simulates how the real system works: detection events contain
 			// already-sanitized display names from the audio source registry
@@ -373,10 +378,10 @@ func TestDetectionNotificationConsumer_ConfidenceThreshold(t *testing.T) {
 	// Note: Cannot use t.Parallel() because tests share global settingsInstance
 
 	// Set up test settings with confidence threshold
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	settings.Notification.Push.MinConfidenceThreshold = 0.80 // 80% threshold
-	conf.SetTestSettings(settings)
-	defer conf.SetTestSettings(nil) // Clean up
+	conftest.SetTestSettings(settings)
+	defer conftest.SetTestSettings(nil) // Clean up
 
 	service, consumer, cleanup := setupTestServiceAndConsumer(t)
 	defer cleanup()
@@ -444,10 +449,10 @@ func TestDetectionNotificationConsumer_SpeciesCooldown(t *testing.T) {
 	// Note: Cannot use t.Parallel() because tests share global settingsInstance
 
 	// Set up test settings with cooldown
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	settings.Notification.Push.SpeciesCooldownMinutes = 60 // 60 minute cooldown
-	conf.SetTestSettings(settings)
-	defer conf.SetTestSettings(nil) // Clean up
+	conftest.SetTestSettings(settings)
+	defer conftest.SetTestSettings(nil) // Clean up
 
 	service, consumer, cleanup := setupTestServiceAndConsumer(t)
 	defer cleanup()
@@ -512,10 +517,10 @@ func TestDetectionNotificationConsumer_CooldownExpiration(t *testing.T) {
 	// Note: Cannot use t.Parallel() because tests share global settingsInstance
 
 	// Set up test settings with very short cooldown for testing
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	settings.Notification.Push.SpeciesCooldownMinutes = 1 // 1 minute cooldown
-	conf.SetTestSettings(settings)
-	defer conf.SetTestSettings(nil) // Clean up
+	conftest.SetTestSettings(settings)
+	defer conftest.SetTestSettings(nil) // Clean up
 
 	service, consumer, cleanup := setupTestServiceAndConsumer(t)
 	defer cleanup()
@@ -569,11 +574,11 @@ func TestDetectionNotificationConsumer_DisabledFiltering(t *testing.T) {
 	// Note: Cannot use t.Parallel() because tests share global settingsInstance
 
 	// Set up test settings with filtering disabled (0 values)
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	settings.Notification.Push.MinConfidenceThreshold = 0 // Disabled
 	settings.Notification.Push.SpeciesCooldownMinutes = 0 // Disabled
-	conf.SetTestSettings(settings)
-	defer conf.SetTestSettings(nil) // Clean up
+	conftest.SetTestSettings(settings)
+	defer conftest.SetTestSettings(nil) // Clean up
 
 	service, consumer, cleanup := setupTestServiceAndConsumer(t)
 	defer cleanup()

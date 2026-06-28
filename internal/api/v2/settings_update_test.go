@@ -10,6 +10,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 	"github.com/tphakala/birdnet-go/internal/conf"
 )
 
@@ -28,12 +30,8 @@ func TestDashboardLayoutWidthPersistence(t *testing.T) {
 	}
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Simulate the frontend save: elements without width field (user set to full)
 	update := map[string]any{
@@ -61,7 +59,7 @@ func TestDashboardLayoutWidthPersistence(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// The width fields must be cleared (empty string = full width default)
-	elements := controller.Settings.Realtime.Dashboard.Layout.Elements
+	elements := controller.Settings.Load().Realtime.Dashboard.Layout.Elements
 	require.Len(t, elements, 3)
 	assert.Empty(t, elements[0].Width, "daily-summary width should be empty")
 	assert.Empty(t, elements[1].Width, "currently-hearing width should be empty (was 'half')")
@@ -92,7 +90,7 @@ func TestDashboardLayoutWidthPersistence(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec2.Code)
 
-	elements2 := controller.Settings.Realtime.Dashboard.Layout.Elements
+	elements2 := controller.Settings.Load().Realtime.Dashboard.Layout.Elements
 	require.Len(t, elements2, 3)
 	assert.Equal(t, "full", elements2[1].Width, "currently-hearing should have explicit 'full'")
 	assert.Equal(t, "half", elements2[2].Width, "detections-grid should have 'half'")
@@ -106,12 +104,8 @@ func TestMergePreservesJSONDashFields(t *testing.T) {
 	initialSettings.BirdNET.Labels = []string{"species1", "species2"}
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// PATCH birdnet section — Labels (json:"-") must survive
 	update := map[string]any{"sensitivity": 1.0}
@@ -131,7 +125,7 @@ func TestMergePreservesJSONDashFields(t *testing.T) {
 
 	// Runtime field must be preserved — Labels is json:"-" and would be
 	// destroyed if zeroJSONSliceFields zeroed json:"-" tagged slices.
-	assert.Equal(t, []string{"species1", "species2"}, controller.Settings.BirdNET.Labels,
+	assert.Equal(t, []string{"species1", "species2"}, controller.Settings.Load().BirdNET.Labels,
 		"BirdNET.Labels (json:\"-\") must survive merge")
 }
 
@@ -149,12 +143,8 @@ func TestDashboardPartialUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Update only summary field
 	update := map[string]any{
@@ -185,7 +175,7 @@ func TestDashboardPartialUpdate(t *testing.T) {
 	assert.Contains(t, response["message"], "dashboard settings updated successfully")
 
 	// Verify only the summary field changed, others preserved
-	settings := controller.Settings
+	settings := controller.Settings.Load()
 	assert.False(t, settings.Realtime.Dashboard.Thumbnails.Summary)                        // Changed
 	assert.Equal(t, initialRecent, settings.Realtime.Dashboard.Thumbnails.Recent)          // Preserved
 	assert.Equal(t, initialProvider, settings.Realtime.Dashboard.Thumbnails.ImageProvider) // Preserved
@@ -204,12 +194,8 @@ func TestWeatherPartialUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Update only provider
 	update := map[string]any{
@@ -232,7 +218,7 @@ func TestWeatherPartialUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify settings were preserved
-	settings := controller.Settings
+	settings := controller.Settings.Load()
 	assert.Equal(t, "openweather", settings.Realtime.Weather.Provider)           // Changed
 	assert.Equal(t, initialPollInterval, settings.Realtime.Weather.PollInterval) // Preserved
 	assert.Equal(t, initialDebug, settings.Realtime.Weather.Debug)               // Preserved
@@ -254,12 +240,8 @@ func TestMQTTPartialUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Update only broker
 	update := map[string]any{
@@ -282,7 +264,7 @@ func TestMQTTPartialUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify settings were preserved
-	settings := controller.Settings
+	settings := controller.Settings.Load()
 	assert.Equal(t, "tcp://newbroker:1883", settings.Realtime.MQTT.Broker) // Changed
 	assert.Equal(t, initialEnabled, settings.Realtime.MQTT.Enabled)        // Preserved
 	assert.Equal(t, initialTopic, settings.Realtime.MQTT.Topic)            // Preserved
@@ -297,12 +279,8 @@ func TestBirdNETCoordinatesUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Update only coordinates
 	update := map[string]any{
@@ -326,7 +304,7 @@ func TestBirdNETCoordinatesUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify settings were preserved
-	settings := controller.Settings
+	settings := controller.Settings.Load()
 	assert.InDelta(t, 51.5074, settings.BirdNET.Latitude, 0.0001)                    // Changed
 	assert.InDelta(t, -0.1278, settings.BirdNET.Longitude, 0.0001)                   // Changed
 	assert.InDelta(t, 1.0, settings.BirdNET.Sensitivity, 0.0001)                     // Preserved
@@ -342,12 +320,8 @@ func TestNestedRangeFilterUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Update only range filter threshold
 	update := map[string]any{
@@ -372,7 +346,7 @@ func TestNestedRangeFilterUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify settings were preserved
-	settings := controller.Settings
+	settings := controller.Settings.Load()
 	assert.InDelta(t, float32(0.05), settings.BirdNET.RangeFilter.Threshold, 0.0001) // Changed
 	assert.InDelta(t, 40.7128, settings.BirdNET.Latitude, 0.0001)                    // Preserved
 	assert.InDelta(t, -74.0060, settings.BirdNET.Longitude, 0.0001)                  // Preserved
@@ -386,12 +360,8 @@ func TestAudioExportPartialUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Update only export type
 	update := map[string]any{
@@ -416,7 +386,7 @@ func TestAudioExportPartialUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify settings were preserved
-	settings := controller.Settings
+	settings := controller.Settings.Load()
 	assert.Equal(t, "mp3", settings.Realtime.Audio.Export.Type)     // Changed
 	assert.True(t, settings.Realtime.Audio.Export.Enabled)          // Preserved
 	assert.Equal(t, "clips", settings.Realtime.Audio.Export.Path)   // Preserved
@@ -441,12 +411,8 @@ func TestSpeciesConfigUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Update only threshold
 	update := map[string]any{
@@ -473,7 +439,7 @@ func TestSpeciesConfigUpdate(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify settings were preserved (keys normalized to lowercase after API update)
-	settings := controller.Settings
+	settings := controller.Settings.Load()
 	robinConfig := settings.Realtime.Species.Config["american robin"]
 	assert.InDelta(t, 0.9, robinConfig.Threshold, 0.0001) // Changed
 	assert.Equal(t, 30, robinConfig.Interval)             // Preserved
@@ -498,12 +464,8 @@ func TestEmptyUpdatePreservesEverything(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Send empty update
 	req := httptest.NewRequest(http.MethodPatch, "/api/v2/settings/dashboard", bytes.NewReader([]byte("{}")))
@@ -519,7 +481,7 @@ func TestEmptyUpdatePreservesEverything(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify nothing changed
-	updatedSettings := controller.Settings
+	updatedSettings := controller.Settings.Load()
 	updatedJSON, err := json.Marshal(updatedSettings.Realtime.Dashboard)
 	require.NoError(t, err)
 
@@ -565,10 +527,7 @@ func TestValidationErrors(t *testing.T) {
 			t.Parallel()
 
 			e := echo.New()
-			controller := &Controller{
-				Echo:        e,
-				controlChan: make(chan string, 10),
-			}
+			controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10)}
 
 			var body []byte
 			var err error
@@ -589,7 +548,7 @@ func TestValidationErrors(t *testing.T) {
 			err = controller.UpdateSectionSettings(ctx)
 
 			// Use helper function to assert error response
-			assertControllerError(t, err, rec, tt.expectedCode, tt.expectedError)
+			apitest.AssertControllerError(t, err, rec, tt.expectedCode, tt.expectedError)
 		})
 	}
 }
@@ -609,12 +568,8 @@ func TestDeepNestedUpdates(t *testing.T) {
 	initialTLSEnabled := initialSettings.Realtime.MQTT.TLS.Enabled
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		Settings:            initialSettings,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
+	controller.Settings.Store(initialSettings)
 
 	// Update only one deeply nested field
 	update := map[string]any{
@@ -638,7 +593,7 @@ func TestDeepNestedUpdates(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify only the targeted field changed
-	settings := controller.Settings
+	settings := controller.Settings.Load()
 	assert.Equal(t, 30, settings.Realtime.MQTT.RetrySettings.InitialDelay)                           // Changed
 	assert.Equal(t, initialMaxRetries, settings.Realtime.MQTT.RetrySettings.MaxRetries)              // Preserved
 	assert.InDelta(t, initialBackoff, settings.Realtime.MQTT.RetrySettings.BackoffMultiplier, 0.001) // Preserved

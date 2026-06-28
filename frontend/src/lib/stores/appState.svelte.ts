@@ -60,6 +60,8 @@ interface AppConfigResponse {
     privateMode?: boolean;
   };
   version: string;
+  /** Dataset version for the per-locale species-name dictionary. Used as a cache-buster. */
+  speciesDictVersion?: string;
   freshInstall?: boolean;
   newVersion?: boolean;
   previousVersion?: string;
@@ -85,6 +87,25 @@ interface AppConfigResponse {
     dsn: string;
     systemId: string;
   };
+  projectLinks?: ProjectLinks;
+}
+
+/**
+ * Project identity and routing links served by the backend (always present in
+ * a normal config response). These drive in-app links ("View on GitHub",
+ * "Report an Issue", the support-page issue links) so a fork that rebrands the
+ * backend (via BIRDNET_GO_PROJECT_* env vars or ldflags) is reflected in the UI
+ * without editing translations or component source.
+ */
+interface ProjectLinks {
+  name: string;
+  repoUrl: string;
+  issuesUrl: string;
+  newIssueUrl: string;
+  supportUrl: string;
+  discussionsUrl: string;
+  releasesUrl: string;
+  communityUrl: string;
 }
 
 /**
@@ -111,8 +132,12 @@ interface AppState {
   previousVersion: string | null;
   /** Whether live spectrogram is enabled */
   liveSpectrogram: boolean;
+  /** Dataset version for the per-locale species-name dictionary. Empty string when unknown. */
+  speciesDictVersion: string;
   /** Dashboard layout from public config (available before auth) */
   layout: AppConfigResponse['layout'] | null;
+  /** Project identity/links for routing in-app links */
+  projectLinks: ProjectLinks;
   /** Security configuration */
   security: {
     enabled: boolean;
@@ -124,6 +149,23 @@ interface AppState {
     privateMode: boolean;
   };
 }
+
+/**
+ * Upstream project links used as a fallback before the backend config loads
+ * (and on the pre-config server-error screen). Once the app-config response
+ * arrives, these are replaced by the backend-resolved branding values, so a
+ * fork's configured links take over for the entire authenticated UI.
+ */
+const DEFAULT_PROJECT_LINKS: ProjectLinks = {
+  name: 'BirdNET-Go',
+  repoUrl: 'https://github.com/tphakala/birdnet-go',
+  issuesUrl: 'https://github.com/tphakala/birdnet-go/issues',
+  newIssueUrl: 'https://github.com/tphakala/birdnet-go/issues/new',
+  supportUrl: 'https://github.com/tphakala/birdnet-go',
+  discussionsUrl: 'https://github.com/tphakala/birdnet-go/discussions',
+  releasesUrl: 'https://github.com/tphakala/birdnet-go/releases',
+  communityUrl: 'https://discord.gg/gcSCFGUtsd',
+};
 
 /**
  * Default state values
@@ -139,7 +181,9 @@ const DEFAULT_STATE: AppState = {
   newVersion: false,
   previousVersion: null,
   liveSpectrogram: false,
+  speciesDictVersion: '',
   layout: null,
+  projectLinks: DEFAULT_PROJECT_LINKS,
   security: {
     enabled: false,
     accessAllowed: true,
@@ -267,7 +311,9 @@ export async function initApp(): Promise<boolean> {
       appState.newVersion = config.newVersion ?? false;
       appState.previousVersion = config.previousVersion ?? null;
       appState.liveSpectrogram = config.liveSpectrogram ?? false;
+      appState.speciesDictVersion = config.speciesDictVersion ?? '';
       appState.layout = config.layout ?? null;
+      appState.projectLinks = config.projectLinks ?? DEFAULT_PROJECT_LINKS;
 
       // Apply server-configured appearance settings
       if (config.colorScheme) {
@@ -428,6 +474,19 @@ export function getAuthConfig(): AuthConfig {
  */
 export function getVersion(): string {
   return appState.version;
+}
+
+/**
+ * Gets the species-dictionary dataset version string used as a cache-buster
+ * for the per-locale common-name dictionary endpoint.
+ * Returns an empty string when the backend has not provided this field
+ * (older backend), in which case callers should fetch without a version
+ * query parameter.
+ *
+ * @returns The species dictionary version string, or '' if unavailable
+ */
+export function getSpeciesDictVersion(): string {
+  return appState.speciesDictVersion;
 }
 
 /**

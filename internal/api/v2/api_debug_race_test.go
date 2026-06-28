@@ -5,7 +5,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/conf/conftest"
 )
 
 // writerStopTimeout bounds how long the test waits for the background writer
@@ -18,14 +21,13 @@ const writerStopTimeout = 2 * time.Second
 // again, the race detector should report a data race.
 func TestDebugSkipsControllerFallbackWhenGlobalUnset(t *testing.T) {
 	previous := conf.GetSettings()
-	conf.SetTestSettings(nil)
+	conftest.SetTestSettings(nil)
 	t.Cleanup(func() {
-		conf.SetTestSettings(previous)
+		conftest.SetTestSettings(previous)
 	})
 
-	controller := &Controller{
-		Settings: newValidTestSettings(),
-	}
+	controller := &Controller{Core: &apicore.Core{}}
+	controller.Settings.Store(apitest.NewValidTestSettings())
 
 	stopWriter := make(chan struct{})
 	writerDone := make(chan struct{})
@@ -36,9 +38,9 @@ func TestDebugSkipsControllerFallbackWhenGlobalUnset(t *testing.T) {
 			case <-stopWriter:
 				return
 			default:
-				updated := newValidTestSettings()
+				updated := apitest.NewValidTestSettings()
 				updated.WebServer.Debug = true
-				controller.Settings = updated
+				controller.Settings.Store(updated)
 			}
 		}
 	}()

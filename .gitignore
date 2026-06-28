@@ -4,6 +4,9 @@ assets/tailwind.css
 log/
 clips/
 models/
+# The bare models/ pattern above ignores the runtime ML-model download dir, but
+# it also matches the api/v2 models domain package; keep that source tracked.
+!internal/api/v2/models/
 plans/
 superpowers/
 docs/plans/
@@ -12,11 +15,13 @@ docs/superpowers/
 db/
 cache/
 spectrograms/
+.cache/
 .task/*
 .vscode/*
 .mcp.json
 .claude/settings.local.json
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 tmp
 *.log
 *.log.*
@@ -46,7 +51,15 @@ frontend/blob-report/
 frontend/tests/.auth/
 frontend/coverage/
 frontend/playwright-report*.zip
+frontend/report/
 REFACTOR_CHANGELOG.md
 .worktrees/
 .leann/
-.serena/
+.codegraph/
+# Track the shared Serena project config; ignore caches, logs, memories, and local overrides
+.serena/*
+!.serena/project.yml
+
+# Python bytecode caches (db-doctor and other tools/ scripts)
+__pycache__/
+*.pyc

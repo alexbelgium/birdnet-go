@@ -43,10 +43,11 @@
     securitySettings,
     type OAuthProviderConfig,
   } from '$lib/stores/settings';
+  import { fetchRestartStatus } from '$lib/stores/restart.svelte';
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import { settingsAPI, type TLSCertificateInfo } from '$lib/utils/settingsApi';
   import { toastActions } from '$lib/stores/toast';
-  import { ExternalLink, Server, KeyRound, Users, Plus, Pencil, Trash2, Terminal, ShieldCheck, Upload, Globe, RefreshCw } from '@lucide/svelte';
+  import { ExternalLink, Server, KeyRound, Users, Plus, Pencil, Trash2, Terminal, ShieldCheck, Upload, Globe, RefreshCw, TriangleAlert } from '@lucide/svelte';
   import { t } from '$lib/i18n';
   import { GoogleIcon, AUTH_PROVIDERS } from '$lib/auth';
   import type { Component } from 'svelte';
@@ -191,9 +192,13 @@
       certInfo = await settingsAPI.tls.generateSelfSigned({
         validity: settings?.selfSignedValidity ?? '1825d',
       });
-      // Reload settings to sync frontend with backend TLSMode change
-      await settingsActions.loadSettings();
-      settingsStore.update(state => ({ ...state, restartRequired: true }));
+      // Sync only the TLS mode the backend just persisted. A full loadSettings()
+      // reload would overwrite the whole store and discard any unsaved edits the
+      // user made in other Security fields. The backend sets mode to "selfsigned".
+      settingsActions.syncTLSMode(certInfo?.mode ?? 'selfsigned');
+      // The backend marks restart-required for TLS cert operations; refresh the
+      // shared restart state so the global RestartBanner reflects it.
+      await fetchRestartStatus();
       toastActions.success(t('settings.security.tls.generateSuccess'));
     } catch (err) {
       toastActions.error(
@@ -213,9 +218,13 @@
         privateKey: uploadKey,
         caCertificate: uploadCA || undefined,
       });
-      // Reload settings to sync frontend with backend TLSMode change
-      await settingsActions.loadSettings();
-      settingsStore.update(state => ({ ...state, restartRequired: true }));
+      // Sync only the TLS mode the backend just persisted. A full loadSettings()
+      // reload would overwrite the whole store and discard any unsaved edits the
+      // user made in other Security fields. The backend sets mode to "manual".
+      settingsActions.syncTLSMode(certInfo?.mode ?? 'manual');
+      // The backend marks restart-required for TLS cert operations; refresh the
+      // shared restart state so the global RestartBanner reflects it.
+      await fetchRestartStatus();
       toastActions.success(t('settings.security.tls.uploadSuccess'));
       // Clear upload form on success
       uploadCert = '';
@@ -238,9 +247,14 @@
     try {
       await settingsAPI.tls.deleteCertificate();
       certInfo = null;
-      // Reload settings to sync frontend with backend TLSMode reset to none
-      await settingsActions.loadSettings();
-      settingsStore.update(state => ({ ...state, restartRequired: true }));
+      // Sync only the TLS mode the backend just persisted (reset to none). The
+      // DELETE endpoint returns no body, so use "" directly. A full loadSettings()
+      // reload would overwrite the whole store and discard any unsaved edits the
+      // user made in other Security fields.
+      settingsActions.syncTLSMode('');
+      // The backend marks restart-required for TLS cert operations; refresh the
+      // shared restart state so the global RestartBanner reflects it.
+      await fetchRestartStatus();
       toastActions.success(t('settings.security.tls.deleteSuccess'));
     } catch (err) {
       toastActions.error(
@@ -503,6 +517,13 @@
     return '';
   });
 
+  // Mirror the backend allowlist check (isAllowedOAuthUser): a userId made up of
+  // only blank/comma entries (e.g. "" or ",") allows no one, so an enabled
+  // provider with such a value denies every login (issue #3381).
+  function hasNoAllowedUsers(userId: string | undefined): boolean {
+    return !(userId ?? '').split(',').some(entry => entry.trim() !== '');
+  }
+
   function saveProvider() {
     // Build the provider config
     const newProvider: OAuthProviderConfig = {
@@ -702,7 +723,7 @@
         label={t('settings.security.baseUrlLabel')}
         placeholder={t('settings.security.placeholders.baseUrl')}
         helpText={t('settings.security.baseUrlHelp')}
-        pattern="^https?://[^/:]+.*$"
+        pattern="^https?://[^\/:]+.*$"
         validationMessage={t('settings.security.baseUrlValidation')}
         disabled={store.isLoading || store.isSaving}
         onchange={updateBaseUrl}
@@ -1159,6 +1180,19 @@
                   onchange={(value) => (providerFormData.userId = value)}
                 />
 
+                <!-- Warn (do not block) when an enabled provider has no allowed users:
+                     such a provider denies every login (issue #3381). Gated on enabled to
+                     match the providers-list badge and avoid noise for draft/disabled providers. -->
+                {#if providerFormData.enabled && hasNoAllowedUsers(providerFormData.userId)}
+                  <p
+                    class="text-xs text-[var(--color-warning)] -mt-2 flex items-start gap-1.5"
+                    role="status"
+                  >
+                    <TriangleAlert class="size-3.5 shrink-0 mt-0.5" />
+                    <span>{t('settings.security.oauth.allowedUsersEmptyWarning')}</span>
+                  </p>
+                {/if}
+
                 <Checkbox
                   checked={providerFormData.enabled}
                   label={t('settings.security.oauth.enableProviderLabel')}
@@ -1237,6 +1271,19 @@
                               {provider.userId}
                             </div>
                           {/if}
+                          <!-- Flag enabled providers whose allowlist is empty: nobody
+                               can log in with them (issue #3381). -->
+                          {#if provider.enabled && hasNoAllowedUsers(provider.userId)}
+                            <div
+                              class="text-xs text-[var(--color-warning)] flex items-center gap-1 mt-0.5"
+                              role="status"
+                            >
+                              <TriangleAlert class="size-3 shrink-0" />
+                              <span class="truncate"
+                                >{t('settings.security.oauth.allowedUsersMissingBadge')}</span
+                              >
+                            </div>
+                          {/if}
                         </div>
                       </div>
                     </div>
@@ -1295,6 +1342,10 @@
           disabled={store.isLoading || store.isSaving}
           onchange={updateSubnetBypassEnabled}
         />
+
+        <SettingsNote>
+          <p>{t('settings.security.subnetBypassLocalNote')}</p>
+        </SettingsNote>
 
         <!-- Fieldset for accessible disabled state - all inputs greyed out when feature disabled -->
         <fieldset

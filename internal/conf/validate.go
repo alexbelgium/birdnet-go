@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strings"
 
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
@@ -73,7 +74,12 @@ var ValidAudioModels = map[string]bool{
 	ModelIDBSG:     true,
 }
 
-// ValidationError represents a collection of validation errors
+// ValidationError is the set of fatal validation findings produced by
+// ValidateSettings. Every entry in Errors blocks startup: severity is decided
+// structurally by whether a validator returned an error, never by inspecting
+// the message text. Non-fatal configuration findings use a separate channel,
+// Settings.ValidationWarnings, recorded during config migration (see
+// applyModelValidation), not derived from the text of a fatal error.
 type ValidationError struct {
 	Errors []string
 }
@@ -181,6 +187,18 @@ func ValidateSettings(settings *Settings) error {
 
 	// Sanitize Main.Name: strip HTML tags as defense in depth
 	settings.Main.Name = sanitizeStringField(settings.Main.Name)
+
+	// Validate low-memory mode (non-fatal). Canonicalize case/whitespace so a
+	// value like "On" or " off " keeps the operator's intent; normalize genuinely
+	// invalid values to "auto" with a warning.
+	switch normalized := strings.ToLower(strings.TrimSpace(settings.LowMemory.Mode)); normalized {
+	case "", LowMemoryModeAuto, LowMemoryModeOn, LowMemoryModeOff:
+		settings.LowMemory.Mode = normalized
+	default:
+		settings.ValidationWarnings = append(settings.ValidationWarnings,
+			fmt.Sprintf("invalid lowmemory.mode %q; using %q", settings.LowMemory.Mode, LowMemoryModeAuto))
+		settings.LowMemory.Mode = LowMemoryModeAuto
+	}
 
 	// Default empty BirdNET locale to "en" so downstream label loading
 	// always has a valid locale to work with.

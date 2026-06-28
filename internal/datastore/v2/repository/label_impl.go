@@ -264,18 +264,6 @@ func (r *labelRepository) GetAllByLabelType(ctx context.Context, labelTypeID uin
 	return labels, err
 }
 
-// Search finds labels matching the query string.
-func (r *labelRepository) Search(ctx context.Context, query string, limit int) ([]*entities.Label, error) {
-	var labels []*entities.Label
-	searchPattern := "%" + query + "%"
-	err := r.db.WithContext(ctx).Table(r.tableName()).
-		Where("scientific_name LIKE ?", searchPattern).
-		Limit(limit).
-		Order("scientific_name ASC").
-		Find(&labels).Error
-	return labels, err
-}
-
 // Count returns the total number of labels.
 func (r *labelRepository) Count(ctx context.Context) (int64, error) {
 	var count int64
@@ -347,6 +335,23 @@ func (r *labelRepository) GetLabelIDsByScientificName(ctx context.Context, name 
 		Where("scientific_name = ?", name).
 		Pluck("id", &ids).Error
 	return ids, err
+}
+
+// UpdateLabelType updates the label_type_id of an existing label identified by id and clears its
+// taxonomic_class_id (a non-bird sound class has no taxonomic class).
+// A non-existent id results in zero rows affected, which is not treated as an error.
+func (r *labelRepository) UpdateLabelType(ctx context.Context, id, labelTypeID uint) error {
+	return datastore.RetryOnLock(ctx, "v2_update_label_type", func() error {
+		// Update both columns: a non-bird sound class has no taxonomic class, so clear any
+		// stale taxonomic_class_id (e.g. Aves) carried over from when the row was first created
+		// as a species. Updates with a map writes nil as SQL NULL.
+		return r.db.WithContext(ctx).Table(r.tableName()).
+			Where("id = ?", id).
+			Updates(map[string]any{
+				"label_type_id":      labelTypeID,
+				"taxonomic_class_id": nil,
+			}).Error
+	}, r.metrics)
 }
 
 // GetByScientificNames retrieves all labels matching any of the scientific names.

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/conf/conftest"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/imageprovider"
 )
@@ -16,15 +17,25 @@ const (
 	providerWikimedia  = "wikimedia"
 )
 
+// applyGlobalSettings publishes settings as the process-global snapshot for the
+// duration of the test and restores the previous snapshot on cleanup, so the
+// mutation does not leak into other tests. Tests using it must not call
+// t.Parallel(): they mutate shared global state.
+func applyGlobalSettings(t *testing.T, settings *conf.Settings) {
+	t.Helper()
+	prev := conf.GetSettings()
+	conftest.SetTestSettings(settings)
+	t.Cleanup(func() { conftest.SetTestSettings(prev) })
+}
+
 // TestProviderNameConsistency verifies that the Wikipedia provider uses
 // the correct name "wikimedia" to match configuration expectations
 func TestProviderNameConsistency(t *testing.T) {
-	t.Parallel()
-
-	settings := conf.GetTestSettings()
+	// Not parallel: mutates the process-global settings snapshot.
+	settings := conftest.GetTestSettings()
 	settings.Realtime.Dashboard.Thumbnails.ImageProvider = providerWikimedia
 	settings.Realtime.Dashboard.Thumbnails.FallbackPolicy = "none"
-	conf.SetTestSettings(settings)
+	applyGlobalSettings(t, settings)
 
 	// Create Wikipedia provider and verify it registers with the correct name
 	store := newMockStore()
@@ -77,10 +88,10 @@ func TestFallbackPolicyEnforcement(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test isolation with new settings for each subtest
-			settings := conf.GetTestSettings()
+			settings := conftest.GetTestSettings()
 			settings.Realtime.Dashboard.Thumbnails.ImageProvider = providerAvicommons
 			settings.Realtime.Dashboard.Thumbnails.FallbackPolicy = tt.fallbackPolicy
-			conf.SetTestSettings(settings)
+			applyGlobalSettings(t, settings)
 
 			store := newMockStore()
 
@@ -191,10 +202,10 @@ func TestBatchLoadFromDBFallbackPolicy(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Set up test configuration
-			settings := conf.GetTestSettings()
+			settings := conftest.GetTestSettings()
 			settings.Realtime.Dashboard.Thumbnails.ImageProvider = providerAvicommons
 			settings.Realtime.Dashboard.Thumbnails.FallbackPolicy = tc.fallbackPolicy
-			conf.SetTestSettings(settings)
+			applyGlobalSettings(t, settings)
 
 			// Create store and set up test data
 			store := newMockStoreWithTracking()
@@ -268,10 +279,10 @@ func (m *mockStoreWithTracking) WasProviderQueried(providerName string) bool {
 func TestRefreshEntryFallbackToDBCache(t *testing.T) {
 	const species = "Acanthis flammea"
 
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	settings.Realtime.Dashboard.Thumbnails.ImageProvider = providerAvicommons
 	settings.Realtime.Dashboard.Thumbnails.FallbackPolicy = "all"
-	conf.SetTestSettings(settings)
+	applyGlobalSettings(t, settings)
 
 	store := newMockStore()
 
@@ -319,11 +330,22 @@ func TestRefreshEntryFallbackToDBCache(t *testing.T) {
 	require.NoError(t, err, "Get should return stale data without error")
 	assert.Equal(t, "http://old.example.com/redpoll.jpg", img.URL, "Should return stale data initially")
 
-	// Poll for background refresh to complete (replaces fixed time.Sleep which was flaky in CI)
+	// Poll for the background refresh to land the DB write, which is the actual
+	// observable the assertions below check. The refresh goroutine updates the
+	// in-memory cache (dataMap.Store) BEFORE writing the DB (saveToDB), so polling
+	// primaryCache.Get() (an in-memory read) would unblock before saveToDB runs and
+	// race the DB assertions on a loaded runner. Polling the DB here guarantees both
+	// writes have completed once the condition is met, because the DB write is the
+	// last write in the refresh goroutine's fallback branch.
 	require.Eventually(t, func() bool {
-		img2, err := primaryCache.Get(species)
-		return err == nil && img2.URL == "https://upload.wikimedia.org/Carduelis_flammea_CT6.jpg"
-	}, 5*time.Second, 50*time.Millisecond, "Background refresh should update cache with wikimedia fallback URL")
+		dbEntry, err := store.GetImageCache(datastore.ImageCacheQuery{
+			ScientificName: species,
+			ProviderName:   providerAvicommons,
+		})
+		return err == nil && dbEntry != nil &&
+			dbEntry.URL == "https://upload.wikimedia.org/Carduelis_flammea_CT6.jpg" &&
+			dbEntry.CachedAt.After(staleTime)
+	}, 5*time.Second, 50*time.Millisecond, "Background refresh should persist wikimedia fallback URL to DB")
 
 	// Verify full attribution after refresh
 	img2, err := primaryCache.Get(species)
@@ -350,10 +372,10 @@ func TestRefreshEntryFallbackToDBCache(t *testing.T) {
 func TestRefreshEntryFallbackPolicyNone(t *testing.T) {
 	const species = "Acanthis flammea"
 
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	settings.Realtime.Dashboard.Thumbnails.ImageProvider = providerAvicommons
 	settings.Realtime.Dashboard.Thumbnails.FallbackPolicy = "none"
-	conf.SetTestSettings(settings)
+	applyGlobalSettings(t, settings)
 
 	store := newMockStore()
 

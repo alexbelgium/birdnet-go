@@ -35,24 +35,85 @@ import (
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
-var oidcRetryCancelMu sync.Mutex
-var oidcRetryCancelFunc context.CancelFunc
+var (
+	oidcRetryCancelMu sync.Mutex
 
-// cancelOIDCRetry cancels any running OIDC discovery retry goroutine.
-func cancelOIDCRetry() {
-	oidcRetryCancelMu.Lock()
-	defer oidcRetryCancelMu.Unlock()
-	if oidcRetryCancelFunc != nil {
-		oidcRetryCancelFunc()
-		oidcRetryCancelFunc = nil
+	// oidcRetriesDisabled blocks new OIDC discovery retries once application
+	// shutdown has begun, so a late provider (re)initialization cannot spawn a
+	// retry goroutine that outlives the server. Reset for each new server
+	// instance via enableOIDCRetries. Guarded by oidcRetryCancelMu.
+	oidcRetriesDisabled bool
+
+	// oidcRetryCancels tracks in-flight OIDC discovery retry goroutines, keyed by
+	// issuer URL. Keying per issuer (rather than a single package-global) lets
+	// multiple OIDC providers retry independently: configuring a second provider
+	// no longer cancels or orphans the first provider's retry. Guarded by
+	// oidcRetryCancelMu.
+	//
+	// A retry goroutine that finishes on its own (provider registered, or the
+	// retry deadline elapsed) leaves its now-inert cancel func in the map; these
+	// spent entries are reaped by the next cancelAllOIDCRetries (settings reload
+	// or shutdown). The map is therefore bounded by the number of distinct
+	// configured issuer URLs, not by retry attempts.
+	oidcRetryCancels = make(map[string]context.CancelFunc)
+)
+
+// cancelAllOIDCRetriesLocked cancels and forgets every in-flight OIDC discovery
+// retry. The caller must hold oidcRetryCancelMu.
+func cancelAllOIDCRetriesLocked() {
+	for issuerURL, cancel := range oidcRetryCancels {
+		cancel()
+		delete(oidcRetryCancels, issuerURL)
 	}
 }
 
-// setOIDCRetryCancel stores the cancel function for the current OIDC retry goroutine.
-func setOIDCRetryCancel(cancel context.CancelFunc) {
+// cancelAllOIDCRetries cancels and forgets every in-flight OIDC discovery retry.
+// Used on settings reload, where InitializeGoth rebuilds all providers from
+// scratch and any outstanding retries are superseded.
+func cancelAllOIDCRetries() {
 	oidcRetryCancelMu.Lock()
 	defer oidcRetryCancelMu.Unlock()
-	oidcRetryCancelFunc = cancel
+	cancelAllOIDCRetriesLocked()
+}
+
+// shutdownOIDCRetries cancels every in-flight retry and blocks new ones for the
+// remaining lifetime of the current server instance. Called when the server's
+// context is cancelled (application shutdown), so a retry cannot be started
+// after shutdown has begun (e.g. by a late InitializeGoth/UpdateProviders).
+func shutdownOIDCRetries() {
+	oidcRetryCancelMu.Lock()
+	defer oidcRetryCancelMu.Unlock()
+	oidcRetriesDisabled = true
+	cancelAllOIDCRetriesLocked()
+}
+
+// enableOIDCRetries re-enables OIDC discovery retries for a fresh server
+// instance, clearing any disabled state left by a previous instance's shutdown
+// (relevant in tests that build servers sequentially).
+func enableOIDCRetries() {
+	oidcRetryCancelMu.Lock()
+	defer oidcRetryCancelMu.Unlock()
+	oidcRetriesDisabled = false
+}
+
+// setOIDCRetryCancel stores the cancel function for the retry goroutine of the
+// given issuer URL, cancelling and replacing any existing retry for that same
+// issuer first. Per-issuer keying prevents a second provider's init from
+// orphaning another provider's retry. It returns false (after cancelling the
+// passed func) when retries are disabled because shutdown has begun, signalling
+// the caller not to start the goroutine.
+func setOIDCRetryCancel(issuerURL string, cancel context.CancelFunc) bool {
+	oidcRetryCancelMu.Lock()
+	defer oidcRetryCancelMu.Unlock()
+	if oidcRetriesDisabled {
+		cancel()
+		return false
+	}
+	if existing, ok := oidcRetryCancels[issuerURL]; ok {
+		existing()
+	}
+	oidcRetryCancels[issuerURL] = cancel
+	return true
 }
 
 // startOIDCRetry starts a background goroutine that retries OIDC discovery with exponential backoff.
@@ -70,14 +131,30 @@ func startOIDCRetry(ctx context.Context, providerConfig conf.OAuthProviderConfig
 
 	go func() {
 		defer close(done)
+		// A single reusable timer (Reset per iteration) instead of time.After
+		// inside the loop, so an early ctx cancellation does not leave an
+		// unexpired timer per backoff round waiting to be garbage collected.
+		timer := time.NewTimer(backoff)
+		defer timer.Stop()
 		for {
+			// Prioritize cancellation: a single select with both ctx.Done() and
+			// timer.C ready picks pseudo-randomly, so on shutdown the timer case
+			// could win and start one more (uncancellable) discovery request,
+			// delaying graceful shutdown. Check ctx first, then block on the timer.
 			select {
 			case <-ctx.Done():
 				secLog.Info("OIDC discovery retry canceled")
 				return
-			case <-time.After(backoff):
+			default:
+			}
+
+			select {
+			case <-ctx.Done():
+				secLog.Info("OIDC discovery retry canceled")
+				return
+			case <-timer.C:
 				if time.Now().After(deadline) {
-					secLog.Error("OIDC discovery retry exhausted — provider not available. Save settings to retry.",
+					secLog.Error("OIDC discovery retry exhausted; provider not available. Save settings to retry.",
 						logger.String("issuer_url", providerConfig.IssuerURL))
 					return
 				}
@@ -95,10 +172,11 @@ func startOIDCRetry(ctx context.Context, providerConfig conf.OAuthProviderConfig
 					scopes...,
 				)
 				if err != nil {
+					backoff = min(backoff*OIDCRetryBackoffFactor, OIDCRetryMaxBackoff)
 					secLog.Warn("OIDC discovery retry failed",
 						logger.Error(err),
-						logger.Duration("next_backoff", min(backoff*OIDCRetryBackoffFactor, OIDCRetryMaxBackoff)))
-					backoff = min(backoff*OIDCRetryBackoffFactor, OIDCRetryMaxBackoff)
+						logger.Duration("next_backoff", backoff))
+					timer.Reset(backoff)
 					continue
 				}
 
@@ -131,7 +209,11 @@ type providerAuthConfig struct {
 }
 
 type OAuth2Server struct {
-	Settings     *conf.Settings
+	// settings is the construction-time snapshot. It is unexported so external
+	// callers cannot read it directly and observe a stale value: all runtime
+	// reads must go through currentSettings() / CurrentSettings(), which resolve
+	// the live atomic snapshot (GitHub #3370).
+	settings     *conf.Settings
 	authCodes    map[string]AuthCode
 	accessTokens map[string]AccessToken
 	mutex        sync.RWMutex
@@ -143,9 +225,6 @@ type OAuth2Server struct {
 	tokensFile    string
 	persistTokens bool
 
-	// Expected Redirect URI for Basic Auth (pre-parsed)
-	ExpectedBasicRedirectURI *url.URL
-
 	// Throttling
 	throttledMessages map[string]time.Time
 }
@@ -153,7 +232,14 @@ type OAuth2Server struct {
 // currentSettings returns the latest settings snapshot so security
 // configuration changes take effect without recreating the OAuth2Server.
 func (s *OAuth2Server) currentSettings() *conf.Settings {
-	return conf.CurrentOrFallback(s.Settings)
+	return conf.CurrentOrFallback(s.settings)
+}
+
+// CurrentSettings returns the latest settings snapshot for callers outside the
+// security package (e.g. the API auth adapter) so they read live configuration
+// instead of the construction-time pointer. See currentSettings.
+func (s *OAuth2Server) CurrentSettings() *conf.Settings {
+	return s.currentSettings()
 }
 
 // For testing purposes
@@ -165,13 +251,20 @@ var (
 	ErrTokenExpired  = errors.NewStd("token expired")
 )
 
-func NewOAuth2Server() *OAuth2Server {
+// NewOAuth2Server creates and initializes an OAuth2Server. The supplied context
+// governs background goroutines owned by the server (currently the periodic
+// expired-token cleanup); cancelling it stops them, giving the cleanup goroutine
+// a proper shutdown path instead of running for the process lifetime.
+func NewOAuth2Server(ctx context.Context) *OAuth2Server {
+	// Re-enable OIDC discovery retries for this instance, clearing any disabled
+	// state a previous instance's shutdown left behind (sequential tests).
+	enableOIDCRetries()
 	// Use the security logger from the start
 	GetLogger().Info("Initializing OAuth2 server")
 	settings := conf.GetSettings()
 
 	server := &OAuth2Server{
-		Settings:     settings,
+		settings:     settings,
 		authCodes:    make(map[string]AuthCode),
 		accessTokens: make(map[string]AccessToken),
 	}
@@ -179,18 +272,25 @@ func NewOAuth2Server() *OAuth2Server {
 	// Validate and potentially fix session secret
 	validateSessionSecret(settings)
 
-	// Pre-parse the Basic Auth Redirect URI
-	server.ExpectedBasicRedirectURI = parseBasicAuthRedirectURI(settings)
-
 	// Initialize Gothic with the provided configuration
 	InitializeGoth(settings)
 
 	// Set up token persistence
 	server.setupTokenPersistence()
 
-	// Clean up expired tokens every hour
-	// TODO: Pass application shutdown context for graceful cleanup termination
-	server.StartAuthCleanup(context.Background(), time.Hour)
+	// Clean up expired tokens every hour. The caller's context terminates the
+	// goroutine on application shutdown.
+	server.StartAuthCleanup(ctx, time.Hour)
+
+	// Stop in-flight OIDC discovery retries when the application shuts down and
+	// block any new ones. The retries are package-global (goth's provider
+	// registry is global), so a lightweight watcher on the lifecycle context
+	// drives shutdownOIDCRetries, rather than threading a context field through
+	// the global provider-init path (which the fatcontext linter forbids).
+	go func() {
+		<-ctx.Done()
+		shutdownOIDCRetries()
+	}()
 
 	GetLogger().Info("OAuth2 server initialization complete")
 	return server
@@ -248,7 +348,10 @@ func handleWeakSessionSecret(settings *conf.Settings) {
 		Build()
 }
 
-// parseBasicAuthRedirectURI parses and validates the Basic Auth redirect URI
+// parseBasicAuthRedirectURI parses and validates the Basic Auth redirect URI from
+// the given settings snapshot. It is called per request from the basic-auth handlers
+// so that changes to Security.BasicAuth.RedirectURI made via the web UI take effect
+// without a restart (issue #3370). Returns nil on a missing or invalid configuration.
 func parseBasicAuthRedirectURI(settings *conf.Settings) *url.URL {
 	secLog := GetLogger().With(logger.String("uri", settings.Security.BasicAuth.RedirectURI))
 
@@ -269,7 +372,7 @@ func parseBasicAuthRedirectURI(settings *conf.Settings) *url.URL {
 		return nil
 	}
 
-	secLog.Info("Pre-parsed and validated Basic Auth Redirect URI")
+	secLog.Debug("Validated Basic Auth Redirect URI")
 	return parsedURI
 }
 
@@ -531,10 +634,15 @@ func initializeOIDCProvider(providerConfig *conf.OAuthProviderConfig, redirectUR
 		providerLog.Error("Failed to initialize OIDC provider (is the issuer URL reachable?)",
 			logger.Error(err),
 			logger.String("issuer_url", providerConfig.IssuerURL))
-		// Cancel any previous retry and start a new one
-		cancelOIDCRetry()
+		// Cancel any previous retry for this issuer and start a new one.
+		// Keying by issuer URL keeps multiple OIDC providers' retries independent;
+		// setOIDCRetryCancel cancels and replaces only this issuer's prior retry.
+		// If it reports that retries are disabled (shutdown has begun), it has
+		// already cancelled the context and we must not start the goroutine.
 		ctx, cancel := context.WithCancel(context.Background())
-		setOIDCRetryCancel(cancel)
+		if !setOIDCRetryCancel(providerConfig.IssuerURL, cancel) {
+			return nil
+		}
 		startOIDCRetry(ctx, *providerConfig, redirectURI, scopes)
 		return nil
 	}
@@ -559,7 +667,7 @@ func SetTestConfigPath(path string) {
 
 func (s *OAuth2Server) UpdateProviders() {
 	GetLogger().Info("Updating Goth providers based on potentially changed settings")
-	cancelOIDCRetry()
+	cancelAllOIDCRetries()
 	InitializeGoth(s.currentSettings())
 }
 

@@ -78,6 +78,16 @@ else
     # Running in rootless mode (already running as target user)
     echo "Running in rootless mode (current UID: $CURRENT_UID)"
 
+    # Arbitrary-UID containers (K8s runAsNonRoot, no /etc/passwd entry) inherit
+    # HOME=/ (or empty), which is not writable. Config resolution then does
+    # `mkdir /.config` and the app aborts. Point HOME at the writable /config
+    # mount so config resolution and the symlink below work without the operator
+    # having to set HOME explicitly.
+    if [ -z "$HOME" ] || [ ! -w "$HOME" ]; then
+        export HOME=/config
+        echo "Adjusted HOME to /config for rootless config access"
+    fi
+
     # Just ensure directories exist (permissions already set in Dockerfile)
     mkdir -p /config /data/clips /data/models 2>/dev/null || true
 
@@ -88,9 +98,13 @@ fi
 
 # Set read permissions for model files (only when running as root)
 if [ "$RUNNING_AS_ROOT" = true ]; then
-    find /data/models -type f \( -name '*.tflite' -o -name '*.onnx' -o -name '*.csv' \) -exec chmod a+r {} + 2>/dev/null || true
-    # Ensure directory is executable (browsable)
-    chmod a+x /data/models 2>/dev/null || true
+    # Only chmod entries that actually lack the bits (the ! -perm guards), so a
+    # restart does not rewrite every model file on slow/NFS/read-only mounts.
+    find /data/models -type f \( -iname '*.tflite' -o -iname '*.onnx' -o -iname '*.csv' -o -iname '*.txt' -o -iname '*.bin' \) ! -perm -a+r -exec chmod a+r {} + 2>/dev/null || true
+    # Ensure directories are browsable. Models live in per-model and shared/
+    # subdirectories, so make every directory (not just the top level)
+    # traversable, otherwise a non-root user cannot reach files in subdirs.
+    find /data/models -type d ! -perm -a+rx -exec chmod a+rx {} + 2>/dev/null || true
 fi
 
 # Check if user has custom model path configured via environment variable

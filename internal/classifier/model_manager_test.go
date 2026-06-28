@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/conf/conftest"
 )
 
 // Test URL paths used in httptest handlers.
@@ -1012,7 +1013,7 @@ func TestModelManager_Install_GeomodelConfigWiring(t *testing.T) {
 	t.Cleanup(func() { conf.StoreSettings(origSettings) })
 
 	modelsDir := t.TempDir()
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	conf.StoreSettings(settings)
 	mm := NewModelManager(modelsDir, nil, settings)
 
@@ -1069,7 +1070,7 @@ func TestModelManager_Uninstall_GeomodelConfigClearing(t *testing.T) {
 	t.Cleanup(func() { conf.StoreSettings(origSettings) })
 
 	modelsDir := t.TempDir()
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	conf.StoreSettings(settings)
 	mm := NewModelManager(modelsDir, nil, settings)
 
@@ -1080,10 +1081,14 @@ func TestModelManager_Uninstall_GeomodelConfigClearing(t *testing.T) {
 	current := conf.GetSettings()
 	require.Equal(t, "v3", current.BirdNET.RangeFilter.Model, "precondition: install must set model to v3")
 
-	// Add entry to EmbeddedCatalog temporarily so Uninstall can find it.
-	origLen := len(EmbeddedCatalog)
-	EmbeddedCatalog = append(EmbeddedCatalog, entry)
-	t.Cleanup(func() { EmbeddedCatalog = EmbeddedCatalog[:origLen] })
+	// Make the entry resolvable by Uninstall via the active catalog. Setting
+	// activeCatalog (under its lock) instead of mutating the shared
+	// EmbeddedCatalog global keeps the lock-guarded catalog accessors race-free.
+	withEntry := make([]CatalogEntry, len(EmbeddedCatalog), len(EmbeddedCatalog)+1)
+	copy(withEntry, EmbeddedCatalog)
+	withEntry = append(withEntry, entry)
+	setActiveCatalog(withEntry)
+	t.Cleanup(func() { setActiveCatalog(nil) })
 
 	// Uninstall should clear the range filter config.
 	require.NoError(t, mm.Uninstall("test-geo-uninstall-config"))
@@ -1291,7 +1296,7 @@ func TestModelManager_Install_GeomodelVersionWiring(t *testing.T) {
 	t.Cleanup(func() { conf.StoreSettings(origSettings) })
 
 	modelsDir := t.TempDir()
-	settings := conf.GetTestSettings()
+	settings := conftest.GetTestSettings()
 	conf.StoreSettings(settings)
 	mm := NewModelManager(modelsDir, nil, settings)
 
@@ -1479,4 +1484,32 @@ func TestModelManager_Reinstall_SkipsValidFiles(t *testing.T) {
 
 	// No HTTP requests should have been made since all files are valid.
 	assert.Equal(t, int64(0), downloadCount.Load(), "expected zero downloads when all files are valid")
+}
+
+// TestModelManager_TopologyChangedCallback verifies that a registered callback
+// fires when the topology-changed notify path runs, and that the notify path is
+// a safe no-op when no callback is set.
+func TestModelManager_TopologyChangedCallback(t *testing.T) {
+	t.Parallel()
+
+	mm := NewModelManager(t.TempDir(), nil, nil)
+
+	// No callback set: notify must be a safe no-op.
+	assert.NotPanics(t, mm.notifyTopologyChanged)
+
+	var fired atomic.Int64
+	mm.SetTopologyChangedCallback(func() {
+		fired.Add(1)
+	})
+
+	mm.notifyTopologyChanged()
+	assert.Equal(t, int64(1), fired.Load(), "callback should fire once per notify")
+
+	mm.notifyTopologyChanged()
+	assert.Equal(t, int64(2), fired.Load(), "callback should fire on every notify")
+
+	// Clearing the callback disables it without panicking.
+	mm.SetTopologyChangedCallback(nil)
+	assert.NotPanics(t, mm.notifyTopologyChanged)
+	assert.Equal(t, int64(2), fired.Load(), "cleared callback must not fire")
 }

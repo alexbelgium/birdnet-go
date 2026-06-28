@@ -69,6 +69,9 @@
     Info,
   } from '@lucide/svelte';
   import { api } from '$lib/utils/api';
+  import { type AudioDevice } from '$lib/utils/audioDevices';
+  import { normalizeForLookup } from '$lib/utils/speciesNames';
+  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
 
   const logger = loggers.audio;
 
@@ -280,8 +283,8 @@
   }
 
   // Audio source options - map to actual device names
-  // Note: v2 API returns lowercase field names (index, name, id)
-  let audioDevices = $state<ApiState<Array<{ index: number; name: string; id: string }>>>({
+  // Note: v2 API returns lowercase field names (index, name, id, stableId, busPath)
+  let audioDevices = $state<ApiState<AudioDevice[]>>({
     loading: true,
     error: null,
     data: [],
@@ -297,11 +300,6 @@
     audioDevices.error = null;
 
     try {
-      interface AudioDevice {
-        index: number;
-        name: string;
-        id: string;
-      }
       const data = await api.get<AudioDevice[]>('/api/v2/system/audio/devices');
       audioDevices.data = data || [];
     } catch (error) {
@@ -337,6 +335,16 @@
     data: [],
   });
 
+  // Normalized species value -> scientific name (species entries only; taxonomy
+  // group rows have no scientific name and display verbatim).
+  let speciesScientificMap = $state(new Map<string, string>());
+
+  // Resolve a stored extended-capture value to its visitor-locale label. Taxonomy
+  // group rows (genus/family/order) fall through to their verbatim value.
+  function localizeSpeciesLabel(value: string): string {
+    return localizeSpeciesName(speciesScientificMap.get(normalizeForLookup(value)), value);
+  }
+
   $effect(() => {
     loadSpeciesList();
   });
@@ -348,8 +356,16 @@
     try {
       const data = await api.get<SpeciesListResponse>('/api/v2/range/species/list');
       if (data?.species && Array.isArray(data.species)) {
-        // Species common names
-        const speciesNames = data.species.map(sp => sp.commonName ?? sp.label.replace('_', ' - '));
+        // Species common names, building a value -> scientific name map for display.
+        const sciMap = new Map<string, string>();
+        const speciesNames = data.species.map(sp => {
+          const value = sp.commonName ?? sp.label.replace('_', ' - ');
+          if (sp.scientificName) {
+            sciMap.set(normalizeForLookup(value), sp.scientificName);
+          }
+          return value;
+        });
+        speciesScientificMap = sciMap;
 
         // Taxonomy group entries from server (with display suffixes)
         const generaEntries = (data.genera ?? []).map(g => `${g}${GENUS_SUFFIX}`);
@@ -366,6 +382,7 @@
         ];
       } else {
         speciesListState.data = [];
+        speciesScientificMap = new Map();
       }
     } catch (error) {
       logger.warn('Failed to load species list for extended capture', error, {
@@ -374,6 +391,7 @@
       });
       speciesListState.error = t('settings.filters.errors.speciesLoadFailed');
       speciesListState.data = [];
+      speciesScientificMap = new Map();
     } finally {
       speciesListState.loading = false;
     }
@@ -1197,6 +1215,7 @@
               species={extendedCaptureSettingsLocal.species}
               disabled={!extendedCaptureSettingsLocal.enabled || store.isLoading || store.isSaving}
               predictions={speciesListState.data}
+              localizeLabel={localizeSpeciesLabel}
               predictionsLoading={speciesListState.loading}
               listLabel={t('settings.audio.extendedCapture.speciesListLabel')}
               addLabel={t('settings.audio.extendedCapture.addSpeciesLabel')}

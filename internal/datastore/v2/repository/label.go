@@ -42,10 +42,6 @@ type LabelRepository interface {
 	// GetAllByLabelType retrieves all labels of a specific label type.
 	GetAllByLabelType(ctx context.Context, labelTypeID uint) ([]*entities.Label, error)
 
-	// Search finds labels matching the query string.
-	// Searches in scientific_name field.
-	Search(ctx context.Context, query string, limit int) ([]*entities.Label, error)
-
 	// Count returns the total number of labels.
 	Count(ctx context.Context) (int64, error)
 
@@ -77,6 +73,14 @@ type LabelRepository interface {
 	// Convenience method for filter queries that need IDs only.
 	// Returns empty slice if no labels found.
 	GetLabelIDsByScientificName(ctx context.Context, name string) ([]uint, error)
+
+	// UpdateLabelType updates the label_type_id of an existing label identified by id and
+	// clears its taxonomic_class_id (a non-bird sound class has no taxonomic class). Used to
+	// correct a label that was first created with the wrong type (e.g. a non-bird sound class
+	// initially stored as species, with an Aves taxonomic class, before classification was
+	// available).
+	// Does not error when no row matches id (zero rows affected is not an error).
+	UpdateLabelType(ctx context.Context, id, labelTypeID uint) error
 }
 
 // LabelTypeRepository provides access to the label_types lookup table.

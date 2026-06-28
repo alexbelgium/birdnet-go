@@ -52,7 +52,7 @@
     releaseAudioContext,
   } from '$lib/utils/audioContextManager';
   import {
-    createAudioNodeChain,
+    attachAudioGraphWhenRunning,
     disconnectAudioNodes,
     type AudioNodeChain,
   } from '$lib/utils/audioNodes';
@@ -110,6 +110,8 @@
     enableClipExtraction?: boolean;
     /** Label for clip filenames (e.g. "Eurasian Blue Tit_2026-03-14_14-30-25") */
     clipLabel?: string;
+    /** AI model type (e.g. 'bird', 'bat'); selects the spectrogram frequency axis range */
+    modelType?: string;
   }
 
   let {
@@ -128,6 +130,7 @@
     debug = false,
     enableClipExtraction = false,
     clipLabel = '',
+    modelType = '',
   }: Props = $props();
 
   // Audio and UI elements
@@ -263,9 +266,18 @@
   const FILTER_HP_MIN_FREQ = 20;
   const FILTER_HP_MAX_FREQ = 10000;
 
-  // Frequency scale overlay constants (sox resamples to 24kHz, Nyquist = 12kHz)
-  const FREQ_NYQUIST_KHZ = 12;
-  const FREQ_TICKS_KHZ = [12, 10, 8, 6, 5, 4, 3, 2, 1];
+  // Frequency scale overlay constants. Bird spectrograms are resampled to 24kHz
+  // (Nyquist = 12kHz); bat spectrograms keep the native capture rate and are always
+  // labelled on a fixed 0-128 kHz axis regardless of the clip's actual sample rate.
+  // The axis range follows the detection's model type.
+  const BIRD_NYQUIST_KHZ = 12;
+  const BIRD_TICKS_KHZ = [12, 10, 8, 6, 5, 4, 3, 2, 1];
+  const BAT_NYQUIST_KHZ = 128;
+  const BAT_TICKS_KHZ = [120, 100, 80, 60, 40, 20];
+  const MODEL_TYPE_BAT = 'bat';
+  let isBatSpectrogram = $derived(modelType === MODEL_TYPE_BAT);
+  let freqNyquistKHz = $derived(isBatSpectrogram ? BAT_NYQUIST_KHZ : BIRD_NYQUIST_KHZ);
+  let freqTicksKHz = $derived(isBatSpectrogram ? BAT_TICKS_KHZ : BIRD_TICKS_KHZ);
   // PLAY_END_DELAY_MS imported from $lib/utils/audio
   // Spinner delay is now handled by useDelayedLoading utility
 
@@ -941,7 +953,9 @@
         throw new Error('AudioContext not supported');
       }
       audioContext = await getAudioContext();
-      audioContextAvailable = true;
+      // Availability is derived by the caller from whether the graph actually
+      // attached (audioNodes !== null), so it is not reported true while the
+      // context is still suspended.
       return audioContext;
     } catch {
       logger.warn('Web Audio API is not supported in this browser');
@@ -958,19 +972,29 @@
       if (isPlaying) {
         audioElement.pause();
       } else {
-        // Initialize audio context on first play
-        // Guard against rapid clicks that could create multiple AudioContexts
-        if (!audioContext && !isInitializingContext) {
+        // Initialize the audio context on first play, and re-enter whenever the
+        // graph is not attached OR the context has fallen back to suspended
+        // (e.g. tab backgrounding / audio-session interruption) so
+        // getAudioContext() resumes it. Without the state re-check, an
+        // already-attached graph on a re-suspended context plays silently.
+        // Guard against rapid clicks that could create multiple AudioContexts.
+        if ((!audioNodes || audioContext?.state !== 'running') && !isInitializingContext) {
           isInitializingContext = true;
           try {
             audioContext = await initializeAudioContext();
-            if (audioContext && !audioNodes) {
-              audioNodes = createAudioNodeChain(audioContext, audioElement, {
-                gainDb: gainValue,
-                highPassFreq: filterFreq,
-                includeCompressor: true,
-              });
-            }
+            // Attach the Web Audio graph only when the context is running;
+            // while suspended the element plays through native output and the
+            // graph is deferred to a later play (see attachAudioGraphWhenRunning).
+            audioNodes = attachAudioGraphWhenRunning(audioContext, audioElement, audioNodes, {
+              gainDb: gainValue,
+              highPassFreq: filterFreq,
+              includeCompressor: true,
+            });
+            // Reflect whether the EQ/gain graph is actually live: attached AND
+            // the context running. A previously-attached graph on a re-suspended
+            // context that failed to resume is inert, so the audio settings
+            // control must not be enabled in that case.
+            audioContextAvailable = audioNodes !== null && audioContext?.state === 'running';
           } finally {
             isInitializingContext = false;
           }
@@ -1909,15 +1933,15 @@
     </div>
   {/if}
 
-  <!-- Frequency scale overlay (linear 0-12kHz, sox resamples to 24kHz) -->
+  <!-- Frequency scale overlay (linear; range follows the detection's model type) -->
   {#if showSpectrogram && spectrogramUrl && !spectrogramLoader.error}
-    {#each FREQ_TICKS_KHZ as freq (freq)}
-      <span class="freq-label" style:bottom="{(freq / FREQ_NYQUIST_KHZ) * 100}%" aria-hidden="true"
+    {#each freqTicksKHz as freq (freq)}
+      <span class="freq-label" style:bottom="{(freq / freqNyquistKHz) * 100}%" aria-hidden="true"
         >{freq}k</span
       >
       <div
         class="freq-line"
-        style:bottom="{(freq / FREQ_NYQUIST_KHZ) * 100}%"
+        style:bottom="{(freq / freqNyquistKHz) * 100}%"
         aria-hidden="true"
       ></div>
     {/each}

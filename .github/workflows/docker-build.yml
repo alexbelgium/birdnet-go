@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout GitHub Action
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Login to GitHub Container Registry
         run: |
@@ -74,4 +74,5 @@ jobs:
             type=registry,ref=ghcr.io/${{ env.REPO }}:buildcache,mode=max
           provenance: false
           build-args: |
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             BUILDKIT_INLINE_CACHE=1

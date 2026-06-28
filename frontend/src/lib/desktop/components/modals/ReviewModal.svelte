@@ -8,6 +8,7 @@
   import type { Detection } from '$lib/types/detection.types';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
+  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { XCircle, TriangleAlert, ChevronRight } from '@lucide/svelte';
   import { t } from '$lib/i18n';
   import { safeArrayAccess } from '$lib/utils/security';
@@ -108,7 +109,9 @@
 
 <Modal
   {isOpen}
-  title={t('common.review.modalTitle', { species: detection?.commonName || '' })}
+  title={t('common.review.modalTitle', {
+    species: localizeSpeciesName(detection?.scientificName, detection?.commonName) || '',
+  })}
   size="7xl"
   showCloseButton={true}
   {onClose}
@@ -141,7 +144,7 @@
                 />
                 <div class="flex-1 min-w-0">
                   <h3 class="text-2xl font-semibold text-[var(--color-base-content)] mb-1 truncate">
-                    {detection.commonName}
+                    {localizeSpeciesName(detection.scientificName, detection.commonName)}
                   </h3>
                   <p class="text-base text-[var(--color-base-content)]/60 italic truncate">
                     {detection.scientificName}
@@ -213,6 +216,7 @@
               className="w-full mx-auto"
               enableClipExtraction={clipExtractionEnabled}
               clipLabel={`${detection.commonName}_${detection.date}_${detection.time.replace(/:/g, '-')}`}
+              modelType={detection.modelType}
             />
           </div>
         </div>
@@ -344,8 +348,7 @@
                   id="comment-textarea"
                   bind:value={comment}
                   class="textarea h-24 w-full"
-                  placeholder={t('common.review.form.commentPlaceholder')}
-                ></textarea>
+                  placeholder={t('common.review.form.commentPlaceholder')}></textarea>
               </div>
             {/if}
           </div>

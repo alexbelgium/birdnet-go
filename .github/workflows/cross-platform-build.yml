@@ -1,0 +1,204 @@
+name: cross-platform-build
+
+# Tier 0 of cross-platform validation: cheap compile-only smoke on Ubuntu.
+# Cross-compiles the real release binary (non-test code) AND cross type-checks
+# every package including *_test.go files via `go vet`, for the platforms that
+# can be CGO-cross-compiled from Linux (windows/amd64 via mingw, linux/arm64).
+# darwin/arm64 cannot CGO-cross-compile from Linux without an osxcross
+# toolchain; its compile coverage comes from the native macos-test workflow.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Taskfile.yml'
+      - '.github/workflows/cross-platform-build.yml'
+      - '.github/actions/**'
+  pull_request:
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Taskfile.yml'
+      - '.github/workflows/cross-platform-build.yml'
+      - '.github/actions/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross-build:
+    name: cross-build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            cc: x86_64-w64-mingw32-gcc
+            libdir: /usr/x86_64-w64-mingw32/lib
+            tflite_asset: windows_amd64.zip
+          - goos: linux
+            goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            libdir: /usr/aarch64-linux-gnu/lib
+            tflite_asset: linux_arm64.tar.gz
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - run: go version
+
+      - name: Install cross toolchains
+        # Route through the shared composite for the continue-on-error +
+        # outcome-checked reinstall fallback, so a corrupt apt cache (tar exit 2)
+        # cannot hard-fail this build. execute-install-scripts: 'false' preserves
+        # the prior behavior; the mingw symlink step and the setup-tflite-cross
+        # step below recreate the symlinks the skipped post-install would manage.
+        uses: ./.github/actions/setup-apt-packages
+        with:
+          packages: build-essential pkg-config gcc-aarch64-linux-gnu gcc-mingw-w64-x86-64
+          cache-version: '1.0'
+          execute-install-scripts: 'false'
+
+      - name: Fix mingw cross-compiler symlinks
+        if: matrix.goos == 'windows'
+        run: |
+          # cache-apt-pkgs-action restores debs but skips post-install triggers,
+          # so create the mingw symlinks update-alternatives would normally
+          # manage. The aarch64 cross gcc symlink is handled by the
+          # setup-tflite-cross step below via fix-arm64-cc-symlink.
+          sudo ln -sf /usr/bin/x86_64-w64-mingw32-gcc-posix /usr/bin/x86_64-w64-mingw32-gcc
+          sudo ln -sf /usr/bin/x86_64-w64-mingw32-g++-posix /usr/bin/x86_64-w64-mingw32-g++
+
+      - name: Provision TensorFlow Lite (headers + cross lib)
+        uses: ./.github/actions/setup-tflite-cross
+        with:
+          tflite-asset: ${{ matrix.tflite_asset }}
+          libdir: ${{ matrix.libdir }}
+          fix-arm64-cc-symlink: ${{ matrix.goarch == 'arm64' }}
+
+      - name: Build smoke (cross-compile, non-test code)
+        run: |
+          # Compile + link every non-test package for the target GOOS. noembed and
+          # skipfrontend skip model/frontend embedding, so no dist/models are
+          # required and the frontend build is not pulled in.
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          CGO_ENABLED=1 CC=${{ matrix.cc }} \
+          CGO_CFLAGS="-I${{ github.workspace }}/.cache/tensorflow" \
+          CGO_LDFLAGS="-L${{ matrix.libdir }} -ltensorflowlite_c" \
+          go build -tags noembed,skipfrontend ./...
+
+      - name: Vet (type-checks test files too, no link, no run)
+        run: |
+          # `go build` ignores *_test.go, so a platform-specific mistake in a test
+          # helper would slip through. `go vet` compiles every package including
+          # its test files for the target GOOS without linking or running, catching
+          # those regressions cheaply.
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          CGO_ENABLED=1 CC=${{ matrix.cc }} \
+          CGO_CFLAGS="-I${{ github.workspace }}/.cache/tensorflow" \
+          CGO_LDFLAGS="-L${{ matrix.libdir }} -ltensorflowlite_c" \
+          go vet -tags noembed,skipfrontend ./...
+
+  # Compile-coverage gate for the OpenVINO inference backend
+  # (internal/inference/openvino, //go:build openvino). No other workflow
+  # compiles the openvino-tagged code: cross-build above and release/nightly omit
+  # the tag, and the Docker images build with OPENVINO=false. Without this job a
+  # compile error (including an arch-specific one) in the openvino-tagged backend
+  # or its tests would not be caught pre-merge. The backend is linux-only, so this
+  # covers linux/amd64 (native) and linux/arm64 (cross).
+  openvino-build:
+    name: openvino-build (linux/${{ matrix.goarch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            cc: gcc
+            libdir: /usr/lib/x86_64-linux-gnu
+            tflite_asset: linux_amd64.tar.gz
+            apt_packages: build-essential pkg-config
+          - goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            libdir: /usr/aarch64-linux-gnu/lib
+            tflite_asset: linux_arm64.tar.gz
+            apt_packages: build-essential pkg-config gcc-aarch64-linux-gnu
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - run: go version
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install toolchain
+        uses: ./.github/actions/setup-apt-packages
+        with:
+          packages: ${{ matrix.apt_packages }}
+          cache-version: '1.0'
+          execute-install-scripts: 'false'
+
+      - name: Cache OpenVINO C API headers
+        uses: actions/cache@v6
+        with:
+          path: .cache/openvino
+          # Keyed on the Taskfile so an OPENVINO_BUILD bump rotates the cache; the
+          # check-openvino .build-id guard re-downloads on a mismatch regardless.
+          key: openvino-headers-${{ runner.os }}-${{ hashFiles('Taskfile.yml') }}
+
+      - name: Provision OpenVINO C API headers
+        run: |
+          # The openvino-tagged backend's cgo preamble #includes <openvino/c/...>,
+          # so the C API headers must exist at compile time. check-openvino
+          # downloads and SHA256-verifies them into .cache/openvino/include (it is
+          # a no-op when the cache above already holds the matching build).
+          task check-openvino OPENVINO=true
+
+      - name: Provision TensorFlow Lite (headers + cross lib)
+        uses: ./.github/actions/setup-tflite-cross
+        with:
+          tflite-asset: ${{ matrix.tflite_asset }}
+          libdir: ${{ matrix.libdir }}
+          fix-arm64-cc-symlink: ${{ matrix.goarch == 'arm64' }}
+
+      - name: Build smoke (openvino tag, non-test code)
+        run: |
+          # The openvino backend dlopens libopenvino_c at runtime (no link-time
+          # -lopenvino_c), but its cgo preamble #includes <openvino/c/...> at
+          # compile time, so the OpenVINO C API headers (provisioned above) are on
+          # CGO_CFLAGS alongside the TFLite headers; the TFLite C lib is linked.
+          GOOS=linux GOARCH=${{ matrix.goarch }} \
+          CGO_ENABLED=1 CC=${{ matrix.cc }} \
+          CGO_CFLAGS="-I${{ github.workspace }}/.cache/tensorflow -I${{ github.workspace }}/.cache/openvino/include" \
+          CGO_LDFLAGS="-L${{ matrix.libdir }} -ltensorflowlite_c" \
+          go build -tags noembed,skipfrontend,openvino ./...
+
+      - name: Vet (openvino tag, type-checks test files too)
+        run: |
+          # Compiles the openvino-tagged *_test.go files (which `go build` skips)
+          # for the target GOOS without linking or running.
+          GOOS=linux GOARCH=${{ matrix.goarch }} \
+          CGO_ENABLED=1 CC=${{ matrix.cc }} \
+          CGO_CFLAGS="-I${{ github.workspace }}/.cache/tensorflow -I${{ github.workspace }}/.cache/openvino/include" \
+          CGO_LDFLAGS="-L${{ matrix.libdir }} -ltensorflowlite_c" \
+          go vet -tags noembed,skipfrontend,openvino ./...

@@ -42,6 +42,8 @@ const (
 	MsgSettingsRecalculatingThresholds        = "notifications.content.settings.recalculatingThresholds"
 	MsgSettingsReconfiguringDynamicThresholds = "notifications.content.settings.reconfiguringDynamicThresholds"
 	MsgSettingsWebserverRestart               = "notifications.content.settings.webserverRestartRequired"
+	MsgSettingsDatabaseRestart                = "notifications.content.settings.databaseRestartRequired"
+	MsgSettingsLoggingRestart                 = "notifications.content.settings.loggingRestartRequired"
 
 	// Audio settings toasts
 	MsgSettingsReconfiguringSoundLevel   = "notifications.content.settings.reconfiguringSoundLevel"
@@ -92,6 +94,7 @@ const (
 	MsgErrAlertDuplicateName     = "errors.alert.duplicateName"
 	MsgErrAlertInvalidJSON       = "errors.alert.invalidJSON"
 	MsgErrAlertInvalidEscalation = "errors.alert.invalidEscalation"
+	MsgErrAlertEngineUnavailable = "errors.alert.engineUnavailable"
 
 	// Detection errors
 	MsgErrDetectionInvalidDate = "errors.detection.invalidDate"

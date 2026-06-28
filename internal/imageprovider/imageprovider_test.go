@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/conf/conftest"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/errors"
@@ -163,13 +163,10 @@ func (m *mockStore) SetMetrics(metrics *datastore.Metrics)                      
 func (m *mockStore) SetSunCalcMetrics(suncalcMetrics any)                         {}
 func (m *mockStore) Optimize(ctx context.Context) error                           { return nil }
 func (m *mockStore) GetAllNotes() ([]datastore.Note, error)                       { return []datastore.Note{}, nil }
-func (m *mockStore) GetTopBirdsData(date string, minConf float64, limit int) ([]datastore.Note, error) {
+func (m *mockStore) GetTopBirdsData(_ context.Context, date string, minConf float64, limit int) ([]datastore.Note, error) {
 	return []datastore.Note{}, nil
 }
-func (m *mockStore) GetHourlyOccurrences(date, name string, minConf float64) ([24]int, error) {
-	return [24]int{}, nil
-}
-func (m *mockStore) GetBatchHourlyOccurrences(date string, species []string, minConf float64) (map[string][24]int, error) {
+func (m *mockStore) GetBatchHourlyOccurrences(_ context.Context, date string, species []string, minConf float64) (map[string][24]int, error) {
 	return make(map[string][24]int), nil
 }
 func (m *mockStore) SpeciesDetections(species, date, hour string, duration int, asc bool, limit, offset int) ([]datastore.Note, error) {
@@ -296,26 +293,55 @@ func (m *mockStore) GetSpeciesFirstDetectionInPeriod(ctx context.Context, startD
 func (m *mockStore) GetSpeciesDiversityData(_ context.Context, _, _ string) ([]datastore.DailyAnalyticsData, error) {
 	return nil, nil
 }
+func (m *mockStore) GetActivityHeatmap(_ context.Context, _, _, _ string) (datastore.ActivityHeatmapData, error) {
+	return datastore.ActivityHeatmapData{}, nil
+}
+func (m *mockStore) GetHourlyDistributionBySpecies(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesHourlyDistribution, error) {
+	return []datastore.SpeciesHourlyDistribution{}, nil
+}
+func (m *mockStore) GetDailyActivityOnset(_ context.Context, _, _, _ string) ([]datastore.DailyActivityOnset, error) {
+	return []datastore.DailyActivityOnset{}, nil
+}
+
+func (m *mockStore) GetConfidenceHistogram(_ context.Context, _, _, _ string, _, _ int) ([]datastore.SpeciesConfidenceHistogram, error) {
+	return []datastore.SpeciesConfidenceHistogram{}, nil
+}
+func (m *mockStore) GetSpeciesAccumulation(_ context.Context, _, _ string) ([]datastore.SpeciesAccumulationPoint, error) {
+	return []datastore.SpeciesAccumulationPoint{}, nil
+}
+func (m *mockStore) GetAudioSources(_ context.Context, _, _ string) ([]datastore.AudioSourceSummary, error) {
+	return []datastore.AudioSourceSummary{}, nil
+}
+func (m *mockStore) GetYearOverYear(_ context.Context, _ string) (datastore.YearOverYearResult, error) {
+	return datastore.YearOverYearResult{Points: []datastore.YearOverYearPoint{}}, nil
+}
+func (m *mockStore) GetSpeciesPhenology(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesPhenologyPoint, error) {
+	return []datastore.SpeciesPhenologyPoint{}, nil
+}
+func (m *mockStore) GetAcousticSuccession(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesHourlyCounts, error) {
+	return []datastore.SpeciesHourlyCounts{}, nil
+}
 
 // BG-17 fix: Add notification history methods
-func (m *mockStore) GetActiveNotificationHistory(after time.Time) ([]datastore.NotificationHistory, error) {
+func (m *mockStore) GetActiveNotificationHistory(_ context.Context, after time.Time) ([]datastore.NotificationHistory, error) {
 	return []datastore.NotificationHistory{}, nil
 }
 
-func (m *mockStore) GetNotificationHistory(scientificName, notificationType string) (*datastore.NotificationHistory, error) {
+func (m *mockStore) GetNotificationHistory(_ context.Context, scientificName, notificationType string) (*datastore.NotificationHistory, error) {
 	return nil, datastore.ErrNotificationHistoryNotFound
 }
 
-func (m *mockStore) SaveNotificationHistory(history *datastore.NotificationHistory) error {
+func (m *mockStore) SaveNotificationHistory(_ context.Context, history *datastore.NotificationHistory) error {
 	return nil
 }
 
-func (m *mockStore) DeleteExpiredNotificationHistory(before time.Time) (int64, error) {
+func (m *mockStore) DeleteExpiredNotificationHistory(_ context.Context, before time.Time) (int64, error) {
 	return 0, nil
 }
 
-func (m *mockStore) SchemaVersion() string     { return datastore.SchemaVersionLegacy }
-func (m *mockStore) UpdateNameMaps(_ []string) {}
+func (m *mockStore) SchemaVersion() string                           { return datastore.SchemaVersionLegacy }
+func (m *mockStore) UpdateNameMaps(_ []string)                       {}
+func (m *mockStore) SetNameResolver(_ datastore.SpeciesNameResolver) {}
 func (m *mockStore) GetDatabaseStats(_ context.Context) (*datastore.DatabaseStats, error) {
 	return &datastore.DatabaseStats{
 		Type:      "mock",
@@ -1033,7 +1059,7 @@ func (m *mockProviderWithContext) FetchWithContext(ctx context.Context, scientif
 
 // TestMain provides goleak verification to detect goroutine leaks
 func TestMain(m *testing.M) {
-	conf.NewTestSettings().Apply()
+	conftest.NewTestSettings().Apply()
 
 	goleak.VerifyTestMain(m,
 		goleak.IgnoreTopFunction("testing.(*T).Run"),

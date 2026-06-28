@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/analysis/species"
+	"github.com/tphakala/birdnet-go/internal/analysis/species/speciestest"
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"gorm.io/driver/sqlite"
@@ -28,16 +29,16 @@ func (m *MockDatastoreAdapter) GetSpeciesFirstDetectionInPeriod(ctx context.Cont
 }
 
 // BG-17 fix: Add notification history methods
-func (m *MockDatastoreAdapter) GetActiveNotificationHistory(after time.Time) ([]datastore.NotificationHistory, error) {
-	return m.ds.GetActiveNotificationHistory(after)
+func (m *MockDatastoreAdapter) GetActiveNotificationHistory(ctx context.Context, after time.Time) ([]datastore.NotificationHistory, error) {
+	return m.ds.GetActiveNotificationHistory(ctx, after)
 }
 
-func (m *MockDatastoreAdapter) SaveNotificationHistory(history *datastore.NotificationHistory) error {
-	return m.ds.SaveNotificationHistory(history)
+func (m *MockDatastoreAdapter) SaveNotificationHistory(ctx context.Context, history *datastore.NotificationHistory) error {
+	return m.ds.SaveNotificationHistory(ctx, history)
 }
 
-func (m *MockDatastoreAdapter) DeleteExpiredNotificationHistory(before time.Time) (int64, error) {
-	return m.ds.DeleteExpiredNotificationHistory(before)
+func (m *MockDatastoreAdapter) DeleteExpiredNotificationHistory(ctx context.Context, before time.Time) (int64, error) {
+	return m.ds.DeleteExpiredNotificationHistory(ctx, before)
 }
 
 // setupIntegrationTestDB creates a real SQLite database for integration testing
@@ -129,7 +130,7 @@ func TestIntegration_DatabaseToTracker(t *testing.T) {
 	}
 
 	tracker := species.NewTrackerFromSettings(adapter, settings)
-	tracker.SetCurrentYearForTesting(2024) // Set to 2024 for test data
+	speciestest.SetCurrentYearForTesting(t, tracker, 2024) // Set to 2024 for test data
 	err := tracker.InitFromDatabase()
 	require.NoError(t, err)
 
@@ -252,7 +253,7 @@ func TestIntegration_YearTransition(t *testing.T) {
 	}
 
 	tracker := species.NewTrackerFromSettings(adapter, settings)
-	tracker.SetCurrentYearForTesting(2023)
+	speciestest.SetCurrentYearForTesting(t, tracker, 2023)
 	err := tracker.InitFromDatabase()
 	require.NoError(t, err)
 
@@ -332,7 +333,7 @@ func TestIntegration_SeasonalTransitions(t *testing.T) {
 	}
 
 	tracker := species.NewTrackerFromSettings(adapter, settings)
-	tracker.SetCurrentYearForTesting(2024) // Set to 2024 for test dates
+	speciestest.SetCurrentYearForTesting(t, tracker, 2024) // Set to 2024 for test dates
 	err := tracker.InitFromDatabase()
 	require.NoError(t, err)
 

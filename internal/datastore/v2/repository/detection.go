@@ -106,13 +106,19 @@ type DetectionRepository interface {
 	// modelID is optional; pass nil to include all models.
 	GetTopSpecies(ctx context.Context, start, end int64, minConfidence float64, modelID *uint, limit int) ([]SpeciesCount, error)
 
-	// GetHourlyOccurrences returns detection counts by hour (0-23) for the given labels.
-	// Aggregates across all provided label IDs (multi-model support).
-	// minConfidence filters detections by minimum confidence threshold.
-	GetHourlyOccurrences(ctx context.Context, labelIDs []uint, start, end int64, minConfidence float64) ([24]int, error)
+	// GetBatchHourlyOccurrences returns per-label-ID hourly detection counts (0-23)
+	// for the given label IDs in a single grouped query (per chunk). The result maps
+	// each label ID to its [24]int hourly counts; callers that span one species across
+	// multiple model label IDs sum the per-label arrays themselves. False positives are
+	// excluded and minConfidence filters by minimum confidence threshold. tzOffsetSeconds is
+	// the configured timezone's UTC offset, applied so detections bucket by wall-clock hour in
+	// that zone rather than the database/OS-local zone.
+	GetBatchHourlyOccurrences(ctx context.Context, labelIDs []uint, start, end int64, tzOffsetSeconds int, minConfidence float64) (map[uint][24]int, error)
 
 	// GetDailyOccurrences returns daily detection counts for a label.
-	GetDailyOccurrences(ctx context.Context, labelID uint, start, end int64) ([]DailyCount, error)
+	// tzOffsetSeconds is the configured timezone's UTC offset, applied so detections bucket by
+	// wall-clock date in that zone rather than the database/OS-local zone.
+	GetDailyOccurrences(ctx context.Context, labelID uint, start, end int64, tzOffsetSeconds int) ([]DailyCount, error)
 
 	// GetSpeciesFirstDetection returns the first-ever detection of a species.
 	// Returns ErrDetectionNotFound if the species has never been detected.
@@ -231,18 +237,36 @@ type DetectionRepository interface {
 	// modelID is optional; pass nil to include all models.
 	GetSpeciesSummary(ctx context.Context, start, end int64, modelID *uint) ([]SpeciesSummaryData, error)
 
-	// GetHourlyDistribution returns detection counts by hour.
-	// labelID and modelID are optional filters.
-	GetHourlyDistribution(ctx context.Context, start, end int64, labelID, modelID *uint) ([]HourlyDistributionData, error)
+	// GetHourlyDistribution returns detection counts by hour. tzOffsetSeconds is the
+	// configured timezone's UTC offset, applied so detections bucket by wall-clock hour in
+	// that zone rather than the database/OS-local zone. labelID and modelID are optional filters.
+	GetHourlyDistribution(ctx context.Context, start, end int64, tzOffsetSeconds int, labelID, modelID *uint) ([]HourlyDistributionData, error)
+
+	// GetDetectionTimestamps returns the raw detected_at epochs (seconds) for the half-open
+	// range [start, end), excluding false positives, in no particular order. labelID is an
+	// optional species filter. Callers bucket the timestamps in Go (e.g. the seasonal heatmap),
+	// which keeps the slot/date math out of dialect SQL and correct across DST.
+	GetDetectionTimestamps(ctx context.Context, start, end int64, labelID *uint) ([]int64, error)
+
+	// GetBatchConfidences returns the per-label-ID detection confidences for the given label IDs over
+	// the half-open range [start, end), false positives excluded and filtered by minConfidence. Results
+	// group by label_id so a single query (per chunk) covers many labels; callers that map one species
+	// to multiple model label IDs concatenate the per-label slices themselves. Order within a label is
+	// unspecified (callers bin the values); the confidence distribution chart buckets them in Go.
+	GetBatchConfidences(ctx context.Context, labelIDs []uint, start, end int64, minConfidence float64) (map[uint][]float64, error)
 
 	// GetDailyAnalytics returns daily statistics.
+	// tzOffsetSeconds is the configured timezone's UTC offset, applied so detections bucket by
+	// wall-clock date in that zone rather than the database/OS-local zone.
 	// labelID and modelID are optional filters.
-	GetDailyAnalytics(ctx context.Context, start, end int64, labelID, modelID *uint) ([]DailyAnalyticsData, error)
+	GetDailyAnalytics(ctx context.Context, start, end int64, tzOffsetSeconds int, labelID, modelID *uint) ([]DailyAnalyticsData, error)
 
 	// GetDetectionTrends returns detection trends over time.
 	// period is "day", "week", or "month".
+	// tzOffsetSeconds is the configured timezone's UTC offset, applied so detections bucket by
+	// wall-clock date in that zone rather than the database/OS-local zone.
 	// modelID is optional.
-	GetDetectionTrends(ctx context.Context, period string, limit int, modelID *uint) ([]DailyAnalyticsData, error)
+	GetDetectionTrends(ctx context.Context, period string, limit, tzOffsetSeconds int, modelID *uint) ([]DailyAnalyticsData, error)
 
 	// GetNewSpecies returns species detected for the first time ever within the range.
 	GetNewSpecies(ctx context.Context, start, end int64, limit, offset int) ([]NewSpeciesData, error)
@@ -252,6 +276,26 @@ type DetectionRepository interface {
 	// This is distinct from GetNewSpecies (lifetime firsts) and
 	// GetSpeciesFirstDetection (per-species first ever).
 	GetSpeciesFirstDetectionInPeriod(ctx context.Context, start, end int64, limit, offset int) ([]SpeciesFirstSeen, error)
+
+	// GetSpeciesFirstSeenInPeriod returns the first detection (MIN detected_at) of each species
+	// within the half-open range [start, end), false positives excluded, grouped by scientific name
+	// so multi-model labels collapse to one species. Unlike GetSpeciesFirstDetectionInPeriod it
+	// excludes false positives and is not paginated (every species is returned), as required by the
+	// species accumulation analytics. Results are ordered by first-seen ascending.
+	GetSpeciesFirstSeenInPeriod(ctx context.Context, start, end int64) ([]SpeciesFirstSeen, error)
+
+	// GetSpeciesPhenologyInPeriod returns each species' residency span within the half-open range
+	// [start, end): MIN/MAX detected_at and the detection COUNT, false positives excluded, grouped by
+	// scientific name so multi-model labels collapse to one species. Results are the top `limit` species
+	// by detection volume (ORDER BY count DESC), as required by the arrival/departure phenology chart.
+	GetSpeciesPhenologyInPeriod(ctx context.Context, start, end int64, limit int) ([]SpeciesPhenology, error)
+
+	// GetSourceActivitySummaries returns each audio source with at least one (false-positive-excluded)
+	// detection in the half-open range [start, end): the source's identity columns and its in-period
+	// detection count, ordered by count descending. Sources are INNER JOINed on audio_sources, so
+	// detections with a NULL source_id (legacy-migrated, source-less) are excluded. Powers the analytics
+	// source/mic filter's option list. COUNT is fan-out-immune because reviews are 1:1 with detections.
+	GetSourceActivitySummaries(ctx context.Context, start, end int64) ([]SourceActivitySummary, error)
 
 	// === Utilities ===
 

@@ -17,12 +17,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/audiocore/schedule"
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/events"
 	"github.com/tphakala/birdnet-go/internal/imageprovider"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/notification"
+	"github.com/tphakala/birdnet-go/internal/restart"
 	"github.com/tphakala/birdnet-go/internal/support"
 	"github.com/tphakala/birdnet-go/internal/telemetry"
 	"gopkg.in/yaml.v3"
@@ -47,7 +49,7 @@ type UpdateRequest struct {
 
 // initSettingsRoutes registers all settings-related API endpoints
 func (c *Controller) initSettingsRoutes() {
-	c.logInfoIfEnabled("Initializing settings routes")
+	c.LogInfoIfEnabled("Initializing settings routes")
 
 	// Public read-only endpoint: the Dashboard section contains only
 	// layout/display preferences (no secrets, tokens, or PII) and must be
@@ -61,7 +63,7 @@ func (c *Controller) initSettingsRoutes() {
 	c.Group.GET("/settings/dashboard", c.GetDashboardSettings)
 
 	// Create auth-protected settings API group for everything else.
-	settingsGroup := c.Group.Group("/settings", c.authMiddleware)
+	settingsGroup := c.Group.Group("/settings", c.AuthMiddleware)
 
 	// Routes for settings
 	// GET /api/v2/settings - Retrieves all application settings
@@ -82,26 +84,23 @@ func (c *Controller) initSettingsRoutes() {
 	// (includes /settings/dashboard — writes remain auth-protected).
 	settingsGroup.PATCH("/:section", c.UpdateSectionSettings)
 
-	c.logInfoIfEnabled("Settings routes initialized successfully")
+	c.LogInfoIfEnabled("Settings routes initialized successfully")
 }
 
 // GetAllSettings handles GET /api/v2/settings
 func (c *Controller) GetAllSettings(ctx echo.Context) error {
-	c.logInfoIfEnabled("Getting all settings",
+	c.LogInfoIfEnabled("Getting all settings",
 		logger.String("path", ctx.Request().URL.Path),
 		logger.String("ip", ctx.RealIP()),
 	)
 
-	// Acquire read lock to ensure settings aren't being modified during read
-	c.settingsMutex.RLock()
-	defer c.settingsMutex.RUnlock()
-
-	settings := c.Settings
+	// Read the controller's lock-free settings snapshot.
+	settings := c.ControllerSettings()
 	if settings == nil {
 		// Fallback to global settings if controller settings not set
 		settings = conf.Setting()
 		if settings == nil {
-			c.logErrorIfEnabled("Settings not initialized when trying to get all settings",
+			c.LogErrorIfEnabled("Settings not initialized when trying to get all settings",
 				logger.String("path", ctx.Request().URL.Path),
 				logger.String("ip", ctx.RealIP()),
 			)
@@ -109,7 +108,7 @@ func (c *Controller) GetAllSettings(ctx echo.Context) error {
 		}
 	}
 
-	c.logInfoIfEnabled("Retrieved all settings successfully",
+	c.LogInfoIfEnabled("Retrieved all settings successfully",
 		logger.String("path", ctx.Request().URL.Path),
 		logger.String("ip", ctx.RealIP()),
 	)
@@ -132,18 +131,15 @@ const dashboardSectionName = "dashboard"
 // to this section are handled by UpdateSectionSettings and remain
 // auth-protected.
 func (c *Controller) GetDashboardSettings(ctx echo.Context) error {
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Getting public dashboard settings")
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Getting public dashboard settings")
 
-	// Acquire read lock to ensure settings aren't being modified during read.
-	c.settingsMutex.RLock()
-	defer c.settingsMutex.RUnlock()
-
-	settings := c.Settings
+	// Read the controller's lock-free settings snapshot.
+	settings := c.ControllerSettings()
 	if settings == nil {
 		// Fallback to global settings if controller settings not set.
 		settings = conf.Setting()
 		if settings == nil {
-			c.logAPIRequest(ctx, logger.LogLevelError,
+			c.LogAPIRequest(ctx, logger.LogLevelError,
 				"Settings not initialized when trying to get dashboard settings")
 			return c.HandleError(ctx, fmt.Errorf("settings not initialized"),
 				"Failed to get settings", http.StatusInternalServerError)
@@ -157,7 +153,7 @@ func (c *Controller) GetDashboardSettings(ctx echo.Context) error {
 	sanitized := sanitizeSettingsForAPI(settings)
 	sectionValue, err := getSettingsSection(sanitized, dashboardSectionName)
 	if err != nil {
-		c.logAPIRequest(ctx, logger.LogLevelError,
+		c.LogAPIRequest(ctx, logger.LogLevelError,
 			"Failed to get dashboard settings section", logger.Error(err))
 		return c.HandleError(ctx, err, "Failed to get settings section",
 			http.StatusInternalServerError)
@@ -169,23 +165,20 @@ func (c *Controller) GetDashboardSettings(ctx echo.Context) error {
 // GetSectionSettings handles GET /api/v2/settings/:section
 func (c *Controller) GetSectionSettings(ctx echo.Context) error {
 	section := ctx.Param("section")
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Getting settings for section", logger.String("section", section))
-
-	// Acquire read lock to ensure settings aren't being modified during read
-	c.settingsMutex.RLock()
-	defer c.settingsMutex.RUnlock()
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Getting settings for section", logger.String("section", section))
 
 	if section == "" {
-		c.logAPIRequest(ctx, logger.LogLevelError, "Missing section parameter")
+		c.LogAPIRequest(ctx, logger.LogLevelError, "Missing section parameter")
 		return c.HandleError(ctx, fmt.Errorf("section not specified"), "Section parameter is required", http.StatusBadRequest)
 	}
 
-	settings := c.Settings
+	// Read the controller's lock-free settings snapshot.
+	settings := c.ControllerSettings()
 	if settings == nil {
 		// Fallback to global settings if controller settings not set
 		settings = conf.Setting()
 		if settings == nil {
-			c.logAPIRequest(ctx, logger.LogLevelError, "Settings not initialized when trying to get section settings", logger.String("section", section))
+			c.LogAPIRequest(ctx, logger.LogLevelError, "Settings not initialized when trying to get section settings", logger.String("section", section))
 			return c.HandleError(ctx, fmt.Errorf("settings not initialized"), "Failed to get settings", http.StatusInternalServerError)
 		}
 	}
@@ -194,11 +187,11 @@ func (c *Controller) GetSectionSettings(ctx echo.Context) error {
 	sanitized := sanitizeSettingsForAPI(settings)
 	sectionValue, err := getSettingsSection(sanitized, section)
 	if err != nil {
-		c.logAPIRequest(ctx, logger.LogLevelError, "Failed to get settings section", logger.String("section", section), logger.Error(err))
+		c.LogAPIRequest(ctx, logger.LogLevelError, "Failed to get settings section", logger.String("section", section), logger.Error(err))
 		return c.HandleError(ctx, err, "Failed to get settings section", http.StatusNotFound)
 	}
 
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Retrieved settings section successfully", logger.String("section", section))
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Retrieved settings section successfully", logger.String("section", section))
 
 	return ctx.JSON(http.StatusOK, sectionValue)
 }
@@ -212,19 +205,19 @@ func (c *Controller) GetSectionSettings(ctx echo.Context) error {
 // the new one, never a torn view. Rollback after a validation or disk-write
 // failure is a republish of the previous snapshot.
 func (c *Controller) UpdateSettings(ctx echo.Context) error {
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Attempting to update settings")
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Attempting to update settings")
 	// Serialise concurrent PUT /api/v2/settings calls; each must see the
 	// latest published snapshot as its baseline.
 	c.settingsMutex.Lock()
 	defer c.settingsMutex.Unlock()
 
-	// Read the controller-cached snapshot when set (tests inject this
+	// Read the controller's own snapshot when set (tests inject this
 	// directly); fall back to the global publisher. In production these are
 	// the same pointer at boot and stay in sync because every successful
-	// publish below updates both c.Settings and conf.settingsInstance.
+	// publish below updates both the atomic Settings pointer and conf.settingsInstance.
 	current := c.getSettingsOrFallback()
 	if current == nil {
-		c.logAPIRequest(ctx, logger.LogLevelError, "Settings not initialized during update attempt")
+		c.LogAPIRequest(ctx, logger.LogLevelError, "Settings not initialized during update attempt")
 		return c.HandleError(ctx, fmt.Errorf("settings not initialized"), "Failed to get settings", http.StatusInternalServerError)
 	}
 
@@ -241,7 +234,7 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 	// Parse the request body
 	var updatedSettings conf.Settings
 	if err := ctx.Bind(&updatedSettings); err != nil {
-		c.logAPIRequest(ctx, logger.LogLevelError, "Failed to bind request body for settings update", logger.Error(err))
+		c.LogAPIRequest(ctx, logger.LogLevelError, "Failed to bind request body for settings update", logger.Error(err))
 		return c.HandleError(ctx, err, "Failed to parse request body", http.StatusBadRequest)
 	}
 
@@ -249,24 +242,30 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 	// logic does not overwrite real secrets with the placeholder. Operate on
 	// updated (clone) as the canonical destination, not on current.
 	if err := restoreRedactedSecrets(updated, &updatedSettings); err != nil {
-		c.logAPIRequest(ctx, logger.LogLevelWarn, "Redacted sentinel validation failed", logger.Error(err))
+		c.LogAPIRequest(ctx, logger.LogLevelWarn, "Redacted sentinel validation failed", logger.Error(err))
 		return c.HandleError(ctx, err, "Cannot save: some secret fields contain the redacted placeholder because their identifying key was changed while the secret was hidden. Re-enter the secret values.", http.StatusBadRequest)
 	}
 
 	// Apply allowed field updates to the clone.
 	skippedFields, err := updateAllowedSettingsWithTracking(updated, &updatedSettings)
 	if err != nil {
-		c.logAPIRequest(ctx, logger.LogLevelError, "Error updating allowed settings fields", logger.Error(err), logger.Any("skipped_fields", skippedFields))
+		c.LogAPIRequest(ctx, logger.LogLevelError, "Error updating allowed settings fields", logger.Error(err), logger.Any("skipped_fields", skippedFields))
 		return c.HandleError(ctx, err, "Failed to update settings", http.StatusInternalServerError)
 	}
 	if len(skippedFields) > 0 {
-		c.logAPIRequest(ctx, logger.LogLevelDebug, "Skipped protected fields during settings update", logger.Any("skipped_fields", skippedFields))
+		c.LogAPIRequest(ctx, logger.LogLevelDebug, "Skipped protected fields during settings update", logger.Any("skipped_fields", skippedFields))
 	}
 
 	// Normalize species config keys to lowercase for case-insensitive matching.
 	if updated.Realtime.Species.Config != nil {
 		updated.Realtime.Species.Config = conf.NormalizeSpeciesConfigKeys(updated.Realtime.Species.Config)
 	}
+
+	// Canonicalize the species exclude list to scientific names so a localized or
+	// common name typed into the Settings exclude editor is stored in the same form
+	// the per-detection filter and the detection-card toggle match. Idempotent for
+	// an already-canonical list, so this does not spuriously trigger a rebuild.
+	updated.Realtime.Species.Exclude = c.canonicalizeExcludeList(updated.Realtime.Species.Exclude)
 
 	// Ensure LocationConfigured is set when birdnet coordinates are present.
 	// Backward compatibility with older frontends that don't send the flag.
@@ -285,16 +284,15 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 
 	// Publish the new snapshot. conf.StoreSettings publishes atomically to
 	// the global (readers via conf.GetSettings immediately see this version;
-	// existing pointer holders stay on the old). c.Settings keeps the
-	// controller-cached pointer in sync so read handlers that still
-	// dereference c.Settings return the freshly published snapshot. The
-	// write is safe under c.settingsMutex which all c.Settings readers
-	// also acquire, except for c.Debug which deliberately reads via
-	// conf.GetSettings() to stay race-free without grabbing the lock.
+	// existing pointer holders stay on the old). c.Settings.Store republishes
+	// the controller's own atomic snapshot so per-controller readers
+	// (controllerSettings) return the freshly published value. Both stores are
+	// lock-free; settingsMutex here only serialises this read-modify-write
+	// against other update handlers, not against readers.
 	if publishGlobal {
 		conf.StoreSettings(updated)
 	}
-	c.Settings = updated
+	c.Settings.Store(updated)
 
 	// Run cross-field side-effects (interval tracking, telemetry toggles, etc.)
 	// against the published pair. handleSettingsChanges is read-only on both.
@@ -304,21 +302,21 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 		if publishGlobal {
 			conf.StoreSettings(current)
 		}
-		c.Settings = current
-		c.logAPIRequest(ctx, logger.LogLevelError, "Failed to apply settings changes, rolling back", logger.Error(err))
+		c.Settings.Store(current)
+		c.LogAPIRequest(ctx, logger.LogLevelError, "Failed to apply settings changes, rolling back", logger.Error(err))
 		return c.HandleError(ctx, err, "Failed to apply settings changes, rolled back to previous settings", http.StatusInternalServerError)
 	}
 
 	// Persist to disk only when this controller owns the global snapshot
 	// (production path) AND DisableSaveSettings is not set. conf.SaveSettings
-	// reads conf.GetSettings internally; persisting from a test that injected
-	// a standalone c.Settings would save an unrelated snapshot.
+	// reads conf.GetSettings internally; persisting from a test that stored a
+	// standalone snapshot via c.Settings.Store would save an unrelated snapshot.
 	if publishGlobal && !c.DisableSaveSettings {
 		if err := conf.SaveSettings(); err != nil {
 			// Rollback in-memory; disk write never happened successfully.
 			conf.StoreSettings(current)
-			c.Settings = current
-			c.logAPIRequest(ctx, logger.LogLevelError, "Failed to save settings to disk, rolling back", logger.Error(err))
+			c.Settings.Store(current)
+			c.LogAPIRequest(ctx, logger.LogLevelError, "Failed to save settings to disk, rolling back", logger.Error(err))
 			return c.HandleError(ctx, err, "Failed to save settings, rolled back to previous settings", http.StatusInternalServerError)
 		}
 	}
@@ -336,17 +334,19 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 	imageprovider.SetCustomSynonyms(updated.TaxonomySynonyms, updated.BirdNET.Labels)
 
 	if publishGlobal && !c.DisableSaveSettings {
-		c.logAPIRequest(ctx, logger.LogLevelInfo, "Settings updated and saved successfully",
+		c.LogAPIRequest(ctx, logger.LogLevelInfo, "Settings updated and saved successfully",
 			logger.Int("skipped_fields_count", len(skippedFields)))
 	} else {
-		c.logAPIRequest(ctx, logger.LogLevelDebug, "Settings updated (save to disk skipped)",
+		c.LogAPIRequest(ctx, logger.LogLevelDebug, "Settings updated (save to disk skipped)",
 			logger.Bool("publishGlobal", publishGlobal),
 			logger.Bool("disableSaveSettings", c.DisableSaveSettings))
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"message":       "Settings updated successfully",
-		"skippedFields": skippedFields,
+		"message":          "Settings updated successfully",
+		"skippedFields":    skippedFields,
+		"restart_required": restart.IsRestartRequired(),
+		"restart_reasons":  restart.GetRestartReasons(),
 	})
 }
 
@@ -569,18 +569,18 @@ func handlePrimitiveField(
 }
 
 // publishAndSaveSettings publishes updated settings and persists to disk.
-// Must be called while c.settingsMutex is held. On save failure, both the
-// atomic pointer and c.Settings are rolled back to current.
+// Must be called while c.settingsMutex is held. On save failure, the atomic
+// Settings snapshot is rolled back to current.
 func (c *Controller) publishAndSaveSettings(current, updated *conf.Settings) error {
 	if c.isGlobalOwner {
 		conf.StoreSettings(updated)
 	}
-	c.Settings = updated
+	c.Settings.Store(updated)
 
 	if c.isGlobalOwner && !c.DisableSaveSettings {
 		if err := conf.SaveSettings(); err != nil {
 			conf.StoreSettings(current)
-			c.Settings = current
+			c.Settings.Store(current)
 			return fmt.Errorf("failed to save settings: %w", err)
 		}
 	}
@@ -601,16 +601,16 @@ func (c *Controller) publishAndSaveSettings(current, updated *conf.Settings) err
 // When this controller owns the global singleton (production), it reads from
 // conf.GetSettings() so that out-of-band publishers (range filter rebuild,
 // ShouldUpdateRangeFilterToday, etc.) are not silently overwritten by a stale
-// c.Settings pointer. For test controllers that inject a standalone *Settings,
-// the cached c.Settings is returned as-is.
+// per-controller pointer. For test controllers that inject a standalone *Settings,
+// the controller's own atomic snapshot is returned as-is.
 func (c *Controller) getSettingsOrFallback() *conf.Settings {
 	if c.isGlobalOwner {
 		if s := conf.GetSettings(); s != nil {
 			return s
 		}
 	}
-	if c.Settings != nil {
-		return c.Settings
+	if s := c.Settings.Load(); s != nil {
+		return s
 	}
 	return conf.Setting()
 }
@@ -676,7 +676,7 @@ func (c *Controller) UpdateSectionSettings(ctx echo.Context) error {
 	// does not overwrite real secrets with the placeholder. current is the
 	// source of truth for the pre-update values.
 	if err := restoreRedactedSecrets(current, updated); err != nil {
-		c.logAPIRequest(ctx, logger.LogLevelWarn, "Redacted sentinel validation failed", logger.Error(err))
+		c.LogAPIRequest(ctx, logger.LogLevelWarn, "Redacted sentinel validation failed", logger.Error(err))
 		return c.HandleError(ctx, err, "Cannot save: some secret fields contain the redacted placeholder because their identifying key was changed while the secret was hidden. Re-enter the secret values.", http.StatusBadRequest)
 	}
 
@@ -691,6 +691,14 @@ func (c *Controller) UpdateSectionSettings(ctx echo.Context) error {
 	// Migrate legacy single audio source if a cached frontend sent it.
 	updated.MigrateAudioSourceConfig()
 
+	// Canonicalize the species exclude list to scientific names (see UpdateSettings).
+	// Only the realtime/species sections carry it, so skip other sections: an
+	// unrelated section save must not rewrite the list or trigger a spurious
+	// range-filter rebuild via rangeFilterSettingsChanged.
+	if strings.EqualFold(section, SettingsSectionRealtime) || strings.EqualFold(section, SettingsSectionSpecies) {
+		updated.Realtime.Species.Exclude = c.canonicalizeExcludeList(updated.Realtime.Species.Exclude)
+	}
+
 	// Validate the clone before publishing. No rollback needed on validation
 	// failure: we simply never publish.
 	if err := conf.ValidateSettings(updated); err != nil {
@@ -698,38 +706,39 @@ func (c *Controller) UpdateSectionSettings(ctx echo.Context) error {
 			fmt.Sprintf("Invalid %s settings", section), http.StatusBadRequest)
 	}
 
-	// Publish the new snapshot atomically when we own the global; keep
-	// c.Settings in sync. See the matching comment in UpdateSettings for
-	// why c.Debug reads via conf.GetSettings() rather than c.Settings.
+	// Publish the new snapshot atomically when we own the global, then
+	// republish the controller's own atomic snapshot. See the matching comment
+	// in UpdateSettings for why Debug reads via conf.GetSettings() (the global)
+	// rather than the per-controller snapshot.
 	if publishGlobal {
 		conf.StoreSettings(updated)
 	}
-	c.Settings = updated
+	c.Settings.Store(updated)
 
 	if err := c.handleSettingsChanges(current, updated); err != nil {
 		if publishGlobal {
 			conf.StoreSettings(current)
 		}
-		c.Settings = current
+		c.Settings.Store(current)
 		return c.HandleError(ctx, err, "Failed to apply settings changes, rolled back to previous settings", http.StatusInternalServerError)
 	}
 
 	// Persist to disk only when this controller owns the global snapshot
 	// AND the test did not disable save. conf.SaveSettings persists the
 	// conf.GetSettings value, which would be wrong under a standalone
-	// c.Settings injected by a test that bypassed the global publish.
+	// snapshot injected by a test that bypassed the global publish.
 	if publishGlobal && !c.DisableSaveSettings {
 		if err := conf.SaveSettings(); err != nil {
 			conf.StoreSettings(current)
-			c.Settings = current
+			c.Settings.Store(current)
 			return c.HandleError(ctx, err, "Failed to save settings, rolled back to previous settings", http.StatusInternalServerError)
 		}
-		c.logAPIRequest(ctx, logger.LogLevelInfo, "Section settings saved successfully",
+		c.LogAPIRequest(ctx, logger.LogLevelInfo, "Section settings saved successfully",
 			logger.String("section", section))
 	}
 
 	if !publishGlobal || c.DisableSaveSettings {
-		c.logAPIRequest(ctx, logger.LogLevelDebug, "Section settings updated (save to disk skipped)",
+		c.LogAPIRequest(ctx, logger.LogLevelDebug, "Section settings updated (save to disk skipped)",
 			logger.String("section", section),
 			logger.Bool("publishGlobal", publishGlobal),
 			logger.Bool("disableSaveSettings", c.DisableSaveSettings))
@@ -750,8 +759,10 @@ func (c *Controller) UpdateSectionSettings(ctx echo.Context) error {
 	imageprovider.SetCustomSynonyms(updated.TaxonomySynonyms, updated.BirdNET.Labels)
 
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"message":       fmt.Sprintf("%s settings updated successfully", section),
-		"skippedFields": skippedFields,
+		"message":          fmt.Sprintf("%s settings updated successfully", section),
+		"skippedFields":    skippedFields,
+		"restart_required": restart.IsRestartRequired(),
+		"restart_reasons":  restart.GetRestartReasons(),
 	})
 }
 
@@ -1718,7 +1729,10 @@ func validatePassword(value any) error {
 
 // redactedValue is the placeholder used for secret fields in API responses.
 // The frontend can check for this value to show a "secret is set" indicator.
-const redactedValue = "**********"
+// It aliases apicore.RedactedValue (the shared substrate sentinel) so the
+// settings save flow and the integrations test-connection handlers match the
+// exact same value and cannot drift apart.
+const redactedValue = apicore.RedactedValue
 
 // sanitizeSettingsForAPI returns a shallow copy of Settings with all secret
 // fields replaced by a redacted placeholder. This prevents the GET endpoints
@@ -1837,9 +1851,7 @@ func sanitizeNotificationSecrets(s *conf.Settings) {
 // error is returned listing all affected fields.
 func restoreRedactedSecrets(current, incoming *conf.Settings) error {
 	restore := func(cur, inc *string) {
-		if *inc == redactedValue {
-			*inc = *cur
-		}
+		apicore.RestoreRedactedSecret(*cur, inc)
 	}
 
 	// Security — defense-in-depth: restore even though SessionSecret is
@@ -2132,6 +2144,15 @@ type settingsChangeCheck struct {
 	duration int                                    // Toast duration in milliseconds
 }
 
+// Restart-reason i18n keys recorded via restart.MarkRestartRequired when a
+// restart-requiring setting changes. The frontend RestartBanner resolves these
+// via t(). Named constants to avoid magic strings.
+const (
+	reasonWebserverRestart = "restart.reasons.webserver"
+	reasonDatabaseRestart  = "restart.reasons.database"
+	reasonLoggingRestart   = "restart.reasons.logging"
+)
+
 // settingsChangeChecks defines all settings change detectors in order of execution.
 // Each check has a detection function, action to trigger, and toast notification.
 var settingsChangeChecks = []settingsChangeCheck{
@@ -2148,15 +2169,30 @@ var settingsChangeChecks = []settingsChangeCheck{
 	{"Push notifications", "reconfigure_push_notifications", pushNotificationSettingsChanged, "Reconfiguring push notification providers...", notification.MsgSettingsReconfiguringPushNotifications, "info", toastDurationMedium},
 	{"Quiet hours", schedule.SignalReconfigureQuietHours, quietHoursSettingsChanged, "Updating quiet hours schedule...", "", "info", toastDurationShort},
 	{"Web server", "", webserverSettingsChanged, "Web server settings changed. Restart required to apply.", notification.MsgSettingsWebserverRestart, "warning", toastDurationExtended},
+	{"Database", "", outputSettingsChanged, "Database settings changed. Restart required to apply.", notification.MsgSettingsDatabaseRestart, "warning", toastDurationExtended},
+	{"Logging", "", loggingSettingsChanged, "Logging settings changed. Restart required to apply.", notification.MsgSettingsLoggingRestart, "warning", toastDurationExtended},
 	{"Log deduplication", "reconfigure_log_deduplication", logDeduplicationSettingsChanged, "Reconfiguring log deduplication...", "", "info", toastDurationShort},
 	{"RTSP health", "reconfigure_rtsp_health", rtspHealthSettingsChanged, "Reconfiguring RTSP health monitoring...", "", "info", toastDurationShort},
 	{"Monitoring", "reconfigure_monitoring", monitoringSettingsChanged, "Reconfiguring system monitoring...", "", "info", toastDurationShort},
 	{"Live stream", "reconfigure_livestream", liveStreamSettingsChanged, "Reconfiguring live stream settings...", "", "info", toastDurationShort},
 }
 
+// restartRequiringChecks maps a settingsChangeChecks entry (by name) to the i18n
+// reason key recorded via restart.MarkRestartRequired when that check fires.
+// These settings configure resources bound once at startup (HTTP listener, DB
+// connection, log sinks) and cannot hot-reload. Names MUST match table entries
+// above; settings_restart_test.go cross-validates these keys against the table
+// names and against the hot-reload registry's `restart` category.
+var restartRequiringChecks = map[string]string{
+	"Web server": reasonWebserverRestart,
+	"Database":   reasonDatabaseRestart,
+	"Logging":    reasonLoggingRestart,
+}
+
 // handleSettingsChanges checks if important settings have changed and triggers appropriate actions
 func (c *Controller) handleSettingsChanges(oldSettings, currentSettings *conf.Settings) error {
 	var reconfigActions []string
+	var restartReasons []string
 
 	// Process all settings change checks using table-driven approach
 	for _, check := range settingsChangeChecks {
@@ -2168,24 +2204,40 @@ func (c *Controller) handleSettingsChanges(oldSettings, currentSettings *conf.Se
 			if check.toast != "" || check.toastKey != "" {
 				_ = c.SendToastWithKey(check.toast, check.toastTyp, check.duration, check.toastKey, nil)
 			}
+			// Defer the actual restart-required mark until all fallible work below
+			// has succeeded (see below); only collect the reason here.
+			if reasonKey, ok := restartRequiringChecks[check.name]; ok {
+				restartReasons = append(restartReasons, reasonKey)
+			}
 		}
 	}
 
 	// Handle audio settings changes (separate due to error return)
 	audioActions, err := c.handleAudioSettingsChanges(oldSettings, currentSettings)
 	if err != nil {
+		// Audio reconfig failed; the caller rolls back the settings snapshot, so
+		// the change is not applied. Do NOT mark restart-required, otherwise the
+		// banner would nag for a change that never persisted.
 		return err
 	}
 	reconfigActions = append(reconfigActions, audioActions...)
 
+	// Mark restart-required now that the fallible detection above has succeeded.
+	// The restart flag is process-global and sticky, so marking it before a
+	// possible error/rollback would leave a stuck banner.
+	for _, reason := range restartReasons {
+		restart.MarkRestartRequired(reason)
+	}
+
 	// Trigger reconfigurations asynchronously.
 	// Capture debug flag from the settings snapshot so the goroutine never
-	// reads c.Settings (which may be overwritten by a concurrent update).
+	// reloads settings (which may be republished by a concurrent update).
 	if len(reconfigActions) > 0 {
 		debugEnabled := currentSettings.WebServer.Debug
-		c.wg.Go(func() {
+		c.Go(func() {
 			c.sendReconfigActions(reconfigActions, debugEnabled)
 		})
+
 	}
 
 	return nil
@@ -2201,23 +2253,23 @@ func (c *Controller) handleSettingsChanges(oldSettings, currentSettings *conf.Se
 func (c *Controller) sendReconfigActions(actions []string, debugEnabled bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			c.logWarnIfEnabled("Recovered from send on closed controlChan during shutdown",
+			c.LogWarnIfEnabled("Recovered from send on closed controlChan during shutdown",
 				logger.Any("panic", r))
 		}
 	}()
 
 	for _, action := range actions {
 		if debugEnabled {
-			c.logDebugIfEnabled("Asynchronously executing action", logger.String("action", action))
+			c.LogDebugIfEnabled("Asynchronously executing action", logger.String("action", action))
 		}
 		select {
-		case <-c.ctx.Done():
+		case <-c.Context().Done():
 			return
 		case c.controlChan <- action:
 		}
 
 		select {
-		case <-c.ctx.Done():
+		case <-c.Context().Done():
 			return
 		case <-time.After(actionDelay):
 		}
@@ -2253,6 +2305,27 @@ func birdnetSettingsChanged(oldSettings, currentSettings *conf.Settings) bool {
 
 	// Check for changes in BirdNET XNNPACK acceleration
 	if oldSettings.BirdNET.UseXNNPACK != currentSettings.BirdNET.UseXNNPACK {
+		return true
+	}
+
+	// Check for changes in BirdNET inference backend preference. OpenVINOPath is
+	// intentionally NOT checked here: it is restart-required (the OpenVINO core
+	// loads the library once via InitOpenVINO and libopenvino_c cannot be safely
+	// unloaded), so a runtime path change is declared hotReloadRestart, matching
+	// ONNXRuntimePath.
+	if oldSettings.BirdNET.Backend != currentSettings.BirdNET.Backend {
+		return true
+	}
+
+	// Check for changes in the OpenVINO device preference. Switching CPU<->GPU
+	// recompiles the model on the new device, so a reload is needed; the OpenVINO
+	// core itself stays loaded (only the compiled model and infer request are
+	// rebuilt), so this is hot-reloadable, not restart-required. The reload path
+	// (handleReloadBirdnet) rebuilds the primary BirdNET classifier and then
+	// reloads the OV-capable secondary models (e.g. Perch) via
+	// Orchestrator.ReloadSecondaryModels, so a device/backend change applies to
+	// both without a restart.
+	if oldSettings.BirdNET.OpenVINODevice != currentSettings.BirdNET.OpenVINODevice {
 		return true
 	}
 
@@ -2499,10 +2572,13 @@ func webserverSettingsChanged(oldSettings, currentSettings *conf.Settings) bool 
 	oldWS := oldSettings.WebServer
 	newWS := currentSettings.WebServer
 
-	// Check web server core settings
+	// Check web server core settings that require a restart to apply. Debug is
+	// intentionally excluded: it hot-reloads (registry category `fresh`), so it
+	// must not trigger the restart-required toast/banner.
 	if oldWS.Port != newWS.Port ||
 		oldWS.Enabled != newWS.Enabled ||
-		oldWS.Debug != newWS.Debug {
+		oldWS.BasePath != newWS.BasePath ||
+		oldWS.EnableTerminal != newWS.EnableTerminal {
 		return true
 	}
 
@@ -2518,6 +2594,37 @@ func webserverSettingsChanged(oldSettings, currentSettings *conf.Settings) bool 
 	}
 
 	return false
+}
+
+// outputSettingsChanged reports whether database output settings changed in a
+// way that requires a restart. The database connection pool is opened once at
+// startup, so switching backend, path, or connection parameters needs a restart.
+func outputSettingsChanged(oldSettings, currentSettings *conf.Settings) bool {
+	oldOut := oldSettings.Output
+	newOut := currentSettings.Output
+
+	if oldOut.SQLite.Enabled != newOut.SQLite.Enabled ||
+		oldOut.SQLite.Path != newOut.SQLite.Path {
+		return true
+	}
+
+	if oldOut.MySQL.Enabled != newOut.MySQL.Enabled ||
+		oldOut.MySQL.Username != newOut.MySQL.Username ||
+		oldOut.MySQL.Password != newOut.MySQL.Password ||
+		oldOut.MySQL.Database != newOut.MySQL.Database ||
+		oldOut.MySQL.Host != newOut.MySQL.Host ||
+		oldOut.MySQL.Port != newOut.MySQL.Port {
+		return true
+	}
+
+	return false
+}
+
+// loggingSettingsChanged reports whether the logging configuration changed. Log
+// sinks and rotation are configured once at startup, so any change needs a
+// restart to take effect.
+func loggingSettingsChanged(oldSettings, currentSettings *conf.Settings) bool {
+	return !reflect.DeepEqual(oldSettings.Logging, currentSettings.Logging)
 }
 
 // logDeduplicationSettingsChanged checks if log deduplication settings have changed.
@@ -2554,14 +2661,14 @@ type ImageProviderOption struct {
 
 // GetLocales handles GET /api/v2/settings/locales
 func (c *Controller) GetLocales(ctx echo.Context) error {
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Getting available locales")
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Getting available locales")
 
 	// Return locales in the same format as v1 for compatibility
 	// This matches the client-side expectation of key-value pairs
 	locales := make(map[string]string)
 	maps.Copy(locales, conf.LocaleCodes)
 
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Retrieved locales successfully", logger.Int("count", len(locales)))
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Retrieved locales successfully", logger.Int("count", len(locales)))
 
 	return ctx.JSON(http.StatusOK, locales)
 }
@@ -2581,13 +2688,13 @@ func (c *Controller) collectImageProviders(ctx echo.Context) (providers []ImageP
 
 	cache := c.BirdImageCache
 	if cache == nil {
-		c.logAPIRequest(ctx, logger.LogLevelWarn, "BirdImageCache is nil, cannot get provider names")
+		c.LogAPIRequest(ctx, logger.LogLevelWarn, "BirdImageCache is nil, cannot get provider names")
 		return providers, count
 	}
 
 	registry := cache.GetRegistry()
 	if registry == nil {
-		c.logAPIRequest(ctx, logger.LogLevelWarn, "ImageProviderRegistry is nil, cannot get provider names")
+		c.LogAPIRequest(ctx, logger.LogLevelWarn, "ImageProviderRegistry is nil, cannot get provider names")
 		return providers, count
 	}
 
@@ -2608,34 +2715,31 @@ func (c *Controller) collectImageProviders(ctx echo.Context) (providers []ImageP
 
 // GetImageProviders handles GET /api/v2/settings/imageproviders
 func (c *Controller) GetImageProviders(ctx echo.Context) error {
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Getting available image providers")
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Getting available image providers")
 
 	providers, providerCount := c.collectImageProviders(ctx)
 
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Retrieved image providers successfully", logger.Int("count", len(providers)), logger.Int("provider_count", providerCount))
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Retrieved image providers successfully", logger.Int("count", len(providers)), logger.Int("provider_count", providerCount))
 
 	return ctx.JSON(http.StatusOK, map[string]any{"providers": providers})
 }
 
 // GetSystemID handles GET /api/v2/settings/systemid
 func (c *Controller) GetSystemID(ctx echo.Context) error {
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Getting system ID")
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Getting system ID")
 
-	// Acquire read lock to ensure settings aren't being modified during read
-	c.settingsMutex.RLock()
-	defer c.settingsMutex.RUnlock()
-
-	settings := c.Settings
+	// Read the controller's lock-free settings snapshot.
+	settings := c.ControllerSettings()
 	if settings == nil {
 		// Fallback to global settings if controller settings not set
 		settings = conf.Setting()
 		if settings == nil {
-			c.logAPIRequest(ctx, logger.LogLevelError, "Settings not initialized when trying to get system ID", logger.String("endpoint", "GetSystemID"))
+			c.LogAPIRequest(ctx, logger.LogLevelError, "Settings not initialized when trying to get system ID", logger.String("endpoint", "GetSystemID"))
 			return c.HandleError(ctx, fmt.Errorf("settings not initialized"), "Failed to get settings", http.StatusInternalServerError)
 		}
 	}
 
-	c.logAPIRequest(ctx, logger.LogLevelInfo, "Retrieved system ID successfully", logger.String("system_id", settings.SystemID))
+	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Retrieved system ID successfully", logger.String("system_id", settings.SystemID))
 
 	// Return system ID in the format expected by the frontend
 	response := map[string]string{

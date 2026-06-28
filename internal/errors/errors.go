@@ -392,6 +392,7 @@ func init() {
 	// Core components
 	RegisterComponent("birdnet", "birdnet")
 	RegisterComponent("classifier", "birdnet") // package renamed from birdnet to classifier
+	RegisterComponent("openfauna", "openfauna")
 	RegisterComponent("myaudio", "myaudio")
 	RegisterComponent("ffmpeg-manager", "ffmpeg-manager")
 	RegisterComponent("ffmpeg-stream", "ffmpeg-stream")
@@ -412,6 +413,10 @@ func init() {
 	RegisterComponent("app", "app")
 	RegisterComponent("api", "api")
 	RegisterComponent("restart", "restart")
+	RegisterComponent("imports", "imports")
+	RegisterComponent("imports/audio", "imports.audio")
+	RegisterComponent("imports/birdnetpi", "imports.birdnetpi")
+	RegisterComponent("imports/discovery", "imports.discovery")
 
 	// Analysis package components - use slash-separated paths for subpackages
 	RegisterComponent("analysis", "analysis")
@@ -426,8 +431,8 @@ func init() {
 
 	// audiocore package and subpackages (slash-separated match Go import paths)
 	RegisterComponent("audiocore", "audiocore")
-	RegisterComponent("audiocore/readfile", "audiocore.readfile")
 	RegisterComponent("audiocore/convert", "audiocore.convert")
+	RegisterComponent("audiocore/flac", "audiocore.flac")
 	RegisterComponent("audiocore/ffmpeg", "audiocore.ffmpeg")
 	RegisterComponent("audiocore/buffer", "audiocore.buffer")
 	RegisterComponent("audiocore/soundlevel", "audiocore.soundlevel")

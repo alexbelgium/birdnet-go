@@ -9,6 +9,11 @@ type Species struct {
 	ScientificName string // e.g., "Turdus merula"
 	CommonName     string // e.g., "Common Blackbird"
 	Code           string // eBird species code (may be empty for custom models)
+	// RawScientificName preserves the exact scientific name the model emitted when
+	// canonical-name normalization replaced ScientificName with the canonical form.
+	// Empty when no taxonomic alias was applied (raw equals ScientificName). Carried
+	// to the datastore's raw_scientific_name column; json:"-" keeps it out of payloads.
+	RawScientificName string `json:"-"`
 }
 
 // ParseSpeciesString extracts the scientific name, common name, and species code
@@ -66,7 +71,18 @@ func ParseSpeciesString(species string) Species {
 
 // ExtractScientificName returns the scientific name portion from a
 // "ScientificName_CommonName" label string.
+//
+// It applies the same sanitization as ParseSpeciesString, in the same order
+// (trim surrounding whitespace, then drop carriage returns), before splitting,
+// so a scientific name extracted here keys identically to one obtained via
+// ParseSpeciesString. Model label files commonly carry a trailing CR on CRLF
+// lines, and a stray leading/trailing space would otherwise hash the same
+// species to two distinct keys across the call sites that mix the two
+// extractors (for example the scientific-name dedup keys in the orchestrator's
+// probable-species merge).
 func ExtractScientificName(label string) string {
+	label = strings.TrimSpace(label)
+	label = strings.ReplaceAll(label, "\r", "")
 	if sci, _, ok := strings.Cut(label, "_"); ok {
 		return sci
 	}

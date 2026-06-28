@@ -42,6 +42,7 @@ Performance Optimizations:
   import { ReconnectingEventSource } from '$lib/utils/ReconnectingEventSource';
   import CurrentlyHearingCard from '$lib/desktop/features/dashboard/components/CurrentlyHearingCard.svelte';
   import DailySummaryCard from '$lib/desktop/features/dashboard/components/DailySummaryCard.svelte';
+  import NewSpeciesHighlightsCard from '$lib/desktop/features/dashboard/components/NewSpeciesHighlightsCard.svelte';
   import DetectionCardGrid from '$lib/desktop/features/dashboard/components/DetectionCardGrid.svelte';
   import { t } from '$lib/i18n';
   import type { DailySpeciesSummary, Detection } from '$lib/types/detection.types';
@@ -686,7 +687,6 @@ Performance Optimizations:
       // Handle specific event types
       eventSource.addEventListener('connected', (event: Event) => {
         try {
-          // eslint-disable-next-line no-undef
           const messageEvent = event as MessageEvent;
           const data = JSON.parse(messageEvent.data);
           logger.debug('Connected event received:', data);
@@ -697,7 +697,6 @@ Performance Optimizations:
 
       eventSource.addEventListener('detection', (event: Event) => {
         try {
-          // eslint-disable-next-line no-undef
           const messageEvent = event as MessageEvent;
           const data = JSON.parse(messageEvent.data);
           handleSSEDetection(data);
@@ -708,7 +707,6 @@ Performance Optimizations:
 
       eventSource.addEventListener('heartbeat', (event: Event) => {
         try {
-          // eslint-disable-next-line no-undef
           const messageEvent = event as MessageEvent;
           const data = JSON.parse(messageEvent.data);
           logger.debug('Heartbeat event received, clients:', data.clients);
@@ -719,7 +717,6 @@ Performance Optimizations:
 
       eventSource.addEventListener('pending', (event: Event) => {
         try {
-          // eslint-disable-next-line no-undef
           const messageEvent = event as MessageEvent;
           const data = JSON.parse(messageEvent.data);
           if (Array.isArray(data)) {
@@ -1567,6 +1564,13 @@ Performance Optimizations:
           onServerTimezone={tz => {
             serverTimezone = tz;
           }}
+        />
+      {:else if element.type === 'new-species-highlights'}
+        <NewSpeciesHighlightsCard
+          data={dailySummary}
+          {selectedDate}
+          {showThumbnails}
+          isToday={isViewingToday}
         />
       {:else if element.type === 'currently-hearing'}
         <CurrentlyHearingCard detections={isViewingToday ? pendingDetections : []} />
