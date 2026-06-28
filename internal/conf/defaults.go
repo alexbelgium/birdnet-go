@@ -427,7 +427,7 @@ func setDefaultConfig() {
 
 	// Notification templates
 	viper.SetDefault("notification.templates.newspecies.title", "New Species: {{.CommonName}}")
-	viper.SetDefault("notification.templates.newspecies.message", "First detection of {{.CommonName}} ({{.ScientificName}}) with {{.ConfidencePercent}}% confidence at {{.DetectionTime}}. {{.DetectionURL}}")
+	viper.SetDefault("notification.templates.newspecies.message", "infrequent detection of {{.CommonName}} with {{.ConfidencePercent}}% confidence at {{.DetectionTime}}. Last seen : {{.DaysSinceLastSeen}}. View: {{.DetectionURL}} {{.ImageURL}}")
 
 	// Alerting rules engine
 	viper.SetDefault("alerting.history_retention_days", 30)
