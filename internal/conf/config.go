@@ -368,11 +368,18 @@ type NotificationConfig struct {
 
 // NotificationTemplates contains customizable notification message templates.
 type NotificationTemplates struct {
-	NewSpecies NewSpeciesTemplate `json:"newSpecies" yaml:"newspecies"`
+	NewSpecies        NewSpeciesTemplate        `json:"newSpecies" yaml:"newspecies"`
+	InfrequentSpecies InfrequentSpeciesTemplate `json:"infrequentSpecies" yaml:"infrequentspecies"`
 }
 
 // NewSpeciesTemplate contains templates for new species detection notifications.
 type NewSpeciesTemplate struct {
+	Title   string `json:"title" yaml:"title"`
+	Message string `json:"message" yaml:"message"`
+}
+
+// InfrequentSpeciesTemplate contains templates for infrequent species detection notifications.
+type InfrequentSpeciesTemplate struct {
 	Title   string `json:"title" yaml:"title"`
 	Message string `json:"message" yaml:"message"`
 }
