@@ -131,18 +131,18 @@ func (s *ShoutrrrProvider) Send(ctx context.Context, n *Notification) error {
 	// This produces embedded photos in Telegram rather than plain-text link previews.
 	if len(s.telegramChats) > 0 {
 		if imgURL := extractPublicImageURL(n); imgURL != "" {
-			err := s.sendTelegramPhotos(ctx, n, imgURL)
-			// In mixed Telegram+other-service configs, also deliver to non-Telegram
-			// destinations so they aren't silently dropped when a photo is sent.
-			if s.nonTelegramSender != nil {
-				if shErr := s.sendWithSender(s.nonTelegramSender, n); shErr != nil && err == nil {
-					err = shErr
+			if err := s.sendTelegramPhotos(ctx, n, imgURL); err == nil {
+				// Photo delivered; also route to any non-Telegram URLs.
+				if s.nonTelegramSender != nil {
+					return s.sendWithSender(s.nonTelegramSender, n)
 				}
+				return nil
 			}
-			return err
+			// Photo delivery failed; fall through to Shoutrrr text delivery so
+			// the notification is not silently dropped.
 		}
 	}
-	// Fall back to Shoutrrr text delivery for non-Telegram URLs or when no image URL.
+	// Shoutrrr text delivery: no Telegram URLs, no image, or photo failure fallback.
 	return s.sendViaShoutrrr(n)
 }
 
