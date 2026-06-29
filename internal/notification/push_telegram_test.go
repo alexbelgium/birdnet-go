@@ -228,6 +228,31 @@ func TestExtractPublicImageURL(t *testing.T) {
 			want:     "",
 		},
 		{
+			name:     "private RFC1918 IP rejected",
+			metadata: map[string]any{"bg_image_url": "https://192.168.1.10/img.jpg"},
+			want:     "",
+		},
+		{
+			name:     "private 10.x.x.x IP rejected",
+			metadata: map[string]any{"bg_image_url": "https://10.0.0.1/img.jpg"},
+			want:     "",
+		},
+		{
+			name:     "link-local IP rejected",
+			metadata: map[string]any{"bg_image_url": "https://169.254.169.254/latest/meta-data/"},
+			want:     "",
+		},
+		{
+			name:     "IPv6 loopback rejected",
+			metadata: map[string]any{"bg_image_url": "https://[::1]/img.jpg"},
+			want:     "",
+		},
+		{
+			name:     "empty host rejected",
+			metadata: map[string]any{"bg_image_url": "https:///img.jpg"},
+			want:     "",
+		},
+		{
 			name:     "proxy URL rejected",
 			metadata: map[string]any{"bg_image_url": "http://localhost:8080/api/v2/media/species-image?scientific_name=Turdus"},
 			want:     "",
@@ -252,7 +277,7 @@ func TestExtractPublicImageURL(t *testing.T) {
 func TestShoutrrrProvider_SendPhoto_WithTelegramURL(t *testing.T) {
 	handler := newTelegramAPIHandler(t)
 	srv := httptest.NewServer(handler)
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	shoutrrrURL := "telegram://testtoken@telegram?chats=-1001234567890"
 	p := newShoutrrrProviderWithTelegramServer(srv.URL, shoutrrrURL)

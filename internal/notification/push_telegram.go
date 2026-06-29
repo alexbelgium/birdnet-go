@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -156,8 +157,13 @@ func extractPublicImageURL(n *Notification) string {
 		return ""
 	}
 	host := parsed.Hostname()
-	if host == "localhost" || strings.HasPrefix(host, "127.") {
+	if host == "" || strings.EqualFold(host, "localhost") || strings.HasPrefix(host, "127.") {
 		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			return ""
+		}
 	}
 	return imgURL
 }
@@ -165,41 +171,41 @@ func extractPublicImageURL(n *Notification) string {
 // buildTelegramCaption builds an HTML-formatted photo caption from the notification.
 // imageURL, when non-empty, is stripped from the message text since the photo is
 // being sent directly — showing the URL as text would be redundant.
+// Only the variable body text is truncated; the title and link tags are always complete.
 // Capped at telegramCaptionMaxBytes to respect Telegram API limits.
 func buildTelegramCaption(n *Notification, imageURL string) string {
-	var sb strings.Builder
+	title := "<b>" + htmlEscape(n.Title) + "</b>"
 
-	sb.WriteString("<b>")
-	sb.WriteString(htmlEscape(n.Title))
-	sb.WriteString("</b>")
-
-	if msg := strings.TrimSpace(n.Message); msg != "" {
-		if imageURL != "" {
-			msg = strings.TrimSpace(strings.ReplaceAll(msg, imageURL, ""))
-		}
-		if msg != "" {
-			sb.WriteString("\n")
-			sb.WriteString(htmlEscape(msg))
-		}
-	}
-
+	var link string
 	if detURL, ok := n.Metadata["bg_detection_url"].(string); ok && detURL != "" {
-		sb.WriteString("\n<a href=\"")
-		sb.WriteString(detURL)
-		sb.WriteString("\">View detection</a>")
+		link = "\n<a href=\"" + htmlEscape(detURL) + "\">View detection</a>"
 	}
 
-	caption := sb.String()
-	runes := []rune(caption)
-	if len([]byte(caption)) > telegramCaptionMaxBytes {
-		// "…" is 3 bytes; trim to limit-3 so the suffix keeps us within the limit.
-		limit := telegramCaptionMaxBytes - 3
-		for len([]byte(string(runes))) > limit && len(runes) > 0 {
+	msg := strings.TrimSpace(n.Message)
+	if imageURL != "" {
+		msg = strings.TrimSpace(strings.ReplaceAll(msg, imageURL, ""))
+	}
+
+	if msg == "" {
+		return title + link
+	}
+
+	escaped := htmlEscape(msg)
+	// Budget for the message body: total limit minus title, "\n" separator,
+	// link, and the 3-byte "…" ellipsis appended when truncating.
+	budget := telegramCaptionMaxBytes - len(title) - 1 - len(link) - 3
+	if budget <= 0 {
+		// Fixed parts alone fill the limit; omit the body.
+		return title + link
+	}
+	if len([]byte(escaped)) > budget {
+		runes := []rune(escaped)
+		for len([]byte(string(runes))) > budget && len(runes) > 0 {
 			runes = runes[:len(runes)-1]
 		}
-		caption = string(runes) + "…"
+		escaped = string(runes) + "…"
 	}
-	return caption
+	return title + "\n" + escaped + link
 }
 
 // htmlEscape escapes the five HTML special characters required by Telegram HTML parse mode.
