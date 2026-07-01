@@ -5,7 +5,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/notification"
@@ -317,32 +316,7 @@ func infrequentReturnFallback(commonName, scientificName string, confidence floa
 	msg := fmt.Sprintf("A %s was just detected with a confidence of %.4f (last seen %dd ago)",
 		name, confidence, daysGap)
 
-	if clipURL := infrequentReturnClipURL(event); clipURL != "" {
-		msg += "\n" + clipURL
-	}
 	return msg
-}
-
-// infrequentReturnClipURL resolves a link to the detection's audio clip from
-// the raw event metadata, reusing the same /api/v2/media/audio/:filename
-// route the frontend already links to. Returns "" when no clip is available.
-func infrequentReturnClipURL(event *AlertEvent) string {
-	rawMeta, _ := event.Properties[PropertyEventMetadata].(map[string]any)
-	if rawMeta == nil {
-		return ""
-	}
-	clipName, _ := rawMeta["clip_name"].(string)
-	if clipName == "" {
-		return ""
-	}
-
-	baseURL := "http://localhost"
-	if settings := conf.GetSettings(); settings != nil {
-		if u := settings.Security.GetBaseURL(settings.WebServer.Port); u != "" {
-			baseURL = u
-		}
-	}
-	return baseURL + "/api/v2/media/audio/" + clipName
 }
 
 func errorMessage(event *AlertEvent) (key string, params map[string]any, fallback string) {
