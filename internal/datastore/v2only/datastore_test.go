@@ -1408,6 +1408,77 @@ func TestV2OnlyDatastore_GetSpeciesReviewStats_MergesDuplicateLabels(t *testing.
 	assert.Equal(t, 1, tytoAlba[0].Rejected, "rejected count must sum across labels")
 }
 
+// TestV2OnlyDatastore_DeleteNotesByIDs verifies the bulk-delete bridge: unlocked
+// notes are deleted and their clip names returned, locked notes are skipped and
+// left in place, and not-found/malformed IDs are counted as skipped without
+// erroring. This is the batched path deleteNotesByIDs (api/v2/detections) uses
+// instead of one Get+Delete round trip per ID.
+func TestV2OnlyDatastore_DeleteNotesByIDs(t *testing.T) {
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+
+	ctx := t.Context()
+
+	saveTestNote(t, ds, "2024-01-15", "08:00:00", "Passer domesticus", 0.85) // ID 1, unlocked
+	saveTestNote(t, ds, "2024-01-15", "09:00:00", "Turdus merula", 0.90)     // ID 2, will be locked
+	saveTestNote(t, ds, "2024-01-16", "10:00:00", "Corvus corax", 0.80)      // ID 3, unlocked
+
+	require.NoError(t, ds.LockNote("2"))
+
+	deletedCount, clipNames, skipped, err := ds.DeleteNotesByIDs(ctx,
+		[]string{"1", "2", "3", "999", "not-a-number"})
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, deletedCount, "the two unlocked notes should be deleted")
+	assert.Equal(t, 3, skipped, "locked (1) + not-found (1) + malformed (1) = 3 skipped")
+	// saveTestNote gives every note the same clip path, so both deleted notes
+	// contribute a (duplicate) entry; the caller cleans up per clip name, not per ID.
+	assert.Equal(t, []string{"/clips/test.wav", "/clips/test.wav"}, clipNames)
+
+	// The locked note must survive; the two unlocked notes must be gone.
+	_, err = ds.Get("1")
+	assert.Error(t, err, "deleted note 1 should no longer be retrievable")
+	_, err = ds.Get("3")
+	assert.Error(t, err, "deleted note 3 should no longer be retrievable")
+
+	remaining, err := ds.Get("2")
+	require.NoError(t, err, "locked note 2 must survive the bulk delete")
+	assert.True(t, remaining.Locked)
+}
+
+// TestV2OnlyDatastore_DeleteNotesByIDs_EmptyIDs verifies the empty-input short circuit.
+func TestV2OnlyDatastore_DeleteNotesByIDs_EmptyIDs(t *testing.T) {
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+
+	deletedCount, clipNames, skipped, err := ds.DeleteNotesByIDs(t.Context(), []string{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, deletedCount)
+	assert.Empty(t, clipNames)
+	assert.Equal(t, 0, skipped)
+}
+
+// TestV2OnlyDatastore_DeleteNotesByIDs_AllSkipped verifies that a batch containing
+// only locked/not-found/malformed IDs deletes nothing and reports every ID as
+// skipped, without erroring.
+func TestV2OnlyDatastore_DeleteNotesByIDs_AllSkipped(t *testing.T) {
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+
+	saveTestNote(t, ds, "2024-01-15", "08:00:00", "Passer domesticus", 0.85) // ID 1
+	require.NoError(t, ds.LockNote("1"))
+
+	deletedCount, clipNames, skipped, err := ds.DeleteNotesByIDs(t.Context(), []string{"1", "999", "nope"})
+	require.NoError(t, err)
+	assert.Equal(t, 0, deletedCount)
+	assert.Empty(t, clipNames)
+	assert.Equal(t, 3, skipped)
+
+	remaining, err := ds.Get("1")
+	require.NoError(t, err)
+	assert.True(t, remaining.Locked)
+}
+
 func TestV2OnlyDatastore_CommentOperations(t *testing.T) {
 	ds, cleanup := setupTestDatastore(t)
 	defer cleanup()

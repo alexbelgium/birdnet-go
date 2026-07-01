@@ -413,6 +413,39 @@ func (r *detectionRepository) GetExistingAndLockedIDs(ctx context.Context, ids [
 	return existing, locked, nil
 }
 
+// GetClipNamesByIDs returns the clip_name for each of the given detection IDs
+// that has a non-empty one set. Chunks the ID list to stay within SQL parameter
+// limits, matching DeleteBatch and GetExistingAndLockedIDs.
+func (r *detectionRepository) GetClipNamesByIDs(ctx context.Context, ids []uint) (map[uint]string, error) {
+	result := make(map[uint]string, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	type clipRow struct {
+		ID       uint
+		ClipName *string `gorm:"column:clip_name"`
+	}
+
+	for i := 0; i < len(ids); i += batchQuerySize {
+		end := min(i+batchQuerySize, len(ids))
+		var rows []clipRow
+		if err := r.db.WithContext(ctx).Table(r.tableName()).
+			Select("id, clip_name").
+			Where("id IN ?", ids[i:end]).
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if row.ClipName != nil && *row.ClipName != "" {
+				result[row.ID] = *row.ClipName
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // ============================================================================
 // Query Methods
 // ============================================================================
@@ -1605,11 +1638,16 @@ func (r *detectionRepository) GetSpeciesReviewStats(ctx context.Context) ([]Spec
 	revTable := r.reviewsTable()
 
 	query := r.db.WithContext(ctx).Table(detTable).
+		// DetectionReview.DetectionID carries a uniqueIndex (at most one review per
+		// detection), so the LEFT JOIN below is 1:1 and cannot multiply rows per
+		// detection (same reasoning as GetSourceActivitySummaries). Plain COUNT is
+		// already fan-out-immune here; DISTINCT would add a needless dedup pass,
+		// computed three times per group.
 		Select(fmt.Sprintf(`
 			%s.scientific_name,
-			COUNT(DISTINCT %s.id) as total,
-			COUNT(DISTINCT CASE WHEN %s.verified = ? THEN %s.id END) as verified,
-			COUNT(DISTINCT CASE WHEN %s.verified = ? THEN %s.id END) as rejected
+			COUNT(%s.id) as total,
+			COUNT(CASE WHEN %s.verified = ? THEN %s.id END) as verified,
+			COUNT(CASE WHEN %s.verified = ? THEN %s.id END) as rejected
 		`, labTable, detTable, revTable, detTable, revTable, detTable),
 			string(entities.VerificationCorrect), string(entities.VerificationFalsePositive)).
 		Joins(fmt.Sprintf("JOIN %s ON %s.id = %s.label_id", labTable, labTable, detTable)).

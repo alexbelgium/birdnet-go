@@ -51,6 +51,13 @@ type DetectionRepository interface {
 	// to minimize round-trips when checking for duplicates.
 	GetExistingAndLockedIDs(ctx context.Context, ids []uint) (existing map[uint]bool, locked map[uint]bool, err error)
 
+	// GetClipNamesByIDs returns the clip_name for each of the given detection IDs
+	// that has a non-empty one set, keyed by ID. IDs with no row, or with a NULL/
+	// empty clip_name, are simply absent from the result. Lets callers resolve
+	// audio-file cleanup targets for a bulk delete in a fixed number of queries
+	// instead of one lookup per ID.
+	GetClipNamesByIDs(ctx context.Context, ids []uint) (map[uint]string, error)
+
 	// === Query Methods ===
 
 	// GetRecent retrieves the most recent detections with preloaded relations.

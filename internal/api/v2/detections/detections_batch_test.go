@@ -4,17 +4,20 @@ package detections
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 	"github.com/tphakala/birdnet-go/internal/datastore"
+	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
 )
 
 // TestBatchDeleteDetections tests the BatchDeleteDetections endpoint.
@@ -99,6 +102,94 @@ func TestBatchDeleteDetections(t *testing.T) {
 			mockDS.AssertExpectations(t)
 		})
 	}
+}
+
+// bulkDeleteMockDatastore embeds the standard mock datastore and adds the
+// optional DeleteNotesByIDs bulk-delete capability (batchDeleteNotesDatastore),
+// letting tests exercise the batched delete path in deleteNotesByIDs without
+// hand-implementing the full datastore.Interface.
+type bulkDeleteMockDatastore struct {
+	*mocks.MockInterface
+	deletedCount int
+	clipNames    []string
+	skipped      int
+	err          error
+	calledWith   []string
+}
+
+func (m *bulkDeleteMockDatastore) DeleteNotesByIDs(_ context.Context, ids []string) (int, []string, int, error) {
+	m.calledWith = ids
+	return m.deletedCount, m.clipNames, m.skipped, m.err
+}
+
+// TestDeleteNotesByIDs_UsesBulkPathWhenAvailable verifies that when the datastore
+// implements batchDeleteNotesDatastore, BatchDeleteDetections resolves entirely
+// through the single bulk call: the mock's per-ID Get/Delete are never invoked,
+// and the response reflects the bulk call's counts.
+func TestDeleteNotesByIDs_UsesBulkPathWhenAvailable(t *testing.T) {
+	e := echo.New()
+	bulkDS := &bulkDeleteMockDatastore{
+		MockInterface: mocks.NewMockInterface(t),
+		deletedCount:  2,
+		clipNames:     []string{"2025/01/15/a.wav", "2025/01/15/b.wav"},
+		skipped:       1,
+	}
+	core := apitest.NewCore(t, apitest.WithEcho(e), apitest.WithDatastore(bulkDS))
+	h := buildTestHandler(t, core, map[string]string{}, map[string]string{})
+
+	body, err := json.Marshal(BatchIDsRequest{IDs: []string{"1", "2", "3"}})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/detections/batch/delete", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, h.BatchDeleteDetections(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var result BatchResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.Equal(t, 2, result.Processed)
+	assert.Equal(t, 1, result.Skipped)
+
+	assert.ElementsMatch(t, []string{"1", "2", "3"}, bulkDS.calledWith)
+	// The per-ID fallback path must not run at all when the bulk call succeeds.
+	bulkDS.MockInterface.AssertNotCalled(t, "Get", mock.Anything)
+	bulkDS.MockInterface.AssertNotCalled(t, "Delete", mock.Anything)
+}
+
+// TestDeleteNotesByIDs_FallsBackWhenBulkPathErrors verifies that if the datastore
+// implements batchDeleteNotesDatastore but the bulk call itself fails, deletion
+// falls back to the per-ID loop rather than surfacing the bulk error.
+func TestDeleteNotesByIDs_FallsBackWhenBulkPathErrors(t *testing.T) {
+	e := echo.New()
+	underlying := mocks.NewMockInterface(t)
+	underlying.On("Get", "1").Return(datastore.Note{ID: 1, Locked: false, ClipName: ""}, nil)
+	underlying.On("Delete", "1").Return(nil)
+
+	bulkDS := &bulkDeleteMockDatastore{
+		MockInterface: underlying,
+		err:           errors.New("bulk delete unavailable"),
+	}
+	core := apitest.NewCore(t, apitest.WithEcho(e), apitest.WithDatastore(bulkDS))
+	h := buildTestHandler(t, core, map[string]string{}, map[string]string{})
+
+	body, err := json.Marshal(BatchIDsRequest{IDs: []string{"1"}})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/detections/batch/delete", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, h.BatchDeleteDetections(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var result BatchResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.Equal(t, 1, result.Processed)
+	assert.Equal(t, 0, result.Skipped)
+
+	underlying.AssertExpectations(t)
 }
 
 // TestBatchReviewDetections tests the BatchReviewDetections endpoint.

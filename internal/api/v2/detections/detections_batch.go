@@ -91,11 +91,41 @@ func (c *Handler) BatchDeleteDetections(ctx echo.Context) error {
 	})
 }
 
+// batchDeleteNotesDatastore is the optional datastore capability for deleting
+// many detections in a small, fixed number of queries instead of one Get+Delete
+// round trip per ID. Datastores that don't implement it fall back to the
+// per-ID loop in deleteNotesByIDs below.
+type batchDeleteNotesDatastore interface {
+	DeleteNotesByIDs(ctx context.Context, ids []string) (deletedCount int, clipNames []string, skipped int, err error)
+}
+
 // deleteNotesByIDs deletes the given detections, skipping locked ones, and removes
 // any associated audio/spectrogram files. It returns the number of deletions
 // performed and the number skipped (missing or locked). Callers are responsible
 // for deduplicating IDs and invalidating the detection cache.
+//
+// When the datastore supports it, deletion is resolved in a small, fixed number
+// of batched queries (see batchDeleteNotesDatastore) rather than one round trip
+// per ID; this matters most for DeleteSpeciesDetections, which is not capped at
+// maxBatchSize and can be asked to delete thousands of historical detections for
+// a single common species. Datastores that don't implement the capability, or
+// that fail the bulk call, fall back to deleting one at a time.
 func (c *Handler) deleteNotesByIDs(ids []string) (deleted, skipped int) {
+	if len(ids) == 0 {
+		return 0, 0
+	}
+
+	if bulk, ok := c.DS.(batchDeleteNotesDatastore); ok {
+		deletedCount, clipNames, skippedCount, err := bulk.DeleteNotesByIDs(context.Background(), ids)
+		if err == nil {
+			for _, clipName := range clipNames {
+				c.removeDetectionFiles(clipName)
+			}
+			return deletedCount, skippedCount
+		}
+		c.LogWarnIfEnabled("Delete: bulk delete failed, falling back to per-ID delete",
+			logger.Error(err))
+	}
 	for _, idStr := range ids {
 		note, err := c.DS.Get(idStr)
 		if err != nil {

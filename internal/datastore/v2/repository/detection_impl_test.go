@@ -378,6 +378,65 @@ func TestDeleteBatch_ChunksRemainderCorrectly(t *testing.T) {
 	assert.Equal(t, dets[len(dets)-1].ID, remaining[0].ID)
 }
 
+func TestGetClipNamesByIDs_EmptyIDs(t *testing.T) {
+	db := setupDetectionTestDB(t)
+	ctx := t.Context()
+
+	repo := &detectionRepository{db: db}
+
+	result, err := repo.GetClipNamesByIDs(ctx, []uint{})
+	require.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestGetClipNamesByIDs_MixOfSetEmptyAndMissing(t *testing.T) {
+	db := setupDetectionTestDB(t)
+	ctx := t.Context()
+
+	repo := &detectionRepository{db: db}
+
+	withClip := createTestDetection(t, db, 1000)
+	clip := "clip_1000.wav"
+	require.NoError(t, db.Table(tableDetections).Where("id = ?", withClip.ID).
+		Update("clip_name", clip).Error)
+
+	noClip := createTestDetection(t, db, 2000) // ClipName left nil
+
+	emptyClip := createTestDetection(t, db, 3000)
+	require.NoError(t, db.Table(tableDetections).Where("id = ?", emptyClip.ID).
+		Update("clip_name", "").Error)
+
+	const missingID = uint(999999)
+
+	result, err := repo.GetClipNamesByIDs(ctx, []uint{withClip.ID, noClip.ID, emptyClip.ID, missingID})
+	require.NoError(t, err)
+
+	// Only the row with a non-empty clip_name should appear; nil, empty-string,
+	// and not-found IDs are simply absent rather than mapping to "".
+	assert.Equal(t, map[uint]string{withClip.ID: clip}, result)
+}
+
+func TestGetClipNamesByIDs_ChunksLargeBatch(t *testing.T) {
+	db := setupDetectionTestDB(t)
+	ctx := t.Context()
+
+	repo := &detectionRepository{db: db}
+
+	dets, ids := createBulkDetections(t, db, batchQuerySize+1)
+	for _, d := range dets {
+		clip := fmt.Sprintf("clip_%d.wav", d.ID)
+		require.NoError(t, db.Table(tableDetections).Where("id = ?", d.ID).
+			Update("clip_name", clip).Error)
+	}
+
+	result, err := repo.GetClipNamesByIDs(ctx, ids)
+	require.NoError(t, err)
+	require.Len(t, result, len(ids), "every ID across both chunks must resolve a clip name")
+	for _, d := range dets {
+		assert.Equal(t, fmt.Sprintf("clip_%d.wav", d.ID), result[d.ID])
+	}
+}
+
 // ============================================================================
 // Batch Hourly Occurrence Tests
 // ============================================================================

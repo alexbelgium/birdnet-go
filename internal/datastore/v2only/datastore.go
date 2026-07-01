@@ -2638,6 +2638,68 @@ func (ds *Datastore) GetSpeciesNoteIDs(ctx context.Context, scientificName strin
 	return result, nil
 }
 
+// DeleteNotesByIDs deletes the given (unlocked) detections in bulk. It returns
+// the number of detections actually deleted, the clip names of those deleted
+// rows that had one set (for the caller to clean up audio/spectrogram files),
+// and the number of IDs skipped (malformed, not found, or locked).
+//
+// Unlike deleting one-by-one via Get+Delete, existence/lock state and clip
+// names are each resolved in a small, fixed number of batched queries
+// regardless of how many IDs are given, so this scales to a species-wide
+// delete across thousands of historical detections without one round trip
+// per detection.
+func (ds *Datastore) DeleteNotesByIDs(ctx context.Context, ids []string) (deletedCount int, clipNames []string, skipped int, err error) {
+	if len(ids) == 0 {
+		return 0, nil, 0, nil
+	}
+
+	noteIDs := make([]uint, 0, len(ids))
+	for _, idStr := range ids {
+		id, perr := parseID(idStr)
+		if perr != nil {
+			skipped++
+			continue
+		}
+		noteIDs = append(noteIDs, id)
+	}
+	if len(noteIDs) == 0 {
+		return 0, nil, skipped, nil
+	}
+
+	existing, locked, err := ds.detection.GetExistingAndLockedIDs(ctx, noteIDs)
+	if err != nil {
+		return 0, nil, 0, err
+	}
+
+	toDelete := make([]uint, 0, len(noteIDs))
+	for _, id := range noteIDs {
+		if !existing[id] || locked[id] {
+			skipped++
+			continue
+		}
+		toDelete = append(toDelete, id)
+	}
+	if len(toDelete) == 0 {
+		return 0, nil, skipped, nil
+	}
+
+	clipNameByID, err := ds.detection.GetClipNamesByIDs(ctx, toDelete)
+	if err != nil {
+		return 0, nil, 0, err
+	}
+
+	if err := ds.detection.DeleteBatch(ctx, toDelete); err != nil {
+		return 0, nil, 0, err
+	}
+
+	clipNames = make([]string, 0, len(clipNameByID))
+	for _, name := range clipNameByID {
+		clipNames = append(clipNames, name)
+	}
+
+	return len(toDelete), clipNames, skipped, nil
+}
+
 // GetHourlyAnalyticsData retrieves hourly analytics data for a specific date and species.
 func (ds *Datastore) GetHourlyAnalyticsData(ctx context.Context, date, species string) ([]datastore.HourlyAnalyticsData, error) {
 	start, end, err := ds.parseDateRange(date, date)
