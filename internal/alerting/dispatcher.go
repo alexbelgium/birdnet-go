@@ -5,10 +5,17 @@ import (
 	"math"
 	"strings"
 
+	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/notification"
 )
+
+// infrequentSpeciesThresholdDays mirrors the built-in "Infrequent species
+// return" rule condition (see defaults.go) and the frontend's
+// INFREQUENT_THRESHOLD_DAYS constant. Used to give push notifications for
+// long-absence returns a distinct title and message format.
+const infrequentSpeciesThresholdDays = 14
 
 // NotificationCreator abstracts the notification service for testability.
 // The notifType parameter allows the dispatcher to specify the correct
@@ -151,6 +158,9 @@ func defaultTitleKey(rule *entities.AlertRule) (key string, params map[string]an
 // Falls back to a default title if the template is empty.
 func renderTitle(tmpl string, rule *entities.AlertRule, event *AlertEvent) string {
 	if tmpl == "" {
+		if _, isReturn := infrequentReturnGapDays(event); isReturn {
+			return "BirdNET : infrequent species detected"
+		}
 		return rule.Name
 	}
 	return renderTemplate(tmpl, rule, event)
@@ -269,7 +279,70 @@ func detectionMessage(event *AlertEvent) (key string, params map[string]any, fal
 		"confidence":   confStr,
 	}
 	fallback = fmt.Sprintf("%s detected with %s%% confidence", species, confStr)
+
+	// Bell notifications always render from MsgAlertDetectionOccurred + params
+	// via the frontend's own i18n strings, so only the push/English fallback
+	// text changes here.
+	if daysGap, isReturn := infrequentReturnGapDays(event); isReturn {
+		scientific, _ := event.Properties[PropertyScientificName].(string)
+		fallback = infrequentReturnFallback(species, scientific, confFloat, daysGap, event)
+	}
+
 	return MsgAlertDetectionOccurred, params, fallback
+}
+
+// infrequentReturnGapDays reports the absence gap (in days) carried on a
+// detection event's properties, and whether it exceeds the threshold that
+// marks the detection as an "infrequent species" return.
+func infrequentReturnGapDays(event *AlertEvent) (days int, isReturn bool) {
+	if event == nil {
+		return 0, false
+	}
+	val, ok := event.Properties[PropertyDaysSinceLastSeen].(int)
+	if !ok || val <= infrequentSpeciesThresholdDays {
+		return 0, false
+	}
+	return val, true
+}
+
+// infrequentReturnFallback builds the English push-notification fallback text
+// for a species returning after a long absence, including a link to the audio
+// clip when one is available.
+func infrequentReturnFallback(commonName, scientificName string, confidence float64, daysGap int, event *AlertEvent) string {
+	name := commonName
+	if scientificName != "" {
+		name = fmt.Sprintf("%s (%s)", commonName, scientificName)
+	}
+
+	msg := fmt.Sprintf("A %s was just detected with a confidence of %.4f (last seen %dd ago)",
+		name, confidence, daysGap)
+
+	if clipURL := infrequentReturnClipURL(event); clipURL != "" {
+		msg += "\n" + clipURL
+	}
+	return msg
+}
+
+// infrequentReturnClipURL resolves a link to the detection's audio clip from
+// the raw event metadata, reusing the same /api/v2/media/audio/:filename
+// route the frontend already links to. Returns "" when no clip is available.
+func infrequentReturnClipURL(event *AlertEvent) string {
+	rawMeta, _ := event.Properties[PropertyEventMetadata].(map[string]any)
+	if rawMeta == nil {
+		return ""
+	}
+	clipName, _ := rawMeta["clip_name"].(string)
+	if clipName == "" {
+		return ""
+	}
+
+	baseURL := "http://localhost"
+	if settings := conf.GetSettings(); settings != nil {
+		if u := settings.Security.GetBaseURL(settings.WebServer.Port); u != "" {
+			baseURL = u
+		}
+	}
+	return baseURL + "/api/v2/media/audio/" + clipName
 }
 
 func errorMessage(event *AlertEvent) (key string, params map[string]any, fallback string) {

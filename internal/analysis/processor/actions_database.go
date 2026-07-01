@@ -263,6 +263,7 @@ func (a *DatabaseAction) populateEventMetadata(detectionEvent events.DetectionEv
 	metadata["latitude"] = a.Result.Latitude
 	metadata["longitude"] = a.Result.Longitude
 	metadata["begin_time"] = a.Result.BeginTime
+	metadata["clip_name"] = a.Result.ClipName
 	if hasNoveltyStatus(novelty) {
 		if novelty.DaysSinceLastSeen >= 0 {
 			metadata[events.DetectionMetadataDaysSinceLastSeen] = novelty.DaysSinceLastSeen
