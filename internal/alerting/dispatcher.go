@@ -305,8 +305,7 @@ func infrequentReturnGapDays(event *AlertEvent) (days int, isReturn bool) {
 }
 
 // infrequentReturnFallback builds the English push-notification fallback text
-// for a species returning after a long absence, including a link to the audio
-// clip when one is available.
+// for a species returning after a long absence.
 func infrequentReturnFallback(commonName, scientificName string, confidence float64, daysGap int, event *AlertEvent) string {
 	name := commonName
 	if scientificName != "" {
