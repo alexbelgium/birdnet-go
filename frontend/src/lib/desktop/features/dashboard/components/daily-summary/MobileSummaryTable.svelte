@@ -3,8 +3,10 @@
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
+  import { resolveNoveltyCategory, noveltyCategoryColorVar } from '../../utils/noveltyCategory';
   import { buildHourlyDetectionUrl } from '$lib/utils/detectionUrls';
   import { getLocalDateString } from '$lib/utils/date';
+  import { Star } from '@lucide/svelte';
   import HourlyMiniChart from './HourlyMiniChart.svelte';
   import MobileSpeciesExpandedCard from './MobileSpeciesExpandedCard.svelte';
 
@@ -63,6 +65,12 @@
   // Truncate chart at current hour when viewing today (avoids empty future bars).
   const isToday = $derived(selectedDate === getLocalDateString());
   const currentHour = $derived(isToday ? new Date().getHours() : 23);
+
+  // Chart column tracks the chart's actual rendered width (must match HourlyMiniChart's
+  // BAR_WIDTH + gap = 4px/bar) so leftover space goes to the species name instead of
+  // sitting empty next to a shorter-than-24h chart.
+  const CHART_BAR_STRIDE = 4;
+  const chartColWidthPx = $derived((currentHour + 1) * CHART_BAR_STRIDE);
 </script>
 
 <!--
@@ -71,7 +79,11 @@
     - Single tap anywhere on a row → expand into species card (300 ms guard)
     - Double-tap anywhere on a row → navigate to daily detections
 -->
-<div class="mobile-summary-table w-full" aria-label="Species detected on {selectedDate}">
+<div
+  class="mobile-summary-table w-full"
+  aria-label="Species detected on {selectedDate}"
+  style:--col-chart-w="{chartColWidthPx}px"
+>
   <!-- Header -->
   <div class="mobile-summary-header" aria-hidden="true">
     <div class="col-header-species">Species</div>
@@ -84,6 +96,7 @@
     {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
     {@const pct = Math.round(Math.max(0, Math.min(1, item.max_confidence ?? 0)) * 100)}
     {@const isExpanded = expandedSpecies === item.scientific_name}
+    {@const novelty = resolveNoveltyCategory(item)}
 
     {#if isExpanded}
       <!-- Expanded: full species card replaces the compact row -->
@@ -161,6 +174,31 @@
             <span class="col-name text-sm font-medium truncate leading-tight">
               {displayName}
             </span>
+            {#if novelty === 'lifetime'}
+              <span
+                class="col-novelty-badge"
+                style:color={noveltyCategoryColorVar('lifetime')}
+                title={`New species (first seen ${item.days_since_first_seen ?? 0} day${(item.days_since_first_seen ?? 0) === 1 ? '' : 's'} ago)`}
+              >
+                <Star class="size-3 fill-current" />
+              </span>
+            {:else if novelty === 'year'}
+              <span
+                class="col-novelty-badge"
+                style:color={noveltyCategoryColorVar('year')}
+                title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
+              >
+                📅
+              </span>
+            {:else if novelty === 'season'}
+              <span
+                class="col-novelty-badge"
+                style:color={noveltyCategoryColorVar('season')}
+                title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
+              >
+                🌿
+              </span>
+            {/if}
           </div>
           <span class="col-scientific-name">{item.scientific_name}</span>
         </div>
@@ -203,20 +241,18 @@
     --col-conf-w: 2.5rem;
     --col-count-w: 2.25rem;
 
-    /* chart min keeps the 96 px SVG intact; name:chart fr ratio = φ (1.618) */
-    --col-chart-min: 6rem;
+    /* --col-chart-w is bound inline to the chart's actual rendered width (px), so the
+       column never reserves more space than the chart needs — the name column gets
+       whatever is left over. */
   }
 
   /* ─── Portrait default: 4-column grid, no thumbnail ─── */
 
   .mobile-summary-header {
     display: grid;
-    grid-template-columns: 1.618fr var(--col-conf-w) var(--col-count-w) minmax(
-        var(--col-chart-min),
-        1fr
-      );
+    grid-template-columns: 1fr var(--col-conf-w) var(--col-count-w) var(--col-chart-w);
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.125rem;
     padding: 0 0.125rem 0.375rem;
     margin-bottom: 0.125rem;
     border-bottom: 1px solid var(--color-base-200);
@@ -234,12 +270,9 @@
 
   .mobile-summary-row {
     display: grid;
-    grid-template-columns: 1.618fr var(--col-conf-w) var(--col-count-w) minmax(
-        var(--col-chart-min),
-        1fr
-      );
+    grid-template-columns: 1fr var(--col-conf-w) var(--col-count-w) var(--col-chart-w);
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.125rem;
     padding: 0 0.125rem;
     min-height: 1.25rem;
     border-radius: 0.375rem;
@@ -309,6 +342,15 @@
     color: var(--color-base-content);
   }
 
+  .col-novelty-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 0.625rem;
+    line-height: 1;
+  }
+
   .col-scientific-name {
     display: none;
     font-size: 0.625rem;
@@ -347,9 +389,8 @@
   /* ─── Landscape: restore thumbnail column ─── */
   @media (orientation: landscape) {
     .mobile-summary-header {
-      grid-template-columns: var(--thumb-w) 1.618fr var(--col-conf-w) var(--col-count-w) minmax(
-          var(--col-chart-min),
-          1fr
+      grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
+          --col-chart-w
         );
     }
 
@@ -358,9 +399,8 @@
     }
 
     .mobile-summary-row {
-      grid-template-columns: var(--thumb-w) 1.618fr var(--col-conf-w) var(--col-count-w) minmax(
-          var(--col-chart-min),
-          1fr
+      grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
+          --col-chart-w
         );
     }
 
