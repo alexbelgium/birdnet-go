@@ -44,11 +44,13 @@
   const lastSeen = $derived(formatLastSeen(item.days_since_last_seen));
   const detectionsUrl = $derived(buildSpeciesDetectionUrl(item.scientific_name, selectedDate));
 
-  function getDayOfYear(dateStr: string): number {
-    const d = new Date(dateStr + 'T00:00:00');
-    const start = new Date(d.getFullYear(), 0, 1);
-    return Math.round((d.getTime() - start.getTime()) / 86_400_000) + 1;
-  }
+function getDayOfYear(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) return 0;
+  const dateUtc = Date.UTC(y, m - 1, d);
+  const startUtc = Date.UTC(y, 0, 1);
+  return Math.floor((dateUtc - startUtc) / 86_400_000) + 1;
+}
 
   function getFrequencyLabel(daysThisYear: number | undefined, date: string): string | null {
     if (!daysThisYear) return null;
