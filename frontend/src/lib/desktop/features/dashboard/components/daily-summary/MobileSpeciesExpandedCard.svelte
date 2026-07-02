@@ -2,7 +2,7 @@
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
-  import { X, ExternalLink, TrendingUp, TrendingDown } from '@lucide/svelte';
+  import { X, ExternalLink, TrendingUp, TrendingDown, Sunrise, Sunset } from '@lucide/svelte';
   import HourlyMiniChart from './HourlyMiniChart.svelte';
   import { buildEbirdUrl, isValidEbirdCode } from '../../utils/dailySummaryStats';
   import { getLocale } from '$lib/i18n';
@@ -37,20 +37,43 @@
 
   function formatLastSeen(days: number | undefined): string {
     if (days === undefined || days === null) return '';
-    if (days === 0) return 'seen today';
+    // "seen today" is superseded by the precise latest-detection time below.
+    if (days === 0) return '';
     return `last seen ${days}d`;
   }
 
   const lastSeen = $derived(formatLastSeen(item.days_since_last_seen));
+
+  // Time of the day's most recent detection, "HH:MM" (latest_heard is "HH:MM:SS").
+  const latestTime = $derived(item.latest_heard ? item.latest_heard.slice(0, 5) : '');
   const detectionsUrl = $derived(buildSpeciesDetectionUrl(item.scientific_name, selectedDate));
 
-function getDayOfYear(dateStr: string): number {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  if (!y || !m || !d) return 0;
-  const dateUtc = Date.UTC(y, m - 1, d);
-  const startUtc = Date.UTC(y, 0, 1);
-  return Math.floor((dateUtc - startUtc) / 86_400_000) + 1;
-}
+  // Reduced-motion preference: use instant instead of smooth scrolling.
+  const prefersReducedMotion =
+    typeof window !== 'undefined'
+      ? (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false)
+      : false;
+
+  // Scroll the card fully into view when it expands near the bottom of the
+  // screen; block:'nearest' is a no-op when it is already fully visible.
+  let cardEl = $state<HTMLDivElement>();
+
+  $effect(() => {
+    const el = cardEl;
+    if (!el) return;
+    const raf = window.requestAnimationFrame(() => {
+      el.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion ? 'auto' : 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(raf);
+  });
+
+  function getDayOfYear(dateStr: string): number {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (!y || !m || !d) return 0;
+    const dateUtc = Date.UTC(y, m - 1, d);
+    const startUtc = Date.UTC(y, 0, 1);
+    return Math.floor((dateUtc - startUtc) / 86_400_000) + 1;
+  }
 
   function getFrequencyLabel(daysThisYear: number | undefined, date: string): string | null {
     if (!daysThisYear) return null;
@@ -133,6 +156,7 @@ function getDayOfYear(dateStr: string): number {
 -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+  bind:this={cardEl}
   class="species-card"
   aria-label="{displayName} species detail"
   onclick={(e: MouseEvent) => e.stopPropagation()}
@@ -201,6 +225,10 @@ function getDayOfYear(dateStr: string): number {
         {#if lastSeen}
           <span class="card-meta-sep">-</span>
           <span class="card-meta-plain">{lastSeen}</span>
+        {/if}
+        {#if latestTime}
+          <span class="card-meta-sep">-</span>
+          <span class="card-meta-plain">latest {latestTime}</span>
         {/if}
       </div>
 
@@ -271,6 +299,22 @@ function getDayOfYear(dateStr: string): number {
             {formatDetectionCount(count)}
           </span>
         {/each}
+      </div>
+    {/if}
+
+    <!-- Sunrise/sunset markers just above the hour axis -->
+    {#if (sunriseHour !== null && sunriseHour <= maxHour) || (sunsetHour !== null && sunsetHour <= maxHour)}
+      <div class="card-sun-marks" aria-hidden="true">
+        {#if sunriseHour !== null && sunriseHour <= maxHour}
+          <span class="card-sun-mark sun-rise" style:left={tickPct(sunriseHour)}>
+            <Sunrise class="size-3" />
+          </span>
+        {/if}
+        {#if sunsetHour !== null && sunsetHour <= maxHour}
+          <span class="card-sun-mark sun-set" style:left={tickPct(sunsetHour)}>
+            <Sunset class="size-3" />
+          </span>
+        {/if}
       </div>
     {/if}
 
@@ -512,7 +556,9 @@ function getDayOfYear(dateStr: string): number {
   .card-chart-section {
     position: relative;
     cursor: pointer;
-    padding: 0.375rem 0.5rem 1.375rem;
+
+    /* Bottom padding hosts the sun-marks strip + hour axis */
+    padding: 0.375rem 0.5rem 2.125rem;
     border-top: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
   }
 
@@ -547,6 +593,30 @@ function getDayOfYear(dateStr: string): number {
     font-variant-numeric: tabular-nums;
     color: color-mix(in srgb, var(--color-base-content) 70%, transparent);
     white-space: nowrap;
+  }
+
+  /* Sunrise/sunset icon strip between the chart and the hour axis */
+  .card-sun-marks {
+    position: absolute;
+    bottom: 1.1875rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    height: 0.75rem;
+    pointer-events: none;
+  }
+
+  .card-sun-mark {
+    position: absolute;
+    transform: translateX(-50%);
+    line-height: 0;
+  }
+
+  .card-sun-mark.sun-rise {
+    color: var(--color-warning);
+  }
+
+  .card-sun-mark.sun-set {
+    color: var(--color-info);
   }
 
   .card-axis {

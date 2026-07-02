@@ -71,6 +71,12 @@
   // sitting empty next to a shorter-than-24h chart.
   const CHART_BAR_STRIDE = 4;
   const chartColWidthPx = $derived((currentHour + 1) * CHART_BAR_STRIDE);
+
+  // Gates the SSE row-flash animation for users who prefer reduced motion.
+  const prefersReducedMotion =
+    typeof window !== 'undefined'
+      ? (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false)
+      : false;
 </script>
 
 <!--
@@ -117,6 +123,9 @@
       <!-- Compact row — single tap → expand; double tap → daily log -->
       <div
         class="mobile-summary-row"
+        class:row-updated={((item.hourlyUpdated?.length ?? 0) > 0 ||
+          item.countIncreased === true) &&
+          !prefersReducedMotion}
         role="button"
         tabindex="0"
         aria-label="{displayName}: {pct}% confidence, {formatDetectionCount(
@@ -237,7 +246,8 @@
 
 <style>
   .mobile-summary-table {
-    --thumb-w: 2rem;
+    --thumb-w: 1.5rem;
+    --thumb-h: 1.25rem;
     --col-conf-w: 2.5rem;
     --col-count-w: 2.25rem;
 
@@ -246,11 +256,13 @@
        whatever is left over. */
   }
 
-  /* ─── Portrait default: 4-column grid, no thumbnail ─── */
+  /* ─── 5-column grid; portrait uses a compact thumbnail, landscape a larger one ─── */
 
   .mobile-summary-header {
     display: grid;
-    grid-template-columns: 1fr var(--col-conf-w) var(--col-count-w) var(--col-chart-w);
+    grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
+        --col-chart-w
+      );
     align-items: center;
     gap: 0.125rem;
     padding: 0 0.125rem 0.375rem;
@@ -260,6 +272,16 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: color-mix(in srgb, var(--color-base-content) 50%, transparent);
+
+    /* Pinned while the (potentially long) species list scrolls */
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--color-base-100);
+  }
+
+  .col-header-species {
+    grid-column: 1 / 3;
   }
 
   .col-header-conf,
@@ -270,7 +292,9 @@
 
   .mobile-summary-row {
     display: grid;
-    grid-template-columns: 1fr var(--col-conf-w) var(--col-count-w) var(--col-chart-w);
+    grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
+        --col-chart-w
+      );
     align-items: center;
     gap: 0.125rem;
     padding: 0 0.125rem;
@@ -284,19 +308,36 @@
     width: 100%;
   }
 
+  /* Brief pulse when SSE delivers a new detection for this species.
+     DashboardPage clears hourlyUpdated/countIncreased after ~2.2 s, which
+     removes the class again. */
+  .mobile-summary-row.row-updated {
+    animation: row-flash 2s ease-out;
+  }
+
+  @keyframes row-flash {
+    0% {
+      background-color: color-mix(in srgb, var(--color-primary) 15%, transparent);
+    }
+
+    100% {
+      background-color: transparent;
+    }
+  }
+
   .mobile-summary-row:focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
   }
 
-  /* Thumbnail column hidden by default (portrait) */
   .mobile-thumb-col {
-    display: none;
+    display: flex;
+    align-items: center;
   }
 
   .mobile-thumb {
     width: var(--thumb-w);
-    height: 1.5rem;
+    height: var(--thumb-h);
     border-radius: 0.25rem;
     object-fit: cover;
     display: block;
@@ -308,7 +349,7 @@
     align-items: center;
     justify-content: center;
     width: var(--thumb-w);
-    height: 1.5rem;
+    height: var(--thumb-h);
     border-radius: 0.25rem;
     font-size: 0.5rem;
     font-weight: 700;
@@ -386,27 +427,11 @@
     padding: 0.625rem 0 0.125rem;
   }
 
-  /* ─── Landscape: restore thumbnail column ─── */
+  /* ─── Landscape: larger thumbnail + scientific name ─── */
   @media (orientation: landscape) {
-    .mobile-summary-header {
-      grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
-          --col-chart-w
-        );
-    }
-
-    .col-header-species {
-      grid-column: 1 / 3;
-    }
-
-    .mobile-summary-row {
-      grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
-          --col-chart-w
-        );
-    }
-
-    .mobile-thumb-col {
-      display: flex;
-      align-items: center;
+    .mobile-summary-table {
+      --thumb-w: 2rem;
+      --thumb-h: 1.5rem;
     }
 
     .col-scientific-name {

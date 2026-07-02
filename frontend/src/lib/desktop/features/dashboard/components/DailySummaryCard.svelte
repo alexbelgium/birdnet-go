@@ -752,6 +752,35 @@ Responsive Breakpoints:
     return () => mq.removeEventListener('change', handleChange);
   });
 
+  // Swipe navigation (mobile only): a horizontal swipe on the species list
+  // changes the selected day. The 2:1 horizontal-dominance test keeps normal
+  // vertical scrolling from ever triggering navigation; listeners are passive
+  // so native scroll is never blocked.
+  const SWIPE_MIN_DX_PX = 60;
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+
+  function handleSwipeStart(e: TouchEvent) {
+    const touch = e.touches.item(0);
+    if (!touch) return;
+    swipeStartX = touch.clientX;
+    swipeStartY = touch.clientY;
+  }
+
+  function handleSwipeEnd(e: TouchEvent) {
+    const touch = e.changedTouches.item(0);
+    if (!touch) return;
+    const dx = touch.clientX - swipeStartX;
+    const dy = touch.clientY - swipeStartY;
+    if (Math.abs(dx) < SWIPE_MIN_DX_PX || Math.abs(dx) <= 2 * Math.abs(dy)) return;
+    if (dx > 0) {
+      onPreviousDay();
+    } else if (!isToday) {
+      // Same guard as the next-day chevron: no navigating past today.
+      onNextDay();
+    }
+  }
+
   // Taxon filter (Birds / Bats / Others) selected via the header dropdown.
   // Classification logic lives in utils/taxonFilter.ts; the card only stores the
   // selection and applies it to the row list and the overview counts.
@@ -924,15 +953,20 @@ Responsive Breakpoints:
         <!-- Mobile compact table (<768px): render ONLY this so phones never
              construct the desktop heatmap DOM (24 hourly + 12 bi-hourly + 6
              six-hourly cells per species row). CSS-only hiding still builds
-             that DOM, which was a major first-paint cost on mobile. -->
-        <MobileSummaryTable
-          data={sortedUnlimited}
-          {sunriseHour}
-          {sunsetHour}
-          getSpeciesUrl={urlBuilders.species}
-          {showThumbnails}
-          {selectedDate}
-        />
+             that DOM, which was a major first-paint cost on mobile.
+             Horizontal swipe on the list navigates between days; the wrapper
+             only observes touches (passive), it is not itself a control. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div ontouchstart={handleSwipeStart} ontouchend={handleSwipeEnd}>
+          <MobileSummaryTable
+            data={sortedUnlimited}
+            {sunriseHour}
+            {sunsetHour}
+            getSpeciesUrl={urlBuilders.species}
+            {showThumbnails}
+            {selectedDate}
+          />
+        </div>
       {:else}
         <!-- Desktop/tablet heatmap (≥768px) -->
         <div class="overflow-x-auto overflow-y-visible">
