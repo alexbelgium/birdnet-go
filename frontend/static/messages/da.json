@@ -650,7 +650,14 @@
         "error": "Kunne ikke indlæse data",
         "complete": "Data indlæst"
       },
-      "noSpecies": "Ingen arter registreret på denne dato"
+      "noSpecies": "Ingen arter registreret på denne dato",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      }
     },
     "recentDetections": {
       "title": "Seneste registreringer",

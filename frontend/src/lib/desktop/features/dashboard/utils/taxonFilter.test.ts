@@ -65,6 +65,28 @@ describe('classifyTaxon', () => {
     expect(classifyTaxon({ scientific_name: 'Sciurus carolinensis' })).toBe('other'); // Gray squirrel
   });
 
+  it('classifies BirdNET insect labels as other', () => {
+    // Insects in the BirdNET label set (crickets, katydids, bees) must not be
+    // misclassified as birds.
+    expect(classifyTaxon({ scientific_name: 'Apis mellifera' })).toBe('other'); // Honey bee
+    expect(classifyTaxon({ scientific_name: 'Gryllus assimilis' })).toBe('other'); // Field cricket
+    expect(classifyTaxon({ scientific_name: 'Oecanthus celerinictus' })).toBe('other'); // Tree cricket
+    expect(classifyTaxon({ scientific_name: 'Conocephalus fasciatus' })).toBe('other'); // Meadow katydid
+  });
+
+  it('classifies BirdNET amphibian labels as other', () => {
+    // Frogs and toads in the BirdNET label set must not be misclassified as birds.
+    expect(classifyTaxon({ scientific_name: 'Anaxyrus americanus' })).toBe('other'); // American toad
+    expect(classifyTaxon({ scientific_name: 'Dryophytes cinereus' })).toBe('other'); // Green treefrog
+    expect(classifyTaxon({ scientific_name: 'Pseudacris crucifer' })).toBe('other'); // Spring peeper
+    expect(classifyTaxon({ scientific_name: 'Lithobates catesbeianus' })).toBe('other'); // Bullfrog
+  });
+
+  it('classifies BirdNET mammal labels as other', () => {
+    expect(classifyTaxon({ scientific_name: 'Alouatta pigra' })).toBe('other'); // Howler monkey
+    expect(classifyTaxon({ scientific_name: 'Odocoileus virginianus' })).toBe('other'); // White-tailed deer
+  });
+
   it('falls back to other for empty or single-token names', () => {
     expect(classifyTaxon({ scientific_name: '' })).toBe('other');
     expect(classifyTaxon({ scientific_name: '   ' })).toBe('other');

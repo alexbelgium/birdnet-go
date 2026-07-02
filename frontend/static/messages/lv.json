@@ -650,7 +650,14 @@
         "error": "Neizdevās ielādēt datus",
         "complete": "Dati veiksmīgi ielādēti"
       },
-      "noSpecies": "Šajā datumā nav atklāta neviena suga"
+      "noSpecies": "Šajā datumā nav atklāta neviena suga",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      }
     },
     "recentDetections": {
       "title": "Nesenās atklāšanas",

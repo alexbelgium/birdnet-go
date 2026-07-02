@@ -650,7 +650,14 @@
         "error": "Failed to load data",
         "complete": "Data loaded successfully"
       },
-      "noSpecies": "No species detected on this date"
+      "noSpecies": "No species detected on this date",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      }
     },
     "recentDetections": {
       "title": "Recent Detections",

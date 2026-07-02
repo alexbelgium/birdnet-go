@@ -650,7 +650,14 @@
         "error": "Kunde inte ladda data",
         "complete": "Data har laddats"
       },
-      "noSpecies": "Inga arter detekterade detta datum"
+      "noSpecies": "Inga arter detekterade detta datum",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      }
     },
     "recentDetections": {
       "title": "Senaste detekteringar",

@@ -650,7 +650,14 @@
         "error": "Nepodarilo sa načítať dáta",
         "complete": "Dáta boli úspešne načítané"
       },
-      "noSpecies": "V tento deň neboli zistené žiadne druhy"
+      "noSpecies": "V tento deň neboli zistené žiadne druhy",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      }
     },
     "recentDetections": {
       "title": "Nedávne detekcie",

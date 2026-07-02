@@ -11,6 +11,7 @@
 <script lang="ts">
   import type { Component } from 'svelte';
   import { cn } from '$lib/utils/cn';
+  import { t } from '$lib/i18n';
   import { dropdown } from '$lib/utils/transitions';
   import { Bird, Check, ChevronDown, ListFilter, Shapes } from '@lucide/svelte';
   import BatIcon from '$lib/components/icons/BatIcon.svelte';
@@ -29,21 +30,19 @@
 
   interface Option {
     value: TaxonFilter;
-    label: string;
     icon: Component;
   }
 
-  // Hardcoded English labels keep this patch self-contained (no locale-file edits),
-  // matching the other daily-summary additions.
   const OPTIONS: readonly Option[] = [
-    { value: 'all', label: 'All', icon: ListFilter },
-    { value: 'bird', label: 'Birds', icon: Bird },
-    { value: 'bat', label: 'Bats', icon: BatIcon },
-    { value: 'other', label: 'Others', icon: Shapes },
+    { value: 'all', icon: ListFilter },
+    { value: 'bird', icon: Bird },
+    { value: 'bat', icon: BatIcon },
+    { value: 'other', icon: Shapes },
   ];
 
   const current = $derived(OPTIONS.find(o => o.value === value) ?? OPTIONS[0]);
   const CurrentIcon = $derived(current.icon);
+  const currentLabel = $derived(t(`dashboard.dailySummary.taxonFilter.${current.value}`));
 
   let isOpen = $state(false);
   let containerElement: HTMLDivElement;
@@ -83,10 +82,10 @@
     class="btn btn-sm btn-ghost gap-1.5"
     aria-haspopup="menu"
     aria-expanded={isOpen}
-    aria-label="Filter species by group (currently {current.label})"
+    aria-label={t('dashboard.dailySummary.taxonFilter.ariaLabel', { current: currentLabel })}
   >
     <CurrentIcon class="size-4" />
-    <span class="hidden sm:inline">{current.label}</span>
+    <span class="hidden sm:inline">{currentLabel}</span>
     <ChevronDown class="size-3.5 opacity-60" />
   </button>
 
@@ -100,6 +99,7 @@
       {#each OPTIONS as option (option.value)}
         {@const OptionIcon = option.icon}
         {@const selected = option.value === value}
+        {@const optionLabel = t(`dashboard.dailySummary.taxonFilter.${option.value}`)}
         <li>
           <button
             type="button"
@@ -112,7 +112,7 @@
             aria-checked={selected}
           >
             <OptionIcon class="size-4 shrink-0" />
-            <span class="grow">{option.label}</span>
+            <span class="grow">{optionLabel}</span>
             <span class="tabular-nums text-xs text-[var(--color-base-content)]/50">
               {counts[option.value]}
             </span>

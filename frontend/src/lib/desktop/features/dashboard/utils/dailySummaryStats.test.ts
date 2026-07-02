@@ -3,10 +3,10 @@ import type { DailySpeciesSummary } from '$lib/types/detection.types';
 import {
   EBIRD_BASE_URL,
   EBIRD_DEFAULT_LANG,
-  EBIRD_REGION,
   buildEbirdUrl,
   computeConfidenceColor,
   computeOverviewStats,
+  formatDetectionCount,
   isValidEbirdCode,
 } from './dailySummaryStats';
 
@@ -18,8 +18,13 @@ function hueOf(hsl: string): number {
 }
 
 describe('isValidEbirdCode', () => {
-  it('returns true for valid lowercase code', () => {
+  it('returns true for valid lowercase alphabetic code', () => {
     expect(isValidEbirdCode('blujay')).toBe(true);
+  });
+
+  it('returns true for valid lowercase alphanumeric code', () => {
+    expect(isValidEbirdCode('amecro')).toBe(true);
+    expect(isValidEbirdCode('abc123')).toBe(true);
   });
 
   it('returns false for uppercase code', () => {
@@ -34,33 +39,39 @@ describe('isValidEbirdCode', () => {
     expect(isValidEbirdCode(undefined)).toBe(false);
   });
 
-  it('returns true for numeric-looking lowercase code', () => {
-    expect(isValidEbirdCode('amecro')).toBe(true);
+  it('returns false for code with slash', () => {
+    expect(isValidEbirdCode('foo/bar')).toBe(false);
+  });
+
+  it('returns false for code with space', () => {
+    expect(isValidEbirdCode(' ')).toBe(false);
+    expect(isValidEbirdCode('foo bar')).toBe(false);
   });
 });
 
 describe('buildEbirdUrl', () => {
-  it('builds correct URL for standard locale', () => {
+  it('builds correct URL without region for standard locale', () => {
     const url = buildEbirdUrl('blujay', 'en');
-    expect(url).toBe(`${EBIRD_BASE_URL}/blujay/${EBIRD_REGION}?siteLanguage=en`);
+    expect(url).toBe(`${EBIRD_BASE_URL}/blujay?siteLanguage=en`);
   });
 
   it('maps nb locale to no', () => {
     const url = buildEbirdUrl('blujay', 'nb');
-    expect(url).toBe(`${EBIRD_BASE_URL}/blujay/${EBIRD_REGION}?siteLanguage=no`);
+    expect(url).toBe(`${EBIRD_BASE_URL}/blujay?siteLanguage=no`);
   });
 
   it('falls back to default lang when locale is empty', () => {
     const url = buildEbirdUrl('blujay', '');
-    expect(url).toBe(`${EBIRD_BASE_URL}/blujay/${EBIRD_REGION}?siteLanguage=${EBIRD_DEFAULT_LANG}`);
+    expect(url).toBe(`${EBIRD_BASE_URL}/blujay?siteLanguage=${EBIRD_DEFAULT_LANG}`);
   });
 
-  it('uses fr as default language constant', () => {
-    expect(EBIRD_DEFAULT_LANG).toBe('fr');
+  it('uses en as default language constant', () => {
+    expect(EBIRD_DEFAULT_LANG).toBe('en');
   });
 
-  it('uses correct region constant', () => {
-    expect(EBIRD_REGION).toBe('BE-WAL');
+  it('encodes special characters in species code', () => {
+    const url = buildEbirdUrl('foo bar', 'en');
+    expect(url).toBe(`${EBIRD_BASE_URL}/foo%20bar?siteLanguage=en`);
   });
 });
 
@@ -79,6 +90,32 @@ const makeItem = (
   first_heard: '',
   latest_heard: '',
   thumbnail_url: '',
+});
+
+describe('formatDetectionCount', () => {
+  it('returns the number as string for values under 1000', () => {
+    expect(formatDetectionCount(0)).toBe('0');
+    expect(formatDetectionCount(999)).toBe('999');
+    expect(formatDetectionCount(1)).toBe('1');
+  });
+
+  it('returns truncated k-notation for 1000–9999', () => {
+    expect(formatDetectionCount(1000)).toBe('1.0k');
+    expect(formatDetectionCount(1234)).toBe('1.2k');
+    expect(formatDetectionCount(9999)).toBe('9.9k');
+  });
+
+  it('never rounds up to 10.0k within the < 10000 range', () => {
+    // 9999 previously rounded to "10.0k" (5 chars); must stay "9.9k" (4 chars)
+    expect(formatDetectionCount(9999)).toBe('9.9k');
+    expect(formatDetectionCount(9950)).toBe('9.9k');
+  });
+
+  it('returns rounded k-notation for values >= 10000', () => {
+    expect(formatDetectionCount(10000)).toBe('10k');
+    expect(formatDetectionCount(12345)).toBe('12k');
+    expect(formatDetectionCount(99999)).toBe('100k');
+  });
 });
 
 describe('computeOverviewStats', () => {

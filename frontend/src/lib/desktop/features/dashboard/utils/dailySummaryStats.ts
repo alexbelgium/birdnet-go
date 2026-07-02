@@ -3,18 +3,17 @@ import { getLocalDateString } from '$lib/utils/date';
 import { safeArrayAccess } from '$lib/utils/security';
 
 export const EBIRD_BASE_URL = 'https://ebird.org/species';
-export const EBIRD_REGION = 'BE-WAL';
-export const EBIRD_DEFAULT_LANG = 'fr';
+export const EBIRD_DEFAULT_LANG = 'en';
 
-/** Returns true when code is a valid, all-lowercase eBird species code. */
+/** Returns true when code looks like a valid eBird species code (lowercase alphanumeric only). */
 export function isValidEbirdCode(code: string | undefined): boolean {
-  return !!code && code === code.toLowerCase();
+  return !!code && /^[a-z0-9]+$/.test(code);
 }
 
-/** Builds the full eBird species page URL for the given locale. */
+/** Builds the global eBird species page URL for the given locale. */
 export function buildEbirdUrl(speciesCode: string, locale: string): string {
   const lang = locale === 'nb' ? 'no' : locale || EBIRD_DEFAULT_LANG;
-  return `${EBIRD_BASE_URL}/${speciesCode}/${EBIRD_REGION}?siteLanguage=${lang}`;
+  return `${EBIRD_BASE_URL}/${encodeURIComponent(speciesCode)}?siteLanguage=${lang}`;
 }
 
 // Confidence gradient anchor points (hue degrees) — smooth red(0)→orange(30)→green(120).
@@ -92,11 +91,11 @@ export function computeHourDaylightColor(
 
 /**
  * Formats a detection count for compact display (≤4 chars).
- * < 1000 → "987", 1000–9999 → "1.2k", ≥ 10000 → "12k".
+ * < 1000 → "987", 1000–9999 → "1.2k" (truncated, never rounds up to "10.0k"), ≥ 10000 → "12k".
  */
 export function formatDetectionCount(n: number): string {
   if (n < 1000) return String(n);
-  if (n < 10000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 10000) return `${(Math.floor(n / 100) / 10).toFixed(1)}k`;
   return `${Math.round(n / 1000)}k`;
 }
 

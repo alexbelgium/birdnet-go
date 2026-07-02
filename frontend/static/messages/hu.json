@@ -650,7 +650,14 @@
         "error": "Az adatok betöltése sikertelen",
         "complete": "Adatok sikeresen betöltve"
       },
-      "noSpecies": "Ezen a napon nem észleltek fajokat"
+      "noSpecies": "Ezen a napon nem észleltek fajokat",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      }
     },
     "recentDetections": {
       "title": "Legutóbbi észlelések",

@@ -650,7 +650,14 @@
         "error": "Gegevens inlezen is mislukt",
         "complete": "Gegevens zijn succesvol ingelezen"
       },
-      "noSpecies": "Geen soorten herkend op deze datum"
+      "noSpecies": "Geen soorten herkend op deze datum",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      }
     },
     "recentDetections": {
       "title": "Recent herkend",

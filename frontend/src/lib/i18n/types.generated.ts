@@ -524,6 +524,11 @@ export type TranslationKey =
   | 'dashboard.dailySummary.loading.error'
   | 'dashboard.dailySummary.loading.complete'
   | 'dashboard.dailySummary.noSpecies'
+  | 'dashboard.dailySummary.taxonFilter.all'
+  | 'dashboard.dailySummary.taxonFilter.bird'
+  | 'dashboard.dailySummary.taxonFilter.bat'
+  | 'dashboard.dailySummary.taxonFilter.other'
+  | 'dashboard.dailySummary.taxonFilter.ariaLabel' // params: current
   | 'dashboard.recentDetections.title'
   | 'dashboard.recentDetections.subtitle'
   | 'dashboard.recentDetections.controls.show'
@@ -3827,6 +3832,7 @@ export type TranslationParams = {
     startHour: string | number;
     endHour: string | number;
   };
+  'dashboard.dailySummary.taxonFilter.ariaLabel': { current: string | number };
   'dashboard.recentDetections.modals.showSpecies': { species: string | number };
   'dashboard.recentDetections.modals.ignoreSpecies': { species: string | number };
   'dashboard.recentDetections.modals.showSpeciesConfirm': { species: string | number };
