@@ -427,11 +427,29 @@
     padding: 0.625rem 0 0.125rem;
   }
 
-  /* ─── Landscape: larger thumbnail + scientific name ─── */
+  /* ─── Landscape: larger thumbnail + scientific name, name capped at φ ─── */
   @media (orientation: landscape) {
     .mobile-summary-table {
       --thumb-w: 2rem;
       --thumb-h: 1.5rem;
+    }
+
+    /* Name capped at the golden ratio; graph fills the remaining flex space.
+       name:chart = 1.618:1 → name ≈ 61.8% of the flexible width (conf/count are
+       fixed tracks, so name is strictly < 61.8% of the *total* width → "at most"). */
+    .mobile-summary-header,
+    .mobile-summary-row {
+      grid-template-columns: var(--thumb-w) 1.618fr var(--col-conf-w) var(--col-count-w) 1fr;
+    }
+
+    /* The chart track is now flexible; let the cell fill it and the SVG stretch.
+       `.col-chart` otherwise has justify-self:end (shrinks to content). */
+    .col-chart {
+      justify-self: stretch;
+    }
+
+    .col-chart :global(svg) {
+      width: 100%;
     }
 
     .col-scientific-name {
