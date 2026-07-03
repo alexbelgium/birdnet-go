@@ -127,22 +127,27 @@ func (s *ShoutrrrProvider) ValidateConfig() error {
 }
 
 func (s *ShoutrrrProvider) Send(ctx context.Context, n *Notification) error {
-	// When Telegram URLs are configured, send a photo when an image URL is available.
-	// This produces embedded photos in Telegram rather than plain-text link previews.
+	// When Telegram URLs are configured and a public image URL is available,
+	// deliver via Telegram's sendPhoto API (embedded photo) instead of the
+	// text-only sendMessage. Non-Telegram destinations still receive text via
+	// nonTelegramSender. The Telegram URL is deliberately never (re-)sent as
+	// text here: doing so would duplicate the photo message (and its raw image
+	// URL / link preview). On photo failure we return the error so the
+	// dispatcher can retry the photo — we do not degrade to a Telegram text send.
 	if len(s.telegramChats) > 0 {
 		if imgURL := extractPublicImageURL(n); imgURL != "" {
-			if err := s.sendTelegramPhotos(ctx, n, imgURL); err == nil {
-				// Photo delivered; also route to any non-Telegram URLs.
-				if s.nonTelegramSender != nil {
-					return s.sendWithSender(s.nonTelegramSender, n)
+			err := s.sendTelegramPhotos(ctx, n, imgURL)
+			if s.nonTelegramSender != nil {
+				if shErr := s.sendWithSender(s.nonTelegramSender, n); shErr != nil && err == nil {
+					err = shErr
 				}
-				return nil
 			}
-			// Photo delivery failed; fall through to Shoutrrr text delivery so
-			// the notification is not silently dropped.
+			return err
 		}
 	}
-	// Shoutrrr text delivery: no Telegram URLs, no image, or photo failure fallback.
+	// No Telegram photo path (no Telegram URLs, or no public image URL): deliver
+	// text via the full Shoutrrr router. When Telegram is configured without an
+	// image, this correctly sends a Telegram text message (no photo to embed).
 	return s.sendViaShoutrrr(n)
 }
 

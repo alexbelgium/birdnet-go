@@ -19,6 +19,11 @@ import (
 const (
 	telegramAPIBase         = "https://api.telegram.org"
 	telegramCaptionMaxBytes = 1024
+	// maxTelegramResponseBytes caps how much of a Telegram API response we read.
+	// A successful sendPhoto response is a full Message object (photo-size array,
+	// chat, caption_entities, …) that exceeds the 1 KB error-body cap; truncating
+	// it would make the success JSON fail to parse and be misread as a failure.
+	maxTelegramResponseBytes = 64 * 1024
 )
 
 // telegramResponse is the minimal Telegram Bot API response envelope.
@@ -107,7 +112,7 @@ func callTelegramAPI(ctx context.Context, client *httpclient.Client, apiBase, to
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	limitedBody, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
+	limitedBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTelegramResponseBytes))
 	if err != nil {
 		return privacy.WrapError(err)
 	}
