@@ -3,6 +3,7 @@ package notification
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// testTelegramShoutrrrURL is a Shoutrrr Telegram URL reused across photo-send tests.
+const testTelegramShoutrrrURL = "telegram://testtoken@telegram?chats=-1001234567890"
 
 // telegramRequest captures a single API call received by the mock server.
 type telegramRequest struct {
@@ -279,7 +283,7 @@ func TestShoutrrrProvider_SendPhoto_WithTelegramURL(t *testing.T) {
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
-	shoutrrrURL := "telegram://testtoken@telegram?chats=-1001234567890"
+	shoutrrrURL := testTelegramShoutrrrURL
 	p := newShoutrrrProviderWithTelegramServer(srv.URL, shoutrrrURL)
 
 	n := &Notification{
@@ -302,6 +306,83 @@ func TestShoutrrrProvider_SendPhoto_WithTelegramURL(t *testing.T) {
 	assert.Equal(t, "-1001234567890", req.values["chat_id"])
 	assert.Equal(t, "HTML", req.values["parse_mode"])
 	assert.Contains(t, req.values["caption"], "Spotted")
+}
+
+// largeSendPhotoSuccessResponse returns a realistic Telegram sendPhoto success
+// response — a full Message object with a multi-size photo array and caption
+// entities — whose JSON exceeds maxErrorBodySize (1 KB), as real responses do.
+func largeSendPhotoSuccessResponse() string {
+	fileID := strings.Repeat("A", 120) // real file_ids are long base64-ish blobs
+	uniqueID := strings.Repeat("B", 24)
+	photo := func(w, h, size int) string {
+		return fmt.Sprintf(`{"file_id":%q,"file_unique_id":%q,"file_size":%d,"width":%d,"height":%d}`,
+			fileID, uniqueID, size, w, h)
+	}
+	return fmt.Sprintf(`{"ok":true,"result":{"message_id":12345,"from":{"id":987654321,"is_bot":true,`+
+		`"first_name":"BirdNET Bot","username":"birdnet_bot"},"chat":{"id":-1001234567890,`+
+		`"title":"Bird Alerts","type":"channel"},"date":1782681595,"photo":[%s,%s,%s,%s],`+
+		`"caption":"Northern Cardinal","caption_entities":[{"offset":0,"length":16,"type":"bold"}]}}`,
+		photo(90, 51, 1234), photo(320, 180, 12345), photo(800, 450, 45678), photo(1280, 720, 98765))
+}
+
+// TestShoutrrrProvider_SendPhoto_LargeSuccessResponse is a regression test for the
+// duplicate-notification bug: a delivered sendPhoto (HTTP 200) whose success body
+// exceeds 1 KB was truncated by the error-body read cap, so json.Unmarshal failed
+// and the photo was misread as a failure — triggering a second, text delivery.
+func TestShoutrrrProvider_SendPhoto_LargeSuccessResponse(t *testing.T) {
+	body := largeSendPhotoSuccessResponse()
+	require.Greater(t, len(body), maxErrorBodySize, "test body must exceed the old 1 KB cap to be a valid regression test")
+
+	handler := newTelegramAPIHandler(t)
+	handler.responseBody = body
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	shoutrrrURL := testTelegramShoutrrrURL
+	p := newShoutrrrProviderWithTelegramServer(srv.URL, shoutrrrURL)
+
+	n := &Notification{
+		Title:    "Northern Cardinal",
+		Message:  "Detected with 92% confidence",
+		Type:     TypeDetection,
+		Metadata: map[string]any{"bg_image_url": "https://static.avicommons.org/norcar-12345-320.jpg"},
+	}
+
+	err := p.sendTelegramPhotos(t.Context(), n, extractPublicImageURL(n))
+	require.NoError(t, err, "a delivered photo with a >1 KB success body must not be reported as an error")
+	require.Len(t, handler.requests, 1)
+}
+
+// TestShoutrrrProvider_PhotoFailure_NoTelegramTextFallback verifies that when the
+// Telegram photo send fails, Send returns the photo error and does NOT fall back
+// to the full Shoutrrr router (which includes the telegram:// URL). Re-sending as
+// text there would duplicate the message on Telegram — the exact reported bug.
+func TestShoutrrrProvider_PhotoFailure_NoTelegramTextFallback(t *testing.T) {
+	handler := newTelegramAPIHandler(t)
+	handler.statusCode = http.StatusBadRequest // sendPhoto rejected (non-retryable)
+	handler.responseBody = `{"ok":false,"description":"Bad Request: wrong file identifier"}`
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	shoutrrrURL := testTelegramShoutrrrURL
+	p := newShoutrrrProviderWithTelegramServer(srv.URL, shoutrrrURL)
+	// s.sender is deliberately left nil (ValidateConfig not called): if Send wrongly
+	// fell back to the Shoutrrr router, it would surface a "sender not initialized"
+	// error instead of the photo error — a clear signal the fallback was taken.
+
+	n := &Notification{
+		Title:    "Spotted Flycatcher",
+		Message:  "Detected with 81% confidence",
+		Type:     TypeDetection,
+		Metadata: map[string]any{"bg_image_url": "https://static.avicommons.org/spofly-12345-320.jpg"},
+	}
+
+	err := p.Send(t.Context(), n)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "not initialized",
+		"Send must not fall back to the telegram-inclusive Shoutrrr router on photo failure")
+	require.Len(t, handler.requests, 1, "only the sendPhoto attempt should reach Telegram; no text fallback")
+	assert.Contains(t, handler.requests[0].path, "/sendPhoto")
 }
 
 func TestShoutrrrProvider_NewShoutrrrProvider_ParsesTelegramURLs(t *testing.T) {
