@@ -252,6 +252,21 @@ func TestExtractPublicImageURL(t *testing.T) {
 			want:     "",
 		},
 		{
+			name:     "trailing-dot localhost rejected",
+			metadata: map[string]any{"bg_image_url": "https://localhost./img.jpg"},
+			want:     "",
+		},
+		{
+			name:     "trailing-dot loopback IP rejected",
+			metadata: map[string]any{"bg_image_url": "https://127.0.0.1./img.jpg"},
+			want:     "",
+		},
+		{
+			name:     "uppercase HTTP scheme rejected",
+			metadata: map[string]any{"bg_image_url": "HTTP://example.com/bird.jpg"},
+			want:     "",
+		},
+		{
 			name:     "empty host rejected",
 			metadata: map[string]any{"bg_image_url": "https:///img.jpg"},
 			want:     "",
@@ -386,6 +401,8 @@ func TestShoutrrrProvider_PhotoFailure_NoTelegramTextFallback(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "not initialized",
 		"Send must not fall back to the telegram-inclusive Shoutrrr router on photo failure")
+	assert.Contains(t, err.Error(), "wrong file identifier",
+		"error should surface Telegram's description to aid troubleshooting")
 	require.Len(t, handler.requests, 1, "only the sendPhoto attempt should reach Telegram; no text fallback")
 	assert.Contains(t, handler.requests[0].path, "/sendPhoto")
 }

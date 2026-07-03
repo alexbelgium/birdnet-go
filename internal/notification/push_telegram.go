@@ -117,26 +117,37 @@ func callTelegramAPI(ctx context.Context, client *httpclient.Client, apiBase, to
 		return privacy.WrapError(err)
 	}
 
+	// Best-effort decode so error messages can surface Telegram's human-readable
+	// description (e.g. "Bad Request: chat not found"). The description never
+	// contains the bot token, so it is safe to include. A decode failure is only
+	// fatal for a 200 response, which is checked below.
+	var apiResp telegramResponse
+	unmarshalErr := json.Unmarshal(limitedBody, &apiResp)
+	detail := ""
+	if apiResp.Description != "" {
+		detail = ": " + apiResp.Description
+	}
+
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
 		return &providerError{
-			Err:       errors.Newf("telegram API returned HTTP %d", resp.StatusCode).Component("notification").Category(errors.CategoryIntegration).Build(),
+			Err:       errors.Newf("telegram API returned HTTP %d%s", resp.StatusCode, detail).Component("notification").Category(errors.CategoryIntegration).Build(),
 			Retryable: true,
 		}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return &providerError{
-			Err:       errors.Newf("telegram API returned HTTP %d", resp.StatusCode).Component("notification").Category(errors.CategoryIntegration).Build(),
+			Err:       errors.Newf("telegram API returned HTTP %d%s", resp.StatusCode, detail).Component("notification").Category(errors.CategoryIntegration).Build(),
 			Retryable: false,
 		}
 	}
 
-	var apiResp telegramResponse
-	if err := json.Unmarshal(limitedBody, &apiResp); err != nil {
-		return errors.New(err).Component("notification").Category(errors.CategoryIntegration).Build()
+	// HTTP 200: the body must be a well-formed Telegram envelope.
+	if unmarshalErr != nil {
+		return errors.New(unmarshalErr).Component("notification").Category(errors.CategoryIntegration).Build()
 	}
 	if !apiResp.OK {
 		return &providerError{
-			Err:       errors.Newf("telegram API error: %s", apiResp.Description).Component("notification").Category(errors.CategoryIntegration).Build(),
+			Err:       errors.Newf("telegram API error%s", detail).Component("notification").Category(errors.CategoryIntegration).Build(),
 			Retryable: false,
 		}
 	}
@@ -154,14 +165,18 @@ func extractPublicImageURL(n *Notification) string {
 	if !ok || imgURL == "" {
 		return ""
 	}
-	if !strings.HasPrefix(imgURL, "https://") {
-		return ""
-	}
 	parsed, err := url.Parse(imgURL)
 	if err != nil {
 		return ""
 	}
-	host := parsed.Hostname()
+	// Validate the parsed scheme (not a raw string prefix): Telegram fetches this
+	// URL server-side, so only real HTTPS URLs may pass.
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		return ""
+	}
+	// Trim a trailing dot (FQDN root) so "localhost." / "127.0.0.1." cannot bypass
+	// the loopback checks below.
+	host := strings.TrimSuffix(parsed.Hostname(), ".")
 	if host == "" || strings.EqualFold(host, "localhost") || strings.HasPrefix(host, "127.") {
 		return ""
 	}
