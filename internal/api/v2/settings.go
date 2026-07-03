@@ -1587,6 +1587,19 @@ func validateNotificationSection(data json.RawMessage) error {
 		}
 	}
 
+	// Validate infrequent species notification templates if present
+	if notificationConfig.Templates.InfrequentSpecies.Title != "" {
+		if _, err := template.New("title").Funcs(notification.TemplateFuncs).Parse(notificationConfig.Templates.InfrequentSpecies.Title); err != nil {
+			return fmt.Errorf("invalid template syntax in infrequent species title: %w", err)
+		}
+	}
+
+	if notificationConfig.Templates.InfrequentSpecies.Message != "" {
+		if _, err := template.New("message").Funcs(notification.TemplateFuncs).Parse(notificationConfig.Templates.InfrequentSpecies.Message); err != nil {
+			return fmt.Errorf("invalid template syntax in infrequent species message: %w", err)
+		}
+	}
+
 	return nil
 }
 

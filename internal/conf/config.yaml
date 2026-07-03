@@ -467,7 +467,7 @@ notification:
       message: "First detection of {{.CommonName}} ({{.ScientificName}}) with {{.ConfidencePercent}}% confidence at {{.DetectionTime}}. View: {{.DetectionURL}}"
     infrequentspecies:
       title: "Infrequent Species: {{.CommonName}}"
-      message: "infrequent detection of {{.CommonName}} with {{.ConfidencePercent}}% confidence at {{.DetectionTime}}. Last seen : {{.DaysSinceLastSeen}}. View: {{.DetectionURL}} {{.ImageURL}}"
+      message: "Infrequent detection of {{.CommonName}} with {{.ConfidencePercent}}% confidence at {{.DetectionTime}}. Last seen: {{.DaysSinceLastSeen}} days ago. View: {{.DetectionURL}} {{.ImageURL}}"
   push:
     enabled: false
     default_timeout: 30s
