@@ -450,8 +450,6 @@ NotificationConfig is the root for notification-specific settings.
 | `notification.push.species_cooldown_minutes` | integer | 0 = disabled |
 | `notification.templates.newspecies.title` | string |  |
 | `notification.templates.newspecies.message` | string |  |
-| `notification.templates.infrequentspecies.title` | string |  |
-| `notification.templates.infrequentspecies.message` | string |  |
 
 ## alerting
 

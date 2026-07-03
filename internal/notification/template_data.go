@@ -26,7 +26,6 @@ type TemplateData struct {
 	DetectionURL       string
 	ImageURL           string
 	DaysSinceFirstSeen int
-	DaysSinceLastSeen  int
 }
 
 func NewTemplateData(event events.DetectionEvent, baseURL string, timeAs24h bool) *TemplateData {
@@ -90,11 +89,6 @@ func NewTemplateData(event events.DetectionEvent, baseURL string, timeAs24h bool
 		imageURL = fmt.Sprintf("%s/api/v2/media/species-image?scientific_name=%s", baseURL, encodedScientificName)
 	}
 
-	daysSinceLastSeen := -1
-	if v, ok := metadata[events.DetectionMetadataDaysSinceLastSeen].(int); ok {
-		daysSinceLastSeen = v
-	}
-
 	return &TemplateData{
 		CommonName:         event.GetSpeciesName(),
 		ScientificName:     scientificName,
@@ -110,7 +104,6 @@ func NewTemplateData(event events.DetectionEvent, baseURL string, timeAs24h bool
 		DetectionURL:       detectionURL,
 		ImageURL:           imageURL,
 		DaysSinceFirstSeen: event.GetDaysSinceFirstSeen(),
-		DaysSinceLastSeen:  daysSinceLastSeen,
 	}
 }
 

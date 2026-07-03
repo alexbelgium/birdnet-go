@@ -240,26 +240,17 @@ func buildTemplateDataFromProps(props map[string]any) *notification.TemplateData
 }
 
 // applyDetectionTemplates overrides title and message with user-configured
-// notification templates for detection events. New-species events use the
-// NewSpecies template; infrequent-species events (DaysSinceLastSeen > 0) use
-// the InfrequentSpecies template. Non-detection types pass through unchanged.
+// notification templates for new-species detection events. Non-detection types
+// and non-new-species detections pass through unchanged.
 func applyDetectionTemplates(notifType notification.Type, title, message string, eventProps map[string]any) (renderedTitle, renderedMessage string) {
 	if notifType != notification.TypeDetection {
 		return title, message
 	}
 	isNew, _ := eventProps[PropertyIsNewSpecies].(bool)
-	daysSinceLast, _ := eventProps[PropertyDaysSinceLastSeen].(int)
-	isInfrequent := !isNew && daysSinceLast > 0
-
-	var rt, rm string
-	switch {
-	case isNew:
-		rt, rm = renderDetectionTemplates(eventProps)
-	case isInfrequent:
-		rt, rm = renderInfrequentSpeciesTemplates(eventProps)
-	default:
+	if !isNew {
 		return title, message
 	}
+	rt, rm := renderDetectionTemplates(eventProps)
 	if rt != "" {
 		title = rt
 	}
@@ -299,45 +290,6 @@ func renderDetectionTemplates(props map[string]any) (title, message string) {
 		rendered, err := notification.RenderTemplate("message", msgTmpl, templateData)
 		if err != nil {
 			log.Warn("failed to render detection message template",
-				logger.String("template", msgTmpl), logger.Error(err))
-		} else {
-			message = rendered
-		}
-	}
-
-	return title, message
-}
-
-func renderInfrequentSpeciesTemplates(props map[string]any) (title, message string) {
-	settings := conf.GetSettings()
-	if settings == nil {
-		return "", ""
-	}
-
-	titleTmpl := settings.Notification.Templates.InfrequentSpecies.Title
-	msgTmpl := settings.Notification.Templates.InfrequentSpecies.Message
-	if titleTmpl == "" && msgTmpl == "" {
-		return "", ""
-	}
-
-	templateData := buildTemplateDataFromProps(props)
-
-	log := notification.GetLogger()
-
-	if titleTmpl != "" {
-		rendered, err := notification.RenderTemplate("title", titleTmpl, templateData)
-		if err != nil {
-			log.Warn("failed to render infrequent species title template",
-				logger.String("template", titleTmpl), logger.Error(err))
-		} else {
-			title = rendered
-		}
-	}
-
-	if msgTmpl != "" {
-		rendered, err := notification.RenderTemplate("message", msgTmpl, templateData)
-		if err != nil {
-			log.Warn("failed to render infrequent species message template",
 				logger.String("template", msgTmpl), logger.Error(err))
 		} else {
 			message = rendered
