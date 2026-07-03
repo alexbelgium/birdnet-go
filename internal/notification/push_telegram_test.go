@@ -257,8 +257,10 @@ func TestExtractPublicImageURL(t *testing.T) {
 			want:     "",
 		},
 		{
-			name:     "proxy URL rejected",
-			metadata: map[string]any{"bg_image_url": "http://localhost:8080/api/v2/media/species-image?scientific_name=Turdus"},
+			// https so the scheme check passes and the localhost host check does the rejecting,
+			// exercising the SSRF filter against the real internal media-proxy URL shape.
+			name:     "https proxy URL rejected via host check",
+			metadata: map[string]any{"bg_image_url": "https://localhost:8080/api/v2/media/species-image?scientific_name=Turdus"},
 			want:     "",
 		},
 		{
@@ -279,6 +281,7 @@ func TestExtractPublicImageURL(t *testing.T) {
 }
 
 func TestShoutrrrProvider_SendPhoto_WithTelegramURL(t *testing.T) {
+	t.Parallel()
 	handler := newTelegramAPIHandler(t)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
@@ -330,6 +333,7 @@ func largeSendPhotoSuccessResponse() string {
 // exceeds 1 KB was truncated by the error-body read cap, so json.Unmarshal failed
 // and the photo was misread as a failure — triggering a second, text delivery.
 func TestShoutrrrProvider_SendPhoto_LargeSuccessResponse(t *testing.T) {
+	t.Parallel()
 	body := largeSendPhotoSuccessResponse()
 	require.Greater(t, len(body), maxErrorBodySize, "test body must exceed the old 1 KB cap to be a valid regression test")
 
@@ -358,6 +362,7 @@ func TestShoutrrrProvider_SendPhoto_LargeSuccessResponse(t *testing.T) {
 // to the full Shoutrrr router (which includes the telegram:// URL). Re-sending as
 // text there would duplicate the message on Telegram — the exact reported bug.
 func TestShoutrrrProvider_PhotoFailure_NoTelegramTextFallback(t *testing.T) {
+	t.Parallel()
 	handler := newTelegramAPIHandler(t)
 	handler.statusCode = http.StatusBadRequest // sendPhoto rejected (non-retryable)
 	handler.responseBody = `{"ok":false,"description":"Bad Request: wrong file identifier"}`
