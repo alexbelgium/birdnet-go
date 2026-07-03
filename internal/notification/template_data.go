@@ -98,7 +98,6 @@ func NewTemplateData(event events.DetectionEvent, baseURL string, timeAs24h bool
 		imageURL = fmt.Sprintf("%s/api/v2/media/species-image?scientific_name=%s", baseURL, encodedScientificName)
 	}
 
-
 	return &TemplateData{
 		CommonName:         event.GetSpeciesName(),
 		ScientificName:     scientificName,

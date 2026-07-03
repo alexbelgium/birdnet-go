@@ -1077,19 +1077,6 @@
       "type": "object",
       "description": "ImportConfig controls the BirdNET-Pi import feature behavior."
     },
-    "InfrequentSpeciesTemplate": {
-      "properties": {
-        "title": {
-          "type": "string"
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "description": "InfrequentSpeciesTemplate contains templates for infrequent species detection notifications."
-    },
     "InfrequentTrackingSettings": {
       "properties": {
         "enabled": {
@@ -1435,9 +1422,6 @@
       "properties": {
         "newspecies": {
           "$ref": "#/$defs/NewSpeciesTemplate"
-        },
-        "infrequentspecies": {
-          "$ref": "#/$defs/InfrequentSpeciesTemplate"
         }
       },
       "additionalProperties": false,
