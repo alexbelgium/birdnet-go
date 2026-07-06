@@ -2,8 +2,17 @@
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
-  import { X, ExternalLink, TrendingUp, TrendingDown, Sunrise, Sunset } from '@lucide/svelte';
+  import {
+    X,
+    ExternalLink,
+    TrendingUp,
+    TrendingDown,
+    Sunrise,
+    Sunset,
+    BarChart2,
+  } from '@lucide/svelte';
   import HourlyMiniChart from './HourlyMiniChart.svelte';
+  import MobileSpeciesHistoryModal from './MobileSpeciesHistoryModal.svelte';
   import { buildEbirdUrl, isValidEbirdCode } from '../../utils/dailySummaryStats';
   import { getLocale } from '$lib/i18n';
   import { safeArrayAccess } from '$lib/utils/security';
@@ -67,25 +76,8 @@
     return () => window.cancelAnimationFrame(raf);
   });
 
-  function getDayOfYear(dateStr: string): number {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    if (!y || !m || !d) return 0;
-    const dateUtc = Date.UTC(y, m - 1, d);
-    const startUtc = Date.UTC(y, 0, 1);
-    return Math.floor((dateUtc - startUtc) / 86_400_000) + 1;
-  }
-
-  function getFrequencyLabel(daysThisYear: number | undefined, date: string): string | null {
-    if (!daysThisYear) return null;
-    const total = getDayOfYear(date);
-    if (total === 0) return null;
-    const ratio = daysThisYear / total;
-    if (ratio >= 0.5) return 'frequent';
-    if (ratio >= 0.15) return 'uncommon';
-    return 'rare';
-  }
-
-  const frequencyLabel = $derived(getFrequencyLabel(item.days_this_year, selectedDate));
+  // History modal (multi-day detection trend) open state.
+  let showHistory = $state(false);
 
   // Peak hour: hour with the highest detection count in 0..maxHour.
   const peakHour = $derived.by(() => {
@@ -204,6 +196,16 @@
         >
           <ExternalLink class="size-3" />Detections
         </a>
+        <button
+          class="card-history-btn"
+          aria-label="Detection history for {displayName}"
+          onclick={(e: MouseEvent) => {
+            e.stopPropagation();
+            showHistory = true;
+          }}
+        >
+          <BarChart2 class="size-3" />
+        </button>
       </div>
 
       <!-- Scientific name -->
@@ -232,19 +234,10 @@
         {/if}
       </div>
 
-      <!-- Secondary stats: peak hour · frequency label + days this year -->
-      {#if peakHour !== null || item.days_this_year}
+      <!-- Secondary stats: peak hour -->
+      {#if peakHour !== null}
         <div class="card-stats">
-          {#if peakHour !== null}
-            <span class="card-stat">peak {String(peakHour).padStart(2, '0')}h</span>
-          {/if}
-          {#if item.days_this_year}
-            {#if peakHour !== null}<span class="card-stats-sep">·</span>{/if}
-            <span class="card-stat"
-              >{#if frequencyLabel}{frequencyLabel} ·
-              {/if}{item.days_this_year}d this year</span
-            >
-          {/if}
+          <span class="card-stat">peak {String(peakHour).padStart(2, '0')}h</span>
         </div>
       {/if}
 
@@ -334,6 +327,15 @@
     </div>
   </div>
 </div>
+
+{#if showHistory}
+  <MobileSpeciesHistoryModal
+    scientificName={item.scientific_name}
+    {displayName}
+    {selectedDate}
+    onClose={() => (showHistory = false)}
+  />
+{/if}
 
 <style>
   .species-card {
@@ -438,6 +440,30 @@
     background: color-mix(in srgb, var(--color-base-content) 8%, transparent);
   }
 
+  /* Icon-only history button — same pill treatment as Detections */
+  .card-history-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--color-base-content);
+    background: none;
+    border: 1px solid color-mix(in srgb, var(--color-base-content) 30%, transparent);
+    border-radius: 9999px;
+    padding: 0.15rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .card-history-btn:hover {
+    background: color-mix(in srgb, var(--color-base-content) 8%, transparent);
+  }
+
+  .card-history-btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
   .card-sci {
     font-size: 0.575rem;
     font-style: italic;
@@ -500,12 +526,6 @@
     font-size: 0.575rem;
     font-weight: 600;
     color: color-mix(in srgb, var(--color-base-content) 55%, transparent);
-    line-height: 1;
-  }
-
-  .card-stats-sep {
-    font-size: 0.5rem;
-    color: color-mix(in srgb, var(--color-base-content) 30%, transparent);
     line-height: 1;
   }
 

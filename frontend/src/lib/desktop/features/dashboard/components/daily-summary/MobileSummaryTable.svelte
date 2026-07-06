@@ -379,7 +379,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
-    flex: 1;
+
+    /* Hug the name so the novelty badge sits right after it (not pushed to the
+       column's right edge); still shrinks + ellipsis-truncates when too long. */
+    flex: 0 1 auto;
     color: var(--color-base-content);
   }
 
