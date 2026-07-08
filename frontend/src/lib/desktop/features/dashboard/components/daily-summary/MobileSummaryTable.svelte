@@ -2,12 +2,11 @@
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
-  import { formatDetectionCount } from '../../utils/dailySummaryStats';
+  import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
   import { getSpeciesBadgeColor, getSpeciesInitials } from '../../utils/speciesBadge';
   import { resolveNoveltyCategory, noveltyCategoryColorVar } from '../../utils/noveltyCategory';
   import { Star } from '@lucide/svelte';
   import HourlyMiniChart, { BAR_STRIDE } from './HourlyMiniChart.svelte';
-  import ConfidencePill from './ConfidencePill.svelte';
   import SpeciesDetailCard from './SpeciesDetailCard.svelte';
 
   interface Props {
@@ -182,10 +181,13 @@
           <span class="col-scientific-name">{item.scientific_name}</span>
         </div>
 
-        <!-- Max confidence pill (same component as the desktop stat column) -->
-        <div class="col-conf">
-          <ConfidencePill percent={pct} />
-        </div>
+        <!-- Max confidence, color-coded -->
+        <span
+          class="col-conf text-xs tabular-nums font-semibold"
+          style:color={computeConfidenceColor(pct)}
+        >
+          {pct}%
+        </span>
 
         <!-- Detection count, abbreviated -->
         <span class="col-count text-xs tabular-nums">
@@ -205,22 +207,32 @@
       No species detected
     </div>
   {/if}
-
-  {#if data.length > 0}
-    <div class="zoom-hint" aria-hidden="true">tap a row for details</div>
-  {/if}
 </div>
+
+{#if data.length > 0}
+  <!-- Outside the scroll region so the hint stays visible without scrolling to the bottom -->
+  <div class="zoom-hint" aria-hidden="true">tap a row for details</div>
+{/if}
 
 <style>
   .mobile-summary-table {
-    --thumb-w: 2rem;
-    --thumb-h: 1.5rem;
+    --thumb-w: 1.5rem;
+    --thumb-h: 1.25rem;
     --col-conf-w: 2.5rem;
     --col-count-w: 2.25rem;
 
     /* --col-chart-w is bound inline to the chart's actual rendered width (px), so the
        column never reserves more space than the chart needs — the name column gets
        whatever is left over. */
+
+    /* This element is its own scroll region (rather than relying on page-level
+       scroll) so the sticky header below always has a genuinely-scrolling
+       containing block: the app shell's outer scroll container (drawer-content)
+       auto-sizes to its content and never actually scrolls internally, which
+       silently breaks `position: sticky` for any descendant that assumes it. */
+    max-height: 60vh;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   /* ─── 5-column grid; header and rows share the same tracks ─── */
@@ -265,9 +277,7 @@
     align-items: center;
     gap: 0.125rem;
     padding: 0 0.125rem;
-
-    /* Comfortable tap target (36 px + gap; guideline minimum is ~44 px hit area) */
-    min-height: 2.25rem;
+    min-height: 1.25rem;
     border-radius: 0.375rem;
     color: var(--color-base-content);
     cursor: pointer;
@@ -323,7 +333,7 @@
     width: var(--thumb-w);
     height: var(--thumb-h);
     border-radius: 0.25rem;
-    font-size: 0.625rem;
+    font-size: 0.5rem;
     font-weight: 700;
     color: white;
     text-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
@@ -402,8 +412,13 @@
     padding: 0.625rem 0 0.125rem;
   }
 
-  /* ─── Landscape: scientific name shown, name capped at φ ─── */
+  /* ─── Landscape: larger thumbnail + scientific name, name capped at φ ─── */
   @media (orientation: landscape) {
+    .mobile-summary-table {
+      --thumb-w: 2rem;
+      --thumb-h: 1.5rem;
+    }
+
     /* Name capped at the golden ratio; graph fills the remaining flex space.
        name:chart = 1.618:1 → name ≈ 61.8% of the flexible width (conf/count are
        fixed tracks, so name is strictly < 61.8% of the *total* width → "at most"). */
