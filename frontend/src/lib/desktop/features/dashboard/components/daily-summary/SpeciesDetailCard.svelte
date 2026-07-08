@@ -12,7 +12,7 @@
     BarChart2,
   } from '@lucide/svelte';
   import HourlyMiniChart from './HourlyMiniChart.svelte';
-  import MobileSpeciesHistoryModal from './MobileSpeciesHistoryModal.svelte';
+  import SpeciesHistoryModal from './SpeciesHistoryModal.svelte';
   import { buildEbirdUrl, isValidEbirdCode } from '../../utils/dailySummaryStats';
   import { getLocale } from '$lib/i18n';
   import { safeArrayAccess } from '$lib/utils/security';
@@ -26,8 +26,9 @@
     speciesUrl: string;
     maxHour: number;
     onCollapse: () => void;
-    dailyUrl: string;
     selectedDate: string;
+    /** Chart height in px; the desktop host passes a taller chart. */
+    chartHeight?: number;
   }
 
   let {
@@ -38,8 +39,8 @@
     speciesUrl,
     maxHour,
     onCollapse,
-    dailyUrl,
     selectedDate,
+    chartHeight = 64,
   }: Props = $props();
 
   const pct = $derived(Math.round(Math.max(0, Math.min(1, item.max_confidence ?? 0)) * 100));
@@ -65,6 +66,8 @@
 
   // Scroll the card fully into view when it expands near the bottom of the
   // screen; block:'nearest' is a no-op when it is already fully visible.
+  // Also move focus onto the card so keyboard/screen-reader users land in the
+  // detail they just opened (the host restores focus to the row on collapse).
   let cardEl = $state<HTMLDivElement>();
 
   $effect(() => {
@@ -72,6 +75,7 @@
     if (!el) return;
     const raf = window.requestAnimationFrame(() => {
       el.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion ? 'auto' : 'smooth' });
+      el.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(raf);
   });
@@ -117,11 +121,13 @@
       : buildAppUrl(`/api/v2/media/species-image?name=${encodeURIComponent(item.scientific_name)}`)
   );
 
-  // Peak bars: local maxima (count >= both neighbors) in 0..maxHour, top 6 by count.
-  const CHART_H = 64;
-  const MAX_BAR_H = CHART_H - 2; // headroom reserve matches HourlyMiniChart
+  // Peak bars: local maxima (count >= both neighbors) in 0..maxHour, top 4 by
+  // count (more overlap at 9 px labels, so fewer than the old 6).
+  const MAX_PEAK_LABELS = 4;
+  const PEAK_LABEL_OFFSET_PX = 11; // label font (9px) + 2px gap above the bar
 
   const peakBars = $derived.by(() => {
+    const maxBarH = chartHeight - 2; // headroom reserve matches HourlyMiniChart
     const counts = item.hourly_counts.slice(0, maxHour + 1);
     const maxC = Math.max(...counts, 1);
     const peaks: Array<{ hour: number; count: number; labelTopPx: number }> = [];
@@ -131,38 +137,30 @@
       const prev = safeArrayAccess(counts, h - 1, 0) ?? 0;
       const next = safeArrayAccess(counts, h + 1, 0) ?? 0;
       if (c >= prev && c >= next) {
-        const barH = Math.max(2, Math.round((c / maxC) * MAX_BAR_H));
-        const barTopPx = CHART_H - barH;
-        peaks.push({ hour: h, count: c, labelTopPx: Math.max(0, barTopPx - 9) });
+        const barH = Math.max(2, Math.round((c / maxC) * maxBarH));
+        const barTopPx = chartHeight - barH;
+        peaks.push({ hour: h, count: c, labelTopPx: Math.max(0, barTopPx - PEAK_LABEL_OFFSET_PX) });
       }
     }
-    return peaks.sort((a, b) => b.count - a.count).slice(0, 6);
+    return peaks.sort((a, b) => b.count - a.count).slice(0, MAX_PEAK_LABELS);
   });
 </script>
 
 <!--
-  Expanded species card — replaces the compact row when a species chart is tapped.
-  Close button (×) or tapping the chart section collapses back to compact row.
+  Expanded species detail card — replaces the compact row (mobile) or renders
+  under the heatmap row (desktop) when a species is selected.
+  Close button (×) or tapping the chart section collapses back.
   Tapping the species name navigates to species detections.
-  Double-tapping anywhere (outside links/buttons) navigates to daily detections.
 -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   bind:this={cardEl}
   class="species-card"
+  tabindex="-1"
   aria-label="{displayName} species detail"
+  style:--detail-chart-h="{chartHeight}px"
   onclick={(e: MouseEvent) => e.stopPropagation()}
   onkeydown={(e: KeyboardEvent) => e.stopPropagation()}
-  ondblclick={(e: MouseEvent) => {
-    const target = e.target as HTMLElement | null;
-    if (
-      !target?.closest('a') &&
-      !target?.closest('button') &&
-      !target?.closest('[role="button"]')
-    ) {
-      window.location.href = dailyUrl;
-    }
-  }}
 >
   <!-- ╔═══════════════════ HEADER ═══════════════════╗ -->
   <div class="card-header">
@@ -281,7 +279,7 @@
     }}
   >
     <div class="card-chart-wrap">
-      <HourlyMiniChart {item} {sunriseHour} {sunsetHour} {maxHour} chartHeight={64} />
+      <HourlyMiniChart {item} {sunriseHour} {sunsetHour} {maxHour} {chartHeight} />
     </div>
 
     <!-- Peak count labels overlay -->
@@ -329,7 +327,7 @@
 </div>
 
 {#if showHistory}
-  <MobileSpeciesHistoryModal
+  <SpeciesHistoryModal
     scientificName={item.scientific_name}
     {displayName}
     {selectedDate}
@@ -345,6 +343,12 @@
     overflow: hidden;
     margin: 0.1rem 0;
     border: 1px solid color-mix(in srgb, var(--color-base-content) 10%, transparent);
+  }
+
+  /* Card receives programmatic focus on expand (tabindex="-1"); the visible
+     focus ring stays on the interactive children. */
+  .species-card:focus {
+    outline: none;
   }
 
   /* ── Header ── */
@@ -587,10 +591,10 @@
     outline-offset: -2px;
   }
 
-  /* SVG fills full chart-section width */
+  /* SVG fills full chart-section width; height follows the chartHeight prop */
   .card-chart-wrap :global(svg) {
     width: 100%;
-    height: 64px;
+    height: var(--detail-chart-h, 64px);
     display: block;
   }
 
@@ -600,14 +604,14 @@
     top: 0.375rem; /* matches card-chart-section padding-top */
     left: 0.5rem;
     right: 0.5rem;
-    height: 64px;
+    height: var(--detail-chart-h, 64px);
     pointer-events: none;
   }
 
   .card-peak-label {
     position: absolute;
     transform: translateX(-50%);
-    font-size: 0.4rem;
+    font-size: 0.5625rem; /* 9px — smallest still-legible size */
     font-weight: 700;
     line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -665,5 +669,68 @@
     right: 0;
     left: auto !important;
     transform: none;
+  }
+
+  /* ─── Desktop (≥768px): the card renders under a heatmap row — roomier
+     header, larger type, bigger thumbnail ─── */
+  @media (min-width: 768px) {
+    .card-header {
+      gap: 0.75rem;
+      padding: 0.75rem 2.75rem 0.625rem 0.75rem;
+    }
+
+    .card-thumb,
+    .card-thumb-img {
+      width: 5rem;
+      height: 3.75rem;
+    }
+
+    .card-name {
+      font-size: 1rem;
+    }
+
+    .card-sci {
+      font-size: 0.7rem;
+    }
+
+    .card-meta-plain,
+    .card-conf-val {
+      font-size: 0.75rem;
+    }
+
+    .card-stat {
+      font-size: 0.65rem;
+    }
+
+    .card-ebird-btn,
+    .card-detections-btn {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+    }
+
+    .card-peak-label {
+      font-size: 0.625rem;
+    }
+
+    .card-axis-tick {
+      font-size: 0.625rem;
+    }
+  }
+
+  /* ─── Wide desktop (≥1600px): two-column layout — meta/actions left,
+     large chart right ─── */
+  @media (min-width: 1600px) {
+    .species-card {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+      align-items: stretch;
+    }
+
+    /* Overlays (.card-peak-labels/.card-sun-marks/.card-axis) are positioned
+       against this section's padding box, so keep normal block flow here. */
+    .card-chart-section {
+      border-top: none;
+      border-left: 1px solid color-mix(in srgb, var(--color-base-content) 8%, transparent);
+    }
   }
 </style>

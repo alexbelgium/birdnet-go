@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
-import MobileSpeciesHistoryModal from './MobileSpeciesHistoryModal.svelte';
+import SpeciesHistoryModal from './SpeciesHistoryModal.svelte';
 
 // Exact response shape produced by GET /api/v2/analytics/time/daily
 // (GetDailyAnalytics in internal/api/v2/analytics): the series is wrapped in
@@ -26,7 +26,7 @@ const SERIES = [
   { date: '2026-07-01', count: 5 },
 ];
 
-describe('MobileSpeciesHistoryModal', () => {
+describe('SpeciesHistoryModal', () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -36,7 +36,7 @@ describe('MobileSpeciesHistoryModal', () => {
   });
 
   function renderModal(props?: { scientificName?: string; onClose?: () => void }) {
-    return render(MobileSpeciesHistoryModal, {
+    return render(SpeciesHistoryModal, {
       props: {
         scientificName: props?.scientificName ?? 'Turdus merula',
         displayName: 'Common Blackbird',

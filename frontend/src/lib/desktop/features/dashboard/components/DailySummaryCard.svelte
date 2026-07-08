@@ -9,7 +9,7 @@ Purpose:
 
 Features:
 - Progressive loading states (skeleton → spinner → loaded/error)
-- Responsive hourly/bi-hourly/six-hourly column grouping based on viewport
+- Responsive hourly/bi-hourly column grouping based on viewport
 - Color-coded heatmap cells showing detection intensity
 - Daylight visualization row showing sunrise/sunset times
 - Species badges with colored initials (GitHub-style heatmap design)
@@ -38,12 +38,10 @@ Performance Optimizations:
 - Efficient data sorting and max count calculations
 
 Responsive Breakpoints:
-- Desktop (≥1400px): All hourly columns visible
-- Large (1200-1399px): All hourly columns visible
-- Medium (1024-1199px): All hourly columns visible
+- Wide (≥1600px): All hourly columns, taller heatmap cells
+- Desktop (1024-1599px): All hourly columns visible
 - Tablet (768-1023px): Bi-hourly columns only
-- Mobile (480-767px): Bi-hourly columns only
-- Small (<480px): Six-hourly columns only
+- Mobile (<768px): compact MobileSummaryTable replaces the heatmap grid
 -->
 
 <script lang="ts">
@@ -78,7 +76,7 @@ Responsive Breakpoints:
     resolveNoveltyCategory,
     noveltyCategoryColorVar,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { ChevronLeft, ChevronRight, Star, XCircle } from '@lucide/svelte';
+  import { ChevronDown, ChevronLeft, ChevronRight, Star, XCircle } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
@@ -86,8 +84,13 @@ Responsive Breakpoints:
   import DailySummaryOverview from './daily-summary/DailySummaryOverview.svelte';
   import DailySummaryStatColumns from './daily-summary/DailySummaryStatColumns.svelte';
   import MobileSummaryTable from './daily-summary/MobileSummaryTable.svelte';
+  import SpeciesDetailCard from './daily-summary/SpeciesDetailCard.svelte';
   import SpeciesEbirdLink from './daily-summary/SpeciesEbirdLink.svelte';
   import TaxonFilterDropdown from './daily-summary/TaxonFilterDropdown.svelte';
+  import {
+    getSpeciesBadgeColor,
+    getSpeciesInitials,
+  } from '$lib/desktop/features/dashboard/utils/speciesBadge';
   import {
     filterByTaxon,
     taxonCounts,
@@ -179,13 +182,7 @@ Responsive Breakpoints:
     align: string;
   }
 
-  interface SixHourlyColumn extends BaseColumn {
-    type: 'six-hourly';
-    hour: number;
-    align: string;
-  }
-
-  type ColumnDefinition = SpeciesColumn | HourlyColumn | BiHourlyColumn | SixHourlyColumn;
+  type ColumnDefinition = SpeciesColumn | HourlyColumn | BiHourlyColumn;
 
   // URL builder types
   interface URLBuilders {
@@ -495,41 +492,6 @@ Responsive Breakpoints:
     return 'evening';
   };
 
-  // Species badge color palette - 12 distinct, visually appealing colors
-  const BADGE_COLORS = $state.raw([
-    '#10b981', // emerald
-    '#f59e0b', // amber
-    '#ef4444', // red
-    '#8b5cf6', // violet
-    '#06b6d4', // cyan
-    '#ec4899', // pink
-    '#84cc16', // lime
-    '#f97316', // orange
-    '#6366f1', // indigo
-    '#14b8a6', // teal
-    '#a855f7', // purple
-    '#eab308', // yellow
-  ]);
-
-  // Generate a consistent color for a species based on its name
-  const getSpeciesBadgeColor = (speciesName: string): string => {
-    let hash = 0;
-    for (let i = 0; i < speciesName.length; i++) {
-      hash = speciesName.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    return BADGE_COLORS[Math.abs(hash) % BADGE_COLORS.length];
-  };
-
-  // Get initials from species common name (first letter of first two words)
-  const getSpeciesInitials = (commonName: string): string => {
-    const words = commonName.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '??';
-    if (words.length === 1) {
-      return words[0].substring(0, 2).toUpperCase();
-    }
-    return (words[0][0] + words[1][0]).toUpperCase();
-  };
-
   /**
    * Calculate heatmap intensity using simple fixed-range scaling.
    * Maps detection counts evenly across intensity levels 1-9 based on HEATMAP_CONFIG.
@@ -578,17 +540,6 @@ Responsive Breakpoints:
         className: 'hour-data bi-hourly-count bi-hourly px-0',
       };
     }),
-    ...Array.from({ length: 4 }, (_, i) => {
-      const hour = i * 6;
-      return {
-        key: `six_hour_${hour}`,
-        type: 'six-hourly' as const,
-        hour,
-        header: hour.toString().padStart(2, '0'),
-        align: 'center',
-        className: 'hour-data six-hourly-count six-hourly px-0',
-      };
-    }),
   ]);
 
   // Reactive columns with only dynamic headers - use $derived.by for complex logic
@@ -607,7 +558,7 @@ Responsive Breakpoints:
   const loggedUnexpectedColumns = new Set<string>();
   $effect(() => {
     if (import.meta.env.DEV) {
-      const expectedTypes = new Set(['species', 'hourly', 'bi-hourly', 'six-hourly']);
+      const expectedTypes = new Set(['species', 'hourly', 'bi-hourly']);
 
       columns.forEach(column => {
         if (!expectedTypes.has(column.type) && !loggedUnexpectedColumns.has(column.key)) {
@@ -630,13 +581,6 @@ Responsive Breakpoints:
     'bi-hourly': (item: DailySpeciesSummary, hour: number) =>
       (safeArrayAccess(item.hourly_counts, hour, 0) ?? 0) +
       (safeArrayAccess(item.hourly_counts, hour + 1, 0) ?? 0),
-    'six-hourly': (item: DailySpeciesSummary, hour: number) => {
-      let sum = 0;
-      for (let h = hour; h < hour + 6 && h < 24; h++) {
-        sum += safeArrayAccess(item.hourly_counts, h, 0) ?? 0;
-      }
-      return sum;
-    },
   });
 
   // Phase 4: Optimized URL building with memoization for 90%+ performance improvement
@@ -721,6 +665,38 @@ Responsive Breakpoints:
     return serverTimezone ? getDateInTimezone(serverTimezone) : getLocalDateString();
   });
   const isToday = $derived(selectedDate === serverTodayDate);
+
+  // Last hour (inclusive) rendered by the hourly mini charts: truncated to the
+  // current hour when viewing today so no empty future bars show. nowTick keeps
+  // it advancing across hour changes and past midnight.
+  const chartMaxHour = $derived.by(() => {
+    void nowTick;
+    return isToday ? new Date().getHours() : 23;
+  });
+
+  // Desktop: scientific name of the species whose detail card is expanded
+  // under its heatmap row, or null. One row at a time, mirroring mobile.
+  let expandedSpecies = $state<string | null>(null);
+
+  // Grid root, used to restore focus to a row's expand button after collapse.
+  let gridEl = $state<HTMLDivElement>();
+
+  function toggleRowExpansion(scientificName: string) {
+    expandedSpecies = expandedSpecies === scientificName ? null : scientificName;
+  }
+
+  function collapseRowExpansion(scientificName: string) {
+    expandedSpecies = null;
+    // Return focus to the row's expand button (next frame) so keyboard users
+    // keep their place after the detail card closes.
+    window.requestAnimationFrame(() => {
+      const escaped =
+        typeof window.CSS?.escape === 'function'
+          ? window.CSS.escape(scientificName)
+          : scientificName;
+      gridEl?.querySelector<HTMLElement>(`[data-expand-btn="${escaped}"]`)?.focus();
+    });
+  }
 
   // Check for reduced motion preference for performance and accessibility
   const prefersReducedMotion = $derived(
@@ -951,9 +927,9 @@ Responsive Breakpoints:
 
       {#if isMobileViewport}
         <!-- Mobile compact table (<768px): render ONLY this so phones never
-             construct the desktop heatmap DOM (24 hourly + 12 bi-hourly + 6
-             six-hourly cells per species row). CSS-only hiding still builds
-             that DOM, which was a major first-paint cost on mobile.
+             construct the desktop heatmap DOM (24 hourly + 12 bi-hourly cells
+             per species row). CSS-only hiding still builds that DOM, which was
+             a major first-paint cost on mobile.
              Horizontal swipe on the list navigates between days; the wrapper
              only observes touches (passive), it is not itself a control. -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -965,12 +941,14 @@ Responsive Breakpoints:
             getSpeciesUrl={urlBuilders.species}
             {showThumbnails}
             {selectedDate}
+            maxHour={chartMaxHour}
           />
         </div>
       {:else}
         <!-- Desktop/tablet heatmap (≥768px) -->
         <div class="overflow-x-auto overflow-y-visible">
           <div
+            bind:this={gridEl}
             class="daily-summary-grid min-w-[900px]"
             style:--species-col-width={speciesColumnWidth}
           >
@@ -1001,20 +979,6 @@ Responsive Breakpoints:
                     {@const emoji = getHourlyWeatherEmoji(hour)}
                     <div
                       class="h-5 flex items-center justify-center text-sm weather-cell"
-                      title={getHourlyWeatherTooltip(hour)}
-                    >
-                      {emoji || ''}
-                    </div>
-                  {/each}
-                </div>
-
-                <!-- Six-hourly weather (small mobile) -->
-                <div class="six-hourly-grid flex-1 grid">
-                  {#each Array(4) as _, i (i)}
-                    {@const hour = i * 6}
-                    {@const emoji = getHourlyWeatherEmoji(hour)}
-                    <div
-                      class="h-5 flex items-center justify-center text-base weather-cell"
                       title={getHourlyWeatherTooltip(hour)}
                     >
                       {emoji || ''}
@@ -1065,26 +1029,6 @@ Responsive Breakpoints:
                   </div>
                 {/each}
               </div>
-              <!-- Six-hourly daylight (small mobile) -->
-              <div class="six-hourly-grid flex-1 grid">
-                {#each Array(4) as _, i (i)}
-                  {@const hour = i * 6}
-                  {@const daylightClass = getDaylightClass(hour)}
-                  {@const showSunrise =
-                    sunriseHour !== null && hour <= sunriseHour && sunriseHour < hour + 6}
-                  {@const showSunset =
-                    sunsetHour !== null &&
-                    hour <= sunsetHour &&
-                    sunsetHour < hour + 6 &&
-                    !showSunrise}
-                  <div
-                    class="h-5 rounded-sm daylight-cell daylight-{daylightClass} relative flex items-center justify-center"
-                  >
-                    {@render sunIcon('sunrise', sunTimes?.sunrise, showSunrise)}
-                    {@render sunIcon('sunset', sunTimes?.sunset, showSunset)}
-                  </div>
-                {/each}
-              </div>
             </div>
 
             <!-- Hours header row -->
@@ -1123,36 +1067,29 @@ Responsive Breakpoints:
                   </a>
                 {/each}
               </div>
-              <!-- Six-hourly headers (small mobile) -->
-              <div class="six-hourly-grid flex-1 grid text-xs">
-                {#each Array(4) as _, i (i)}
-                  {@const hour = i * 6}
-                  <a
-                    href={urlBuilders.hourly(hour, 6)}
-                    class="text-center hover:text-[var(--color-primary)] cursor-pointer"
-                    style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
-                    title={t('dashboard.dailySummary.tooltips.viewSixHourly', {
-                      startHour: hour.toString().padStart(2, '0'),
-                      endHour: (hour + 6).toString().padStart(2, '0'),
-                    })}
-                  >
-                    {hour.toString().padStart(2, '0')}
-                  </a>
-                {/each}
-              </div>
             </div>
 
             <!-- Species rows -->
             <div class="flex flex-col" style:gap="var(--grid-gap)">
               {#each sortedData as item, index (`${item.scientific_name}_${index}`)}
                 {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
+                {@const isRowExpanded = expandedSpecies === item.scientific_name}
+                <!-- Row background click toggles the detail card; links/buttons inside
+                     keep their own actions. Keyboard access goes through the chevron
+                     button, so the div itself needs no key handler. -->
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
                 <div
                   class="flex items-center species-row"
                   class:new-species={item.isNew && !prefersReducedMotion}
+                  onclick={(e: MouseEvent) => {
+                    const target = e.target as HTMLElement | null;
+                    if (target?.closest('a, button')) return;
+                    toggleRowExpansion(item.scientific_name);
+                  }}
                 >
                   <DailySummaryStatColumns variant="data" {item} />
                   <!-- Species info column -->
-                  <div class="species-label-col shrink-0 flex items-center gap-2 pr-4">
+                  <div class="species-label-col shrink-0 flex items-center gap-2 pr-2">
                     {#if showThumbnails}
                       <BirdThumbnailPopup
                         thumbnailUrl={item.thumbnail_url
@@ -1174,39 +1111,54 @@ Responsive Breakpoints:
                         {getSpeciesInitials(displayName)}
                       </a>
                     {/if}
-                    <a
-                      href={urlBuilders.species(item)}
-                      class="text-sm hover:text-[var(--color-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
-                      title={displayName}
-                    >
-                      <span class="truncate flex-1">{displayName}</span>
-                      {#if resolveNoveltyCategory(item) === 'lifetime'}
-                        <span
-                          class="inline-block shrink-0"
-                          style:color={noveltyCategoryColorVar('lifetime')}
-                          title={`New species (first seen ${item.days_since_first_seen ?? 0} day${(item.days_since_first_seen ?? 0) === 1 ? '' : 's'} ago)`}
-                        >
-                          <Star class="size-3 fill-current" />
-                        </span>
-                      {:else if resolveNoveltyCategory(item) === 'year'}
-                        <span
-                          class="shrink-0"
-                          style:color={noveltyCategoryColorVar('year')}
-                          title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
-                        >
-                          📅
-                        </span>
-                      {:else if resolveNoveltyCategory(item) === 'season'}
-                        <span
-                          class="shrink-0"
-                          style:color={noveltyCategoryColorVar('season')}
-                          title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
-                        >
-                          🌿
-                        </span>
-                      {/if}
-                    </a>
+                    <div class="flex flex-col min-w-0 flex-1">
+                      <a
+                        href={urlBuilders.species(item)}
+                        class="text-sm hover:text-[var(--color-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
+                        title={displayName}
+                      >
+                        <span class="truncate flex-1">{displayName}</span>
+                        {#if resolveNoveltyCategory(item) === 'lifetime'}
+                          <span
+                            class="inline-block shrink-0"
+                            style:color={noveltyCategoryColorVar('lifetime')}
+                            title={`New species (first seen ${item.days_since_first_seen ?? 0} day${(item.days_since_first_seen ?? 0) === 1 ? '' : 's'} ago)`}
+                          >
+                            <Star class="size-3 fill-current" />
+                          </span>
+                        {:else if resolveNoveltyCategory(item) === 'year'}
+                          <span
+                            class="shrink-0"
+                            style:color={noveltyCategoryColorVar('year')}
+                            title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
+                          >
+                            📅
+                          </span>
+                        {:else if resolveNoveltyCategory(item) === 'season'}
+                          <span
+                            class="shrink-0"
+                            style:color={noveltyCategoryColorVar('season')}
+                            title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
+                          >
+                            🌿
+                          </span>
+                        {/if}
+                      </a>
+                      <span class="species-sci-subline truncate">{item.scientific_name}</span>
+                    </div>
                     <SpeciesEbirdLink speciesCode={item.species_code} {displayName} />
+                    <button
+                      type="button"
+                      class="row-expand-btn shrink-0"
+                      data-expand-btn={item.scientific_name}
+                      aria-expanded={isRowExpanded}
+                      aria-label="{isRowExpanded ? 'Hide' : 'Show'} details for {displayName}"
+                      onclick={() => toggleRowExpansion(item.scientific_name)}
+                    >
+                      <ChevronDown
+                        class="size-4 expand-icon {isRowExpanded ? 'expand-icon-open' : ''}"
+                      />
+                    </button>
                   </div>
 
                   <!-- Hourly heatmap cells (desktop) -->
@@ -1260,33 +1212,24 @@ Responsive Breakpoints:
                       </div>
                     {/each}
                   </div>
-
-                  <!-- Six-hourly heatmap cells (small mobile) -->
-                  <div class="six-hourly-grid flex-1 grid">
-                    {#each Array(4) as _, i (i)}
-                      {@const hour = i * 6}
-                      {@const count = renderFunctions['six-hourly'](item, hour)}
-                      {@const intensity = getHeatmapIntensity(count)}
-                      <div
-                        class="heatmap-cell h-8 rounded-sm heatmap-color-{intensity} flex items-center justify-center text-xs font-medium"
-                      >
-                        {#if count > 0}
-                          <a
-                            href={urlBuilders.speciesHour(item, hour, 6)}
-                            class="w-full h-full flex items-center justify-center cursor-pointer hover:opacity-80"
-                            title={t('dashboard.dailySummary.tooltips.sixHourlyDetections', {
-                              count,
-                              startHour: hour.toString().padStart(2, '0'),
-                              endHour: (hour + 6).toString().padStart(2, '0'),
-                            })}
-                          >
-                            <AnimatedCounter value={count} />
-                          </a>
-                        {/if}
-                      </div>
-                    {/each}
-                  </div>
                 </div>
+
+                {#if isRowExpanded}
+                  <!-- Inline species detail (same card as the mobile expanded view,
+                       with a taller chart) — brings eBird/detections/history actions
+                       and the daylight-colored hourly chart to desktop rows. -->
+                  <SpeciesDetailCard
+                    {item}
+                    {sunriseHour}
+                    {sunsetHour}
+                    {displayName}
+                    speciesUrl={urlBuilders.species(item)}
+                    maxHour={chartMaxHour}
+                    onCollapse={() => collapseRowExpansion(item.scientific_name)}
+                    {selectedDate}
+                    chartHeight={96}
+                  />
+                {/if}
               {/each}
             </div>
           </div>
@@ -1361,13 +1304,19 @@ Responsive Breakpoints:
      CSS Grid Layout Styles
      ======================================================================== */
 
-  /* Species label column - fixed width calculated from longest species name */
+  /* Species label column - fixed width calculated from longest species name.
+     Sticky (after the two 3.5rem stat cells) so species names stay readable
+     while the hour grid scrolls horizontally on narrower screens. */
   .species-label-col {
     width: var(--species-col-width, var(--species-col-min-width));
+    position: sticky;
+    left: 7rem;
+    z-index: 5;
+    background: var(--color-base-100);
   }
 
   /* CSS Grid for hour columns - equal columns using minmax(0, 1fr) */
-  /* Default: show hourly (desktop), hide bi-hourly and six-hourly */
+  /* Default: show hourly (desktop), hide bi-hourly */
   .hourly-grid {
     display: grid;
     grid-template-columns: repeat(24, minmax(0, 1fr));
@@ -1377,12 +1326,6 @@ Responsive Breakpoints:
   .bi-hourly-grid {
     display: none;
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: var(--grid-gap);
-  }
-
-  .six-hourly-grid {
-    display: none;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--grid-gap);
   }
 
@@ -1398,15 +1341,59 @@ Responsive Breakpoints:
     text-decoration: none;
   }
 
-  /* Species row - consistent height */
+  /* Species row - consistent height; two text lines (name + scientific name).
+     The whole row toggles the inline species detail card. */
   .species-row {
-    min-height: 2rem;
+    min-height: 2.5rem;
     border-radius: var(--grid-cell-radius);
     transition: background-color 0.15s ease;
+    cursor: pointer;
   }
 
   .species-row:hover {
     background-color: var(--hover-overlay);
+  }
+
+  /* Scientific name subline under the species name (same treatment as the
+     mobile summary table's landscape mode) */
+  .species-sci-subline {
+    font-size: 0.6875rem;
+    font-style: italic;
+    line-height: 1.2;
+    color: color-mix(in srgb, var(--color-base-content) 55%, transparent);
+  }
+
+  /* Chevron that expands the species detail card under the row */
+  .row-expand-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 9999px;
+    border: none;
+    background: none;
+    color: color-mix(in srgb, var(--color-base-content) 60%, transparent);
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .row-expand-btn:hover {
+    background: color-mix(in srgb, var(--color-base-content) 10%, transparent);
+    color: var(--color-base-content);
+  }
+
+  .row-expand-btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  .row-expand-btn :global(.expand-icon) {
+    transition: transform 0.15s ease;
+  }
+
+  .row-expand-btn :global(.expand-icon-open) {
+    transform: rotate(180deg);
   }
 
   /* Empty cells background */
@@ -1427,7 +1414,8 @@ Responsive Breakpoints:
      Responsive Grid Display
      ======================================================================== */
 
-  /* Tablet (768-1023px): show bi-hourly */
+  /* Tablet (768-1023px): show bi-hourly. Below 768px the desktop grid is not
+     rendered at all — MobileSummaryTable takes over. */
   @media (min-width: 768px) and (max-width: 1023px) {
     .hourly-grid {
       display: none;
@@ -1436,36 +1424,12 @@ Responsive Breakpoints:
     .bi-hourly-grid {
       display: grid;
     }
-
-    .six-hourly-grid {
-      display: none;
-    }
   }
 
-  /* Mobile (<768px): show bi-hourly */
-  @media (max-width: 767px) {
-    .hourly-grid {
-      display: none;
-    }
-
-    .bi-hourly-grid {
-      display: grid;
-    }
-
-    .six-hourly-grid {
-      display: none;
-    }
-  }
-
-  /* Small mobile (<480px): show six-hourly */
-  @media (max-width: 479px) {
-    .hourly-grid,
-    .bi-hourly-grid {
-      display: none;
-    }
-
-    .six-hourly-grid {
-      display: grid;
+  /* Wide desktop (≥1600px): taller heatmap cells use the extra room */
+  @media (min-width: 1600px) {
+    .daily-summary-card .heatmap-cell {
+      height: 2.25rem;
     }
   }
 

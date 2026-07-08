@@ -11,12 +11,13 @@
 </script>
 
 <script lang="ts">
-  // Self-contained species detection-history modal for the mobile dashboard.
+  // Self-contained species detection-history modal, opened from the daily
+  // summary detail card on both mobile and desktop.
   // Charts detection counts for one species over 7d/30d/90d/1y/2y/all-time
   // using the existing GET /api/v2/analytics/time/daily endpoint (which wraps
   // the series in {data: [...]}). Long ranges are aggregated client-side into
   // week/month buckets so the chart stays readable. All strings are hardcoded
-  // English (no i18n) so the mobile feature stays self-contained.
+  // English (no i18n) so the feature stays self-contained.
   import { line as d3Line, curveMonotoneX } from 'd3-shape';
   import { X } from '@lucide/svelte';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
@@ -550,6 +551,13 @@
     display: flex;
     flex-direction: column;
     gap: 0.625rem;
+  }
+
+  /* Desktop gets a roomier chart */
+  @media (min-width: 1024px) {
+    .hist-panel {
+      max-width: 40rem;
+    }
   }
 
   .hist-header {

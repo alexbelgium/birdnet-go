@@ -1,3 +1,10 @@
+<script module lang="ts">
+  // Bar geometry is part of the chart's contract: consumers (e.g. the mobile
+  // summary table's chart column width) size themselves from these values.
+  export const BAR_WIDTH = 3;
+  export const BAR_STRIDE = 4; // bar width + gap
+</script>
+
 <script lang="ts">
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { safeArrayAccess } from '$lib/utils/security';
@@ -12,9 +19,6 @@
   }
 
   let { item, sunriseHour, sunsetHour, maxHour = 23, chartHeight = 20 }: Props = $props();
-
-  const BAR_WIDTH = 3;
-  const BAR_STRIDE = 4; // bar width + gap
 
   const barCount = $derived(maxHour + 1); // 1–24
   const svgWidth = $derived(barCount * BAR_STRIDE);

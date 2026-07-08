@@ -2,13 +2,13 @@
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
-  import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
+  import { formatDetectionCount } from '../../utils/dailySummaryStats';
+  import { getSpeciesBadgeColor, getSpeciesInitials } from '../../utils/speciesBadge';
   import { resolveNoveltyCategory, noveltyCategoryColorVar } from '../../utils/noveltyCategory';
-  import { buildHourlyDetectionUrl } from '$lib/utils/detectionUrls';
-  import { getLocalDateString } from '$lib/utils/date';
   import { Star } from '@lucide/svelte';
-  import HourlyMiniChart from './HourlyMiniChart.svelte';
-  import MobileSpeciesExpandedCard from './MobileSpeciesExpandedCard.svelte';
+  import HourlyMiniChart, { BAR_STRIDE } from './HourlyMiniChart.svelte';
+  import ConfidencePill from './ConfidencePill.svelte';
+  import SpeciesDetailCard from './SpeciesDetailCard.svelte';
 
   interface Props {
     data: DailySpeciesSummary[];
@@ -17,60 +17,44 @@
     getSpeciesUrl: (_item: DailySpeciesSummary) => string;
     showThumbnails: boolean;
     selectedDate: string;
+    /** Last hour (inclusive) to render in charts — today's current hour, else 23.
+        Owned by DailySummaryCard, which keeps it ticking across hour changes. */
+    maxHour: number;
   }
 
-  let { data, sunriseHour, sunsetHour, getSpeciesUrl, showThumbnails, selectedDate }: Props =
-    $props();
-
-  // 12-color palette — same as DailySummaryCard badge colors for visual consistency.
-  const BADGE_COLORS = [
-    '#10b981',
-    '#f59e0b',
-    '#ef4444',
-    '#8b5cf6',
-    '#06b6d4',
-    '#ec4899',
-    '#84cc16',
-    '#f97316',
-    '#6366f1',
-    '#14b8a6',
-    '#a855f7',
-    '#eab308',
-  ] as const;
-
-  function getSpeciesBadgeColor(speciesName: string): string {
-    let hash = 0;
-    for (let i = 0; i < speciesName.length; i++) {
-      hash = speciesName.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    return BADGE_COLORS[Math.abs(hash) % BADGE_COLORS.length];
-  }
-
-  function getSpeciesInitials(commonName: string): string {
-    const words = commonName.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '??';
-    if (words.length === 1) return (words[0] ?? '').substring(0, 2).toUpperCase();
-    return ((words[0] ?? '')[0] + (words[1] ?? '')[0]).toUpperCase();
-  }
+  let {
+    data,
+    sunriseHour,
+    sunsetHour,
+    getSpeciesUrl,
+    showThumbnails,
+    selectedDate,
+    maxHour,
+  }: Props = $props();
 
   // Per-row expansion state — scientific name of the expanded row, or null.
   let expandedSpecies: string | null = $state(null);
 
-  // Timer map for distinguishing single-tap (→ expand) from double-tap (→ daily detections).
-  const rowTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Root element, used to restore focus to a row after its card collapses.
+  let tableEl = $state<HTMLDivElement>();
 
-  // Full-day detections URL for the selected date.
-  const dailyUrl = $derived(buildHourlyDetectionUrl(selectedDate, 0, 24));
+  function collapseRow(scientificName: string) {
+    expandedSpecies = null;
+    // Restore focus to the compact row that replaces the card (next frame,
+    // once the row exists again) so keyboard/SR users keep their place.
+    window.requestAnimationFrame(() => {
+      const escaped =
+        typeof window.CSS?.escape === 'function'
+          ? window.CSS.escape(scientificName)
+          : scientificName;
+      tableEl?.querySelector<HTMLElement>(`[data-species-row="${escaped}"]`)?.focus();
+    });
+  }
 
-  // Truncate chart at current hour when viewing today (avoids empty future bars).
-  const isToday = $derived(selectedDate === getLocalDateString());
-  const currentHour = $derived(isToday ? new Date().getHours() : 23);
-
-  // Chart column tracks the chart's actual rendered width (must match HourlyMiniChart's
-  // BAR_WIDTH + gap = 4px/bar) so leftover space goes to the species name instead of
+  // Chart column tracks the chart's actual rendered width (BAR_STRIDE px/bar,
+  // from HourlyMiniChart) so leftover space goes to the species name instead of
   // sitting empty next to a shorter-than-24h chart.
-  const CHART_BAR_STRIDE = 4;
-  const chartColWidthPx = $derived((currentHour + 1) * CHART_BAR_STRIDE);
+  const chartColWidthPx = $derived((maxHour + 1) * BAR_STRIDE);
 
   // Gates the SSE row-flash animation for users who prefer reduced motion.
   const prefersReducedMotion =
@@ -81,11 +65,11 @@
 
 <!--
   Compact mobile species table — replaces the heatmap grid on screens <768 px.
-  Interaction model:
-    - Single tap anywhere on a row → expand into species card (300 ms guard)
-    - Double-tap anywhere on a row → navigate to daily detections
+  Interaction model: tap anywhere on a row → expand into the species detail
+  card; the card's pills link out (eBird, detections, history).
 -->
 <div
+  bind:this={tableEl}
   class="mobile-summary-table w-full"
   aria-label="Species detected on {selectedDate}"
   style:--col-chart-w="{chartColWidthPx}px"
@@ -106,21 +90,18 @@
 
     {#if isExpanded}
       <!-- Expanded: full species card replaces the compact row -->
-      <MobileSpeciesExpandedCard
+      <SpeciesDetailCard
         {item}
         {sunriseHour}
         {sunsetHour}
         {displayName}
         speciesUrl={getSpeciesUrl(item)}
-        maxHour={currentHour}
-        onCollapse={() => {
-          expandedSpecies = null;
-        }}
-        {dailyUrl}
+        {maxHour}
+        onCollapse={() => collapseRow(item.scientific_name)}
         {selectedDate}
       />
     {:else}
-      <!-- Compact row — single tap → expand; double tap → daily log -->
+      <!-- Compact row — tap → expand into detail card -->
       <div
         class="mobile-summary-row"
         class:row-updated={((item.hourlyUpdated?.length ?? 0) > 0 ||
@@ -128,23 +109,12 @@
           !prefersReducedMotion}
         role="button"
         tabindex="0"
+        data-species-row={item.scientific_name}
         aria-label="{displayName}: {pct}% confidence, {formatDetectionCount(
           item.count
         )} detections. Tap to expand."
-        onclick={(_e: MouseEvent) => {
-          const sci = item.scientific_name;
-          if (rowTimers.has(sci)) {
-            const t = rowTimers.get(sci);
-            if (t !== undefined) clearTimeout(t);
-            rowTimers.delete(sci);
-            window.location.href = dailyUrl;
-          } else {
-            const t = setTimeout(() => {
-              rowTimers.delete(sci);
-              expandedSpecies = sci;
-            }, 300);
-            rowTimers.set(sci, t);
-          }
+        onclick={() => {
+          expandedSpecies = item.scientific_name;
         }}
         onkeydown={(e: KeyboardEvent) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -212,13 +182,10 @@
           <span class="col-scientific-name">{item.scientific_name}</span>
         </div>
 
-        <!-- Max confidence, color-coded -->
-        <span
-          class="col-conf text-xs tabular-nums font-semibold"
-          style:color={computeConfidenceColor(pct)}
-        >
-          {pct}%
-        </span>
+        <!-- Max confidence pill (same component as the desktop stat column) -->
+        <div class="col-conf">
+          <ConfidencePill percent={pct} />
+        </div>
 
         <!-- Detection count, abbreviated -->
         <span class="col-count text-xs tabular-nums">
@@ -227,7 +194,7 @@
 
         <!-- Hourly chart (visual only — whole row handles tap) -->
         <div class="col-chart" aria-hidden="true">
-          <HourlyMiniChart {item} {sunriseHour} {sunsetHour} maxHour={currentHour} />
+          <HourlyMiniChart {item} {sunriseHour} {sunsetHour} {maxHour} />
         </div>
       </div>
     {/if}
@@ -240,14 +207,14 @@
   {/if}
 
   {#if data.length > 0}
-    <div class="zoom-hint" aria-hidden="true">tap to expand · double-tap for daily log</div>
+    <div class="zoom-hint" aria-hidden="true">tap a row for details</div>
   {/if}
 </div>
 
 <style>
   .mobile-summary-table {
-    --thumb-w: 1.5rem;
-    --thumb-h: 1.25rem;
+    --thumb-w: 2rem;
+    --thumb-h: 1.5rem;
     --col-conf-w: 2.5rem;
     --col-count-w: 2.25rem;
 
@@ -256,7 +223,7 @@
        whatever is left over. */
   }
 
-  /* ─── 5-column grid; portrait uses a compact thumbnail, landscape a larger one ─── */
+  /* ─── 5-column grid; header and rows share the same tracks ─── */
 
   .mobile-summary-header {
     display: grid;
@@ -298,7 +265,9 @@
     align-items: center;
     gap: 0.125rem;
     padding: 0 0.125rem;
-    min-height: 1.25rem;
+
+    /* Comfortable tap target (36 px + gap; guideline minimum is ~44 px hit area) */
+    min-height: 2.25rem;
     border-radius: 0.375rem;
     color: var(--color-base-content);
     cursor: pointer;
@@ -306,6 +275,9 @@
     background: none;
     text-align: left;
     width: 100%;
+
+    /* Rows are tap targets, never zoom/pan surfaces — avoids double-tap zoom */
+    touch-action: manipulation;
   }
 
   /* Brief pulse when SSE delivers a new detection for this species.
@@ -351,7 +323,7 @@
     width: var(--thumb-w);
     height: var(--thumb-h);
     border-radius: 0.25rem;
-    font-size: 0.5rem;
+    font-size: 0.625rem;
     font-weight: 700;
     color: white;
     text-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
@@ -430,13 +402,8 @@
     padding: 0.625rem 0 0.125rem;
   }
 
-  /* ─── Landscape: larger thumbnail + scientific name, name capped at φ ─── */
+  /* ─── Landscape: scientific name shown, name capped at φ ─── */
   @media (orientation: landscape) {
-    .mobile-summary-table {
-      --thumb-w: 2rem;
-      --thumb-h: 1.5rem;
-    }
-
     /* Name capped at the golden ratio; graph fills the remaining flex space.
        name:chart = 1.618:1 → name ≈ 61.8% of the flexible width (conf/count are
        fixed tracks, so name is strictly < 61.8% of the *total* width → "at most"). */
