@@ -60,6 +60,46 @@
     typeof window !== 'undefined'
       ? (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false)
       : false;
+
+  // ── Column-header pinning ─────────────────────────────────────────────────
+  // Keeps the header visible while any part of the species list is on screen,
+  // with the page (not this component) as the scroll surface. CSS
+  // `position: sticky` is not an option: the app shell's .drawer-content has
+  // overflow-y: auto, which makes it the header's scrollport, but it auto-grows
+  // with its content and never scrolls itself (the window does) — so a sticky
+  // header would never stick. Instead, translate the header down by however far
+  // the table's top has scrolled past the viewport top, clamped so the header
+  // leaves with the end of the list. The capture-phase listener catches the
+  // scroll wherever it happens (window today, any scrolling ancestor tomorrow).
+  let headerEl = $state<HTMLDivElement>();
+
+  $effect(() => {
+    const table = tableEl;
+    const header = headerEl;
+    if (!table || !header) return;
+
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const tableTop = table.getBoundingClientRect().top;
+      const maxShift = Math.max(0, table.offsetHeight - header.offsetHeight);
+      const shift = Math.min(Math.max(0, -tableTop), maxShift);
+      header.style.transform = shift > 0 ? `translateY(${shift}px)` : '';
+    };
+    const schedule = () => {
+      if (raf === 0) raf = window.requestAnimationFrame(update);
+    };
+
+    window.addEventListener('scroll', schedule, { capture: true, passive: true });
+    window.addEventListener('resize', schedule, { passive: true });
+    update();
+
+    return () => {
+      window.removeEventListener('scroll', schedule, { capture: true });
+      window.removeEventListener('resize', schedule);
+      if (raf !== 0) window.cancelAnimationFrame(raf);
+    };
+  });
 </script>
 
 <!--
@@ -73,8 +113,8 @@
   aria-label="Species detected on {selectedDate}"
   style:--col-chart-w="{chartColWidthPx}px"
 >
-  <!-- Header -->
-  <div class="mobile-summary-header" aria-hidden="true">
+  <!-- Header (JS-pinned while the list is in view — see pin $effect) -->
+  <div bind:this={headerEl} class="mobile-summary-header" aria-hidden="true">
     <div class="col-header-species">Species</div>
     <div class="col-header-conf">Conf.</div>
     <div class="col-header-count">Cnt</div>
@@ -207,12 +247,11 @@
       No species detected
     </div>
   {/if}
-</div>
 
-{#if data.length > 0}
-  <!-- Outside the scroll region so the hint stays visible without scrolling to the bottom -->
-  <div class="zoom-hint" aria-hidden="true">tap a row for details</div>
-{/if}
+  {#if data.length > 0}
+    <div class="zoom-hint" aria-hidden="true">tap a row for details</div>
+  {/if}
+</div>
 
 <style>
   .mobile-summary-table {
@@ -224,15 +263,6 @@
     /* --col-chart-w is bound inline to the chart's actual rendered width (px), so the
        column never reserves more space than the chart needs — the name column gets
        whatever is left over. */
-
-    /* This element is its own scroll region (rather than relying on page-level
-       scroll) so the sticky header below always has a genuinely-scrolling
-       containing block: the app shell's outer scroll container (drawer-content)
-       auto-sizes to its content and never actually scrolls internally, which
-       silently breaks `position: sticky` for any descendant that assumes it. */
-    max-height: 60vh;
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
   }
 
   /* ─── 5-column grid; header and rows share the same tracks ─── */
@@ -252,11 +282,15 @@
     letter-spacing: 0.05em;
     color: color-mix(in srgb, var(--color-base-content) 50%, transparent);
 
-    /* Pinned while the (potentially long) species list scrolls */
-    position: sticky;
-    top: 0;
+    /* Pinned via translateY while the page scrolls (see the pin $effect in the
+       script block). position: sticky cannot work here: the app shell's
+       .drawer-content ancestor has overflow-y: auto, making it this header's
+       scrollport — but it auto-grows with its content and never scrolls (the
+       window does), so a sticky header would simply never stick. */
+    position: relative;
     z-index: 10;
     background: var(--color-base-100);
+    will-change: transform;
   }
 
   .col-header-species {
