@@ -85,7 +85,7 @@
       const maxShift = Math.max(0, table.offsetHeight - header.offsetHeight);
       const shift = Math.min(Math.max(0, -tableTop), maxShift);
       header.style.setProperty('--pin-shift', `${shift}px`);
-      header.style.transform = shift > 0 ? `translate3d(0, ${shift}px, 0)` : 
+      header.style.transform = shift > 0 ? `translate3d(0, ${shift}px, 0)` : '';
     };
     const schedule = () => {
       if (raf === 0) raf = window.requestAnimationFrame(update);
