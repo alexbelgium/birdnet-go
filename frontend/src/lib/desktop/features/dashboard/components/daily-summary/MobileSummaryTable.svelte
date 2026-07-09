@@ -358,7 +358,8 @@
     object-fit: cover;
     display: block;
     flex-shrink: 0;
-  }
+    margin-right: 0.5rem;
+}
 
   .mobile-badge {
     display: flex;
