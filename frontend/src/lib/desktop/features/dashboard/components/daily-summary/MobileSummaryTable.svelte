@@ -84,7 +84,8 @@
       const tableTop = table.getBoundingClientRect().top;
       const maxShift = Math.max(0, table.offsetHeight - header.offsetHeight);
       const shift = Math.min(Math.max(0, -tableTop), maxShift);
-      header.style.transform = shift > 0 ? `translateY(${shift}px)` : '';
+      header.style.setProperty('--pin-shift', `${shift}px`);
+      header.style.transform = shift > 0 ? `translate3d(0, ${shift}px, 0)` : 
     };
     const schedule = () => {
       if (raf === 0) raf = window.requestAnimationFrame(update);
@@ -264,6 +265,21 @@
        column never reserves more space than the chart needs — the name column gets
        whatever is left over. */
   }
+  
+  /* Curtain above the column names while the header is pinned */
+  .mobile-summary-header::before {
+    content: '';
+    position: absolute;
+    left: -0.25rem;
+    right: -0.25rem;
+    bottom: 100%;
+    height: var(--pin-shift, 0px);
+    background: color-mix(in srgb, var(--color-base-100) 75%, black 25%);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    pointer-events: none;
+    z-index: -1;
+  }
 
   /* ─── 5-column grid; header and rows share the same tracks ─── */
 
@@ -287,10 +303,13 @@
        .drawer-content ancestor has overflow-y: auto, making it this header's
        scrollport — but it auto-grows with its content and never scrolls (the
        window does), so a sticky header would simply never stick. */
-    position: relative;
-    z-index: 10;
-    background: var(--color-base-100);
     will-change: transform;
+    position: relative;
+    z-index: 50;
+    background: color-mix(in srgb, var(--color-base-100) 92%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    isolation: isolate;
   }
 
   .col-header-species {
