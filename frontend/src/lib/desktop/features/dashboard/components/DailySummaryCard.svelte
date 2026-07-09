@@ -955,9 +955,9 @@ Responsive Breakpoints:
             <!-- Hourly weather visualization row (only shown if weather data exists) -->
             {#if hourlyWeather.length > 0}
               <div class="flex mb-1">
-                <DailySummaryStatColumns variant="spacer" />
                 <!-- Empty label column to align with other rows -->
                 <div class="species-label-col shrink-0"></div>
+                <DailySummaryStatColumns variant="spacer" />
 
                 <!-- Hourly weather (desktop) -->
                 <div class="hourly-grid flex-1 grid">
@@ -990,13 +990,13 @@ Responsive Breakpoints:
 
             <!-- Daylight visualization row -->
             <div class="flex mb-1">
-              <DailySummaryStatColumns variant="spacer" />
               <div class="species-label-col shrink-0 flex items-center">
                 <span
                   class="text-xs text-[var(--color-base-content)]/60 font-normal whitespace-nowrap"
                   >{t('dashboard.dailySummary.daylight.label')}</span
                 >
               </div>
+              <DailySummaryStatColumns variant="spacer" />
               <!-- Hourly daylight (desktop) -->
               <div class="hourly-grid flex-1 grid">
                 {#each Array(24) as _, hour (hour)}
@@ -1033,8 +1033,8 @@ Responsive Breakpoints:
 
             <!-- Hours header row -->
             <div class="flex mb-1">
-              <DailySummaryStatColumns variant="header" />
               <div class="species-label-col shrink-0"></div>
+              <DailySummaryStatColumns variant="header" />
               <!-- Hourly headers (desktop) -->
               <div class="hourly-grid flex-1 grid text-xs">
                 {#each Array(24) as _, hour (hour)}
@@ -1087,7 +1087,6 @@ Responsive Breakpoints:
                     toggleRowExpansion(item.scientific_name);
                   }}
                 >
-                  <DailySummaryStatColumns variant="data" {item} />
                   <!-- Species info column -->
                   <div class="species-label-col shrink-0 flex items-center gap-2 pr-2">
                     {#if showThumbnails}
@@ -1160,6 +1159,8 @@ Responsive Breakpoints:
                       />
                     </button>
                   </div>
+
+                  <DailySummaryStatColumns variant="data" {item} />
 
                   <!-- Hourly heatmap cells (desktop) -->
                   <div class="hourly-grid flex-1 grid">
@@ -1305,14 +1306,16 @@ Responsive Breakpoints:
      ======================================================================== */
 
   /* Species label column - fixed width calculated from longest species name.
-     Sticky (after the two 3.5rem stat cells) so species names stay readable
-     while the hour grid scrolls horizontally on narrower screens. */
+     Sticky at the leading edge (species name comes first, then the two
+     stat cells, then the hour grid) so species names stay readable while
+     the hour grid scrolls horizontally on narrower screens. */
   .species-label-col {
     width: var(--species-col-width, var(--species-col-min-width));
     position: sticky;
-    left: 7rem;
+    left: 0;
     z-index: 5;
     background: var(--color-base-100);
+    border-right: 1px solid var(--color-base-200);
   }
 
   /* CSS Grid for hour columns - equal columns using minmax(0, 1fr) */

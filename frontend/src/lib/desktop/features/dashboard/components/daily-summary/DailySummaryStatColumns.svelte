@@ -4,15 +4,16 @@
 
   // Narrow fixed width for each stat cell — keeps all rows aligned and
   // leaves room for the species column + hour grid on smaller screens.
-  // Cells are sticky during horizontal scroll of the heatmap grid (first cell
-  // at left-0, second at left-14 = one cell width), with an opaque background
-  // so heatmap cells slide underneath.
+  // Cells are sticky during horizontal scroll of the heatmap grid, offset
+  // by the (dynamic) species column width since the species column is
+  // sticky at left-0 and these cells sit just to its right, with an
+  // opaque background so heatmap cells slide underneath.
   const STAT_CELL_CLASS =
-    'shrink-0 w-14 flex items-center justify-center px-1 sticky left-0 z-[5] bg-[var(--color-base-100)]';
+    'shrink-0 w-14 flex items-center justify-center px-1 sticky left-[var(--species-col-width)] z-[5] bg-[var(--color-base-100)]';
   const STAT_CELL_2_CLASS =
-    'shrink-0 w-14 flex items-center justify-center px-1 sticky left-14 z-[5] bg-[var(--color-base-100)]';
+    'shrink-0 w-14 flex items-center justify-center px-1 sticky left-[calc(var(--species-col-width)+3.5rem)] z-[5] bg-[var(--color-base-100)]';
   const HEADER_TEXT_CLASS = 'text-center leading-tight text-[10px]';
-  // Subtle right edge separates the stat block from the species column.
+  // Subtle right edge on the second stat cell separates the stat block from the hour grid.
   const SEPARATOR_CLASS = 'border-r border-[var(--color-base-200)]';
 
   interface Props {
