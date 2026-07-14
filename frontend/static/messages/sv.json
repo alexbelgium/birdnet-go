@@ -205,12 +205,20 @@
     "serverError": "500 - Internt serverfel",
     "componentError": "Komponentladdningsfel",
     "speciesAnalytics": "Artanalys",
-    "advancedAnalytics": "Avancerad analys",
     "detectionDetails": "Detektionsdetaljer",
-    "settingsNotAvailable": "Inställningar ej tillgängliga"
+    "settingsNotAvailable": "Inställningar ej tillgängliga",
+    "analyticsSummary": "Analytics - Summary",
+    "analyticsActivity": "Analytics - Activity Patterns",
+    "analyticsTrends": "Analytics - Trends",
+    "analyticsBiodiversity": "Analytics - Biodiversity",
+    "analyticsReview": "Analytics - Review & Accuracy",
+    "analyticsNocturnal": "Analys - Nattaktivitet",
+    "analyticsWeather": "Analys - Väderkorrelation",
+    "analyticsSoundscape": "Analys - Ljudlandskap"
   },
   "navigation": {
     "dashboard": "Instrumentpanel",
+    "liveAudio": "Direktljud",
     "settingsMenu": "Inställningsmeny",
     "theme": "Tema",
     "github": "GitHub",
@@ -238,7 +246,13 @@
     "reportBugAriaLabel": "Rapportera en bugg på GitHub (öppnas i nytt fönster)",
     "askQuestionAriaLabel": "Ställ en fråga på GitHub Discussions (öppnas i nytt fönster)",
     "viewOnGithubAriaLabel": "Visa BirdNET-Go på GitHub (öppnas i nytt fönster)",
-    "health": "Health"
+    "health": "Health",
+    "sections": {
+      "explore": "Utforska",
+      "patterns": "Mönster",
+      "environment": "Miljö",
+      "dataQuality": "Datakvalitet"
+    }
   },
   "about": {
     "title": "BirdNET-Go",
@@ -405,6 +419,7 @@
         "recalculatingThresholds": "Beräknar om dynamiska tröskelvärden för nytt basvärde",
         "reconfiguringDynamicThresholds": "Konfigurerar om dynamiska tröskelvärden...",
         "webserverRestartRequired": "Webbserverinställningar ändrade. Omstart krävs.",
+        "oauthRestartRequired": "Autentiseringsleverantörsinställningar ändrade. Omstart krävs.",
         "databaseRestartRequired": "Database settings changed. Restart required.",
         "loggingRestartRequired": "Logging settings changed. Restart required.",
         "reconfiguringSoundLevel": "Uppdaterar ljudnivååvervakning...",
@@ -947,7 +962,8 @@
     "row": {
       "viewDetails": "Visa detaljer för {species}",
       "play": "Spela upp",
-      "playAudio": "Spela upp ljud"
+      "playAudio": "Spela upp ljud",
+      "imageFailedToLoad": "Image failed to load"
     },
     "media": {
       "title": "Inspelning och spektrogram",
@@ -1161,7 +1177,166 @@
       "overview": "Översikt",
       "database": "Databas",
       "inference": "AI Models",
-      "terminal": "Terminal"
+      "terminal": "Terminal",
+      "importExport": "Import / Export"
+    },
+    "importExport": {
+      "available": "Tillgänglig",
+      "experimental": "Experimentell",
+      "comingSoon": "Kommer snart",
+      "loading": "Laddar...",
+      "runInBackground": "Stäng (importen fortsätter i bakgrunden)",
+      "runInBackgroundTitle": "Stäng den här dialogrutan. Importen fortsätter i bakgrunden.",
+      "stepAnnouncement": "Steg {current} av {total}: {name}",
+      "steps": {
+        "source": "Källa",
+        "mode": "Läge",
+        "confirm": "Bekräfta",
+        "progress": "Förlopp",
+        "done": "Klar"
+      },
+      "import": {
+        "sectionTitle": "Import"
+      },
+      "export": {
+        "sectionTitle": "Export",
+        "cardTitle": "Exportera detekteringar",
+        "cardDescription": "Exportera dina detekteringsdata till CSV, JSON eller andra format."
+      },
+      "birdnetPi": {
+        "cardTitle": "BirdNET-Pi",
+        "cardDescription": "Importera detekteringshistorik från en BirdNET-Pi-SQLite-databas (birds.db).",
+        "startButton": "Importera från BirdNET-Pi",
+        "wizardTitle": "Importera från BirdNET-Pi",
+        "experimentalNotice": "Import från BirdNET-Pi är experimentell och kan fortfarande ha problem.",
+        "reportBug": "Rapportera ett fel på GitHub"
+      },
+      "birdsDbUpload": {
+        "cardTitle": "Uppladdning av birds.db",
+        "cardDescription": "Ladda upp en BirdNET-Pi-databasfil direkt från din webbläsare."
+      },
+      "activity": {
+        "sectionTitle": "Importaktivitet",
+        "empty": {
+          "title": "Ingen importaktivitet",
+          "description": "När en import körs visas förloppet här."
+        },
+        "openWizard": "Öppna importguiden"
+      },
+      "wizard": {
+        "stepsLabel": "Steg i importguiden"
+      },
+      "sourceAccess": {
+        "pathLabel": "Sökväg till birds.db (relativ till monteringsroten)",
+        "pathHelpText": "Ange sökvägen relativt till roten för den externa mediemonteringen, t.ex. birdnet-pi/birds.db",
+        "pathRequiredReason": "Ange sökvägen till birds.db för att fortsätta",
+        "mountDescription": "Din BirdNET-Pi-databas bör finnas på den externa mediemonteringen.",
+        "mountRoot": "Monteringsrot",
+        "nativeTitle": "Extern mediemontering krävs",
+        "nativeDescription": "BirdNET-Pi-import kräver en extern mediemontering, som endast är tillgänglig när BirdNET-Go körs i en container. Nativa (icke-containeriserade) installationer kan inte använda den här importfunktionen.",
+        "nativeHowTo": "För att importera från BirdNET-Pi, kör BirdNET-Go i en container där BirdNET-Pi-datakatalogen är monterad som den externa medievolymen.",
+        "missingTitle": "Extern mediemontering hittades inte",
+        "missingDescription": "BirdNET-Go körs i en container, men den externa mediemonteringen är inte åtkomlig. Följ stegen nedan för att ställa in den.",
+        "setupStepsLabel": "Installationssteg",
+        "recheckButton": "Kontrollera igen",
+        "recheckHint": "När du har slutfört installationsstegen klickar du på Kontrollera igen för att fortsätta."
+      },
+      "source": {
+        "title": "Var finns dina BirdNET-Pi-data?",
+        "candidatesIntro": "Vi hittade dessa BirdNET-Pi-databaser:",
+        "selectButton": "Välj",
+        "useThisButton": "Använd den här",
+        "detectionsSummary": "{count} detekteringar, fram till {date}",
+        "kindLocal": "På den här enheten",
+        "kindRemovable": "Flyttbar enhet",
+        "kindNetwork": "Nätverksplats",
+        "unreadableTitle": "Hittades, men BirdNET-Go kan inte läsa den",
+        "unreadableOwner": "Dessa data tillhör en annan användare ({owner}).",
+        "manualEntryLink": "Ser du den inte? Ange platsen manuellt",
+        "manualEntryLabel": "Plats för BirdNET-Pi-databasen",
+        "manualValidating": "Kontrollerar...",
+        "manualValid": "Hittade {count} detekteringar.",
+        "manualNotFound": "Vi kunde inte hitta någon fil där.",
+        "manualUnreadable": "Hittade den, men BirdNET-Go kan inte läsa den än.",
+        "manualInvalid": "Den filen är inte en BirdNET-Pi-databas.",
+        "zeroTitle": "Vi kunde inte hitta den automatiskt",
+        "zeroDescription": "Anslut enheten som innehåller dina BirdNET-Pi-data och kontrollera igen.",
+        "checkAgainButton": "Kontrollera igen",
+        "showCommandsLabel": "Visa kommandon",
+        "containerUnreadableHint": "BirdNET-Go (körs som UID {uid}) kan inte läsa den här filen. Ändra behörigheterna på värden så att UID {uid} kan läsa den, och kontrollera sedan igen.",
+        "elevation": {
+          "copying": "Dina data kopieras...",
+          "passwordTitle": "BirdNET-Go behöver behörighet för att läsa dessa data",
+          "passwordDescription": "Ange administratörslösenordet för den här enheten så att BirdNET-Go kan kopiera data.",
+          "passwordLabel": "Administratörslösenord",
+          "passwordRequiredReason": "Ange administratörslösenordet för att fortsätta",
+          "httpWarning": "Den här sidan använder inte HTTPS. Administratörslösenordet skickas okrypterat över ditt lokala nätverk. Fortsätt endast i ett nätverk du litar på.",
+          "submitButton": "Kopiera och fortsätt",
+          "fallbackTitle": "Kör det här kommandot för att ge åtkomst",
+          "fallbackDescription": "BirdNET-Go kan inte höja behörigheten automatiskt. Kör kommandot nedan och klicka sedan på Kontrollera igen.",
+          "disabledNote": "Behörighetshöjning i appen är avstängd. Använd kommandot nedan för att ge åtkomst.",
+          "failed": "Det fungerade inte. Kontrollera lösenordet och försök igen, eller använd kommandot nedan."
+        }
+      },
+      "mode": {
+        "label": "Vad vill du importera?",
+        "dbOnly": {
+          "label": "Endast databas",
+          "description": "Importera detekteringar från birds.db. Ljudklipp importeras inte."
+        },
+        "dbAudio": {
+          "label": "Databas + ljudklipp",
+          "description": "Importera detekteringar och tillhörande ljudinspelningar.",
+          "badge": "Inte tillgänglig",
+          "disabledReason": "Import av ljudklipp är inte tillgänglig än. Endast databasimport stöds; ljudklipp importeras inte."
+        }
+      },
+      "confirm": {
+        "description": "Granska dina importinställningar innan du börjar. Importerade detekteringar märks med källan birdnet-pi och dubbletter hoppas över automatiskt.",
+        "source": "Källsökväg",
+        "mode": "Importläge",
+        "tagging": "Källtagg",
+        "taggingValue": "birdnet-pi (tillämpas automatiskt)",
+        "deduplicationNote": "Dubbla detekteringar (samma art, tid och datum som redan finns i databasen) hoppas över automatiskt. De exakta antalen visas i realtid under importen.",
+        "startButton": "Starta import"
+      },
+      "progress": {
+        "label": "Importförlopp",
+        "runningLabel": "Import pågår",
+        "progressLabel": "{percent} % klart",
+        "cancelButton": "Avbryt",
+        "cancellingLabel": "Avbryter...",
+        "cancelledMessage": "Importen avbröts.",
+        "processed": "Bearbetade",
+        "inserted": "Infogade",
+        "skipped": "Överhoppade",
+        "errors": "Fel",
+        "phase": {
+          "validate": "Validerar",
+          "dedup": "Tar bort dubbletter",
+          "import": "Importerar"
+        }
+      },
+      "done": {
+        "successTitle": "Import slutförd",
+        "successDescription": "Dina BirdNET-Pi-detekteringar har importerats.",
+        "cancelledTitle": "Import avbruten",
+        "cancelledDescription": "Importen avbröts innan den slutfördes.",
+        "errorTitle": "Importen misslyckades",
+        "interruptedTitle": "Import stoppad",
+        "interruptedDescription": "Anslutningen till servern bröts medan importen pågick, så det slutliga resultatet är okänt. Kontrollera dina detekteringar och starta importen igen om det behövs.",
+        "viewDetectionsLink": "Visa importerade detekteringar",
+        "partialInserted": "{count} detekteringar importerades före avbrottet.",
+        "importAnother": "Importera igen"
+      },
+      "errors": {
+        "loadFailed": "Det gick inte att läsa in importstatusen. Försök igen.",
+        "mediaLoadFailed": "Det gick inte att kontrollera de externa medierna. Försök igen.",
+        "alreadyRunning": "En import pågår redan. Vänta tills den är klar.",
+        "startFailed": "Det gick inte att starta importen. Försök igen.",
+        "cancelFailed": "Det gick inte att avbryta importen.",
+        "importFailed": "Importen misslyckades. Kontrollera din konfiguration och försök igen."
+      }
     },
     "database": {
       "title": "Databashantering",
@@ -1657,11 +1832,14 @@
   "analytics": {
     "hub": {
       "tabs": {
-        "overview": "Översikt",
         "patterns": "Aktivitetsmönster",
         "trends": "Trender",
         "biodiversity": "Biologisk mångfald",
-        "quality": "Granskning och noggrannhet"
+        "quality": "Granskning och noggrannhet",
+        "summary": "Summary",
+        "nocturnal": "Nattaktivitet",
+        "weather": "Väder",
+        "soundscape": "Ljudlandskap"
       },
       "aria": {
         "tabs": "Analysavsnitt"
@@ -1669,7 +1847,9 @@
       "controls": {
         "source": "Källa",
         "sourceAll": "Alla källor",
-        "sourceComingSoon": "Filtrering efter källa kommer i en senare uppdatering.",
+        "sourceLoading": "Loading audio sources…",
+        "sourceNone": "No audio sources with detections yet.",
+        "sourceNotApplicable": "The charts in this section do not filter by source.",
         "speciesNotApplicable": "Diagrammen i det här avsnittet filtrerar inte efter art."
       },
       "card": {
@@ -1679,13 +1859,25 @@
         "notEnoughDataHint": "Det här diagrammet behöver minst {min} datapunkter. Fortsätt spela in och titta tillbaka snart.",
         "export": "Exportera",
         "exportComingSoon": "CSV-export kommer snart."
-      },
-      "comingSoon": {
-        "description": "Det här avsnittet är under uppbyggnad och kommer i en kommande uppdatering."
       }
     },
-    "title": "Översikt",
     "loadingError": "Kunde inte ladda vissa analysdata. Försök igen senare.",
+    "comingSoon": {
+      "badge": "Kommer snart",
+      "plannedTitle": "Planerade funktioner",
+      "weather": {
+        "description": "Fågelaktivitet spårad mot lokala väderförhållanden. Den här vyn korrelerar detektioner med temperatur, vind och nederbörd.",
+        "feature1": "Korrelera detektioner med temperatur, vind och nederbörd",
+        "feature2": "Se hur väderfronter förändrar artaktiviteten",
+        "feature3": "Jämför säsongsaktivitet med historiska väderdata"
+      },
+      "soundscape": {
+        "description": "En inblick i miljöns övergripande akustiska karaktär, med hjälp av akustiska index för att sammanfatta ljudlandskapets mångfald över tid.",
+        "feature1": "Akustiska index som sammanfattar ljudlandskapets komplexitet",
+        "feature2": "Spåra biologisk mångfald genom omgivande ljud över tid",
+        "feature3": "Identifiera grynings- och skymningskörer i det akustiska registret"
+      }
+    },
     "stats": {
       "totalDetections": "Totala detektioner",
       "uniqueSpecies": "Unika arter",
@@ -1793,7 +1985,6 @@
       }
     },
     "advanced": {
-      "title": "Avancerad analys",
       "chartControls": "Diagramkontroller",
       "dateRange": "Datumintervall",
       "chartOptions": "Diagramalternativ",
@@ -1840,6 +2031,126 @@
           "axisDate": "Datum",
           "axisUniqueSpecies": "Unika arter"
         },
+        "accumulation": {
+          "title": "Species Accumulation Curve",
+          "description": "Cumulative number of distinct species detected within the selected period. The curve climbs as new species appear and flattens toward an asymptote once the common ones have been recorded; a still-rising tail means more species are likely waiting to be found.",
+          "noData": "No species accumulation data available",
+          "noDataHint": "Select a wider date range to watch the species list build up over time",
+          "ariaLabel": "Species accumulation curve: cumulative distinct species detected over the period",
+          "axisDate": "Date",
+          "axisSpecies": "Cumulative species",
+          "totalSpecies": "{species} species",
+          "tooltipCumulative": "Cumulative species",
+          "tooltipNew": "New in period",
+          "summary": "Cumulative species accumulation across {days} days, reaching {species} distinct species by the end of the period."
+        },
+        "yearOverYear": {
+          "title": "Year-over-Year Tracker",
+          "description": "Cumulative detections so far this year versus the same calendar dates last year. The shaded band is the running gap between the two; this year's line sitting above last year's means you are ahead of last year's pace.",
+          "noData": "No year-over-year data available",
+          "noDataHint": "Detections from this year and last year build up here as the year progresses",
+          "ariaLabel": "Year-over-year tracker: cumulative detections this year versus the same span last year",
+          "axisDate": "Date",
+          "axisCount": "Cumulative detections",
+          "legendThis": "{year} (this year)",
+          "legendLast": "{year} (last year)",
+          "tooltipDelta": "Difference",
+          "summary": "Year over year: by {monthDay}, {currentYear} has {thisYear} cumulative detections versus {lastYear} for {previousYear} (a difference of {delta})."
+        },
+        "phenology": {
+          "title": "Arrival & Departure Phenology",
+          "description": "First and last detection of each species within the selected period, drawn as residency bars for the most-detected species. Read it top to bottom in arrival order to see who shows up first and who lingers latest across the season.",
+          "noData": "No phenology data available",
+          "noDataHint": "Select a wider date range to see when species arrive and depart",
+          "ariaLabel": "Arrival and departure phenology: residency bars showing each species' first-to-last detection span",
+          "axisDate": "Date",
+          "summary": "Arrival and departure residency spans for {species} species across the selected period.",
+          "tooltipFirst": "First detected",
+          "tooltipLast": "Last detected",
+          "tooltipResidency": "Residency",
+          "tooltipCount": "Detections",
+          "residencyDays": "{days} days"
+        },
+        "heatmap": {
+          "title": "Seasonal Activity Heatmap",
+          "description": "Detection density by date and time of day, revealing migration waves and dawn-chorus drift",
+          "noData": "No activity data available",
+          "noDataHint": "Select a date range to view seasonal activity patterns",
+          "axisDate": "Date",
+          "axisTime": "Time of Day",
+          "tooltipTime": "Time",
+          "tooltipCount": "Detections",
+          "legendLess": "Less",
+          "legendMore": "More ({max})",
+          "ariaLabel": "Seasonal activity heatmap: detection density by date and time of day",
+          "summary": "{total} detections across {days} days. Busiest around {time} on {date}."
+        },
+        "ridgeline": {
+          "title": "Who Sings When",
+          "description": "Hour-of-day activity for the most-detected species, sorting dawn singers from all-day and nocturnal birds",
+          "noData": "No species activity data available",
+          "noDataHint": "Select a wider date range to compare species activity patterns",
+          "ariaLabel": "Who-sings-when ridgeline: hour-of-day activity distribution per species",
+          "axisTime": "Time of Day",
+          "note": "Showing the top {count} species by detection volume",
+          "tooltipDetections": "Detections",
+          "tooltipPeak": "Peak",
+          "summary": "Hour-of-day activity for {count} species. Most active: {species} around {time}."
+        },
+        "succession": {
+          "title": "Acoustic Succession",
+          "description": "How the soundscape's top species hand off through the day, shown as stacked bands of hourly detections from pre-dawn through night",
+          "noData": "No acoustic succession data available",
+          "noDataHint": "Select a wider date range to see how species hand off through the day",
+          "ariaLabel": "Acoustic succession streamgraph: stacked hour-of-day detections for the top species",
+          "axisTime": "Time of Day",
+          "note": "Combined hourly activity of the top {count} species by detection volume",
+          "tooltipDetections": "Detections",
+          "tooltipPeak": "Peak",
+          "summary": "Hour-of-day succession for {count} species. Most active: {species} around {time}."
+        },
+        "dawnOnset": {
+          "title": "Dawn Chorus Onset",
+          "description": "When the morning chorus starts each day relative to civil dawn, isolating the seasonal shift from clock time",
+          "noData": "No dawn chorus data available",
+          "noDataHint": "Select a wider date range to track how the dawn chorus shifts across the seasons",
+          "ariaLabel": "Dawn chorus onset tracker: daily chorus onset relative to civil dawn",
+          "axisDate": "Date",
+          "axisOnset": "Minutes from civil dawn",
+          "civilDawn": "Civil dawn",
+          "tooltipOnset": "Onset",
+          "tooltipOnsetAfter": "{minutes} min after civil dawn",
+          "tooltipOnsetBefore": "{minutes} min before civil dawn",
+          "tooltipOnsetAt": "At civil dawn",
+          "tooltipCount": "Detections",
+          "summary": "Dawn chorus onset relative to civil dawn across {days} days ({plotted} with a measurable onset)."
+        },
+        "nocturnal": {
+          "title": "Nocturnal Activity Clock",
+          "description": "Detections around the 24-hour clock with the daytime hours shaded, making nighttime activity stand out",
+          "noData": "No activity data available",
+          "noDataHint": "Select a wider date range or a more active period to see the daily activity pattern",
+          "ariaLabel": "Nocturnal activity clock: detections by hour of day with daytime shading",
+          "axisHour": "Hour of day",
+          "tooltipHour": "{start} to {end}",
+          "tooltipCount": "Detections",
+          "summary": "Detection activity by hour of day ({total} detections, most active around {peak}). Daytime hours are shaded.",
+          "legendDay": "Day",
+          "legendTwilight": "Twilight",
+          "legendNight": "Night"
+        },
+        "confidence": {
+          "title": "Confidence Distribution",
+          "description": "How confident the model is per species, so you can spot the birds it most often second-guesses",
+          "noData": "No confidence data available",
+          "noDataHint": "Select a wider date range to compare how confident the model is across species",
+          "ariaLabel": "Confidence distribution: per-species histogram of detection confidence scores",
+          "axisLabel": "Confidence",
+          "note": "Showing the top {count} species by detection volume",
+          "tooltipCount": "Detections",
+          "tooltipPeak": "Peak confidence",
+          "summary": "Detection-confidence distribution for {count} species. {species} clusters around {time} confidence."
+        },
         "tooltips": {
           "date": "Datum",
           "percentage": "Andel",
@@ -1867,12 +2178,12 @@
       "loadFailed": "Kunde inte ladda analysdata. Försök igen."
     },
     "timeOfDayPeriods": {
-      "night0to4": "Night (0-4)",
-      "dawn5to8": "Dawn (5-8)",
-      "morning9to11": "Morning (9-11)",
-      "afternoon12to16": "Afternoon (12-16)",
-      "evening17to19": "Evening (17-19)",
-      "night20to23": "Night (20-23)"
+      "night0to4": "Natt (0-4)",
+      "dawn5to8": "Gryning (5-8)",
+      "morning9to11": "Morgon (9-11)",
+      "afternoon12to16": "Eftermiddag (12-16)",
+      "evening17to19": "Kväll (17-19)",
+      "night20to23": "Natt (20-23)"
     }
   },
   "settings": {
@@ -4487,8 +4798,10 @@
       "spectrogramLoaded": "Spektrogram laddat",
       "spectrogramLoadingAria": "Laddar spektrogram",
       "spectrogramAlt": "Ljudspektrogram",
+      "spectrogramForSpecies": "Spectrogram for {species}",
       "spectrogramGeneratingAria": "Genererar spektrogram",
       "generating": "Genererar...",
+      "waiting": "Waiting...",
       "queuePosition": "Kö: {position}",
       "loadError": "Kunde inte ladda ljud"
     },
@@ -4641,7 +4954,8 @@
       "typesRequired": "Objekttyp och utlösartyp krävs",
       "duplicateName": "En regel med detta namn finns redan",
       "invalidJSON": "Ogiltig JSON",
-      "invalidEscalation": "Eskaleringsstegen är ogiltiga"
+      "invalidEscalation": "Eskaleringsstegen är ogiltiga",
+      "engineUnavailable": "Alerting engine is unavailable"
     },
     "detection": {
       "invalidDate": "Ogiltigt {paramName}-format, använd ÅÅÅÅ-MM-DD"
@@ -5005,6 +5319,7 @@
     "restartFailed": "Det gick inte att starta om",
     "reasons": {
       "webserver": "Web server / network settings",
+      "oauth": "Authentication provider settings",
       "database": "Database settings",
       "logging": "Logging settings",
       "tlsCertificate": "TLS certificate"

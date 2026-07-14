@@ -26,6 +26,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/datastore/dbstats"
 	"github.com/tphakala/birdnet-go/internal/datastore/entities"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/diskmanager"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/observability/metrics"
@@ -181,6 +182,7 @@ type Interface interface {
 	GetAllImageCaches(providerName string) ([]ImageCache, error)
 	GetLockedNotesClipPaths() ([]string, error)
 	ClearNoteClipPathsByNames(clipNames []string) (int64, error)
+	GetNoteClipReferences(afterID uint, limit int) ([]diskmanager.ClipReference, error)
 	CountHourlyDetections(date, hour string, duration int) (int64, error)
 	// Analytics methods
 	GetSpeciesSummaryData(ctx context.Context, startDate, endDate string) ([]SpeciesSummaryData, error)
@@ -192,6 +194,47 @@ type Interface interface {
 	GetSpeciesFirstDetectionInPeriod(ctx context.Context, startDate, endDate string, limit, offset int) ([]NewSpeciesData, error)
 	// GetSpeciesDiversityData returns daily unique species counts within the given date range.
 	GetSpeciesDiversityData(ctx context.Context, startDate, endDate string) ([]DailyAnalyticsData, error)
+	// GetActivityHeatmap returns detection counts bucketed by (station-local date, intra-day slot)
+	// over the inclusive date range, as a columnar sparse payload. species is an optional filter.
+	GetActivityHeatmap(ctx context.Context, startDate, endDate, species string) (ActivityHeatmapData, error)
+	// GetHourlyDistributionBySpecies returns the normalized hour-of-day activity distribution for
+	// the top `limit` species by detection volume over the inclusive date range (false positives
+	// excluded), ordered by descending volume. Powers the who-sings-when ridgeline.
+	GetHourlyDistributionBySpecies(ctx context.Context, startDate, endDate string, limit int) ([]SpeciesHourlyDistribution, error)
+	// GetDailyActivityOnset returns, per calendar day in the inclusive date range, the dawn-chorus
+	// onset relative to civil dawn (false positives excluded). species is an optional scientific-name
+	// filter. Powers the dawn-chorus onset tracker.
+	GetDailyActivityOnset(ctx context.Context, startDate, endDate, species string) ([]DailyActivityOnset, error)
+	// GetConfidenceHistogram returns the per-species confidence-score distribution over the date range,
+	// powering the confidence distribution chart. With no species filter it covers the top `limit`
+	// species by detection volume; with a species filter it covers just that species.
+	GetConfidenceHistogram(ctx context.Context, startDate, endDate, species string, bins, limit int) ([]SpeciesConfidenceHistogram, error)
+	// GetSpeciesAccumulation returns, per calendar day in the inclusive date range, the cumulative
+	// count of distinct species first detected within that range (false positives excluded). Powers
+	// the species accumulation curve in the Biodiversity tab; "first seen" is bounded to the selected
+	// window, not lifetime.
+	GetSpeciesAccumulation(ctx context.Context, startDate, endDate string) ([]SpeciesAccumulationPoint, error)
+	// GetYearOverYear returns the current year-to-date cumulative detection counts versus the same
+	// calendar span one year earlier (false positives excluded): one point per current-year calendar
+	// day from Jan 1 through date (station-local YYYY-MM-DD; empty -> today in the station timezone).
+	// Counts are aligned by calendar (month, day) with leap-day Feb 29 handled, and the delta is current
+	// minus previous. Powers the year-over-year tracker in the Trends tab.
+	GetYearOverYear(ctx context.Context, date string) (YearOverYearResult, error)
+	// GetSpeciesPhenology returns the arrival/departure residency span (first and last
+	// false-positive-excluded detection, plus the in-range detection count) for the top `limit` species
+	// by volume over the date range. Powers the arrival/departure phenology chart in the Biodiversity
+	// tab; spans are bounded to the selected window, not lifetime.
+	GetSpeciesPhenology(ctx context.Context, startDate, endDate string, limit int) ([]SpeciesPhenologyPoint, error)
+	// GetAcousticSuccession returns the raw hour-of-day detection counts (false positives excluded)
+	// for the top `limit` species by detection volume over the inclusive date range, ordered by
+	// descending volume. Powers the acoustic succession streamgraph in the Activity Patterns tab.
+	GetAcousticSuccession(ctx context.Context, startDate, endDate string, limit int) ([]SpeciesHourlyCounts, error)
+	// GetAudioSources returns each audio source that has at least one (false-positive-excluded)
+	// detection in the date range, with its in-range detection count, ordered by count descending. When
+	// both dates are empty it covers all history. Powers the analytics source/mic filter's option list;
+	// the metric is v2only (the legacy schema does not persist a detection's source), so the legacy
+	// datastore returns an empty result.
+	GetAudioSources(ctx context.Context, startDate, endDate string) ([]AudioSourceSummary, error)
 	// Search functionality
 	SearchDetections(filters *SearchFilters) ([]DetectionRecord, int, error)
 	// Dynamic Threshold methods
@@ -211,16 +254,10 @@ type Interface interface {
 	DeleteThresholdEvents(speciesName string) error
 	DeleteAllThresholdEvents() (int64, error)
 	// Notification History methods
-	// TODO(BG-17): Add context.Context as first parameter for cancellation/timeout support:
-	//   SaveNotificationHistory(ctx context.Context, history *NotificationHistory) error
-	//   GetNotificationHistory(ctx context.Context, scientificName string, notificationType string) (*NotificationHistory, error)
-	//   GetActiveNotificationHistory(ctx context.Context, after time.Time) ([]NotificationHistory, error)
-	//   DeleteExpiredNotificationHistory(ctx context.Context, before time.Time) (int64, error)
-	// This requires updating all implementations and call sites (breaking change)
-	SaveNotificationHistory(history *NotificationHistory) error
-	GetNotificationHistory(scientificName string, notificationType string) (*NotificationHistory, error)
-	GetActiveNotificationHistory(after time.Time) ([]NotificationHistory, error)
-	DeleteExpiredNotificationHistory(before time.Time) (int64, error) // Returns count deleted
+	SaveNotificationHistory(ctx context.Context, history *NotificationHistory) error
+	GetNotificationHistory(ctx context.Context, scientificName string, notificationType string) (*NotificationHistory, error)
+	GetActiveNotificationHistory(ctx context.Context, after time.Time) ([]NotificationHistory, error)
+	DeleteExpiredNotificationHistory(ctx context.Context, before time.Time) (int64, error) // Returns count deleted
 	// Database stats method for runtime statistics
 	GetDatabaseStats(ctx context.Context) (*DatabaseStats, error)
 	// PingWithLatency executes a trivial query (SELECT 1) and returns the round-trip time.
@@ -2010,6 +2047,54 @@ func (ds *DataStore) ClearNoteClipPathsByNames(clipNames []string) (int64, error
 	}
 
 	return totalAffected, nil
+}
+
+// GetNoteClipReferences returns up to limit notes with a non-empty clip_name and
+// ID greater than afterID, ordered by ID ascending (keyset pagination, like
+// GetReviewsBatch). It is used by the clip reconcile crawler to walk clip
+// references in bounded chunks. CompletionTime is Note.EndTime, the capture
+// completion time used for the crawler's recency guard.
+func (ds *DataStore) GetNoteClipReferences(afterID uint, limit int) ([]diskmanager.ClipReference, error) {
+	if limit <= 0 {
+		return nil, validationError("limit must be positive", "limit", limit)
+	}
+
+	// EndTime is scanned as *time.Time: the end_time column is nullable, and a NULL
+	// (legacy/incomplete row) must scan as nil rather than erroring out and aborting
+	// the whole reconcile pass. A nil end time yields a zero CompletionTime, which
+	// the crawler treats as unknown-age and skips.
+	var rows []struct {
+		ID       uint
+		ClipName string
+		EndTime  *time.Time
+	}
+	err := ds.DB.Model(&Note{}).
+		Select("id", "clip_name", "end_time").
+		Where("id > ? AND clip_name <> ''", afterID).
+		Order("id ASC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryDatabase).
+			Context("operation", "get_note_clip_references").
+			Build()
+	}
+
+	refs := make([]diskmanager.ClipReference, len(rows))
+	for i := range rows {
+		var completion time.Time
+		if rows[i].EndTime != nil {
+			completion = *rows[i].EndTime
+		}
+		refs[i] = diskmanager.ClipReference{
+			ID:             rows[i].ID,
+			ClipName:       rows[i].ClipName,
+			CompletionTime: completion,
+		}
+	}
+	return refs, nil
 }
 
 // CountHourlyDetections counts the number of detections for a specific date and hour.

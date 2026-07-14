@@ -14,19 +14,19 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/tphakala/birdnet-go/internal/alerting"
-	"github.com/tphakala/birdnet-go/internal/audiocore/ffmpeg"
-	"github.com/tphakala/birdnet-go/internal/audiocore/flac"
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/errors"
+	"github.com/tphakala/birdnet-go/internal/httpclient"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/notification"
+
+	"golang.org/x/net/http2"
 )
 
 // GetLogger returns the birdweather package logger
@@ -43,8 +43,22 @@ const (
 	// httpClientTimeout is the default timeout for HTTP requests
 	httpClientTimeout = 45 * time.Second
 
-	// encodingTimeout is the timeout for audio encoding operations
-	encodingTimeout = 30 * time.Second
+	// encodingTimeout bounds the native go-flac encode of a soundscape upload so a
+	// slow host (Raspberry Pi, Home Assistant add-on, tired SD card) cannot hang the
+	// upload. The audionorm loudness measurement is pure in-memory CPU work; only the
+	// encode pass runs under this budget. 60s leaves ample room, and the upload runs
+	// in a background worker, so a slow encode never blocks the analysis pipeline or UI.
+	encodingTimeout = 60 * time.Second
+
+	// http2ReadIdleTimeout and http2PingTimeout enable HTTP/2 connection health
+	// checks on the upload client. The BirdWeather API sits behind a CDN that
+	// silently drops idle connections; reusing a half-open pooled connection
+	// surfaces as "http2: client connection force closed via ClientConn.Close".
+	// With these set, the transport sends a PING on an idle connection after
+	// http2ReadIdleTimeout and discards it if no PONG arrives within
+	// http2PingTimeout, so a dead connection is never reused for an upload.
+	http2ReadIdleTimeout = 15 * time.Second
+	http2PingTimeout     = 5 * time.Second
 
 	// detectionDurationSeconds is the duration added to timestamp for end time
 	detectionDurationSeconds = 3
@@ -190,6 +204,29 @@ type Interface interface {
 	Close()
 }
 
+// newUploadHTTPClient builds the HTTP client used for BirdWeather uploads. It
+// uses a dedicated transport (cloned from http.DefaultTransport so proxy support
+// and dial timeouts are preserved) instead of the shared global transport, and
+// enables HTTP/2 health-check PINGs so a half-open connection dropped by the
+// CDN is detected and discarded rather than reused for an upload (which would
+// fail with "http2: client connection force closed via ClientConn.Close").
+func newUploadHTTPClient() *http.Client {
+	transport := httpclient.CloneDefaultTransport()
+	if h2, err := http2.ConfigureTransports(transport); err == nil {
+		h2.ReadIdleTimeout = http2ReadIdleTimeout
+		h2.PingTimeout = http2PingTimeout
+	} else {
+		// Non-fatal: without explicit HTTP/2 configuration the transport still
+		// negotiates HTTP/2 via ALPN, just without the proactive idle PINGs.
+		GetLogger().Warn("Failed to configure HTTP/2 health checks for BirdWeather uploads",
+			logger.Error(err))
+	}
+	return &http.Client{
+		Timeout:   httpClientTimeout,
+		Transport: transport,
+	}
+}
+
 // New creates and initializes a new BwClient with the given settings.
 // The HTTP client is configured with httpClientTimeout to prevent hanging requests.
 func New(settings *conf.Settings) (*BwClient, error) {
@@ -202,7 +239,7 @@ func New(settings *conf.Settings) (*BwClient, error) {
 		Accuracy:      settings.Realtime.Birdweather.LocationAccuracy,
 		Latitude:      settings.BirdNET.Latitude,
 		Longitude:     settings.BirdNET.Longitude,
-		HTTPClient:    &http.Client{Timeout: httpClientTimeout},
+		HTTPClient:    newUploadHTTPClient(),
 	}
 
 	// Attach the circuit breaker. Metrics are intentionally nil for now — the
@@ -461,126 +498,8 @@ func handleHTTPResponse(resp *http.Response, expectedStatus int, operation, mask
 	return responseBody, nil
 }
 
-// encodeFlacUsingFFmpeg converts PCM data to FLAC format using FFmpeg directly into a bytes buffer.
-// It applies a simple gain adjustment instead of dynamic loudness normalization to avoid pumping effects.
-// This avoids writing temporary files to disk.
-// It accepts a context for timeout/cancellation control and the explicit path to the FFmpeg executable.
-func (b *BwClient) encodeFlacUsingFFmpeg(ctx context.Context, pcmData []byte, ffmpegPath string, settings *conf.Settings) (*bytes.Buffer, error) {
-	log := GetLogger()
-
-	log.Debug("Starting FLAC encoding process")
-	// Add check for empty pcmData
-	if len(pcmData) == 0 {
-		log.Error("FLAC encoding failed: PCM data is empty")
-		return nil, fmt.Errorf("pcmData is empty")
-	}
-
-	// ffmpegPath is now passed directly
-	log.Debug("Using ffmpeg path", logger.String("path", ffmpegPath))
-
-	// --- Pass 1: Analyze Loudness ---
-	// Use the provided context for the analysis
-	log.Debug("Performing loudness analysis (Pass 1)")
-	loudnessStats, err := ffmpeg.AnalyzePCMLoudness(ctx, pcmData, ffmpegPath, conf.SampleRate, conf.BitDepth)
-	if err != nil {
-		// Check if the error is due to context cancellation
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			log.Warn("Loudness analysis cancelled or timed out", logger.Error(err))
-			return nil, err // Propagate context error
-		}
-
-		log.Warn("Loudness analysis (Pass 1) failed, falling back to fixed gain adjustment", logger.Error(err))
-		// Fallback to a conservative fixed gain adjustment
-		// A fixed gain of 15dB is a reasonable middle ground for bird call recordings
-		gainValue := 15.0
-		volumeArgs := fmt.Sprintf("volume=%.1fdB", gainValue)
-		customArgs := []string{
-			"-af", volumeArgs, // Simple gain adjustment
-			"-c:a", "flac",
-			"-f", "flac",
-		}
-
-		// Use the provided context for the fallback export operation
-		log.Debug("Starting fallback FLAC export with fixed gain", logger.Float64("gain_db", gainValue))
-		buffer, err := ffmpeg.ExportAudioToBuffer(ctx, pcmData, ffmpegPath, conf.SampleRate, conf.NumChannels, conf.BitDepth, customArgs)
-		if err != nil {
-			log.Error("Fallback FLAC export with fixed gain failed",
-				logger.Float64("gain_db", gainValue),
-				logger.Error(err))
-			return nil, fmt.Errorf("fallback FLAC export with fixed gain failed: %w", err)
-		}
-		log.Info("Encoded PCM to FLAC using fixed gain (fallback)", logger.Float64("gain_db", gainValue))
-		return buffer, nil
-	}
-
-	log.Debug("Loudness analysis results",
-		logger.String("input_i", loudnessStats.InputI),
-		logger.String("input_lra", loudnessStats.InputLRA),
-		logger.String("input_tp", loudnessStats.InputTP),
-		logger.String("input_thresh", loudnessStats.InputThresh))
-
-	// --- Calculate gain needed to reach target loudness ---
-	inputLUFS := parseDouble(loudnessStats.InputI, -70.0)
-	gainNeeded := targetIntegratedLoudnessLUFS - inputLUFS
-
-	// Apply safety limits to prevent excessive amplification or attenuation
-	maxGain := 30.0 // Maximum gain in dB (absolute value)
-	gainLimited := false
-	if gainNeeded > maxGain {
-		b.logGainLimit(log, "Limiting gain to prevent excessive amplification",
-			"calculated_gain", gainNeeded, "max_gain", maxGain)
-		gainNeeded = maxGain
-		gainLimited = true
-	} else if gainNeeded < -maxGain {
-		b.logGainLimit(log, "Limiting gain to prevent excessive attenuation",
-			"calculated_gain", gainNeeded, "min_gain", -maxGain)
-		gainNeeded = -maxGain
-		gainLimited = true
-	}
-	log.Debug("Calculated gain adjustment",
-		logger.Float64("gain_db", gainNeeded),
-		logger.Float64("target_lufs", targetIntegratedLoudnessLUFS),
-		logger.Float64("measured_lufs", inputLUFS),
-		logger.Bool("limited", gainLimited))
-
-	// --- Pass 2: Apply simple gain adjustment and encode ---
-	log.Debug("Applying gain adjustment and encoding to FLAC (Pass 2)", logger.Float64("gain_db", gainNeeded))
-
-	// Use simple volume filter instead of loudnorm
-	volumeArgs := fmt.Sprintf("volume=%.2fdB", gainNeeded)
-
-	customArgs := []string{
-		"-af", volumeArgs, // Simple gain adjustment filter
-		"-c:a", "flac", // Output codec: FLAC
-		"-f", "flac", // Output format: FLAC
-	}
-
-	// Use the provided context for the final encoding operation
-	buffer, err := ffmpeg.ExportAudioToBuffer(ctx, pcmData, ffmpegPath, conf.SampleRate, conf.NumChannels, conf.BitDepth, customArgs)
-	if err != nil {
-		log.Error("FFmpeg FLAC encoding with gain adjustment failed",
-			logger.Float64("gain_db", gainNeeded),
-			logger.Error(err))
-		return nil, fmt.Errorf("failed to export PCM to FLAC with gain adjustment: %w", err)
-	}
-
-	log.Info("Encoded PCM to FLAC with gain adjustment", logger.Float64("gain_db", gainNeeded))
-
-	// Return the buffer containing the FLAC data
-	return buffer, nil
-}
-
-// parseDouble safely parses a string to float64, returning defaultValue on error.
-func parseDouble(s string, defaultValue float64) float64 {
-	val, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
-		return defaultValue
-	}
-	return val
-}
-
 // UploadSoundscape uploads a soundscape file to the Birdweather API and returns the soundscape ID if successful.
-// It handles the PCM to WAV conversion, compresses the data, and manages HTTP request creation and response handling safely.
+// It handles the PCM to FLAC conversion and manages HTTP request creation and response handling safely.
 func (b *BwClient) UploadSoundscape(timestamp string, pcmData []byte) (soundscapeID string, err error) {
 	log := GetLogger()
 
@@ -602,8 +521,8 @@ func (b *BwClient) UploadSoundscape(timestamp string, pcmData []byte) (soundscap
 			Build()
 	}
 
-	// Encode PCM data to audio format (FLAC with FFmpeg, or WAV fallback)
-	encodingResult, err := b.encodeAudioForUpload(b.Settings, pcmData, timestamp)
+	// Encode PCM data to FLAC using the native go-flac encoder
+	encodingResult, err := b.encodeAudioForUpload(pcmData, timestamp)
 	if err != nil {
 		return "", errors.New(err).
 			Component("birdweather").
@@ -1068,7 +987,10 @@ func (b *BwClient) Close() {
 
 	log.Info("Closing BirdWeather client")
 	if b.HTTPClient != nil && b.HTTPClient.Transport != nil {
-		// If the transport implements the CloseIdleConnections method, call it
+		// If the transport implements the CloseIdleConnections method, call it.
+		// The upload client owns a dedicated transport (see newUploadHTTPClient),
+		// so this only reclaims this client's idle connections and never touches
+		// the shared http.DefaultTransport pool.
 		type transporter interface {
 			CloseIdleConnections()
 		}
@@ -1076,8 +998,12 @@ func (b *BwClient) Close() {
 			log.Debug("Closing idle HTTP connections")
 			transport.CloseIdleConnections()
 		}
-		// Cancel any in-flight requests by using a new client
-		b.HTTPClient = nil // Allow GC to collect the old client/transport
+		// Deliberately do NOT nil out b.HTTPClient here. In-flight uploads read
+		// b.HTTPClient without holding the processor's bwClientMutex (they
+		// obtained the *BwClient via GetBwClient and released the lock), so a
+		// write here races with those reads and risks a nil dereference. The
+		// client/transport are garbage-collected once the BwClient is dropped
+		// from the processor; CloseIdleConnections already frees pooled sockets.
 	}
 
 	if b.Settings.Realtime.Birdweather.Debug {
@@ -1099,56 +1025,13 @@ type audioEncodingResult struct {
 	ext    string
 }
 
-// encodeAudioForUpload encodes the PCM soundscape to FLAC for upload. With the
-// BIRDNET_FLAC_ENCODER=native gate on it uses the native go-flac + audionorm
-// path (no FFmpeg dependency); otherwise it falls back to the FFmpeg encoder,
-// which BirdWeather has always required for its FLAC-only API.
-func (b *BwClient) encodeAudioForUpload(settings *conf.Settings, pcmData []byte, timestamp string) (*audioEncodingResult, error) {
-	log := GetLogger()
-
-	// Native path first: gated by the same flag as the detection save path. This
-	// must be checked BEFORE the FFmpeg-availability guard so a host without
-	// FFmpeg can still upload natively.
-	if flac.NativeEncoderEnabled() && flac.SupportedBitDepth(conf.BitDepth) {
-		log.Debug("Using native go-flac encoder for BirdWeather upload",
-			logger.String("timestamp", timestamp))
-		return b.encodeWithNativeFLAC(pcmData, timestamp)
-	}
-
-	// Use the validated FFmpeg path from settings (validated at startup)
-	// This avoids redundant exec.LookPath calls on every upload
-	ffmpegPathForExec := settings.Realtime.Audio.FfmpegPath
-	ffmpegAvailable := ffmpegPathForExec != ""
-	log.Debug("Checking FFmpeg availability",
-		logger.String("path", ffmpegPathForExec),
-		logger.Bool("available", ffmpegAvailable))
-
-	if !ffmpegAvailable {
-		log.Error("FFmpeg not available, cannot encode to FLAC for BirdWeather",
-			logger.String("timestamp", timestamp))
-		return nil, fmt.Errorf("FFmpeg is required for BirdWeather uploads (FLAC encoding)")
-	}
-
-	return b.encodeWithFFmpeg(settings, pcmData, ffmpegPathForExec, timestamp)
-}
-
-// encodeWithFFmpeg encodes PCM to FLAC format using FFmpeg
-func (b *BwClient) encodeWithFFmpeg(settings *conf.Settings, pcmData []byte, ffmpegPath, timestamp string) (*audioEncodingResult, error) {
-	log := GetLogger()
-
-	ctx, cancel := context.WithTimeout(context.Background(), encodingTimeout)
-	defer cancel()
-
-	audioBuffer, err := b.encodeFlacUsingFFmpeg(ctx, pcmData, ffmpegPath, settings)
-	if err != nil {
-		log.Error("FLAC encoding failed",
-			logger.String("timestamp", timestamp),
-			logger.Error(err))
-		logFLACEncodingError(err)
-		return nil, fmt.Errorf("FLAC encoding failed: %w", err)
-	}
-	log.Info("Encoded audio to FLAC format", logger.String("timestamp", timestamp))
-	return &audioEncodingResult{buffer: audioBuffer, ext: "flac"}, nil
+// encodeAudioForUpload encodes the PCM soundscape to FLAC for upload using the
+// native go-flac encoder with audionorm EBU R128 loudness normalization. FFmpeg is
+// neither used nor required; BirdWeather's FLAC-only API is served entirely in Go.
+func (b *BwClient) encodeAudioForUpload(pcmData []byte, timestamp string) (*audioEncodingResult, error) {
+	GetLogger().Debug("Encoding BirdWeather upload with native go-flac encoder",
+		logger.String("timestamp", timestamp))
+	return b.encodeWithNativeFLAC(pcmData, timestamp)
 }
 
 // logFLACEncodingError logs the appropriate message for FLAC encoding failures

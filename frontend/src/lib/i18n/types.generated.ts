@@ -185,10 +185,18 @@ export type TranslationKey =
   | 'pageTitle.serverError'
   | 'pageTitle.componentError'
   | 'pageTitle.speciesAnalytics'
-  | 'pageTitle.advancedAnalytics'
   | 'pageTitle.detectionDetails'
   | 'pageTitle.settingsNotAvailable'
+  | 'pageTitle.analyticsSummary'
+  | 'pageTitle.analyticsActivity'
+  | 'pageTitle.analyticsTrends'
+  | 'pageTitle.analyticsBiodiversity'
+  | 'pageTitle.analyticsReview'
+  | 'pageTitle.analyticsNocturnal'
+  | 'pageTitle.analyticsWeather'
+  | 'pageTitle.analyticsSoundscape'
   | 'navigation.dashboard'
+  | 'navigation.liveAudio'
   | 'navigation.settingsMenu'
   | 'navigation.theme'
   | 'navigation.github'
@@ -217,6 +225,10 @@ export type TranslationKey =
   | 'navigation.askQuestionAriaLabel'
   | 'navigation.viewOnGithubAriaLabel'
   | 'navigation.health'
+  | 'navigation.sections.explore'
+  | 'navigation.sections.patterns'
+  | 'navigation.sections.environment'
+  | 'navigation.sections.dataQuality'
   | 'about.title'
   | 'about.subtitle'
   | 'about.logoAlt'
@@ -349,6 +361,7 @@ export type TranslationKey =
   | 'notifications.content.settings.recalculatingThresholds'
   | 'notifications.content.settings.reconfiguringDynamicThresholds'
   | 'notifications.content.settings.webserverRestartRequired'
+  | 'notifications.content.settings.oauthRestartRequired'
   | 'notifications.content.settings.databaseRestartRequired'
   | 'notifications.content.settings.loggingRestartRequired'
   | 'notifications.content.settings.reconfiguringSoundLevel'
@@ -761,6 +774,7 @@ export type TranslationKey =
   | 'detections.row.viewDetails' // params: species
   | 'detections.row.play'
   | 'detections.row.playAudio'
+  | 'detections.row.imageFailedToLoad'
   | 'detections.media.title'
   | 'detections.media.clipHint'
   | 'detections.tabs.overview'
@@ -901,6 +915,125 @@ export type TranslationKey =
   | 'system.sections.database'
   | 'system.sections.inference'
   | 'system.sections.terminal'
+  | 'system.sections.importExport'
+  | 'system.importExport.available'
+  | 'system.importExport.experimental'
+  | 'system.importExport.comingSoon'
+  | 'system.importExport.loading'
+  | 'system.importExport.runInBackground'
+  | 'system.importExport.runInBackgroundTitle'
+  | 'system.importExport.stepAnnouncement' // params: current, total, name
+  | 'system.importExport.steps.source'
+  | 'system.importExport.steps.mode'
+  | 'system.importExport.steps.confirm'
+  | 'system.importExport.steps.progress'
+  | 'system.importExport.steps.done'
+  | 'system.importExport.import.sectionTitle'
+  | 'system.importExport.export.sectionTitle'
+  | 'system.importExport.export.cardTitle'
+  | 'system.importExport.export.cardDescription'
+  | 'system.importExport.birdnetPi.cardTitle'
+  | 'system.importExport.birdnetPi.cardDescription'
+  | 'system.importExport.birdnetPi.startButton'
+  | 'system.importExport.birdnetPi.wizardTitle'
+  | 'system.importExport.birdnetPi.experimentalNotice'
+  | 'system.importExport.birdnetPi.reportBug'
+  | 'system.importExport.birdsDbUpload.cardTitle'
+  | 'system.importExport.birdsDbUpload.cardDescription'
+  | 'system.importExport.activity.sectionTitle'
+  | 'system.importExport.activity.empty.title'
+  | 'system.importExport.activity.empty.description'
+  | 'system.importExport.activity.openWizard'
+  | 'system.importExport.wizard.stepsLabel'
+  | 'system.importExport.sourceAccess.pathLabel'
+  | 'system.importExport.sourceAccess.pathHelpText'
+  | 'system.importExport.sourceAccess.pathRequiredReason'
+  | 'system.importExport.sourceAccess.mountDescription'
+  | 'system.importExport.sourceAccess.mountRoot'
+  | 'system.importExport.sourceAccess.nativeTitle'
+  | 'system.importExport.sourceAccess.nativeDescription'
+  | 'system.importExport.sourceAccess.nativeHowTo'
+  | 'system.importExport.sourceAccess.missingTitle'
+  | 'system.importExport.sourceAccess.missingDescription'
+  | 'system.importExport.sourceAccess.setupStepsLabel'
+  | 'system.importExport.sourceAccess.recheckButton'
+  | 'system.importExport.sourceAccess.recheckHint'
+  | 'system.importExport.source.title'
+  | 'system.importExport.source.candidatesIntro'
+  | 'system.importExport.source.selectButton'
+  | 'system.importExport.source.useThisButton'
+  | 'system.importExport.source.detectionsSummary' // params: count, date
+  | 'system.importExport.source.kindLocal'
+  | 'system.importExport.source.kindRemovable'
+  | 'system.importExport.source.kindNetwork'
+  | 'system.importExport.source.unreadableTitle'
+  | 'system.importExport.source.unreadableOwner' // params: owner
+  | 'system.importExport.source.manualEntryLink'
+  | 'system.importExport.source.manualEntryLabel'
+  | 'system.importExport.source.manualValidating'
+  | 'system.importExport.source.manualValid' // params: count
+  | 'system.importExport.source.manualNotFound'
+  | 'system.importExport.source.manualUnreadable'
+  | 'system.importExport.source.manualInvalid'
+  | 'system.importExport.source.zeroTitle'
+  | 'system.importExport.source.zeroDescription'
+  | 'system.importExport.source.checkAgainButton'
+  | 'system.importExport.source.showCommandsLabel'
+  | 'system.importExport.source.containerUnreadableHint' // params: uid
+  | 'system.importExport.source.elevation.copying'
+  | 'system.importExport.source.elevation.passwordTitle'
+  | 'system.importExport.source.elevation.passwordDescription'
+  | 'system.importExport.source.elevation.passwordLabel'
+  | 'system.importExport.source.elevation.passwordRequiredReason'
+  | 'system.importExport.source.elevation.httpWarning'
+  | 'system.importExport.source.elevation.submitButton'
+  | 'system.importExport.source.elevation.fallbackTitle'
+  | 'system.importExport.source.elevation.fallbackDescription'
+  | 'system.importExport.source.elevation.disabledNote'
+  | 'system.importExport.source.elevation.failed'
+  | 'system.importExport.mode.label'
+  | 'system.importExport.mode.dbOnly.label'
+  | 'system.importExport.mode.dbOnly.description'
+  | 'system.importExport.mode.dbAudio.label'
+  | 'system.importExport.mode.dbAudio.description'
+  | 'system.importExport.mode.dbAudio.badge'
+  | 'system.importExport.mode.dbAudio.disabledReason'
+  | 'system.importExport.confirm.description'
+  | 'system.importExport.confirm.source'
+  | 'system.importExport.confirm.mode'
+  | 'system.importExport.confirm.tagging'
+  | 'system.importExport.confirm.taggingValue'
+  | 'system.importExport.confirm.deduplicationNote'
+  | 'system.importExport.confirm.startButton'
+  | 'system.importExport.progress.label'
+  | 'system.importExport.progress.runningLabel'
+  | 'system.importExport.progress.progressLabel' // params: percent
+  | 'system.importExport.progress.cancelButton'
+  | 'system.importExport.progress.cancellingLabel'
+  | 'system.importExport.progress.cancelledMessage'
+  | 'system.importExport.progress.processed'
+  | 'system.importExport.progress.inserted'
+  | 'system.importExport.progress.skipped'
+  | 'system.importExport.progress.errors'
+  | 'system.importExport.progress.phase.validate'
+  | 'system.importExport.progress.phase.dedup'
+  | 'system.importExport.progress.phase.import'
+  | 'system.importExport.done.successTitle'
+  | 'system.importExport.done.successDescription'
+  | 'system.importExport.done.cancelledTitle'
+  | 'system.importExport.done.cancelledDescription'
+  | 'system.importExport.done.errorTitle'
+  | 'system.importExport.done.interruptedTitle'
+  | 'system.importExport.done.interruptedDescription'
+  | 'system.importExport.done.viewDetectionsLink'
+  | 'system.importExport.done.partialInserted' // params: count
+  | 'system.importExport.done.importAnother'
+  | 'system.importExport.errors.loadFailed'
+  | 'system.importExport.errors.mediaLoadFailed'
+  | 'system.importExport.errors.alreadyRunning'
+  | 'system.importExport.errors.startFailed'
+  | 'system.importExport.errors.cancelFailed'
+  | 'system.importExport.errors.importFailed'
   | 'system.database.title'
   | 'system.database.description'
   | 'system.database.legacy.title'
@@ -1289,15 +1422,20 @@ export type TranslationKey =
   | 'terminal.detached'
   | 'terminal.detachedDescription'
   | 'terminal.reattach'
-  | 'analytics.hub.tabs.overview'
   | 'analytics.hub.tabs.patterns'
   | 'analytics.hub.tabs.trends'
   | 'analytics.hub.tabs.biodiversity'
   | 'analytics.hub.tabs.quality'
+  | 'analytics.hub.tabs.summary'
+  | 'analytics.hub.tabs.nocturnal'
+  | 'analytics.hub.tabs.weather'
+  | 'analytics.hub.tabs.soundscape'
   | 'analytics.hub.aria.tabs'
   | 'analytics.hub.controls.source'
   | 'analytics.hub.controls.sourceAll'
-  | 'analytics.hub.controls.sourceComingSoon'
+  | 'analytics.hub.controls.sourceLoading'
+  | 'analytics.hub.controls.sourceNone'
+  | 'analytics.hub.controls.sourceNotApplicable'
   | 'analytics.hub.controls.speciesNotApplicable'
   | 'analytics.hub.card.error'
   | 'analytics.hub.card.retry'
@@ -1305,9 +1443,17 @@ export type TranslationKey =
   | 'analytics.hub.card.notEnoughDataHint' // params: min
   | 'analytics.hub.card.export'
   | 'analytics.hub.card.exportComingSoon'
-  | 'analytics.hub.comingSoon.description'
-  | 'analytics.title'
   | 'analytics.loadingError'
+  | 'analytics.comingSoon.badge'
+  | 'analytics.comingSoon.plannedTitle'
+  | 'analytics.comingSoon.weather.description'
+  | 'analytics.comingSoon.weather.feature1'
+  | 'analytics.comingSoon.weather.feature2'
+  | 'analytics.comingSoon.weather.feature3'
+  | 'analytics.comingSoon.soundscape.description'
+  | 'analytics.comingSoon.soundscape.feature1'
+  | 'analytics.comingSoon.soundscape.feature2'
+  | 'analytics.comingSoon.soundscape.feature3'
   | 'analytics.stats.totalDetections'
   | 'analytics.stats.uniqueSpecies'
   | 'analytics.stats.avgConfidence'
@@ -1392,7 +1538,6 @@ export type TranslationKey =
   | 'analytics.species.card.detections'
   | 'analytics.species.card.confidence'
   | 'analytics.species.card.first'
-  | 'analytics.advanced.title'
   | 'analytics.advanced.chartControls'
   | 'analytics.advanced.dateRange'
   | 'analytics.advanced.chartOptions'
@@ -1428,6 +1573,108 @@ export type TranslationKey =
   | 'analytics.advanced.charts.diversity.noDataHint'
   | 'analytics.advanced.charts.diversity.axisDate'
   | 'analytics.advanced.charts.diversity.axisUniqueSpecies'
+  | 'analytics.advanced.charts.accumulation.title'
+  | 'analytics.advanced.charts.accumulation.description'
+  | 'analytics.advanced.charts.accumulation.noData'
+  | 'analytics.advanced.charts.accumulation.noDataHint'
+  | 'analytics.advanced.charts.accumulation.ariaLabel'
+  | 'analytics.advanced.charts.accumulation.axisDate'
+  | 'analytics.advanced.charts.accumulation.axisSpecies'
+  | 'analytics.advanced.charts.accumulation.totalSpecies' // params: species
+  | 'analytics.advanced.charts.accumulation.tooltipCumulative'
+  | 'analytics.advanced.charts.accumulation.tooltipNew'
+  | 'analytics.advanced.charts.accumulation.summary' // params: days, species
+  | 'analytics.advanced.charts.yearOverYear.title'
+  | 'analytics.advanced.charts.yearOverYear.description'
+  | 'analytics.advanced.charts.yearOverYear.noData'
+  | 'analytics.advanced.charts.yearOverYear.noDataHint'
+  | 'analytics.advanced.charts.yearOverYear.ariaLabel'
+  | 'analytics.advanced.charts.yearOverYear.axisDate'
+  | 'analytics.advanced.charts.yearOverYear.axisCount'
+  | 'analytics.advanced.charts.yearOverYear.legendThis' // params: year
+  | 'analytics.advanced.charts.yearOverYear.legendLast' // params: year
+  | 'analytics.advanced.charts.yearOverYear.tooltipDelta'
+  | 'analytics.advanced.charts.yearOverYear.summary' // params: monthDay, currentYear, thisYear, lastYear, previousYear, delta
+  | 'analytics.advanced.charts.phenology.title'
+  | 'analytics.advanced.charts.phenology.description'
+  | 'analytics.advanced.charts.phenology.noData'
+  | 'analytics.advanced.charts.phenology.noDataHint'
+  | 'analytics.advanced.charts.phenology.ariaLabel'
+  | 'analytics.advanced.charts.phenology.axisDate'
+  | 'analytics.advanced.charts.phenology.summary' // params: species
+  | 'analytics.advanced.charts.phenology.tooltipFirst'
+  | 'analytics.advanced.charts.phenology.tooltipLast'
+  | 'analytics.advanced.charts.phenology.tooltipResidency'
+  | 'analytics.advanced.charts.phenology.tooltipCount'
+  | 'analytics.advanced.charts.phenology.residencyDays' // params: days
+  | 'analytics.advanced.charts.heatmap.title'
+  | 'analytics.advanced.charts.heatmap.description'
+  | 'analytics.advanced.charts.heatmap.noData'
+  | 'analytics.advanced.charts.heatmap.noDataHint'
+  | 'analytics.advanced.charts.heatmap.axisDate'
+  | 'analytics.advanced.charts.heatmap.axisTime'
+  | 'analytics.advanced.charts.heatmap.tooltipTime'
+  | 'analytics.advanced.charts.heatmap.tooltipCount'
+  | 'analytics.advanced.charts.heatmap.legendLess'
+  | 'analytics.advanced.charts.heatmap.legendMore' // params: max
+  | 'analytics.advanced.charts.heatmap.ariaLabel'
+  | 'analytics.advanced.charts.heatmap.summary' // params: total, days, time, date
+  | 'analytics.advanced.charts.ridgeline.title'
+  | 'analytics.advanced.charts.ridgeline.description'
+  | 'analytics.advanced.charts.ridgeline.noData'
+  | 'analytics.advanced.charts.ridgeline.noDataHint'
+  | 'analytics.advanced.charts.ridgeline.ariaLabel'
+  | 'analytics.advanced.charts.ridgeline.axisTime'
+  | 'analytics.advanced.charts.ridgeline.note' // params: count
+  | 'analytics.advanced.charts.ridgeline.tooltipDetections'
+  | 'analytics.advanced.charts.ridgeline.tooltipPeak'
+  | 'analytics.advanced.charts.ridgeline.summary' // params: count, species, time
+  | 'analytics.advanced.charts.succession.title'
+  | 'analytics.advanced.charts.succession.description'
+  | 'analytics.advanced.charts.succession.noData'
+  | 'analytics.advanced.charts.succession.noDataHint'
+  | 'analytics.advanced.charts.succession.ariaLabel'
+  | 'analytics.advanced.charts.succession.axisTime'
+  | 'analytics.advanced.charts.succession.note' // params: count
+  | 'analytics.advanced.charts.succession.tooltipDetections'
+  | 'analytics.advanced.charts.succession.tooltipPeak'
+  | 'analytics.advanced.charts.succession.summary' // params: count, species, time
+  | 'analytics.advanced.charts.dawnOnset.title'
+  | 'analytics.advanced.charts.dawnOnset.description'
+  | 'analytics.advanced.charts.dawnOnset.noData'
+  | 'analytics.advanced.charts.dawnOnset.noDataHint'
+  | 'analytics.advanced.charts.dawnOnset.ariaLabel'
+  | 'analytics.advanced.charts.dawnOnset.axisDate'
+  | 'analytics.advanced.charts.dawnOnset.axisOnset'
+  | 'analytics.advanced.charts.dawnOnset.civilDawn'
+  | 'analytics.advanced.charts.dawnOnset.tooltipOnset'
+  | 'analytics.advanced.charts.dawnOnset.tooltipOnsetAfter' // params: minutes
+  | 'analytics.advanced.charts.dawnOnset.tooltipOnsetBefore' // params: minutes
+  | 'analytics.advanced.charts.dawnOnset.tooltipOnsetAt'
+  | 'analytics.advanced.charts.dawnOnset.tooltipCount'
+  | 'analytics.advanced.charts.dawnOnset.summary' // params: days, plotted
+  | 'analytics.advanced.charts.nocturnal.title'
+  | 'analytics.advanced.charts.nocturnal.description'
+  | 'analytics.advanced.charts.nocturnal.noData'
+  | 'analytics.advanced.charts.nocturnal.noDataHint'
+  | 'analytics.advanced.charts.nocturnal.ariaLabel'
+  | 'analytics.advanced.charts.nocturnal.axisHour'
+  | 'analytics.advanced.charts.nocturnal.tooltipHour' // params: start, end
+  | 'analytics.advanced.charts.nocturnal.tooltipCount'
+  | 'analytics.advanced.charts.nocturnal.summary' // params: total, peak
+  | 'analytics.advanced.charts.nocturnal.legendDay'
+  | 'analytics.advanced.charts.nocturnal.legendTwilight'
+  | 'analytics.advanced.charts.nocturnal.legendNight'
+  | 'analytics.advanced.charts.confidence.title'
+  | 'analytics.advanced.charts.confidence.description'
+  | 'analytics.advanced.charts.confidence.noData'
+  | 'analytics.advanced.charts.confidence.noDataHint'
+  | 'analytics.advanced.charts.confidence.ariaLabel'
+  | 'analytics.advanced.charts.confidence.axisLabel'
+  | 'analytics.advanced.charts.confidence.note' // params: count
+  | 'analytics.advanced.charts.confidence.tooltipCount'
+  | 'analytics.advanced.charts.confidence.tooltipPeak'
+  | 'analytics.advanced.charts.confidence.summary' // params: count, species, time
   | 'analytics.advanced.charts.tooltips.date'
   | 'analytics.advanced.charts.tooltips.percentage'
   | 'analytics.advanced.charts.tooltips.detections'
@@ -3264,8 +3511,10 @@ export type TranslationKey =
   | 'components.audio.spectrogramLoaded'
   | 'components.audio.spectrogramLoadingAria'
   | 'components.audio.spectrogramAlt'
+  | 'components.audio.spectrogramForSpecies' // params: species
   | 'components.audio.spectrogramGeneratingAria'
   | 'components.audio.generating'
+  | 'components.audio.waiting'
   | 'components.audio.queuePosition' // params: position
   | 'components.audio.loadError'
   | 'components.forms.numberField.adjustedToMinimum' // params: value
@@ -3367,6 +3616,7 @@ export type TranslationKey =
   | 'errors.alert.duplicateName'
   | 'errors.alert.invalidJSON'
   | 'errors.alert.invalidEscalation'
+  | 'errors.alert.engineUnavailable'
   | 'errors.detection.invalidDate' // params: paramName
   | 'errors.backup.invalidType'
   | 'errors.backup.alreadyRunning'
@@ -3628,6 +3878,7 @@ export type TranslationKey =
   | 'restart.bannerAction'
   | 'restart.restartFailed'
   | 'restart.reasons.webserver'
+  | 'restart.reasons.oauth'
   | 'restart.reasons.database'
   | 'restart.reasons.logging'
   | 'restart.reasons.tlsCertificate'
@@ -3890,6 +4141,17 @@ export type TranslationParams = {
   'system.errors.memoryUsage': { error: string | number };
   'system.errors.temperature': { error: string | number };
   'system.errors.processes': { error: string | number };
+  'system.importExport.stepAnnouncement': {
+    current: string | number;
+    total: string | number;
+    name: string | number;
+  };
+  'system.importExport.source.detectionsSummary': { count: string | number; date: string | number };
+  'system.importExport.source.unreadableOwner': { owner: string | number };
+  'system.importExport.source.manualValid': { count: string | number };
+  'system.importExport.source.containerUnreadableHint': { uid: string | number };
+  'system.importExport.progress.progressLabel': { percent: string | number };
+  'system.importExport.done.partialInserted': { count: string | number };
   'system.database.legacy.cleanup.success': { size: string | number };
   'system.database.legacy.cleanup.confirmMessage': { size: string | number };
   'system.database.dashboard.metrics.lastHour': { count: string | number };
@@ -3933,6 +4195,59 @@ export type TranslationParams = {
   'analytics.hub.card.notEnoughDataHint': { min: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
   'analytics.advanced.detections': { count: string | number };
+  'analytics.advanced.charts.accumulation.totalSpecies': { species: string | number };
+  'analytics.advanced.charts.accumulation.summary': {
+    days: string | number;
+    species: string | number;
+  };
+  'analytics.advanced.charts.yearOverYear.legendThis': { year: string | number };
+  'analytics.advanced.charts.yearOverYear.legendLast': { year: string | number };
+  'analytics.advanced.charts.yearOverYear.summary': {
+    monthDay: string | number;
+    currentYear: string | number;
+    thisYear: string | number;
+    lastYear: string | number;
+    previousYear: string | number;
+    delta: string | number;
+  };
+  'analytics.advanced.charts.phenology.summary': { species: string | number };
+  'analytics.advanced.charts.phenology.residencyDays': { days: string | number };
+  'analytics.advanced.charts.heatmap.legendMore': { max: string | number };
+  'analytics.advanced.charts.heatmap.summary': {
+    total: string | number;
+    days: string | number;
+    time: string | number;
+    date: string | number;
+  };
+  'analytics.advanced.charts.ridgeline.note': { count: string | number };
+  'analytics.advanced.charts.ridgeline.summary': {
+    count: string | number;
+    species: string | number;
+    time: string | number;
+  };
+  'analytics.advanced.charts.succession.note': { count: string | number };
+  'analytics.advanced.charts.succession.summary': {
+    count: string | number;
+    species: string | number;
+    time: string | number;
+  };
+  'analytics.advanced.charts.dawnOnset.tooltipOnsetAfter': { minutes: string | number };
+  'analytics.advanced.charts.dawnOnset.tooltipOnsetBefore': { minutes: string | number };
+  'analytics.advanced.charts.dawnOnset.summary': {
+    days: string | number;
+    plotted: string | number;
+  };
+  'analytics.advanced.charts.nocturnal.tooltipHour': {
+    start: string | number;
+    end: string | number;
+  };
+  'analytics.advanced.charts.nocturnal.summary': { total: string | number; peak: string | number };
+  'analytics.advanced.charts.confidence.note': { count: string | number };
+  'analytics.advanced.charts.confidence.summary': {
+    count: string | number;
+    species: string | number;
+    time: string | number;
+  };
   'settings.notFound.message': { section: string | number };
   'settings.main.sections.falsePositiveFilter.detectionCount': {
     count: string | number;
@@ -4023,6 +4338,7 @@ export type TranslationParams = {
   'media.audio.nowPlaying': { source: string | number };
   'media.audio.streamTitle': { source: string | number };
   'media.audio.playbackError': { details: string | number };
+  'components.audio.spectrogramForSpecies': { species: string | number };
   'components.audio.queuePosition': { position: string | number };
   'components.forms.numberField.adjustedToMinimum': { value: string | number };
   'components.forms.numberField.adjustedToMaximum': { value: string | number };

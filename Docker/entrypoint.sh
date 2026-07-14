@@ -98,9 +98,13 @@ fi
 
 # Set read permissions for model files (only when running as root)
 if [ "$RUNNING_AS_ROOT" = true ]; then
-    find /data/models -type f \( -name '*.tflite' -o -name '*.onnx' -o -name '*.csv' \) -exec chmod a+r {} + 2>/dev/null || true
-    # Ensure directory is executable (browsable)
-    chmod a+x /data/models 2>/dev/null || true
+    # Only chmod entries that actually lack the bits (the ! -perm guards), so a
+    # restart does not rewrite every model file on slow/NFS/read-only mounts.
+    find /data/models -type f \( -iname '*.tflite' -o -iname '*.onnx' -o -iname '*.csv' -o -iname '*.txt' -o -iname '*.bin' \) ! -perm -a+r -exec chmod a+r {} + 2>/dev/null || true
+    # Ensure directories are browsable. Models live in per-model and shared/
+    # subdirectories, so make every directory (not just the top level)
+    # traversable, otherwise a non-root user cannot reach files in subdirs.
+    find /data/models -type d ! -perm -a+rx -exec chmod a+rx {} + 2>/dev/null || true
 fi
 
 # Check if user has custom model path configured via environment variable
@@ -172,6 +176,41 @@ if [ -d "/dev/snd" ]; then
         fi
         # Make device accessible
         chmod -R a+rw /dev/snd || true
+    fi
+fi
+
+# If Intel GPU device present, add user to render group for OpenVINO iGPU inference
+if [ -d "/dev/dri" ]; then
+    if [ "$RUNNING_AS_ROOT" = true ]; then
+        # Detect the actual GID of the first render node on the host; it varies
+        # across distributions (105, 109, 44, 989 …) and Docker preserves the
+        # host GID when passing --device /dev/dri. Using a hardcoded GID would
+        # mismatch. Use a glob so the code works whether the device landed as
+        # renderD128, renderD129, etc. (e.g. when only one specific node is
+        # passed via --device /dev/dri/renderD129).
+        DRI_DEVICE=""
+        for _dev in /dev/dri/renderD*; do
+            [ -e "$_dev" ] && DRI_DEVICE="$_dev" && break
+        done
+        if [ -n "$DRI_DEVICE" ]; then
+            RENDER_GID=$(stat -c '%g' "$DRI_DEVICE")
+            # Create a group for this GID if one doesn't already exist
+            if ! getent group "$RENDER_GID" >/dev/null 2>&1; then
+                addgroup --gid "$RENDER_GID" drm-render 2>/dev/null || \
+                    groupadd --gid "$RENDER_GID" drm-render 2>/dev/null || true
+            fi
+            DRM_GROUP=$(getent group "$RENDER_GID" | cut -d: -f1)
+            if [ -n "$DRM_GROUP" ]; then
+                adduser "$USER_NAME" "$DRM_GROUP" 2>/dev/null || \
+                    usermod -aG "$DRM_GROUP" "$USER_NAME" 2>/dev/null || true
+                echo "Added $USER_NAME to group $DRM_GROUP (GID $RENDER_GID) for Intel iGPU access"
+            fi
+        fi
+    else
+        # Rootless: cannot create or join groups. Intel iGPU access still works if
+        # the container user was started already in the host render group (e.g. via
+        # --group-add on docker run). This is a heads-up, not an error.
+        echo "Note: /dev/dri present but running rootless; relying on pre-set render group membership for Intel iGPU access"
     fi
 fi
 

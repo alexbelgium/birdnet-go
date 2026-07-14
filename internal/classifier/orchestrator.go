@@ -368,29 +368,46 @@ func (o *Orchestrator) ModelScheduleStatus(modelID string) (active bool, reason 
 	return false, scheduleReasonNight
 }
 
-// GetModelDevice returns the compute device (execution provider) the named
-// model's inference currently runs on, resolved from the live instance's
-// Device() (e.g. "CPU" or "GPU"). It returns deviceUnknown when the model is not
-// loaded or its instance has been torn down. Locking mirrors ModelInfos /
-// PredictModel: o.mu.RLock to find the entry, then entry.mu to read the instance.
-func (o *Orchestrator) GetModelDevice(modelID string) string {
+// instanceFor returns the live ModelInstance for modelID, or nil when the model
+// is not loaded or its instance has been torn down. Locking mirrors ModelInfos /
+// PredictModel: o.mu.RLock to find the entry, then entry.mu only briefly to
+// capture the instance pointer. The pointer is captured under entry.mu and the
+// lock released before the caller invokes any instance method, because those
+// methods may take their own per-model lock (BirdNET locks bn.mu), and holding
+// entry.mu across such a call would stall PredictModel, which needs entry.mu only
+// briefly on the inference hot path.
+func (o *Orchestrator) instanceFor(modelID string) ModelInstance {
 	o.mu.RLock()
 	entry, ok := o.models[modelID]
 	o.mu.RUnlock()
 	if !ok {
-		return deviceUnknown
+		return nil
 	}
-	// Capture the instance pointer under entry.mu, then release it before calling
-	// Device(): a model's Device() may take its own per-model lock (BirdNET locks
-	// bn.mu), and holding entry.mu across that call would stall PredictModel, which
-	// needs entry.mu only briefly on the inference hot path. Mirrors PredictModel.
 	entry.mu.Lock()
 	inst := entry.instance
 	entry.mu.Unlock()
+	return inst
+}
+
+// GetModelRuntimeInfo returns the live compute device, execution backend, and
+// effective runtime precision for the named model, resolved from the live
+// instance's RuntimeInfo() in a single instance lookup. Because RuntimeInfo()
+// returns the triplet from one consistent snapshot, the status card never
+// observes a mixed-generation triplet when a reload completes mid-read.
+//
+// device is the live execution provider ("CPU"/"GPU"), falling back to
+// deviceUnknown when the model is not loaded or its instance has been torn down.
+// backend (BackendTFLite/BackendONNX/BackendOpenVINO) and precision
+// ("INT8"/"FP16"/"FP32") come from the loaded instance, so an ONNX model executed
+// on OpenVINO reports "OpenVINO" and its effective precision; both are "" when the
+// model is not loaded, signalling callers to fall back to the static ModelInfo
+// file metadata.
+func (o *Orchestrator) GetModelRuntimeInfo(modelID string) (device, backend, precision string) {
+	inst := o.instanceFor(modelID)
 	if inst == nil {
-		return deviceUnknown
+		return deviceUnknown, "", ""
 	}
-	return inst.Device()
+	return inst.RuntimeInfo()
 }
 
 // ModelSpecFor returns the ModelSpec for the given model ID.
@@ -432,8 +449,9 @@ func (o *Orchestrator) resolveInstalledPaths(registryID string) (modelPath, labe
 			logger.String("registry_id", registryID))
 		return "", "", ""
 	}
-	for i := range EmbeddedCatalog {
-		entry := &EmbeddedCatalog[i]
+	catalog := ActiveCatalog()
+	for i := range catalog {
+		entry := &catalog[i]
 		if entry.RegistryID != registryID {
 			continue
 		}
@@ -662,7 +680,7 @@ func (o *Orchestrator) GetProbableSpeciesWithSettings(date time.Time, week float
 // "Eptesicus nilssonii") are deliberately kept as distinct scientific names so
 // both pass the scientific-name inclusion gate (conf.Settings.IsSpeciesIncluded)
 // during audio processing. Those near-duplicates are collapsed for the user only
-// at the display boundary (dedupeSpeciesForDisplay in internal/api/v2/range.go),
+// at the display boundary (dedupeSpeciesForDisplay in internal/api/v2/range/range.go),
 // keyed on the resolved common name, so the functional inclusion set stays intact.
 //
 // The bat model is handled separately from the loop above: it has no geomodel,
@@ -1244,9 +1262,9 @@ func secondaryTripletFor(settings *conf.Settings) secondaryBackendKey {
 	}
 }
 
-// ReloadSecondaryModels rebuilds the OV-capable secondary models (currently
-// Perch) when the BirdNET inference backend or OpenVINO device preference
-// changes at runtime, so they move to the new device without a full restart.
+// ReloadSecondaryModels rebuilds the OV-capable secondary models (Perch, and the
+// bat embedding extractor) when the BirdNET inference backend or OpenVINO device
+// preference changes at runtime, so they move to the new device without a full restart.
 // It mirrors the primary reload's transactional safety: each model is built on
 // the new backend BEFORE the old instance is closed, and a build failure leaves
 // the old instance serving (one model failing does not abort the others).
@@ -1512,10 +1530,10 @@ type secondaryModelBuilder func(o *Orchestrator, settings *conf.Settings, thread
 // whose construction honors the BirdNET inference backend / OpenVINO device
 // preference to a builder returning a fresh, unregistered instance.
 // ReloadSecondaryModels rebuilds exactly these models when the backend/device
-// changes at runtime. ORT-only secondaries (e.g. Bat, which consumes only
-// ONNXRuntimePath) are intentionally absent: rebuilding them on a device change
-// would be wasted native work. Giving a new secondary OpenVINO support is a
-// one-line entry here, paired with the OV fields on its loader config.
+// changes at runtime. For Bat, only the heavy embedding extractor honors the
+// preference; the tiny bat classifier head always runs on ORT. Giving a new
+// secondary OpenVINO support is a one-line entry here, paired with the OV fields on
+// its loader config.
 var openvinoCapableSecondaryBuilders = map[string]secondaryModelBuilder{
 	RegistryIDPerchV2: func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {
 		// Explicit nil-on-error return avoids the typed-nil interface trap (a
@@ -1525,6 +1543,15 @@ var openvinoCapableSecondaryBuilders = map[string]secondaryModelBuilder{
 			return nil, err
 		}
 		return p, nil
+	},
+	RegistryIDBat: func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {
+		// Explicit nil-on-error return avoids the typed-nil interface trap (a
+		// nil *Bat wrapped in a non-nil ModelInstance).
+		b, err := o.buildBat(settings, threads)
+		if err != nil {
+			return nil, err
+		}
+		return b, nil
 	},
 }
 
@@ -1849,11 +1876,25 @@ func (o *Orchestrator) PrimaryModelID() string {
 	return o.ModelInfo.ID
 }
 
+// PrimaryModelInfo returns a copy of the primary model's live ModelInfo, read
+// under o.mu so callers outside the package get a consistent value instead of
+// racing reloadModelInternal's o.mu-guarded write to o.ModelInfo. The result is
+// a snapshot copy; it does not track subsequent reloads. Returns the zero
+// ModelInfo if no primary is set.
+func (o *Orchestrator) PrimaryModelInfo() ModelInfo {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.ModelInfo
+}
+
 // ModelInfos returns ModelInfo for all registered models. Thread-safe.
 // Used by the pipeline to build ModelTarget lists for buffer fan-out.
 // For the primary model entry, the live o.ModelInfo is returned rather than the
 // static registry template, so the reported Backend and Quantization match the
 // actually loaded model (e.g. ONNX/INT8 on the arm64 container default).
+// NumSpecies is always sourced from the live instance (not the template) so a
+// sliced or custom model reports its actual loaded label count rather than the
+// stock catalog number.
 func (o *Orchestrator) ModelInfos() []ModelInfo {
 	o.mu.RLock()
 	if o.models == nil {
@@ -1873,9 +1914,17 @@ func (o *Orchestrator) ModelInfos() []ModelInfo {
 
 	infos := make([]ModelInfo, 0, len(refs))
 	for _, ref := range refs {
+		// Capture the instance pointer under entry.mu, then release the lock before
+		// calling any instance method. Those accessors take their own per-model lock
+		// (BirdNET locks bn.mu), so holding entry.mu across them would stall
+		// PredictModel, which needs entry.mu only briefly on the inference hot path.
+		// This mirrors instanceFor / GetModelRuntimeInfo. The captured pointer stays
+		// usable even if the entry is torn down concurrently: the accessors below read
+		// label/settings/info state, not the native classifier that Close() frees.
 		ref.entry.mu.Lock()
-		if ref.entry.instance == nil {
-			ref.entry.mu.Unlock()
+		instance := ref.entry.instance
+		ref.entry.mu.Unlock()
+		if instance == nil {
 			continue
 		}
 		var info ModelInfo
@@ -1888,14 +1937,19 @@ func (o *Orchestrator) ModelInfos() []ModelInfo {
 			info, exists = ModelRegistry[ref.id]
 			if !exists {
 				info = ModelInfo{
-					ID:         ref.entry.instance.ModelID(),
-					Name:       ref.entry.instance.ModelName(),
-					Spec:       ref.entry.instance.Spec(),
-					NumSpecies: ref.entry.instance.NumSpecies(),
+					ID:   instance.ModelID(),
+					Name: instance.ModelName(),
+					Spec: instance.Spec(),
 				}
 			}
 		}
-		ref.entry.mu.Unlock()
+		// NumSpecies depends on the model's loaded label file, which a user can
+		// override with a sliced or custom model (e.g. a regional Perch v2 slice
+		// with far fewer classes than the stock 14,795). Both the primary template
+		// (o.ModelInfo) and the static registry template carry the stock catalog
+		// count, so source it from the live instance to report what is actually
+		// loaded.
+		info.NumSpecies = instance.NumSpecies()
 		infos = append(infos, info)
 	}
 	return infos

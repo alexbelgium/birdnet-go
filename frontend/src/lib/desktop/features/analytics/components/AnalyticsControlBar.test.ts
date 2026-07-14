@@ -5,9 +5,14 @@ import AnalyticsControlBar from './AnalyticsControlBar.svelte';
 import { parseAnalyticsParams } from '../registry/analyticsParams';
 import { createSpeciesId } from '$lib/types/species';
 import type { Species } from '$lib/types/species';
-import type { AnalyticsParams } from '../registry/types';
+import type { AnalyticsParams, AudioSourceOption } from '../registry/types';
 
 afterEach(() => cleanup());
+
+const sources: AudioSourceOption[] = [
+  { id: '7', name: 'camera-7', count: 42 },
+  { id: '3', name: 'audio-source-3', count: 9 },
+];
 
 const NOW = new Date(2026, 5, 19, 12, 0, 0);
 
@@ -28,21 +33,129 @@ const species: Species[] = [
 
 function makeParams(overrides: Partial<AnalyticsParams> = {}): AnalyticsParams {
   return {
-    ...parseAnalyticsParams('', { defaultTab: 'patterns', now: NOW }),
+    ...parseAnalyticsParams('', { now: NOW }),
     ...overrides,
   };
 }
 
 describe('AnalyticsControlBar', () => {
-  it('renders the source filter as inert with an explanation', () => {
+  it('hides the source filter when no chart on the tab uses source and no source is selected', () => {
     const onParamsChange = vi.fn();
     render(AnalyticsControlBar, {
-      props: { params: makeParams(), availableSpecies: species, onParamsChange },
+      // sourceApplicable defaults to false and no source is set: the control is hidden entirely
+      // (no chart consumes the source dimension yet, so a permanently-disabled control is dropped).
+      props: {
+        params: makeParams(),
+        availableSpecies: species,
+        availableSources: sources,
+        onParamsChange,
+      },
+    });
+
+    expect(screen.queryByText('analytics.hub.controls.source')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('analytics.hub.controls.sourceNotApplicable')
+    ).not.toBeInTheDocument();
+  });
+
+  it('still shows the source filter (enabled, so it is clearable) when a stale source is set even though no chart uses source', () => {
+    const onParamsChange = vi.fn();
+    render(AnalyticsControlBar, {
+      // sourceApplicable defaults to false, but a stale source arrived via a URL/bookmark. The
+      // control must render so the value is never stuck, and stay enabled so it can be cleared.
+      props: {
+        params: makeParams({ source: '7' }),
+        availableSpecies: species,
+        availableSources: [],
+        onParamsChange,
+      },
     });
 
     expect(screen.getByText('analytics.hub.controls.source')).toBeInTheDocument();
-    // The "coming soon" reason is a hover tooltip on the source control wrapper.
-    expect(screen.getByTitle('analytics.hub.controls.sourceComingSoon')).toBeInTheDocument();
+    // Enabled: no disabled-reason help text is present, so "All sources" can be selected to clear it.
+    expect(
+      screen.queryByText('analytics.hub.controls.sourceNotApplicable')
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('analytics.hub.controls.sourceNone')).not.toBeInTheDocument();
+  });
+
+  it('disables the source filter with a distinct reason when applicable but no sources exist', () => {
+    const onParamsChange = vi.fn();
+    render(AnalyticsControlBar, {
+      props: {
+        params: makeParams(),
+        availableSpecies: species,
+        availableSources: [],
+        sourceApplicable: true,
+        onParamsChange,
+      },
+    });
+
+    expect(screen.getByText('analytics.hub.controls.sourceNone')).toBeInTheDocument();
+  });
+
+  it('disables the source filter with a loading reason while sources load', () => {
+    const onParamsChange = vi.fn();
+    render(AnalyticsControlBar, {
+      props: {
+        params: makeParams(),
+        availableSpecies: species,
+        availableSources: [],
+        sourceApplicable: true,
+        loadingSources: true,
+        onParamsChange,
+      },
+    });
+
+    expect(screen.getByText('analytics.hub.controls.sourceLoading')).toBeInTheDocument();
+  });
+
+  it('enables the source filter and reports a selection when a chart on the tab uses source', async () => {
+    const onParamsChange = vi.fn();
+    render(AnalyticsControlBar, {
+      props: {
+        params: makeParams(),
+        availableSpecies: species,
+        availableSources: sources,
+        sourceApplicable: true,
+        onParamsChange,
+      },
+    });
+
+    // Enabled: no disabled-reason help text is present.
+    expect(
+      screen.queryByText('analytics.hub.controls.sourceNotApplicable')
+    ).not.toBeInTheDocument();
+
+    // Open the source dropdown (its trigger shows the "All sources" label) and pick a source.
+    const trigger = screen.getByText('analytics.hub.controls.sourceAll').closest('button');
+    expect(trigger).not.toBeNull();
+    await fireEvent.click(trigger as HTMLButtonElement);
+
+    const option = await screen.findByText('camera-7');
+    await fireEvent.click(option);
+
+    expect(onParamsChange).toHaveBeenCalledWith({ source: '7' });
+  });
+
+  it('keeps the source filter enabled to clear a stale selection even when no sources are returned', () => {
+    const onParamsChange = vi.fn();
+    render(AnalyticsControlBar, {
+      props: {
+        // A source is set (e.g. from a URL/bookmark) but the live list came back empty.
+        params: makeParams({ source: '7' }),
+        availableSpecies: species,
+        availableSources: [],
+        sourceApplicable: true,
+        onParamsChange,
+      },
+    });
+
+    // Enabled (no disabled reason) so the user can reset back to "All sources" and recover.
+    expect(screen.queryByText('analytics.hub.controls.sourceNone')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('analytics.hub.controls.sourceNotApplicable')
+    ).not.toBeInTheDocument();
   });
 
   it('explains when species filtering does not apply to the active tab', () => {

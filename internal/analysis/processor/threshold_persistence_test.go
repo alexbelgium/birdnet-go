@@ -12,6 +12,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/diskmanager"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"gorm.io/gorm"
 )
@@ -133,8 +134,11 @@ func (m *MockDatastore) SaveImageCache(*datastore.ImageCache) error { return nil
 func (m *MockDatastore) GetAllImageCaches(string) ([]datastore.ImageCache, error) {
 	return make([]datastore.ImageCache, 0), nil
 }
-func (m *MockDatastore) GetLockedNotesClipPaths() ([]string, error)               { return make([]string, 0), nil }
-func (m *MockDatastore) ClearNoteClipPathsByNames(_ []string) (int64, error)      { return 0, nil }
+func (m *MockDatastore) GetLockedNotesClipPaths() ([]string, error)          { return make([]string, 0), nil }
+func (m *MockDatastore) ClearNoteClipPathsByNames(_ []string) (int64, error) { return 0, nil }
+func (m *MockDatastore) GetNoteClipReferences(_ uint, _ int) ([]diskmanager.ClipReference, error) {
+	return nil, nil
+}
 func (m *MockDatastore) CountHourlyDetections(string, string, int) (int64, error) { return 0, nil }
 func (m *MockDatastore) GetSpeciesSummaryData(context.Context, string, string) ([]datastore.SpeciesSummaryData, error) {
 	return make([]datastore.SpeciesSummaryData, 0), nil
@@ -159,6 +163,34 @@ func (m *MockDatastore) GetSpeciesFirstDetectionInPeriod(context.Context, string
 }
 func (m *MockDatastore) GetSpeciesDiversityData(context.Context, string, string) ([]datastore.DailyAnalyticsData, error) {
 	return nil, nil
+}
+func (m *MockDatastore) GetActivityHeatmap(context.Context, string, string, string) (datastore.ActivityHeatmapData, error) {
+	return datastore.ActivityHeatmapData{}, nil
+}
+func (m *MockDatastore) GetHourlyDistributionBySpecies(context.Context, string, string, int) ([]datastore.SpeciesHourlyDistribution, error) {
+	return []datastore.SpeciesHourlyDistribution{}, nil
+}
+func (m *MockDatastore) GetDailyActivityOnset(context.Context, string, string, string) ([]datastore.DailyActivityOnset, error) {
+	return []datastore.DailyActivityOnset{}, nil
+}
+
+func (m *MockDatastore) GetConfidenceHistogram(context.Context, string, string, string, int, int) ([]datastore.SpeciesConfidenceHistogram, error) {
+	return []datastore.SpeciesConfidenceHistogram{}, nil
+}
+func (m *MockDatastore) GetSpeciesAccumulation(context.Context, string, string) ([]datastore.SpeciesAccumulationPoint, error) {
+	return []datastore.SpeciesAccumulationPoint{}, nil
+}
+func (m *MockDatastore) GetAudioSources(context.Context, string, string) ([]datastore.AudioSourceSummary, error) {
+	return []datastore.AudioSourceSummary{}, nil
+}
+func (m *MockDatastore) GetYearOverYear(_ context.Context, _ string) (datastore.YearOverYearResult, error) {
+	return datastore.YearOverYearResult{Points: []datastore.YearOverYearPoint{}}, nil
+}
+func (m *MockDatastore) GetSpeciesPhenology(context.Context, string, string, int) ([]datastore.SpeciesPhenologyPoint, error) {
+	return []datastore.SpeciesPhenologyPoint{}, nil
+}
+func (m *MockDatastore) GetAcousticSuccession(context.Context, string, string, int) ([]datastore.SpeciesHourlyCounts, error) {
+	return []datastore.SpeciesHourlyCounts{}, nil
 }
 func (m *MockDatastore) SearchDetections(*datastore.SearchFilters) ([]datastore.DetectionRecord, int, error) {
 	return make([]datastore.DetectionRecord, 0), 0, nil
@@ -325,22 +357,22 @@ func (m *MockDatastore) DeleteAllThresholdEvents() (int64, error) {
 }
 
 // BG-17 fix: Add notification history methods
-func (m *MockDatastore) GetActiveNotificationHistory(after time.Time) ([]datastore.NotificationHistory, error) {
+func (m *MockDatastore) GetActiveNotificationHistory(_ context.Context, after time.Time) ([]datastore.NotificationHistory, error) {
 	return []datastore.NotificationHistory{}, nil
 }
 
-func (m *MockDatastore) GetNotificationHistory(scientificName, notificationType string) (*datastore.NotificationHistory, error) {
+func (m *MockDatastore) GetNotificationHistory(_ context.Context, scientificName, notificationType string) (*datastore.NotificationHistory, error) {
 	return nil, errors.Newf("notification history not found").
 		Component("datastore").
 		Category(errors.CategoryNotFound).
 		Build()
 }
 
-func (m *MockDatastore) SaveNotificationHistory(history *datastore.NotificationHistory) error {
+func (m *MockDatastore) SaveNotificationHistory(_ context.Context, history *datastore.NotificationHistory) error {
 	return nil
 }
 
-func (m *MockDatastore) DeleteExpiredNotificationHistory(before time.Time) (int64, error) {
+func (m *MockDatastore) DeleteExpiredNotificationHistory(_ context.Context, before time.Time) (int64, error) {
 	return 0, nil
 }
 
