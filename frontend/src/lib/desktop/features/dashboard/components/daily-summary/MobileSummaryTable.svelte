@@ -250,7 +250,8 @@
   {/if}
 
   {#if data.length > 0}
-    <div class="zoom-hint" aria-hidden="true">tap a row for details</div>
+    <!-- Gesture hints only; both actions have accessible equivalents (row buttons, DatePicker) -->
+    <div class="zoom-hint" aria-hidden="true">tap a row for details · swipe ⟷ to change day</div>
   {/if}
 </div>
 

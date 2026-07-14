@@ -1600,9 +1600,12 @@ Performance Optimizations:
           isToday={isViewingToday}
         />
       {:else if element.type === 'currently-hearing'}
-        <CurrentlyHearingCard detections={isViewingToday ? pendingDetections : []} />
+        <!-- Live-only element: hidden on past dates, but kept visible in edit mode so it stays draggable/removable -->
+        {#if isViewingToday || inEditMode}
+          <CurrentlyHearingCard detections={isViewingToday ? pendingDetections : []} />
+        {/if}
       {:else if element.type === 'live-spectrogram'}
-        {#if isViewingToday}
+        {#if isViewingToday || inEditMode}
           <LazyMiniSpectrogram {pendingDetections} />
         {/if}
       {:else if element.type === 'detections-grid'}

@@ -188,7 +188,7 @@
   class={cn(
     'detection-card group relative rounded-xl',
     isNew && 'new-detection',
-    (isMenuOpen || isAudioSettingsOpen) && 'z-[60]'
+    (isMenuOpen || isAudioSettingsOpen) && 'z-[60] overlay-open'
   )}
 >
   <!-- Inner container with overflow-hidden for spectrogram clipping -->
@@ -291,6 +291,23 @@
 <style>
   .detection-card {
     background-color: var(--color-base-100);
+  }
+
+  /* On phones the dashboard stacks many of these cards below the fold; let the
+     browser skip layout/paint for off-screen ones. The card is a fixed 15rem tall
+     (.detection-card-inner), so the intrinsic size placeholder is exact and the
+     scrollbar stays stable. Must be lifted while the action menu or audio settings
+     overlay is open: content-visibility's paint containment would clip their
+     fixed-position popovers. */
+  @media (max-width: 767px) {
+    .detection-card {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 15rem;
+    }
+
+    .detection-card.overlay-open {
+      content-visibility: visible;
+    }
   }
 
   .detection-card-inner {

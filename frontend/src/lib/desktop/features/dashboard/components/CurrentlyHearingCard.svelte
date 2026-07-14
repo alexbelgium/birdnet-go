@@ -5,7 +5,8 @@ Purpose:
 - Shows species currently being detected by BirdNET in real-time
 - Provides visual feedback when detections are approved or rejected
 - Retains terminal (approved/rejected) states for a few seconds before fading out
-- Hidden entirely when no pending detections exist
+- Shows an idle empty state when no pending detections exist (collapses to a
+  single compact row on mobile viewports to save vertical space)
 
 Props:
 - detections: PendingDetection[] - Current pending detection snapshot from SSE
@@ -149,14 +150,30 @@ Props:
 <section
   class="card col-span-12 flex h-full flex-col rounded-2xl border border-border-100 bg-[var(--color-base-100)] shadow-sm {className}"
 >
-  <!-- Card Header -->
-  <div class="flex items-center gap-2 border-b border-[var(--color-base-200)] px-6 py-4">
+  <!-- Card Header (collapses to a single compact row on mobile when there is nothing to show) -->
+  <div
+    class="flex items-center gap-2 px-6 py-4 {hasDisplayDetections
+      ? 'border-b border-[var(--color-base-200)]'
+      : 'max-md:py-3 md:border-b md:border-[var(--color-base-200)]'}"
+  >
+    {#if !hasDisplayDetections}
+      <Mic class="h-4 w-4 shrink-0 text-[var(--color-base-content)]/40 md:hidden" />
+    {/if}
     <div class="flex flex-col">
       <h3 class="font-semibold">{t('dashboard.currentlyHearing.title')}</h3>
-      <p class="text-sm text-[var(--color-base-content)]/60">
+      <p
+        class="text-sm text-[var(--color-base-content)]/60 {hasDisplayDetections
+          ? ''
+          : 'max-md:hidden'}"
+      >
         {t('dashboard.currentlyHearing.subtitle')}
       </p>
     </div>
+    {#if !hasDisplayDetections}
+      <p class="ml-auto text-sm text-[var(--color-base-content)]/40 md:hidden">
+        {t('dashboard.currentlyHearing.empty')}
+      </p>
+    {/if}
   </div>
 
   <!-- Card Content -->
@@ -224,7 +241,7 @@ Props:
       {/each}
     </div>
   {:else}
-    <div class="flex flex-1 items-center justify-center px-6 py-8">
+    <div class="flex flex-1 items-center justify-center px-6 py-8 max-md:hidden">
       <p class="text-sm text-[var(--color-base-content)]/40">
         {t('dashboard.currentlyHearing.empty')}
       </p>
