@@ -48,7 +48,8 @@ Responsive Breakpoints:
   import DatePicker from '$lib/desktop/components/ui/DatePicker.svelte';
   import SkeletonDailySummary from '$lib/desktop/components/ui/SkeletonDailySummary.svelte';
   import { t } from '$lib/i18n';
-  import type { DailySpeciesSummary } from '$lib/types/detection.types';
+  import type { Component } from 'svelte';
+  import type { DailySpeciesSummary, LatestWeatherResponse } from '$lib/types/detection.types';
   import { getLocalDateString, getDateInTimezone } from '$lib/utils/date';
   import {
     buildHourlyDetectionUrl,
@@ -67,6 +68,7 @@ Responsive Breakpoints:
     UNKNOWN_WEATHER_INFO,
     getEffectiveWeatherCode,
     translateWeatherCondition,
+    isNightTime,
   } from '$lib/utils/weather';
   import {
     convertTemperature,
@@ -78,7 +80,23 @@ Responsive Breakpoints:
     resolveNoveltyCategory,
     noveltyCategoryColorVar,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import { ChevronDown, ChevronLeft, ChevronRight, Star, XCircle } from '@lucide/svelte';
+  import {
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    Star,
+    XCircle,
+    Sun,
+    Moon,
+    CloudSun,
+    Cloud,
+    CloudDrizzle,
+    CloudRain,
+    CloudLightning,
+    CloudSnow,
+    Snowflake,
+    CloudFog,
+  } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
@@ -365,11 +383,14 @@ Responsive Breakpoints:
 
   // Update hourly weather when selected date changes.
   // Uses captured date to prevent stale data from overwriting fresh data on rapid date changes.
-  // Skipped on mobile: only the desktop/tablet heatmap renders the hourly weather row,
-  // so fetching it on phones is wasted work that competes with first paint.
+  // On desktop the heatmap renders the full hourly weather row immediately. On mobile only the
+  // detail card's peak-hour line uses it (and only once a row is expanded), so there the fetch is
+  // deferred to browser idle time to stay off the first-paint critical path.
   $effect(() => {
     const currentDate = selectedDate;
-    if (currentDate && !isMobileViewport) {
+    if (!currentDate) return;
+
+    const run = () => {
       fetchHourlyWeather(currentDate).then(data => {
         // Only update if this is still the current date (prevents race condition)
         if (selectedDate === currentDate) {
@@ -385,7 +406,19 @@ Responsive Breakpoints:
           );
         }
       });
+    };
+
+    if (!isMobileViewport) {
+      run();
+      return;
     }
+    // Mobile: defer to idle so it never competes with first paint.
+    if (typeof globalThis.requestIdleCallback === 'function') {
+      const id = globalThis.requestIdleCallback(run, { timeout: 2000 });
+      return () => globalThis.cancelIdleCallback(id);
+    }
+    const id = setTimeout(run, 300);
+    return () => clearTimeout(id);
   });
 
   // Calculate which hour column corresponds to sunrise/sunset.
@@ -452,6 +485,19 @@ Responsive Breakpoints:
     }
 
     return [desc, temp].filter(Boolean).join(', ');
+  };
+
+  // Compact per-hour weather (emoji + rounded temperature) for the mobile detail
+  // card's peak-hour line. Undefined when no weather is known for that hour.
+  const getHourWeather = (hour: number): { emoji: string; tempText: string } | undefined => {
+    const emoji = getHourlyWeatherEmoji(hour);
+    const hourData = getHourlyWeatherData(hour);
+    const tempText =
+      hourData && typeof hourData.temperature === 'number'
+        ? `${Math.round(convertTemperature(hourData.temperature, temperatureUnit))}${getTemperatureSymbol(temperatureUnit)}`
+        : '';
+    if (!emoji && !tempText) return undefined;
+    return { emoji, tempText };
   };
 
   // Get daylight class for an hour based on its position relative to sunrise/sunset
@@ -730,6 +776,85 @@ Responsive Breakpoints:
     return () => mq.removeEventListener('change', handleChange);
   });
 
+  // ── Mobile weather stat ─────────────────────────────────────────────────────
+  // Desktop/tablet get weather inside the heatmap's hourly row; the mobile table
+  // has none. Surface current conditions as one extra stat in the overview bar,
+  // but only for "today" on a phone (past dates have no "current" weather, and
+  // the desktop already shows it). Silently absent when the weather provider is
+  // off — never an error state. Mirrors BannerCard's fetch/refresh/error handling.
+  let mobileWeather = $state<LatestWeatherResponse | null>(null);
+  const WEATHER_REFRESH_MS = 10 * 60_000;
+
+  $effect(() => {
+    if (!isMobileViewport || !isToday) {
+      mobileWeather = null;
+      return;
+    }
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const resp = await fetch(buildAppUrl('/api/v2/weather/latest'), {
+          signal: controller.signal,
+        });
+        if (!resp.ok) throw new Error('weather unavailable');
+        mobileWeather = await resp.json();
+      } catch (e: unknown) {
+        if (e instanceof Error && e.name === 'AbortError') return;
+        mobileWeather = null; // degrade quietly: no stat rather than an error
+      }
+    };
+    load();
+    const id = setInterval(load, WEATHER_REFRESH_MS);
+    return () => {
+      controller.abort();
+      clearInterval(id);
+    };
+  });
+
+  // Lucide icon standing in for a base weather code (day/night aware for clear sky).
+  function weatherIconFor(code: string, night: boolean): Component {
+    switch (code) {
+      case '01':
+        return night ? Moon : Sun;
+      case '02':
+      case '03':
+      case '04':
+        return night ? Cloud : CloudSun;
+      case '09':
+        return CloudDrizzle;
+      case '10':
+        return CloudRain;
+      case '11':
+        return CloudLightning;
+      case '12':
+        return CloudSnow;
+      case '13':
+        return Snowflake;
+      case '50':
+        return CloudFog;
+      default:
+        return Cloud;
+    }
+  }
+
+  // Overview weather stat (icon + rounded temperature + condition label), or
+  // undefined when there is nothing to show. Passed only to the mobile overview.
+  const mobileWeatherStat = $derived.by(() => {
+    const hourly = mobileWeather?.hourly;
+    if (!hourly || typeof hourly.temperature !== 'number') return undefined;
+    const code = getEffectiveWeatherCode(hourly.weather_icon, hourly.weather_desc);
+    const night = isNightTime(hourly.weather_icon);
+    const info = code
+      ? safeGet(WEATHER_ICON_MAP, code, UNKNOWN_WEATHER_INFO)
+      : UNKNOWN_WEATHER_INFO;
+    const temp = Math.round(convertTemperature(hourly.temperature, temperatureUnit));
+    return {
+      icon: weatherIconFor(code, night),
+      count: `${temp}${getTemperatureSymbol(temperatureUnit)}`,
+      label: (hourly.weather_desc ?? info.description).toLowerCase(),
+    };
+  });
+
   // Swipe navigation (mobile only): a horizontal swipe on the species list
   // changes the selected day. The 2:1 horizontal-dominance test keeps normal
   // vertical scrolling from ever triggering navigation; listeners are passive
@@ -1002,7 +1127,7 @@ Responsive Breakpoints:
 
     <!-- Grid Content -->
     <div class="p-6 pt-8">
-      <DailySummaryOverview data={visibleData} {selectedDate} />
+      <DailySummaryOverview data={visibleData} {selectedDate} weatherStat={mobileWeatherStat} />
 
       {#if isMobileViewport}
         <!-- Mobile compact table (<768px): render ONLY this so phones never
@@ -1025,6 +1150,7 @@ Responsive Breakpoints:
             sortKey={mobileSort.key}
             sortDir={mobileSort.dir}
             onSortChange={handleMobileSortChange}
+            {getHourWeather}
           />
         </div>
       {:else}

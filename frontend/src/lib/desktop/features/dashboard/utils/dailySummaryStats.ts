@@ -1,6 +1,7 @@
 import type { DailySpeciesSummary } from '$lib/types/detection.types';
 import { getLocalDateString } from '$lib/utils/date';
 import { safeArrayAccess } from '$lib/utils/security';
+import { resolveNoveltyCategory } from './noveltyCategory';
 
 export const EBIRD_BASE_URL = 'https://ebird.org/species';
 export const EBIRD_DEFAULT_LANG = 'en';
@@ -103,12 +104,15 @@ export interface OverviewStats {
   total: number;
   lastHour: number;
   speciesCount: number;
+  /** Species new in any tracked period (lifetime / year / season). */
+  newSpecies: number;
   isToday: boolean;
 }
 
 /**
  * Computes summary stats for the overview bar.
  * lastHour reflects the current clock hour and is 0 for past dates.
+ * newSpecies counts species flagged new in any period (see resolveNoveltyCategory).
  */
 export function computeOverviewStats(
   data: DailySpeciesSummary[],
@@ -120,13 +124,17 @@ export function computeOverviewStats(
 
   let total = 0;
   let lastHour = 0;
+  let newSpecies = 0;
   for (const item of data) {
     total += item.count;
     if (isToday) {
       const hourCount = safeArrayAccess(item.hourly_counts, currentHour, 0) ?? 0;
       lastHour += hourCount;
     }
+    if (resolveNoveltyCategory(item) !== null) {
+      newSpecies++;
+    }
   }
 
-  return { total, lastHour, speciesCount: data.length, isToday };
+  return { total, lastHour, speciesCount: data.length, newSpecies, isToday };
 }

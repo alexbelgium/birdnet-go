@@ -30,6 +30,8 @@
     selectedDate: string;
     /** Chart height in px; the desktop host passes a taller chart. */
     chartHeight?: number;
+    /** Optional per-hour weather accessor (mobile). Undefined on the desktop host. */
+    getHourWeather?: (_hour: number) => { emoji: string; tempText: string } | undefined;
   }
 
   let {
@@ -42,6 +44,7 @@
     onCollapse,
     selectedDate,
     chartHeight = 64,
+    getHourWeather,
   }: Props = $props();
 
   const pct = $derived(Math.round(Math.max(0, Math.min(1, item.max_confidence ?? 0)) * 100));
@@ -92,6 +95,12 @@
     const idx = counts.indexOf(maxVal);
     return idx >= 0 ? idx : null;
   });
+
+  // Weather at the peak hour (mobile only; undefined otherwise) — answers
+  // "what were conditions when this bird was most active" with near-zero pixels.
+  const peakWeather = $derived(
+    peakHour !== null && getHourWeather ? getHourWeather(peakHour) : undefined
+  );
 
   // Novelty pill: strongest badge wins, returns {label, bg} or null.
   const novelty = $derived(
@@ -226,10 +235,17 @@
         {/if}
       </div>
 
-      <!-- Secondary stats: peak hour -->
+      <!-- Secondary stats: peak hour (+ its weather on mobile, when known) -->
       {#if peakHour !== null}
         <div class="card-stats">
-          <span class="card-stat">peak {String(peakHour).padStart(2, '0')}h</span>
+          <span class="card-stat">
+            peak {String(peakHour).padStart(2, '0')}h
+            {#if peakWeather && (peakWeather.emoji || peakWeather.tempText)}
+              <span class="card-stat-weather">
+                · {peakWeather.emoji}{peakWeather.tempText ? ` ${peakWeather.tempText}` : ''}
+              </span>
+            {/if}
+          </span>
         </div>
       {/if}
 
@@ -518,6 +534,11 @@
     align-items: center;
     gap: 0.3rem;
     margin-top: 0.05rem;
+  }
+
+  .card-stat-weather {
+    white-space: nowrap;
+    color: color-mix(in srgb, var(--color-base-content) 65%, transparent);
   }
 
   .card-stat {

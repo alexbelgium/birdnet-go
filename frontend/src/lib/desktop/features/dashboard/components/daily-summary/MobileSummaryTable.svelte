@@ -33,6 +33,8 @@
     sortDir?: MobileSortDir;
     /** Invoked when a column header is tapped; parent flips direction / switches key. */
     onSortChange?: (_key: MobileSortKey) => void;
+    /** Per-hour weather accessor for the expanded detail card's peak-hour line. */
+    getHourWeather?: (_hour: number) => { emoji: string; tempText: string } | undefined;
   }
 
   let {
@@ -47,6 +49,7 @@
     sortKey = 'count',
     sortDir = 'desc',
     onSortChange,
+    getHourWeather,
   }: Props = $props();
 
   // "Show all" expander: cap the list to `limit` rows on busy days (each row
@@ -239,6 +242,7 @@
         {maxHour}
         onCollapse={() => collapseRow(item.scientific_name)}
         {selectedDate}
+        {getHourWeather}
       />
     {:else}
       <!-- Compact row — tap → expand into detail card -->

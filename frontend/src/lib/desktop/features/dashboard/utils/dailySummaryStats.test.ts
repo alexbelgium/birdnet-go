@@ -78,7 +78,10 @@ describe('buildEbirdUrl', () => {
 const makeItem = (
   count: number,
   hourly_counts: number[],
-  max_confidence?: number
+  max_confidence?: number,
+  novelty?: Partial<
+    Pick<DailySpeciesSummary, 'is_new_species' | 'is_new_this_year' | 'is_new_this_season'>
+  >
 ): DailySpeciesSummary => ({
   scientific_name: 'Test Bird',
   common_name: 'Test Bird',
@@ -90,6 +93,7 @@ const makeItem = (
   first_heard: '',
   latest_heard: '',
   thumbnail_url: '',
+  ...novelty,
 });
 
 describe('formatDetectionCount', () => {
@@ -124,7 +128,32 @@ describe('computeOverviewStats', () => {
   it('returns zeros for empty data', () => {
     const now = new Date('2024-06-20T10:00:00');
     const result = computeOverviewStats([], '2024-06-20', now);
-    expect(result).toEqual({ total: 0, lastHour: 0, speciesCount: 0, isToday: true });
+    expect(result).toEqual({
+      total: 0,
+      lastHour: 0,
+      speciesCount: 0,
+      newSpecies: 0,
+      isToday: true,
+    });
+  });
+
+  it('counts species new in any tracked period as newSpecies', () => {
+    const data = [
+      makeItem(5, hourly24, 0.9, { is_new_species: true }), // lifetime
+      makeItem(3, hourly24, 0.8, { is_new_this_year: true }), // year
+      makeItem(2, hourly24, 0.7, { is_new_this_season: true }), // season
+      makeItem(9, hourly24, 0.95), // not new
+    ];
+    const now = new Date('2024-06-20T10:00:00');
+    const result = computeOverviewStats(data, '2024-06-20', now);
+    expect(result.newSpecies).toBe(3);
+    expect(result.speciesCount).toBe(4);
+  });
+
+  it('reports zero newSpecies when nothing is new', () => {
+    const data = [makeItem(5, hourly24), makeItem(3, hourly24)];
+    const now = new Date('2024-06-20T10:00:00');
+    expect(computeOverviewStats(data, '2024-06-20', now).newSpecies).toBe(0);
   });
 
   it('sums total detections and species count', () => {
