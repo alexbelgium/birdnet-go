@@ -1,3 +1,9 @@
+<script module lang="ts">
+  /** Column the mobile species table is sorted by. */
+  export type MobileSortKey = 'count' | 'name' | 'conf' | 'latest';
+  export type MobileSortDir = 'asc' | 'desc';
+</script>
+
 <script lang="ts">
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
@@ -5,7 +11,8 @@
   import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
   import { getSpeciesBadgeColor, getSpeciesInitials } from '../../utils/speciesBadge';
   import { resolveNoveltyCategory, noveltyCategoryColorVar } from '../../utils/noveltyCategory';
-  import { Star } from '@lucide/svelte';
+  import { computeAxisTicks, tickPositionCss } from '../../utils/hourAxis';
+  import { Star, ChevronUp, ChevronDown } from '@lucide/svelte';
   import HourlyMiniChart, { BAR_STRIDE } from './HourlyMiniChart.svelte';
   import SpeciesDetailCard from './SpeciesDetailCard.svelte';
 
@@ -19,6 +26,13 @@
     /** Last hour (inclusive) to render in charts — today's current hour, else 23.
         Owned by DailySummaryCard, which keeps it ticking across hour changes. */
     maxHour: number;
+    /** Rows shown before the "Show all" expander; 0 disables the cap. */
+    limit?: number;
+    /** Current sort column + direction (owned/persisted by DailySummaryCard). */
+    sortKey?: MobileSortKey;
+    sortDir?: MobileSortDir;
+    /** Invoked when a column header is tapped; parent flips direction / switches key. */
+    onSortChange?: (_key: MobileSortKey) => void;
   }
 
   let {
@@ -29,7 +43,35 @@
     showThumbnails,
     selectedDate,
     maxHour,
+    limit = 0,
+    sortKey = 'count',
+    sortDir = 'desc',
+    onSortChange,
   }: Props = $props();
+
+  // "Show all" expander: cap the list to `limit` rows on busy days (each row
+  // carries an SVG chart) so the page doesn't scroll forever to reach the content
+  // below. No data is hidden silently — the button states the full count.
+  let showAll = $state(false);
+  // Collapse back to the capped view whenever the day changes.
+  $effect(() => {
+    void selectedDate;
+    showAll = false;
+  });
+  const isTruncated = $derived(limit > 0 && data.length > limit);
+  const visibleRows = $derived(showAll || !isTruncated ? data : data.slice(0, limit));
+
+  // Hour-scale ticks drawn in the pinned header so every row's chart is readable
+  // at a glance (the per-row charts carry no axis of their own).
+  const headerTicks = $derived(computeAxisTicks(maxHour));
+
+  // Full accessible label for a sort header. aria-sort itself is only valid on
+  // grid/columnheader roles (this is a CSS grid, not an ARIA grid), so the current
+  // sort state is folded into the button's label instead.
+  function sortLabel(key: MobileSortKey, what: string): string {
+    if (sortKey !== key) return `Sort by ${what}`;
+    return `Sorted by ${what}, ${sortDir === 'asc' ? 'ascending' : 'descending'}. Tap to reverse.`;
+  }
 
   // Per-row expansion state — scientific name of the expanded row, or null.
   let expandedSpecies: string | null = $state(null);
@@ -114,15 +156,73 @@
   aria-label="Species detected on {selectedDate}"
   style:--col-chart-w="{chartColWidthPx}px"
 >
-  <!-- Header (JS-pinned while the list is in view — see pin $effect) -->
-  <div bind:this={headerEl} class="mobile-summary-header" aria-hidden="true">
-    <div class="col-header-species">Species</div>
-    <div class="col-header-conf">Conf.</div>
-    <div class="col-header-count">Cnt</div>
-    <div class="col-header-chart">Hourly</div>
+  <!-- Active-sort indicator for a header button -->
+  {#snippet sortGlyph(key: MobileSortKey)}
+    {#if sortKey === key}
+      {#if sortDir === 'asc'}
+        <ChevronUp class="size-2.5" aria-hidden="true" />
+      {:else}
+        <ChevronDown class="size-2.5" aria-hidden="true" />
+      {/if}
+    {/if}
+  {/snippet}
+
+  <!-- Header (JS-pinned while the list is in view — see pin $effect). Each column
+       is a tap-to-sort button; the chart column doubles as the hour-scale axis. -->
+  <div bind:this={headerEl} class="mobile-summary-header">
+    <button
+      type="button"
+      class="col-header-species col-header-btn"
+      class:is-active={sortKey === 'name'}
+      onclick={() => onSortChange?.('name')}
+      aria-label={sortLabel('name', 'species name')}
+    >
+      Species{@render sortGlyph('name')}
+    </button>
+    <button
+      type="button"
+      class="col-header-conf col-header-btn"
+      class:is-active={sortKey === 'conf'}
+      onclick={() => onSortChange?.('conf')}
+      aria-label={sortLabel('conf', 'confidence')}
+    >
+      {@render sortGlyph('conf')}Conf.
+    </button>
+    <button
+      type="button"
+      class="col-header-count col-header-btn"
+      class:is-active={sortKey === 'count'}
+      onclick={() => onSortChange?.('count')}
+      aria-label={sortLabel('count', 'detection count')}
+    >
+      {@render sortGlyph('count')}Cnt
+    </button>
+    <!-- Chart column: the hour-scale axis IS the header; active-sort state tints
+         the ticks (a chevron would overlap the right-edge tick in this narrow column). -->
+    <button
+      type="button"
+      class="col-header-chart col-header-btn"
+      class:is-active={sortKey === 'latest'}
+      onclick={() => onSortChange?.('latest')}
+      aria-label={sortLabel('latest', 'most recent detection')}
+    >
+      <span class="col-header-axis" aria-hidden="true">
+        {#each headerTicks as tick, i (tick)}
+          <span
+            class="col-header-tick"
+            class:tick-first={i === 0}
+            class:tick-last={i === headerTicks.length - 1}
+            style:left={i === headerTicks.length - 1 ? undefined : tickPositionCss(tick, maxHour)}
+            style:right={i === headerTicks.length - 1 ? '0' : undefined}
+          >
+            {tick}
+          </span>
+        {/each}
+      </span>
+    </button>
   </div>
 
-  {#each data as item (item.scientific_name)}
+  {#each visibleRows as item (item.scientific_name)}
     {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
     {@const pct = Math.round(Math.max(0, Math.min(1, item.max_confidence ?? 0)) * 100)}
     {@const isExpanded = expandedSpecies === item.scientific_name}
@@ -249,6 +349,13 @@
     </div>
   {/if}
 
+  {#if isTruncated}
+    <!-- Visible expander (not a hint): the list is capped, so state the full count -->
+    <button type="button" class="show-all-btn" onclick={() => (showAll = !showAll)}>
+      {showAll ? 'Show fewer' : `Show all ${data.length} species`}
+    </button>
+  {/if}
+
   {#if data.length > 0}
     <!-- Gesture hints only; both actions have accessible equivalents (row buttons, DatePicker) -->
     <div class="zoom-hint" aria-hidden="true">tap a row for details · swipe ⟷ to change day</div>
@@ -266,7 +373,7 @@
        column never reserves more space than the chart needs — the name column gets
        whatever is left over. */
   }
-  
+
   /* Curtain above the column names while the header is pinned */
   .mobile-summary-header::before {
     content: '';
@@ -313,14 +420,108 @@
     isolation: isolate;
   }
 
+  /* Header cells are tap-to-sort buttons: strip the native chrome, inherit the
+     header's tiny uppercase type, keep them from becoming zoom surfaces. */
+  .col-header-btn {
+    appearance: none;
+    background: none;
+    border: none;
+    margin: 0;
+    padding: 0.25rem 0;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.0625rem;
+    min-width: 0;
+    touch-action: manipulation;
+  }
+
+  .col-header-btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+    border-radius: 0.25rem;
+  }
+
+  /* Active-sort column reads darker than the resting headers. */
+  .col-header-btn.is-active {
+    color: var(--color-base-content);
+  }
+
   .col-header-species {
     grid-column: 1 / 3;
+    justify-content: flex-start;
   }
 
   .col-header-conf,
-  .col-header-count,
-  .col-header-chart {
+  .col-header-count {
+    justify-content: flex-end;
     text-align: right;
+  }
+
+  /* Chart column doubles as the hour axis; give the ticks a positioning context. */
+  .col-header-chart {
+    position: relative;
+    justify-content: flex-end;
+    min-height: 0.75rem;
+  }
+
+  .col-header-axis {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 0.6rem;
+  }
+
+  .col-header-tick {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    font-size: 0.5rem;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--color-base-content) 42%, transparent);
+  }
+
+  .col-header-tick.tick-first {
+    left: 0 !important;
+    transform: none;
+  }
+
+  .col-header-tick.tick-last {
+    left: auto !important;
+    transform: none;
+  }
+
+  /* When 'latest' is the active sort, brighten the axis to mark the column. */
+  .col-header-chart.is-active .col-header-tick {
+    color: var(--color-base-content);
+  }
+
+  /* Full-width expander shown when the list is capped */
+  .show-all-btn {
+    appearance: none;
+    display: block;
+    width: 100%;
+    margin-top: 0.25rem;
+    padding: 0.5rem;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--color-base-200);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .show-all-btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+    border-radius: 0.375rem;
   }
 
   .mobile-summary-row {
@@ -379,7 +580,7 @@
     display: block;
     flex-shrink: 0;
     margin-right: 0.5rem;
-}
+  }
 
   .mobile-badge {
     display: flex;

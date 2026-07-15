@@ -59,6 +59,8 @@ Responsive Breakpoints:
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { loggers } from '$lib/utils/logger';
   import { LRUCache } from '$lib/utils/LRUCache';
+  import { getStoredValue, setStoredValue } from '$lib/utils/storage';
+  import type { MobileSortKey, MobileSortDir } from './daily-summary/MobileSummaryTable.svelte';
   import { safeArrayAccess, safeGet } from '$lib/utils/security';
   import {
     WEATHER_ICON_MAP,
@@ -782,6 +784,83 @@ Responsive Breakpoints:
     return sortedUnlimited;
   });
 
+  // Initial row cap for the compact mobile table. The daily-summary API is
+  // already fetched with &limit=summaryLimit (default 30), so `data` is capped
+  // server-side; this smaller cap keeps the *initial* mobile render short (each
+  // row draws an SVG) and gives a real "Show all" affordance to reach the rest
+  // without a long scroll past every species to the content below.
+  const MOBILE_INITIAL_ROW_CAP = 20;
+
+  // ── Mobile sort ───────────────────────────────────────────────────────────
+  // The compact table lets the user re-sort via its column headers. Persisted so
+  // the choice survives reloads. Desktop keeps sortedUnlimited's fixed count-desc
+  // order — only the mobile table reads mobileSorted.
+  const MOBILE_SORT_STORAGE_KEY = 'dashboard-mobile-sort';
+  const DEFAULT_MOBILE_SORT: { key: MobileSortKey; dir: MobileSortDir } = {
+    key: 'count',
+    dir: 'desc',
+  };
+
+  function isMobileSortState(v: unknown): v is { key: MobileSortKey; dir: MobileSortDir } {
+    if (typeof v !== 'object' || v === null) return false;
+    const { key, dir } = v as Record<string, unknown>;
+    return (
+      (key === 'count' || key === 'name' || key === 'conf' || key === 'latest') &&
+      (dir === 'asc' || dir === 'desc')
+    );
+  }
+
+  let mobileSort = $state<{ key: MobileSortKey; dir: MobileSortDir }>(
+    getStoredValue(MOBILE_SORT_STORAGE_KEY, DEFAULT_MOBILE_SORT, isMobileSortState)
+  );
+
+  $effect(() => {
+    setStoredValue(MOBILE_SORT_STORAGE_KEY, mobileSort);
+  });
+
+  // Sensible initial direction when switching to a new column: text ascends,
+  // magnitudes/recency descend (biggest / most-recent first).
+  function defaultDirFor(key: MobileSortKey): MobileSortDir {
+    return key === 'name' ? 'asc' : 'desc';
+  }
+
+  function handleMobileSortChange(key: MobileSortKey) {
+    mobileSort =
+      mobileSort.key === key
+        ? { key, dir: mobileSort.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: defaultDirFor(key) };
+  }
+
+  // Mobile table rows in the user-selected order. Falls back to count desc then
+  // latest heard as a stable tiebreak so equal primary keys never jitter.
+  const mobileSorted = $derived.by(() => {
+    if (visibleData.length === 0) return [];
+    const { key, dir } = mobileSort;
+    const sign = dir === 'asc' ? 1 : -1;
+    return [...visibleData].sort((a: DailySpeciesSummary, b: DailySpeciesSummary) => {
+      let primary = 0;
+      switch (key) {
+        case 'name':
+          primary = localizeSpeciesName(a.scientific_name, a.common_name).localeCompare(
+            localizeSpeciesName(b.scientific_name, b.common_name)
+          );
+          break;
+        case 'conf':
+          primary = (a.max_confidence ?? 0) - (b.max_confidence ?? 0);
+          break;
+        case 'latest':
+          primary = (a.latest_heard ?? '').localeCompare(b.latest_heard ?? '');
+          break;
+        default:
+          primary = a.count - b.count;
+          break;
+      }
+      if (primary !== 0) return sign * primary;
+      if (b.count !== a.count) return b.count - a.count;
+      return (b.latest_heard ?? '').localeCompare(a.latest_heard ?? '');
+    });
+  });
+
   // Calculate dynamic species column width based on longest name
   // This ensures all rows align properly regardless of name length
   // Uses CONFIG.SPECIES_COLUMN constants for easy adjustment
@@ -935,13 +1014,17 @@ Responsive Breakpoints:
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div ontouchstart={handleSwipeStart} ontouchend={handleSwipeEnd}>
           <MobileSummaryTable
-            data={sortedUnlimited}
+            data={mobileSorted}
             {sunriseHour}
             {sunsetHour}
             getSpeciesUrl={urlBuilders.species}
             {showThumbnails}
             {selectedDate}
             maxHour={chartMaxHour}
+            limit={MOBILE_INITIAL_ROW_CAP}
+            sortKey={mobileSort.key}
+            sortDir={mobileSort.dir}
+            onSortChange={handleMobileSortChange}
           />
         </div>
       {:else}

@@ -14,6 +14,7 @@
   import HourlyMiniChart from './HourlyMiniChart.svelte';
   import SpeciesHistoryModal from './SpeciesHistoryModal.svelte';
   import { buildEbirdUrl, isValidEbirdCode } from '../../utils/dailySummaryStats';
+  import { computeAxisTicks, tickPositionCss } from '../../utils/hourAxis';
   import { getLocale } from '$lib/i18n';
   import { safeArrayAccess } from '$lib/utils/security';
   import { buildSpeciesDetectionUrl } from '$lib/utils/detectionUrls';
@@ -103,17 +104,10 @@
           : null
   );
 
-  // Adaptive axis ticks: fixed candidates filtered by maxHour, last hour always included.
-  const axisTicks = $derived.by(() => {
-    const base = [0, 6, 12, 18].filter(h => h <= maxHour);
-    const last = base[base.length - 1];
-    return last !== maxHour ? [...base, maxHour] : base;
-  });
-
-  // Tick position matches the SVG bar-centre: (h×4 + 1.5) / ((maxHour+1)×4) = (h+0.375)/(maxHour+1).
-  function tickPct(hour: number): string {
-    return `${(((hour + 0.375) / (maxHour + 1)) * 100).toFixed(1)}%`;
-  }
+  // Adaptive axis ticks + bar-centre positioning shared with the compact table
+  // header so the header ticks line up with the bars drawn here (see utils/hourAxis).
+  const axisTicks = $derived(computeAxisTicks(maxHour));
+  const tickPct = (hour: number): string => tickPositionCss(hour, maxHour);
 
   const thumbSrc = $derived(
     item.thumbnail_url
