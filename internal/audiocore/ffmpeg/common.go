@@ -7,20 +7,14 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/errors"
 )
-
-// rePathContamination matches URL-like path segments that indicate the FFmpeg
-// path has been contaminated by a reverse proxy or ingress prefix (e.g.,
-// "/api/", "/ingress/", "/proxy/", "/hassio/"). A valid FFmpeg binary path
-// should never contain these segments.
-var rePathContamination = regexp.MustCompile(`(?i)/(?:api|ingress|proxy|hassio)/`)
 
 // ValidateFFmpegPath checks if the FFmpeg path is valid for execution.
 // It rejects empty paths, relative paths, and paths that appear to be
@@ -34,25 +28,29 @@ func ValidateFFmpegPath(ffmpegPath string) error {
 			Build()
 	}
 
+	// Redact the path in errors/telemetry: a contaminated tool path can embed an
+	// ingress credential token and these errors reach Sentry and support dumps.
+	safeFFmpegPath := conf.RedactToolPath(ffmpegPath)
+
 	if !filepath.IsAbs(ffmpegPath) {
-		return errors.Newf("FFmpeg path must be absolute, got: %s", ffmpegPath).
+		return errors.Newf("FFmpeg path must be absolute, got: %s", safeFFmpegPath).
 			Component("audiocore").
 			Category(errors.CategoryValidation).
 			Context("operation", "validate_ffmpeg_path").
-			Context("path", ffmpegPath).
+			Context("path", safeFFmpegPath).
 			Build()
 	}
 
 	// Reject paths contaminated by HTTP proxy/ingress prefixes.
 	// A valid FFmpeg binary path should be a clean filesystem path,
 	// not contain URL-like segments such as "/api/", "/ingress/", "/proxy/",
-	// or "/hassio/". Uses a case-insensitive regex for broader detection.
-	if rePathContamination.MatchString(ffmpegPath) {
-		return errors.Newf("FFmpeg path appears contaminated by proxy/ingress prefix: %s", ffmpegPath).
+	// or "/hassio/". Shares the canonical check with config-time validation.
+	if conf.IsContaminatedToolPath(ffmpegPath) {
+		return errors.Newf("FFmpeg path appears contaminated by proxy/ingress prefix: %s", safeFFmpegPath).
 			Component("audiocore").
 			Category(errors.CategoryValidation).
 			Context("operation", "validate_ffmpeg_path").
-			Context("path", ffmpegPath).
+			Context("path", safeFFmpegPath).
 			Build()
 	}
 
@@ -71,29 +69,49 @@ func ValidateSoxPath(soxPath string) error {
 			Build()
 	}
 
+	safeSoxPath := conf.RedactToolPath(soxPath)
+
 	if !filepath.IsAbs(soxPath) {
-		return errors.Newf("Sox path must be absolute, got: %s", soxPath).
+		return errors.Newf("Sox path must be absolute, got: %s", safeSoxPath).
 			Component("audiocore").
 			Category(errors.CategoryValidation).
 			Context("operation", "validate_sox_path").
-			Context("path", soxPath).
+			Context("path", safeSoxPath).
 			Build()
 	}
 
 	// Reject paths contaminated by HTTP proxy/ingress prefixes.
 	// A valid Sox binary path should be a clean filesystem path,
 	// not contain URL-like segments such as "/api/", "/ingress/", "/proxy/",
-	// or "/hassio/". Uses a case-insensitive regex for broader detection.
-	if rePathContamination.MatchString(soxPath) {
-		return errors.Newf("Sox path appears contaminated by proxy/ingress prefix: %s", soxPath).
+	// or "/hassio/". Shares the canonical check with config-time validation.
+	if conf.IsContaminatedToolPath(soxPath) {
+		return errors.Newf("Sox path appears contaminated by proxy/ingress prefix: %s", safeSoxPath).
 			Component("audiocore").
 			Category(errors.CategoryValidation).
 			Context("operation", "validate_sox_path").
-			Context("path", soxPath).
+			Context("path", safeSoxPath).
 			Build()
 	}
 
 	return nil
+}
+
+// pcmSampleBytes returns the size in bytes of one PCM sample in the output
+// format GetFFmpegFormat selects for the given bit depth: 16 maps to s16le,
+// 24 to s24le, 32 to s32le, and anything else falls back to s16le.
+//
+// This is the byte-size twin of GetFFmpegFormat's format switch. The two are
+// kept in agreement by TestPCMSampleBytesMatchesFFmpegFormat, which derives the
+// expected byte size from the format string itself, so adding a bit depth to
+// one without the other fails the build's tests rather than silently making
+// stream readers frame on the wrong unit.
+func pcmSampleBytes(bitDepth int) int {
+	switch bitDepth {
+	case 16, 24, 32:
+		return bitDepth / bitsPerByte
+	default:
+		return defaultPCMSampleBytes
+	}
 }
 
 // GetFFmpegFormat converts audio configuration values to FFmpeg-compatible format strings.

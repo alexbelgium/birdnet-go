@@ -90,10 +90,8 @@ func WithDuration(seconds float64) GenerateOption {
 }
 
 // WithFrequencyProfile sets the frequency profile for spectrogram generation.
-// BatProfile() applies no resample and a high-pass at 18 kHz; BirdProfile()
-// resamples to 24 kHz. When not set, defaults to BirdProfile(). Note that the
-// automatic bat gating in ProfileForModelType is temporarily disabled, so all
-// detections currently resolve to BirdProfile().
+// BatProfile() resamples to 256 kHz (0-128 kHz axis); BirdProfile() resamples to
+// 24 kHz (0-12 kHz axis). When not set, defaults to BirdProfile().
 func WithFrequencyProfile(fp FrequencyProfile) GenerateOption {
 	return func(o *generateOptions) {
 		o.freqProfile = &fp
@@ -127,13 +125,17 @@ func fftFriendlyHeight(width int) int {
 // FFmpeg showspectrumpic color mode constants for style mapping.
 // These are the closest FFmpeg equivalents to the Sox style presets.
 const (
-	// ffmpegColorDefault is FFmpeg's default colorful spectrogram (channel mode).
-	// Matches Sox default style (colorful with dark background).
-	ffmpegColorDefault = "channel"
+	// ffmpegColorDefault is FFmpeg's colorful heat map ("intensity", the
+	// showspectrumpic default). Matches Sox default style (colorful with
+	// dark background). Not "channel": that mode assigns one color per
+	// audio channel, which renders mono clips in a single hue, i.e.
+	// black and white (issue #3835).
+	ffmpegColorDefault = "intensity"
 
-	// ffmpegColorIntensity produces a grayscale spectrogram in FFmpeg.
-	// Matches Sox monochrome mode (-m) used by scientific styles.
-	ffmpegColorIntensity = "intensity"
+	// ffmpegColorGrayscale produces a grayscale spectrogram for mono audio
+	// ("channel" assigns one color per audio channel). Closest FFmpeg
+	// equivalent to Sox monochrome mode (-m) used by scientific styles.
+	ffmpegColorGrayscale = "channel"
 
 	// ffmpegColorFire produces a high-saturation warm-toned spectrogram in FFmpeg.
 	// Matches Sox high-contrast mode (-h) used by high_contrast_dark style.
@@ -167,13 +169,13 @@ func getFFmpegColorMode(style string) string {
 	switch style {
 	case conf.SpectrogramStyleScientificDark:
 		// Grayscale - closest FFmpeg equivalent to Sox -m (monochrome)
-		return ffmpegColorIntensity
+		return ffmpegColorGrayscale
 	case conf.SpectrogramStyleHighContrastDark:
 		// High saturation - closest FFmpeg equivalent to Sox -h (high color)
 		return ffmpegColorFire
 	case conf.SpectrogramStyleScientific:
 		// Grayscale - closest FFmpeg equivalent to Sox -m -l (monochrome, light)
-		return ffmpegColorIntensity
+		return ffmpegColorGrayscale
 	default:
 		// Default colorful style
 		return ffmpegColorDefault
@@ -287,12 +289,12 @@ func (g *Generator) GenerateFromFile(ctx context.Context, audioPath, outputPath 
 	}
 
 	g.log().Debug("Starting spectrogram generation from file",
-		logger.String("audio_path", audioPath),
-		logger.String("output_path", outputPath),
+		logger.String("audio_path", g.relPath(audioPath)),
+		logger.String("output_path", g.relPath(outputPath)),
 		logger.Int("width", width),
 		logger.Bool("raw", raw),
 		logger.Float64("pre_validated_duration", options.preValidatedDuration),
-		logger.Bool("bat_profile", profile.HighPassHz > 0))
+		logger.Bool("bat_profile", ProfileSuffix(profile) != ""))
 
 	// Validate inputs before filesystem operations
 	if outputPath == "" {
@@ -307,7 +309,7 @@ func (g *Generator) GenerateFromFile(ctx context.Context, audioPath, outputPath 
 			Component("spectrogram").
 			Category(errors.CategoryValidation).
 			Context("operation", "generate_from_file").
-			Context("output_path", outputPath).
+			Context("output_path", g.relPath(outputPath)).
 			Build()
 	}
 	if width <= 0 {
@@ -369,7 +371,7 @@ func (g *Generator) GenerateFromFile(ctx context.Context, audioPath, outputPath 
 		}
 
 		g.log().Warn("Sox spectrogram generation failed, falling back to FFmpeg",
-			logger.String("audio_path", audioPath),
+			logger.String("audio_path", g.relPath(audioPath)),
 			logger.Error(err),
 			logger.Int64("elapsed_ms", time.Since(start).Milliseconds()))
 
@@ -383,7 +385,7 @@ func (g *Generator) GenerateFromFile(ctx context.Context, audioPath, outputPath 
 		// Fallback to FFmpeg pipeline with fresh context
 		if ffmpegErr := g.generateWithFFmpeg(ffmpegCtx, settings, audioPath, tempPath, width, raw, profile); ffmpegErr != nil {
 			g.log().Error("Both Sox and FFmpeg generation failed",
-				logger.String("audio_path", audioPath),
+				logger.String("audio_path", g.relPath(audioPath)),
 				logger.String("sox_error", err.Error()),
 				logger.String("ffmpeg_error", ffmpegErr.Error()))
 			return ffmpegErr
@@ -398,12 +400,12 @@ func (g *Generator) GenerateFromFile(ctx context.Context, audioPath, outputPath 
 			Component("spectrogram").
 			Category(errors.CategoryFileIO).
 			Context("operation", "finalize_spectrogram").
-			Context("output_path", outputPath).
+			Context("output_path", g.relPath(outputPath)).
 			Build()
 	}
 
 	g.log().Info("Spectrogram generation from file completed",
-		logger.String("audio_path", audioPath),
+		logger.String("audio_path", g.relPath(audioPath)),
 		logger.Int("width", width),
 		logger.Int64("total_ms", time.Since(start).Milliseconds()))
 
@@ -436,11 +438,11 @@ func (g *Generator) GenerateFromPCM(ctx context.Context, pcmData []byte, outputP
 	}
 
 	g.log().Debug("Starting spectrogram generation from PCM",
-		logger.String("output_path", outputPath),
+		logger.String("output_path", g.relPath(outputPath)),
 		logger.Int("pcm_bytes", len(pcmData)),
 		logger.Int("width", width),
 		logger.Bool("raw", raw),
-		logger.Bool("bat_profile", profile.HighPassHz > 0))
+		logger.Bool("bat_profile", ProfileSuffix(profile) != ""))
 
 	// Validate inputs before filesystem operations
 	if outputPath == "" {
@@ -455,7 +457,7 @@ func (g *Generator) GenerateFromPCM(ctx context.Context, pcmData []byte, outputP
 			Component("spectrogram").
 			Category(errors.CategoryValidation).
 			Context("operation", "generate_from_pcm").
-			Context("output_path", outputPath).
+			Context("output_path", g.relPath(outputPath)).
 			Build()
 	}
 	if width <= 0 {
@@ -509,12 +511,12 @@ func (g *Generator) GenerateFromPCM(ctx context.Context, pcmData []byte, outputP
 			Component("spectrogram").
 			Category(errors.CategoryFileIO).
 			Context("operation", "finalize_spectrogram").
-			Context("output_path", outputPath).
+			Context("output_path", g.relPath(outputPath)).
 			Build()
 	}
 
 	g.log().Info("Spectrogram generation from PCM completed",
-		logger.String("output_path", outputPath),
+		logger.String("output_path", g.relPath(outputPath)),
 		logger.Int("width", width),
 		logger.Int("pcm_bytes", len(pcmData)),
 		logger.Int64("total_ms", time.Since(start).Milliseconds()))
@@ -576,8 +578,8 @@ func (g *Generator) generateWithSoxDirect(ctx context.Context, settings *conf.Se
 
 	g.log().Debug("Executing SoX command directly",
 		logger.String("sox_binary", soxBinary),
-		logger.String("audio_path", audioPath),
-		logger.String("output_path", outputPath))
+		logger.String("audio_path", g.relPath(audioPath)),
+		logger.String("output_path", g.relPath(outputPath)))
 
 	cmd := createCommandWithNice(ctx, soxBinary, soxArgs)
 
@@ -590,16 +592,16 @@ func (g *Generator) generateWithSoxDirect(ctx context.Context, settings *conf.Se
 	soxStart := time.Now()
 	if err := cmd.Run(); err != nil {
 		g.log().Warn("SoX direct execution failed",
-			logger.String("audio_path", audioPath),
+			logger.String("audio_path", g.relPath(audioPath)),
 			logger.Int("width", width),
 			logger.Int64("sox_ms", time.Since(soxStart).Milliseconds()))
 		eb := errors.New(err).
 			Component("spectrogram").
 			Category(errors.CategorySystem).
 			Context("operation", "generate_with_sox_direct").
-			Context("audio_path", audioPath).
+			Context("audio_path", g.relPath(audioPath)).
 			Context("input_file_bytes", getFileSizeBytes(audioPath)).
-			Context("output_path", outputPath).
+			Context("output_path", g.relPath(outputPath)).
 			Context("width", width).
 			Context("raw", raw).
 			Context("sox_output", output.String())
@@ -611,7 +613,7 @@ func (g *Generator) generateWithSoxDirect(ctx context.Context, settings *conf.Se
 	runtime.Gosched()
 
 	g.log().Info("SoX direct execution completed",
-		logger.String("audio_path", audioPath),
+		logger.String("audio_path", g.relPath(audioPath)),
 		logger.Int("width", width),
 		logger.Int64("sox_ms", time.Since(soxStart).Milliseconds()))
 
@@ -678,7 +680,7 @@ func (g *Generator) generateWithFFmpegSoxPipeline(ctx context.Context, settings 
 			Component("spectrogram").
 			Category(errors.CategorySystem).
 			Context("operation", "create_pipe").
-			Context("audio_path", audioPath).
+			Context("audio_path", g.relPath(audioPath)).
 			Context("width", width).
 			Context("raw", raw).
 			Build()
@@ -699,7 +701,7 @@ func (g *Generator) generateWithFFmpegSoxPipeline(ctx context.Context, settings 
 			Component("spectrogram").
 			Category(errors.CategorySystem).
 			Context("operation", "start_sox").
-			Context("audio_path", audioPath).
+			Context("audio_path", g.relPath(audioPath)).
 			Context("width", width).
 			Context("raw", raw).
 			Build()
@@ -724,15 +726,23 @@ func (g *Generator) generateWithFFmpegSoxPipeline(ctx context.Context, settings 
 	// Run FFmpeg (producer)
 	if err := ffmpegCmd.Run(); err != nil {
 		g.killSoxProcess(soxCmd, soxPid)
+		// Wait for Sox to exit before reading soxOutput below. soxCmd.Stderr is a
+		// *bytes.Buffer, so os/exec runs a background goroutine that copies Sox's
+		// stderr into that buffer until soxCmd.Wait() joins it. Reading the buffer
+		// before Wait() returns races that copier goroutine. Setting soxWaitDone
+		// also stops the deferred cleanup from waiting a second time.
+		soxKillTimeout := computeRemainingTimeout(ctx, soxWaitFallbackTimeout)
+		g.waitWithTimeout(soxCmd, soxKillTimeout)
+		soxWaitDone = true
 		g.log().Warn("FFmpeg|SoX pipeline failed (FFmpeg stage)",
-			logger.String("audio_path", audioPath),
+			logger.String("audio_path", g.relPath(audioPath)),
 			logger.Int("width", width),
 			logger.Int64("pipeline_ms", time.Since(pipelineStart).Milliseconds()))
 		eb := errors.New(err).
 			Component("spectrogram").
 			Category(errors.CategorySystem).
 			Context("operation", "run_ffmpeg").
-			Context("audio_path", audioPath).
+			Context("audio_path", g.relPath(audioPath)).
 			Context("input_file_bytes", getFileSizeBytes(audioPath)).
 			Context("width", width).
 			Context("raw", raw).
@@ -756,7 +766,7 @@ func (g *Generator) generateWithFFmpegSoxPipeline(ctx context.Context, settings 
 
 	if soxWaitErr != nil {
 		g.log().Warn("FFmpeg|SoX pipeline failed (SoX stage)",
-			logger.String("audio_path", audioPath),
+			logger.String("audio_path", g.relPath(audioPath)),
 			logger.Int("width", width),
 			logger.Int64("ffmpeg_ms", ffmpegElapsedMs),
 			logger.Int64("pipeline_ms", time.Since(pipelineStart).Milliseconds()))
@@ -764,7 +774,7 @@ func (g *Generator) generateWithFFmpegSoxPipeline(ctx context.Context, settings 
 			Component("spectrogram").
 			Category(errors.CategorySystem).
 			Context("operation", "wait_sox").
-			Context("audio_path", audioPath).
+			Context("audio_path", g.relPath(audioPath)).
 			Context("input_file_bytes", getFileSizeBytes(audioPath)).
 			Context("width", width).
 			Context("raw", raw).
@@ -779,7 +789,7 @@ func (g *Generator) generateWithFFmpegSoxPipeline(ctx context.Context, settings 
 	runtime.Gosched()
 
 	g.log().Info("FFmpeg|SoX pipeline completed",
-		logger.String("audio_path", audioPath),
+		logger.String("audio_path", g.relPath(audioPath)),
 		logger.Int("width", width),
 		logger.Int64("ffmpeg_ms", ffmpegElapsedMs),
 		logger.Int64("pipeline_ms", time.Since(pipelineStart).Milliseconds()))
@@ -820,11 +830,9 @@ func (g *Generator) generateWithSoxPCM(ctx context.Context, settings *conf.Setti
 		"-n", // No audio output (null output)
 	}
 
-	// Frequency-dependent effects: resample (bird) or high-pass filter (bat).
-	// Guard: sinc filter requires sample rate > 2*cutoff (Nyquist constraint).
-	if profile.HighPassHz > 0 && effectiveRate > 2*profile.HighPassHz {
-		args = append(args, "sinc", strconv.Itoa(profile.HighPassHz)+"-")
-	} else if profile.ResampleRate > 0 {
+	// Frequency-dependent effects: resample to the profile's rate (bird 24 kHz,
+	// bat 256 kHz) so the spectrogram's frequency axis matches the fixed UI overlay.
+	if profile.ResampleRate > 0 {
 		args = append(args, "rate", strconv.Itoa(profile.ResampleRate))
 	}
 
@@ -861,7 +869,7 @@ func (g *Generator) generateWithSoxPCM(ctx context.Context, settings *conf.Setti
 	soxStart := time.Now()
 	if err := cmd.Run(); err != nil {
 		g.log().Warn("SoX PCM execution failed",
-			logger.String("output_path", outputPath),
+			logger.String("output_path", g.relPath(outputPath)),
 			logger.Int("width", width),
 			logger.Int("pcm_bytes", len(pcmData)),
 			logger.Int64("sox_ms", time.Since(soxStart).Milliseconds()))
@@ -869,7 +877,7 @@ func (g *Generator) generateWithSoxPCM(ctx context.Context, settings *conf.Setti
 			Component("spectrogram").
 			Category(errors.CategorySystem).
 			Context("operation", "generate_with_sox_pcm").
-			Context("output_path", outputPath).
+			Context("output_path", g.relPath(outputPath)).
 			Context("width", width).
 			Context("raw", raw).
 			Context("sox_stderr", stderr.String()).
@@ -881,12 +889,43 @@ func (g *Generator) generateWithSoxPCM(ctx context.Context, settings *conf.Setti
 	}
 
 	g.log().Info("SoX PCM execution completed",
-		logger.String("output_path", outputPath),
+		logger.String("output_path", g.relPath(outputPath)),
 		logger.Int("width", width),
 		logger.Int("pcm_bytes", len(pcmData)),
 		logger.Int64("sox_ms", time.Since(soxStart).Milliseconds()))
 
 	return nil
+}
+
+// buildFFmpegSpectrogramFilter builds the -lavfi filtergraph for the FFmpeg-only
+// fallback. The showspectrumpic stage uses a style-aware color mode so the fallback
+// visually matches the Sox primary path (without it the fallback always renders the
+// default colorful style, causing intermittent mismatches when Sox fails under load).
+// When the frequency profile sets a resample rate, an aresample stage is prepended so
+// the rendered frequency axis matches the Sox paths (which apply the same rate) and the
+// fixed UI overlay: bird clips resample to 24 kHz (0-12 kHz axis) and bat clips to
+// 256 kHz (0-128 kHz axis) regardless of capture rate. Without it the fallback renders
+// to the native Nyquist and that axis-mismatched image gets cached under the profile
+// filename.
+func buildFFmpegSpectrogramFilter(width int, raw bool, style string, profile FrequencyProfile) string {
+	height := fftFriendlyHeight(width)
+	colorMode := getFFmpegColorMode(style)
+
+	legendFlag := 1
+	if raw {
+		legendFlag = 0
+	}
+
+	// Match the Sox "rate" effect so both backends produce the same frequency axis:
+	// an aresample stage sets showspectrumpic's input rate, so the axis tops out at
+	// its Nyquist (rate/2). Built as a single Sprintf to avoid a throwaway alloc.
+	resamplePrefix := ""
+	if profile.ResampleRate > 0 {
+		resamplePrefix = fmt.Sprintf("aresample=%d,", profile.ResampleRate)
+	}
+
+	return fmt.Sprintf("%sshowspectrumpic=s=%dx%d:legend=%d:gain=%s:drange=%s:color=%s",
+		resamplePrefix, width, height, legendFlag, ffmpegGain, ffmpegDrange, colorMode)
 }
 
 // generateWithFFmpeg generates a spectrogram using only FFmpeg (no Sox).
@@ -903,26 +942,8 @@ func (g *Generator) generateWithFFmpeg(ctx context.Context, settings *conf.Setti
 			Build()
 	}
 
-	height := fftFriendlyHeight(width)
-
-	// Apply style-aware color mode so FFmpeg fallback matches the Sox primary style.
-	// Without this, the FFmpeg fallback always produces the default colorful style,
-	// causing intermittent style mismatches when Sox fails under resource pressure.
 	style := settings.Realtime.Dashboard.Spectrogram.Style
-	colorMode := getFFmpegColorMode(style)
-
-	legendFlag := 1
-	if raw {
-		legendFlag = 0
-	}
-
-	filterStr := fmt.Sprintf("showspectrumpic=s=%dx%d:legend=%d:gain=%s:drange=%s:color=%s",
-		width, height, legendFlag, ffmpegGain, ffmpegDrange, colorMode)
-
-	// Bat profile: prepend high-pass filter to remove sub-ultrasonic content
-	if profile.HighPassHz > 0 {
-		filterStr = fmt.Sprintf("highpass=f=%d,%s", profile.HighPassHz, filterStr)
-	}
+	filterStr := buildFFmpegSpectrogramFilter(width, raw, style, profile)
 
 	ffmpegArgs := []string{
 		"-hide_banner",
@@ -942,16 +963,16 @@ func (g *Generator) generateWithFFmpeg(ctx context.Context, settings *conf.Setti
 	ffmpegStart := time.Now()
 	if err := cmd.Run(); err != nil {
 		g.log().Warn("FFmpeg-only execution failed",
-			logger.String("audio_path", audioPath),
+			logger.String("audio_path", g.relPath(audioPath)),
 			logger.Int("width", width),
 			logger.Int64("ffmpeg_ms", time.Since(ffmpegStart).Milliseconds()))
 		eb := errors.New(err).
 			Component("spectrogram").
 			Category(errors.CategorySystem).
 			Context("operation", "generate_with_ffmpeg").
-			Context("audio_path", audioPath).
+			Context("audio_path", g.relPath(audioPath)).
 			Context("input_file_bytes", getFileSizeBytes(audioPath)).
-			Context("output_path", outputPath).
+			Context("output_path", g.relPath(outputPath)).
 			Context("width", width).
 			Context("raw", raw).
 			Context("ffmpeg_output", output.String())
@@ -962,7 +983,7 @@ func (g *Generator) generateWithFFmpeg(ctx context.Context, settings *conf.Setti
 	}
 
 	g.log().Info("FFmpeg-only execution completed",
-		logger.String("audio_path", audioPath),
+		logger.String("audio_path", g.relPath(audioPath)),
 		logger.Int("width", width),
 		logger.Int64("ffmpeg_ms", time.Since(ffmpegStart).Milliseconds()))
 
@@ -993,14 +1014,12 @@ func (g *Generator) getSoxSpectrogramArgs(ctx context.Context, settings *conf.Se
 	heightStr := strconv.Itoa(fftFriendlyHeight(width))
 	widthStr := strconv.Itoa(width)
 
-	// Build base args: either resample (bird) or high-pass filter (bat)
+	// Build base args: resample to the profile's rate (bird 24 kHz, bat 256 kHz) so
+	// the spectrogram's frequency axis matches the fixed UI overlay.
 	var args []string
-	switch {
-	case profile.HighPassHz > 0:
-		args = []string{"-n", "sinc", strconv.Itoa(profile.HighPassHz) + "-", "spectrogram", "-x", widthStr, "-y", heightStr}
-	case profile.ResampleRate > 0:
+	if profile.ResampleRate > 0 {
 		args = []string{"-n", "rate", strconv.Itoa(profile.ResampleRate), "spectrogram", "-x", widthStr, "-y", heightStr}
-	default:
+	} else {
 		args = []string{"-n", "spectrogram", "-x", widthStr, "-y", heightStr}
 	}
 
@@ -1009,7 +1028,7 @@ func (g *Generator) getSoxSpectrogramArgs(ctx context.Context, settings *conf.Se
 	// Priority: pre-validated (from FFprobe) > cached sox/ffprobe > configured fallback.
 	duration := preValidatedDuration
 	if duration <= 0 {
-		duration = getCachedAudioDuration(ctx, settings.Realtime.Audio.SoxPath, audioPath)
+		duration = g.getCachedAudioDuration(ctx, settings.Realtime.Audio.SoxPath, audioPath)
 	}
 	if duration <= 0 {
 		// Fallback: Use configured capture length if both sox and ffprobe fail
@@ -1017,7 +1036,7 @@ func (g *Generator) getSoxSpectrogramArgs(ctx context.Context, settings *conf.Se
 		duration = float64(captureLength)
 		g.log().Warn("Duration query failed, using configured fallback duration",
 			logger.Float64("fallback_duration_seconds", duration),
-			logger.String("audio_path", audioPath))
+			logger.String("audio_path", g.relPath(audioPath)))
 	}
 
 	// Convert duration to string, rounding to nearest integer
@@ -1049,8 +1068,8 @@ func (g *Generator) ensureOutputDirectory(outputPath string) error {
 			Component("spectrogram").
 			Category(errors.CategoryFileIO).
 			Context("operation", "ensure_output_directory").
-			Context("output_dir", outputDir).
-			Context("output_path", outputPath).
+			Context("output_dir", g.relPath(outputDir)).
+			Context("output_path", g.relPath(outputPath)).
 			Build()
 	}
 	return nil
@@ -1172,7 +1191,7 @@ func (g *Generator) waitWithTimeoutErr(cmd *exec.Cmd, timeout time.Duration) err
 // falling back to ffprobe if sox fails (e.g., for MP3/AAC files without libsox-fmt-mp3).
 // The cache is invalidated if the file has been modified (size or modTime changed).
 // Returns 0 if duration cannot be determined (caller should use configured fallback).
-func getCachedAudioDuration(ctx context.Context, soxPath, audioPath string) float64 {
+func (g *Generator) getCachedAudioDuration(ctx context.Context, soxPath, audioPath string) float64 {
 	// Get file info for cache validation
 	fileInfo, err := os.Stat(audioPath)
 	if err != nil {
@@ -1202,9 +1221,16 @@ func getCachedAudioDuration(ctx context.Context, soxPath, audioPath string) floa
 	duration, soxErr := getAudioDurationViaSox(ctx, soxPath, audioPath)
 	if soxErr != nil {
 		// Sox failed (common for MP3/AAC without libsox-fmt-mp3) — fall back to ffprobe
+		// A method rather than a free function purely so this log line can reach
+		// both export roots. Resolving them via conf.Setting() instead would be
+		// a trap: that call is not a pure accessor, it lazily loads and can WRITE
+		// a default config.yaml, and it publishes the result as the process-wide
+		// settings, which would then override the injected settings every other
+		// path in this package resolves against. It would also run before the
+		// level filter, so a disabled Debug line would still pay for it.
 		GetLogger().Debug("Sox duration query failed, falling back to ffprobe",
 			logger.Error(soxErr),
-			logger.String("audio_path", audioPath))
+			logger.String("audio_path", g.relPath(audioPath)))
 		duration, err = ffmpeg.GetDurationViaFFprobe(ctx, audioPath)
 		if err != nil {
 			return 0 // Caller will use configured fallback

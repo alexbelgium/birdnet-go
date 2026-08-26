@@ -16,6 +16,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/migration"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/diskmanager"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -637,7 +638,7 @@ func (s *testLegacyInterface) GetThresholdEvents(speciesName string, limit int) 
 }
 
 // GetActiveNotificationHistory implements datastore.Interface.
-func (s *testLegacyInterface) GetActiveNotificationHistory(after time.Time) ([]datastore.NotificationHistory, error) {
+func (s *testLegacyInterface) GetActiveNotificationHistory(_ context.Context, after time.Time) ([]datastore.NotificationHistory, error) {
 	var history []datastore.NotificationHistory
 	err := s.db.Where("expires_at > ?", after).Find(&history).Error
 	return history, err
@@ -673,7 +674,7 @@ func (s *testLegacyInterface) GetAllNotes() ([]datastore.Note, error)           
 func (s *testLegacyInterface) GetTopBirdsData(_ context.Context, _ string, _ float64, _ int) ([]datastore.Note, error) {
 	return nil, nil
 }
-func (s *testLegacyInterface) GetBatchHourlyOccurrences(_ context.Context, _ string, _ []string, _ float64) (map[string][24]int, error) {
+func (s *testLegacyInterface) GetBatchHourlyOccurrences(_ context.Context, _, _ string, _ []string, _ float64) (map[string][24]int, error) {
 	return make(map[string][24]int), nil
 }
 func (s *testLegacyInterface) SpeciesDetections(_, _, _ string, _ int, _ bool, _, _ int) ([]datastore.Note, error) {
@@ -730,6 +731,9 @@ func (s *testLegacyInterface) GetImageCacheBatch(_ string, _ []string) (map[stri
 func (s *testLegacyInterface) SaveImageCache(_ *datastore.ImageCache) error        { return nil }
 func (s *testLegacyInterface) GetLockedNotesClipPaths() ([]string, error)          { return nil, nil }
 func (s *testLegacyInterface) ClearNoteClipPathsByNames(_ []string) (int64, error) { return 0, nil }
+func (s *testLegacyInterface) GetNoteClipReferences(_ uint, _ int) ([]diskmanager.ClipReference, error) {
+	return nil, nil
+}
 func (s *testLegacyInterface) CountHourlyDetections(_, _ string, _ int) (int64, error) {
 	return 0, nil
 }
@@ -757,11 +761,39 @@ func (s *testLegacyInterface) GetSpeciesFirstDetectionInPeriod(_ context.Context
 func (s *testLegacyInterface) GetSpeciesDiversityData(_ context.Context, _, _ string) ([]datastore.DailyAnalyticsData, error) {
 	return nil, nil
 }
+func (s *testLegacyInterface) GetActivityHeatmap(_ context.Context, _, _, _ string) (datastore.ActivityHeatmapData, error) {
+	return datastore.ActivityHeatmapData{}, nil
+}
+func (s *testLegacyInterface) GetHourlyDistributionBySpecies(_ context.Context, _, _ string, _ []string, _ int) ([]datastore.SpeciesHourlyDistribution, error) {
+	return []datastore.SpeciesHourlyDistribution{}, nil
+}
+func (s *testLegacyInterface) GetDailyActivityOnset(_ context.Context, _, _, _ string) ([]datastore.DailyActivityOnset, error) {
+	return []datastore.DailyActivityOnset{}, nil
+}
+
+func (s *testLegacyInterface) GetConfidenceHistogram(_ context.Context, _, _, _ string, _, _ int) ([]datastore.SpeciesConfidenceHistogram, error) {
+	return []datastore.SpeciesConfidenceHistogram{}, nil
+}
+func (s *testLegacyInterface) GetSpeciesAccumulation(_ context.Context, _, _ string) ([]datastore.SpeciesAccumulationPoint, error) {
+	return []datastore.SpeciesAccumulationPoint{}, nil
+}
+func (s *testLegacyInterface) GetAudioSources(_ context.Context, _, _ string) ([]datastore.AudioSourceSummary, error) {
+	return []datastore.AudioSourceSummary{}, nil
+}
+func (s *testLegacyInterface) GetYearOverYear(_ context.Context, _ string) (datastore.YearOverYearResult, error) {
+	return datastore.YearOverYearResult{Points: []datastore.YearOverYearPoint{}}, nil
+}
+func (s *testLegacyInterface) GetSpeciesPhenology(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesPhenologyPoint, error) {
+	return []datastore.SpeciesPhenologyPoint{}, nil
+}
+func (s *testLegacyInterface) GetAcousticSuccession(_ context.Context, _, _ string, _ []string, _ int) ([]datastore.SpeciesHourlyCounts, error) {
+	return []datastore.SpeciesHourlyCounts{}, nil
+}
 func (s *testLegacyInterface) SearchDetections(_ *datastore.SearchFilters) ([]datastore.DetectionRecord, int, error) {
 	return nil, 0, nil
 }
 func (s *testLegacyInterface) SaveDynamicThreshold(_ *datastore.DynamicThreshold) error { return nil }
-func (s *testLegacyInterface) GetDynamicThreshold(_, _ string) (*datastore.DynamicThreshold, error) {
+func (s *testLegacyInterface) GetDynamicThreshold(_ string) (*datastore.DynamicThreshold, error) {
 	return nil, nil //nolint:nilnil // stub
 }
 func (s *testLegacyInterface) DeleteDynamicThreshold(_ string) error { return nil }
@@ -782,13 +814,13 @@ func (s *testLegacyInterface) GetRecentThresholdEvents(_ int) ([]datastore.Thres
 }
 func (s *testLegacyInterface) DeleteThresholdEvents(_ string) error     { return nil }
 func (s *testLegacyInterface) DeleteAllThresholdEvents() (int64, error) { return 0, nil }
-func (s *testLegacyInterface) SaveNotificationHistory(_ *datastore.NotificationHistory) error {
+func (s *testLegacyInterface) SaveNotificationHistory(_ context.Context, _ *datastore.NotificationHistory) error {
 	return nil
 }
-func (s *testLegacyInterface) GetNotificationHistory(_, _ string) (*datastore.NotificationHistory, error) {
+func (s *testLegacyInterface) GetNotificationHistory(_ context.Context, _, _ string) (*datastore.NotificationHistory, error) {
 	return nil, nil //nolint:nilnil // stub
 }
-func (s *testLegacyInterface) DeleteExpiredNotificationHistory(_ time.Time) (int64, error) {
+func (s *testLegacyInterface) DeleteExpiredNotificationHistory(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
 func (s *testLegacyInterface) SchemaVersion() string                           { return datastore.SchemaVersionLegacy }

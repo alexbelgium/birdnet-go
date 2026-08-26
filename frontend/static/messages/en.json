@@ -205,12 +205,20 @@
     "serverError": "500 - Internal Server Error",
     "componentError": "Component Load Error",
     "speciesAnalytics": "Species Analytics",
-    "advancedAnalytics": "Advanced Analytics",
     "detectionDetails": "Detection Details",
-    "settingsNotAvailable": "Settings Not Available"
+    "settingsNotAvailable": "Settings Not Available",
+    "analyticsSummary": "Analytics - Summary",
+    "analyticsActivity": "Analytics - Activity Patterns",
+    "analyticsTrends": "Analytics - Trends",
+    "analyticsBiodiversity": "Analytics - Biodiversity",
+    "analyticsReview": "Analytics - Review & Accuracy",
+    "analyticsNocturnal": "Analytics - Nocturnal Activity",
+    "analyticsWeather": "Analytics - Weather Correlation",
+    "analyticsSoundscape": "Analytics - Soundscape"
   },
   "navigation": {
     "dashboard": "Dashboard",
+    "liveAudio": "Live Audio",
     "settingsMenu": "Settings menu",
     "theme": "Theme",
     "github": "GitHub",
@@ -238,7 +246,13 @@
     "reportBugAriaLabel": "Report a bug on GitHub (opens in new window)",
     "askQuestionAriaLabel": "Ask a question on GitHub Discussions (opens in new window)",
     "viewOnGithubAriaLabel": "View BirdNET-Go on GitHub (opens in new window)",
-    "health": "Health"
+    "health": "Health",
+    "sections": {
+      "explore": "Explore",
+      "patterns": "Patterns",
+      "environment": "Environment",
+      "dataQuality": "Data Quality"
+    }
   },
   "about": {
     "title": "BirdNET-Go",
@@ -398,6 +412,7 @@
         "updatingIntervals": "Updating detection intervals...",
         "reconfiguringMqtt": "Updating MQTT connection...",
         "reconfiguringBirdweather": "Updating BirdWeather integration...",
+        "reconfiguringEbird": "Updating eBird integration...",
         "reconfiguringStreams": "Updating audio streams...",
         "reconfiguringTelemetry": "Updating telemetry settings...",
         "reconfiguringPushNotifications": "Reconfiguring push notification providers...",
@@ -405,6 +420,7 @@
         "recalculatingThresholds": "Recalculating dynamic thresholds for new base value",
         "reconfiguringDynamicThresholds": "Reconfiguring dynamic thresholds...",
         "webserverRestartRequired": "Web server settings changed. Restart required.",
+        "oauthRestartRequired": "Authentication provider settings changed. Restart required.",
         "databaseRestartRequired": "Database settings changed. Restart required.",
         "loggingRestartRequired": "Logging settings changed. Restart required.",
         "reconfiguringSoundLevel": "Updating sound level monitoring...",
@@ -442,6 +458,11 @@
         "unavailableTitle": "ONNX Runtime Not Available",
         "unavailableMessage": "ONNX Runtime {requiredVersion} is required for {modelName} but was not found. See the install guide: {installGuideURL}"
       },
+      "region": {
+        "staleTitle": "Model region may be outdated",
+        "staleMessage": "{modelName} is installed for {oldRegion}, but your new location resolves to {newRegion}. You can switch variants from the model gallery in Settings.",
+        "staleGlobalMessage": "{modelName} is installed for {oldRegion}, but your new location is outside its coverage. You can switch to the global variant from the model gallery in Settings."
+      },
       "alert": {
         "firedTitle": "{rule_name}",
         "metricExceeded": "Current value: {value}% (threshold: {threshold}%)",
@@ -449,17 +470,17 @@
         "errorOccurred": "{error}",
         "disconnected": "{source_name} disconnected",
         "error": {
-          "authError": "Authentication failed — check your API key or credentials",
-          "rateLimited": "Rate limited — requests will slow down automatically",
+          "authError": "Authentication failed - check your API key or credentials",
+          "rateLimited": "Rate limited - requests will slow down automatically",
           "gatewayTimeout": "Service may be experiencing high load",
           "serverError": "Service is temporarily unavailable",
-          "connectionRefused": "Service is unreachable — check the address and that it's running",
-          "dnsError": "Could not resolve hostname — check the address",
-          "tlsError": "TLS/certificate error — check your security settings",
-          "timeout": "Connection timed out — the service may be slow or unreachable",
-          "connectionInterrupted": "Connection was interrupted — will retry automatically",
-          "diskFull": "Disk is full — free some space",
-          "permissionDenied": "Permission denied — check file or service permissions"
+          "connectionRefused": "Service is unreachable - check the address and that it's running",
+          "dnsError": "Could not resolve hostname - check the address",
+          "tlsError": "TLS/certificate error - check your security settings",
+          "timeout": "Connection timed out - the service may be slow or unreachable",
+          "connectionInterrupted": "Connection was interrupted - will retry automatically",
+          "diskFull": "Disk is full - free some space",
+          "permissionDenied": "Permission denied - check file or service permissions"
         }
       }
     },
@@ -597,7 +618,7 @@
     "currentlyHearing": {
       "title": "Currently Hearing",
       "subtitle": "Real-time species being identified",
-      "empty": "All quiet — no birds detected right now"
+      "empty": "All quiet - no birds detected right now"
     },
     "rejected": "Rejected",
     "newSpeciesHighlights": {
@@ -608,6 +629,7 @@
       "categoryYear": "New this year",
       "categorySeason": "New this season",
       "categorySeasonNamed": "New this {season}",
+      "categoryInfrequent": "Infrequent",
       "maxConfidenceShort": "Max {confidence}%",
       "detections": "{count, plural, one {# detection} other {# detections}}",
       "lastSeen": "Last: {days, plural, =0 {today} one {# day ago} other {# days ago}}"
@@ -642,7 +664,8 @@
         "viewSixHourly": "View all detections for {startHour}:00-{endHour}:00",
         "hourlyDetections": "{count} detections at {hour}:00 - Click to view",
         "biHourlyDetections": "{count} detections from {startHour}:00-{endHour}:00 - Click to view",
-        "sixHourlyDetections": "{count} detections from {startHour}:00-{endHour}:00 - Click to view"
+        "sixHourlyDetections": "{count} detections from {startHour}:00-{endHour}:00 - Click to view",
+        "infrequent": "Infrequent - returned after {days, plural, one {# day} other {# days}} away"
       },
       "loading": {
         "preparing": "Preparing data...",
@@ -947,7 +970,8 @@
     "row": {
       "viewDetails": "View details for {species}",
       "play": "Play",
-      "playAudio": "Play audio"
+      "playAudio": "Play audio",
+      "imageFailedToLoad": "Image failed to load"
     },
     "media": {
       "title": "Recording & Spectrogram",
@@ -1161,7 +1185,166 @@
       "overview": "Overview",
       "database": "Database",
       "inference": "AI Models",
-      "terminal": "Terminal"
+      "terminal": "Terminal",
+      "importExport": "Import / Export"
+    },
+    "importExport": {
+      "available": "Available",
+      "experimental": "Experimental",
+      "comingSoon": "Coming soon",
+      "loading": "Loading...",
+      "runInBackground": "Close (import continues in background)",
+      "runInBackgroundTitle": "Dismiss this dialog. The import keeps running in the background.",
+      "stepAnnouncement": "Step {current} of {total}: {name}",
+      "steps": {
+        "source": "Source",
+        "mode": "Mode",
+        "confirm": "Confirm",
+        "progress": "Progress",
+        "done": "Done"
+      },
+      "import": {
+        "sectionTitle": "Import"
+      },
+      "export": {
+        "sectionTitle": "Export",
+        "cardTitle": "Export detections",
+        "cardDescription": "Export your detection data to CSV, JSON, or other formats."
+      },
+      "birdnetPi": {
+        "cardTitle": "BirdNET-Pi",
+        "cardDescription": "Import detection history from a BirdNET-Pi SQLite database (birds.db).",
+        "startButton": "Import from BirdNET-Pi",
+        "wizardTitle": "Import from BirdNET-Pi",
+        "experimentalNotice": "BirdNET-Pi import is experimental and may still have issues.",
+        "reportBug": "Report a bug on GitHub"
+      },
+      "birdsDbUpload": {
+        "cardTitle": "birds.db upload",
+        "cardDescription": "Upload a BirdNET-Pi database file directly from your browser."
+      },
+      "activity": {
+        "sectionTitle": "Import activity",
+        "empty": {
+          "title": "No import activity",
+          "description": "When an import is running, its progress shows up here."
+        },
+        "openWizard": "Open import wizard"
+      },
+      "wizard": {
+        "stepsLabel": "Import wizard steps"
+      },
+      "sourceAccess": {
+        "pathLabel": "Path to birds.db (relative to mount root)",
+        "pathHelpText": "Enter the path relative to the external media mount root, e.g. birdnet-pi/birds.db",
+        "pathRequiredReason": "Enter the path to birds.db to continue",
+        "mountDescription": "Your BirdNET-Pi database should be on the external media mount.",
+        "mountRoot": "Mount root",
+        "nativeTitle": "External media mount required",
+        "nativeDescription": "BirdNET-Pi import requires an external media mount, which is only available when BirdNET-Go runs in a container. Native (non-containerized) installs cannot use this import feature.",
+        "nativeHowTo": "To import from BirdNET-Pi, run BirdNET-Go in a container with the BirdNET-Pi data directory mounted as the external media volume.",
+        "missingTitle": "External media mount not found",
+        "missingDescription": "BirdNET-Go is running in a container but the external media mount is not accessible. Follow the steps below to set it up.",
+        "setupStepsLabel": "Setup steps",
+        "recheckButton": "Re-check",
+        "recheckHint": "After completing the setup steps, click Re-check to continue."
+      },
+      "source": {
+        "title": "Where is your BirdNET-Pi data?",
+        "candidatesIntro": "We found these BirdNET-Pi databases:",
+        "selectButton": "Select",
+        "useThisButton": "Use this",
+        "detectionsSummary": "{count} detections, up to {date}",
+        "kindLocal": "On this device",
+        "kindRemovable": "Removable drive",
+        "kindNetwork": "Network location",
+        "unreadableTitle": "Found, but BirdNET-Go can't read it",
+        "unreadableOwner": "This data belongs to another user ({owner}).",
+        "manualEntryLink": "Don't see it? Enter the location manually",
+        "manualEntryLabel": "BirdNET-Pi database location",
+        "manualValidating": "Checking...",
+        "manualValid": "Found {count} detections.",
+        "manualNotFound": "We couldn't find a file there.",
+        "manualUnreadable": "Found it, but BirdNET-Go can't read it yet.",
+        "manualInvalid": "That file isn't a BirdNET-Pi database.",
+        "zeroTitle": "We couldn't find it automatically",
+        "zeroDescription": "Connect the drive that holds your BirdNET-Pi data, then check again.",
+        "checkAgainButton": "Check again",
+        "showCommandsLabel": "Show commands",
+        "containerUnreadableHint": "BirdNET-Go (running as UID {uid}) can't read this file. Fix the permissions on the host so that UID {uid} can read it, then check again.",
+        "elevation": {
+          "copying": "Copying your data...",
+          "passwordTitle": "BirdNET-Go needs permission to read this data",
+          "passwordDescription": "Enter the administrator password for this device to let BirdNET-Go copy the data.",
+          "passwordLabel": "Administrator password",
+          "passwordRequiredReason": "Enter the administrator password to continue",
+          "httpWarning": "This page is not using HTTPS. The administrator password will be sent over your local network unencrypted. Only continue on a network you trust.",
+          "submitButton": "Copy and continue",
+          "fallbackTitle": "Run this command to grant access",
+          "fallbackDescription": "BirdNET-Go can't elevate automatically. Run the command below, then click Check again.",
+          "disabledNote": "In-app elevation is turned off. Use the command below to grant access.",
+          "failed": "That didn't work. Check the password and try again, or use the command below."
+        }
+      },
+      "mode": {
+        "label": "What do you want to import?",
+        "dbOnly": {
+          "label": "Database only",
+          "description": "Import detection records from birds.db. Audio clips are not imported."
+        },
+        "dbAudio": {
+          "label": "Database + audio clips",
+          "description": "Import detection records and associated audio recordings.",
+          "badge": "Not available",
+          "disabledReason": "Audio clip import is not yet available. Only database import is supported."
+        }
+      },
+      "confirm": {
+        "description": "Review your import settings before starting. Imported detections are tagged with the source birdnet-pi and duplicates are skipped automatically.",
+        "source": "Source path",
+        "mode": "Import mode",
+        "tagging": "Source tag",
+        "taggingValue": "birdnet-pi (auto-applied)",
+        "deduplicationNote": "Duplicate detections (same species, time, and date already in the database) are skipped automatically. Exact counts will be shown live during the import.",
+        "startButton": "Start import"
+      },
+      "progress": {
+        "label": "Import progress",
+        "runningLabel": "Import running",
+        "progressLabel": "{percent}% complete",
+        "cancelButton": "Cancel",
+        "cancellingLabel": "Cancelling...",
+        "cancelledMessage": "Import was cancelled.",
+        "processed": "Processed",
+        "inserted": "Inserted",
+        "skipped": "Skipped",
+        "errors": "Errors",
+        "phase": {
+          "validate": "Validating",
+          "dedup": "Deduplicating",
+          "import": "Importing"
+        }
+      },
+      "done": {
+        "successTitle": "Import complete",
+        "successDescription": "Your BirdNET-Pi detections have been imported successfully.",
+        "cancelledTitle": "Import cancelled",
+        "cancelledDescription": "The import was cancelled before completing.",
+        "errorTitle": "Import failed",
+        "interruptedTitle": "Import interrupted",
+        "interruptedDescription": "The connection to the server was lost while the import was running, so its final result is unknown. Check your detections and start the import again if needed.",
+        "viewDetectionsLink": "View imported detections",
+        "partialInserted": "{count} detections were imported before cancellation.",
+        "importAnother": "Import another"
+      },
+      "errors": {
+        "loadFailed": "Failed to load import status. Please try again.",
+        "mediaLoadFailed": "Failed to check external media. Please try again.",
+        "alreadyRunning": "An import is already in progress. Please wait for it to complete.",
+        "startFailed": "Failed to start import. Please try again.",
+        "cancelFailed": "Failed to cancel import.",
+        "importFailed": "Import failed. Please check your configuration and try again."
+      }
     },
     "database": {
       "title": "Database Management",
@@ -1354,10 +1537,10 @@
           "targetV2": "Target (V2)",
           "recordsLabel": "Records",
           "sizeLabel": "Size",
-          "prerequisitesNotMet": "Prerequisites not met — resolve critical issues below",
+          "prerequisitesNotMet": "Prerequisites not met - resolve critical issues below",
           "validatingTitle": "Validating Data",
           "validatingBody": "Comparing {count} legacy records against V2 database...",
-          "dirtyRecordsCatchup": "{count} dirty records — will attempt catch-up reconciliation",
+          "dirtyRecordsCatchup": "{count} dirty records - will attempt catch-up reconciliation",
           "cutoverTitle": "Completing Cutover",
           "cutoverBody": "Finalizing transition to V2 database...",
           "migratingPhase": "Migrating {phase}",
@@ -1366,7 +1549,7 @@
           "percentComplete": "{percent}% complete",
           "recordsPerSec": "{rate} records/sec",
           "calculating": "Calculating...",
-          "dirtyWriteFailed": "{count} records failed to write — will be reconciled during validation"
+          "dirtyWriteFailed": "{count} records failed to write - will be reconciled during validation"
         },
         "details": {
           "title": "Database Details",
@@ -1520,6 +1703,26 @@
       "title": "AI Models & Inference",
       "loading": "Loading inference status",
       "error": "Could not load inference status",
+      "vad": {
+        "section": "Privacy Guard",
+        "title": "Silero VAD",
+        "active": "Active",
+        "activeHelp": "The speech-detection model is loaded and scoring audio.",
+        "idle": "Idle",
+        "idleHelp": "Enabled and ready; the model loads when the first audio chunk is scored.",
+        "disabled": "Disabled",
+        "disabledHelp": "Privacy Guard is turned off in the privacy-filter settings.",
+        "unavailable": "No model",
+        "unavailableHelp": "No speech-detection model is available in this build. Set a VAD model path in the privacy-filter settings, or use a build with the embedded model.",
+        "description": "Silero VAD is a specialized acoustic model that detects human speech. It powers the privacy filter, discarding audio when speech is present so voices are kept out of your recordings.",
+        "threshold": "Threshold",
+        "speechHits": "Speech hits",
+        "recentTitle": "Recent speech",
+        "recentEmpty": "No speech detected yet",
+        "colWhen": "When",
+        "colProbability": "Probability",
+        "colSource": "Source"
+      },
       "sectionHardware": "Hardware",
       "sectionBackends": "Inference Backends",
       "sectionModels": "Models",
@@ -1530,6 +1733,9 @@
       "fp16": "FP16",
       "fp16Supported": "FP16 supported",
       "fp16Unsupported": "FP16 not supported",
+      "advanced": "Advanced",
+      "capabilities": "Capabilities",
+      "capabilitiesHelp": "Hardware tags used to match this machine against the available model builds.",
       "backendTflite": "TensorFlow Lite",
       "backendOnnx": "ONNX Runtime",
       "backendOpenvino": "OpenVINO",
@@ -1540,6 +1746,17 @@
       "initialized": "Initialized",
       "version": "Version",
       "devices": "Devices",
+      "board": "Board",
+      "soc": "SoC",
+      "memory": "Memory",
+      "cores": "Cores",
+      "gpu": "Graphics",
+      "gpuReachable": "Reachable",
+      "gpuNotReachable": "Not reachable",
+      "gpuReasonRenderNodeUnavailable": "No GPU device node is visible to the server. In Docker, map /dev/dri into the container; on a native install, check that the graphics driver is loaded.",
+      "gpuReasonRenderNodePermission": "The GPU device node cannot be opened. Either the account BirdNET-Go runs as needs access to the device's group, usually 'render', or the container was given the device with -v instead of --device, which does not grant access to it.",
+      "gpuReasonNoRuntime": "BirdNET-Go only accelerates inference on Intel graphics today, so this card will not be used.",
+      "gpuReasonUnknown": "This GPU cannot be used for inference on this build.",
       "stock": "Stock",
       "custom": "Custom",
       "sampleRate": "Sample rate",
@@ -1657,11 +1874,14 @@
   "analytics": {
     "hub": {
       "tabs": {
-        "overview": "Overview",
         "patterns": "Activity Patterns",
         "trends": "Trends",
         "biodiversity": "Biodiversity",
-        "quality": "Review & Accuracy"
+        "quality": "Review & Accuracy",
+        "summary": "Summary",
+        "nocturnal": "Nocturnal Activity",
+        "weather": "Weather",
+        "soundscape": "Soundscape"
       },
       "aria": {
         "tabs": "Analytics sections"
@@ -1669,7 +1889,9 @@
       "controls": {
         "source": "Source",
         "sourceAll": "All sources",
-        "sourceComingSoon": "Filtering by source arrives in a later update.",
+        "sourceLoading": "Loading audio sources…",
+        "sourceNone": "No audio sources with detections yet.",
+        "sourceNotApplicable": "The charts in this section do not filter by source.",
         "speciesNotApplicable": "The charts in this section do not filter by species."
       },
       "card": {
@@ -1679,13 +1901,25 @@
         "notEnoughDataHint": "This chart needs at least {min} data points. Keep recording and check back soon.",
         "export": "Export",
         "exportComingSoon": "CSV export is coming soon."
-      },
-      "comingSoon": {
-        "description": "This section is under construction and will arrive in an upcoming update."
       }
     },
-    "title": "Overview",
     "loadingError": "Failed to load some analytics data. Please try again later.",
+    "comingSoon": {
+      "badge": "Coming soon",
+      "plannedTitle": "Planned capabilities",
+      "weather": {
+        "description": "Bird activity tracked against local weather conditions. This view will correlate your detections with temperature, wind, and rainfall.",
+        "feature1": "Correlate detections with temperature, wind, and precipitation",
+        "feature2": "See how weather fronts shift species activity",
+        "feature3": "Compare seasonal activity against historical weather"
+      },
+      "soundscape": {
+        "description": "A look at the overall acoustic character of your environment, using acoustic indices to summarize soundscape diversity over time.",
+        "feature1": "Acoustic indices that summarize soundscape complexity",
+        "feature2": "Track biodiversity through ambient sound over time",
+        "feature3": "Spot dawn and dusk choruses in the acoustic record"
+      }
+    },
     "stats": {
       "totalDetections": "Total Detections",
       "uniqueSpecies": "Unique Species",
@@ -1793,7 +2027,6 @@
       }
     },
     "advanced": {
-      "title": "Advanced Analytics",
       "chartControls": "Chart Controls",
       "dateRange": "Date Range",
       "chartOptions": "Chart Options",
@@ -1817,11 +2050,11 @@
       "charts": {
         "timeOfDay": {
           "title": "Detection Patterns by Time of Day",
-          "description": "Shows average detection counts throughout the day for selected species",
+          "description": "Average detections per day at each hour, across your selected date range and species",
           "noData": "No time-of-day data available",
           "noDataHint": "Select species and a date range to view patterns",
           "axisTime": "Time of Day",
-          "axisCount": "Detection Count"
+          "axisCount": "Avg Detections / Day"
         },
         "dailyTrend": {
           "title": "Species Detection Trends",
@@ -1839,6 +2072,126 @@
           "noDataHint": "Select a date range to view species diversity trends",
           "axisDate": "Date",
           "axisUniqueSpecies": "Unique Species"
+        },
+        "accumulation": {
+          "title": "Species Accumulation Curve",
+          "description": "Cumulative number of distinct species detected within the selected period. The curve climbs as new species appear and levels off once the common ones have been recorded; a still-rising line means more species are likely waiting to be found.",
+          "noData": "No species accumulation data available",
+          "noDataHint": "Select a wider date range to watch the species list build up over time",
+          "ariaLabel": "Species accumulation curve: cumulative distinct species detected over the period",
+          "axisDate": "Date",
+          "axisSpecies": "Cumulative species",
+          "totalSpecies": "{species} species",
+          "tooltipCumulative": "Cumulative species",
+          "tooltipNew": "New in period",
+          "summary": "Cumulative species accumulation across {days} days, reaching {species} distinct species by the end of the period."
+        },
+        "yearOverYear": {
+          "title": "Year-over-Year Tracker",
+          "description": "Cumulative detections so far this year versus the same calendar dates last year. The shaded band is the running gap between the two; this year's line sitting above last year's means you are ahead of last year's pace.",
+          "noData": "No year-over-year data available",
+          "noDataHint": "Detections from this year and last year build up here as the year progresses",
+          "ariaLabel": "Year-over-year tracker: cumulative detections this year versus the same span last year",
+          "axisDate": "Date",
+          "axisCount": "Cumulative detections",
+          "legendThis": "{year} (this year)",
+          "legendLast": "{year} (last year)",
+          "tooltipDelta": "Difference",
+          "summary": "Year over year: by {monthDay}, {currentYear} has {thisYear} cumulative detections versus {lastYear} for {previousYear} (a difference of {delta})."
+        },
+        "phenology": {
+          "title": "Arrival & Departure Phenology",
+          "description": "First and last detection of each species within the selected period, drawn as residency bars for the most-detected species. Read it top to bottom in arrival order to see who shows up first and who lingers latest across the season.",
+          "noData": "No phenology data available",
+          "noDataHint": "Select a wider date range to see when species arrive and depart",
+          "ariaLabel": "Arrival and departure phenology: residency bars showing each species' first-to-last detection span",
+          "axisDate": "Date",
+          "summary": "Arrival and departure residency spans for {species} species across the selected period.",
+          "tooltipFirst": "First detected",
+          "tooltipLast": "Last detected",
+          "tooltipResidency": "Residency",
+          "tooltipCount": "Detections",
+          "residencyDays": "{days} days"
+        },
+        "heatmap": {
+          "title": "Seasonal Activity Heatmap",
+          "description": "Detection density by date and time of day for your selected species, revealing migration waves and dawn-chorus drift",
+          "noData": "No activity data available",
+          "noDataHint": "Select species and a date range to view seasonal activity patterns",
+          "axisDate": "Date",
+          "axisTime": "Time of Day",
+          "tooltipTime": "Time",
+          "tooltipCount": "Detections",
+          "legendLess": "Less",
+          "legendMore": "More ({max})",
+          "ariaLabel": "Seasonal activity heatmap: detection density by date and time of day",
+          "summary": "{total} detections across {days} days. Busiest around {time} on {date}."
+        },
+        "ridgeline": {
+          "title": "Who Sings When",
+          "description": "Hour-of-day activity for your selected species, sorting dawn singers from all-day and nocturnal birds",
+          "noData": "No species activity data available",
+          "noDataHint": "Select species and a date range to compare their activity patterns",
+          "ariaLabel": "Who-sings-when ridgeline: hour-of-day activity distribution per species",
+          "axisTime": "Time of Day",
+          "note": "Showing the top {count} species by detection volume",
+          "tooltipDetections": "Detections",
+          "tooltipPeak": "Peak",
+          "summary": "Hour-of-day activity for {count} species. Most active: {species} around {time}."
+        },
+        "succession": {
+          "title": "Acoustic Succession",
+          "description": "How your selected species hand off through the day, shown as stacked bands of hourly detections from pre-dawn through night",
+          "noData": "No acoustic succession data available",
+          "noDataHint": "Select species and a date range to see how they hand off through the day",
+          "ariaLabel": "Acoustic succession streamgraph: stacked hour-of-day detections for the selected species",
+          "axisTime": "Time of Day",
+          "note": "Combined hourly activity of the top {count} species by detection volume",
+          "tooltipDetections": "Detections",
+          "tooltipPeak": "Peak",
+          "summary": "Hour-of-day succession for {count} species. Most active: {species} around {time}."
+        },
+        "dawnOnset": {
+          "title": "Dawn Chorus Onset",
+          "description": "When the morning chorus starts each day relative to civil dawn, isolating the seasonal shift from clock time",
+          "noData": "No dawn chorus data available",
+          "noDataHint": "Select species and a date range to track how the dawn chorus shifts across the seasons",
+          "ariaLabel": "Dawn chorus onset tracker: daily chorus onset relative to civil dawn",
+          "axisDate": "Date",
+          "axisOnset": "Minutes from civil dawn",
+          "civilDawn": "Civil dawn",
+          "tooltipOnset": "Onset",
+          "tooltipOnsetAfter": "{minutes} min after civil dawn",
+          "tooltipOnsetBefore": "{minutes} min before civil dawn",
+          "tooltipOnsetAt": "At civil dawn",
+          "tooltipCount": "Detections",
+          "summary": "Dawn chorus onset relative to civil dawn across {days} days ({plotted} with a measurable onset)."
+        },
+        "nocturnal": {
+          "title": "Nocturnal Activity Clock",
+          "description": "Detections around the 24-hour clock with the daytime hours shaded, making nighttime activity stand out",
+          "noData": "No activity data available",
+          "noDataHint": "Select a wider date range or a more active period to see the daily activity pattern",
+          "ariaLabel": "Nocturnal activity clock: detections by hour of day with daytime shading",
+          "axisHour": "Hour of day",
+          "tooltipHour": "{start} to {end}",
+          "tooltipCount": "Detections",
+          "summary": "Detection activity by hour of day ({total} detections, most active around {peak}). Daytime hours are shaded.",
+          "legendDay": "Day",
+          "legendTwilight": "Twilight",
+          "legendNight": "Night"
+        },
+        "confidence": {
+          "title": "Confidence Distribution",
+          "description": "How confident the model is per species, so you can spot the birds it most often second-guesses",
+          "noData": "No confidence data available",
+          "noDataHint": "Select a wider date range to compare how confident the model is across species",
+          "ariaLabel": "Confidence distribution: per-species histogram of detection confidence scores",
+          "axisLabel": "Confidence",
+          "note": "Showing the top {count} species by detection volume",
+          "tooltipCount": "Detections",
+          "tooltipPeak": "Peak confidence",
+          "summary": "Detection-confidence distribution for {count} species. {species} clusters around {time} confidence."
         },
         "tooltips": {
           "date": "Date",
@@ -2430,7 +2783,8 @@
           "detectionPath": "Relative path to detection (e.g., \"/ui/detections/1234\")",
           "detectionUrl": "Full URL to detection in UI",
           "imageUrl": "Link to species image",
-          "daysSinceFirstSeen": "Number of days since first detected"
+          "daysSinceFirstSeen": "Number of days since first detected",
+          "daysSinceLastSeen": "Number of days since last detected"
         }
       },
       "testNotification": {
@@ -2613,9 +2967,9 @@
             "testConnection": "Test Connection",
             "connectionOk": {
               "https": "HTTPS works",
-              "http": "HTTP works — server is not using HTTPS"
+              "http": "HTTP works - server is not using HTTPS"
             },
-            "connectionFailed": "Could not connect — check hostname and server status",
+            "connectionFailed": "Could not connect - check hostname and server status",
             "auth": {
               "label": "Authentication (optional)",
               "username": {
@@ -2746,7 +3100,11 @@
         "enable": "Enable Privacy Filtering",
         "disabled": "Privacy filtering is disabled",
         "confidenceLabel": "Confidence Threshold for Human Detection",
-        "confidenceHelp": "Set the confidence level for human voice detection, lower value makes filter more sensitive"
+        "confidenceHelp": "Set the confidence level for human voice detection, lower value makes filter more sensitive",
+        "vadEnable": "Enable Privacy Guard (Silero VAD)",
+        "vadHelp": "Runs a dedicated neural speech-detection model alongside the classifier for robust voice filtering. Consumes additional system resources (approx. 20-30 MB RAM and CPU inference per segment).",
+        "vadThresholdLabel": "Privacy Guard Threshold",
+        "vadThresholdHelp": "Sensitivity threshold for the Privacy Guard voice activity detector (default 0.35). Lower values make the filter more sensitive to quiet or distant speech."
       },
       "falsePositivePrevention": {
         "title": "False Positive Prevention",
@@ -3160,6 +3518,13 @@
         "typeLabel": "Stream Type",
         "typeHelp": "Stream protocol - auto-detected from URL",
         "transportLabel": "Protocol",
+        "mediaModeLabel": "Media Mode",
+        "mediaModeHelp": "Full stream requests audio and video (video is discarded after decode) and works with the widest range of cameras. Auto tries audio-only first and falls back to the full stream if the camera cannot deliver audio alone. Audio-only never opens a camera video slot but fails if the camera cannot deliver the audio track by itself.",
+        "mediaMode": {
+          "auto": "Auto",
+          "audioOnly": "Audio only",
+          "fullStream": "Full stream"
+        },
         "summary": "{count} stream(s) configured",
         "healthy": "healthy",
         "unhealthy": "unhealthy",
@@ -3332,8 +3697,6 @@
         "normalizationDisabled": "Audio normalization is disabled",
         "targetLUFSLabel": "Target Loudness (LUFS)",
         "targetLUFSHelp": "Integrated loudness target in LUFS (Loudness Units relative to Full Scale). -23 LUFS is the EBU R128 broadcast standard. Range: -40 to -10 LUFS.",
-        "loudnessRangeLabel": "Loudness Range (LU)",
-        "loudnessRangeHelp": "Maximum variation in loudness within the clip (0-20 LU). Lower values create more consistent volume but may reduce dynamics.",
         "truePeakLabel": "True Peak Limit (dBTP)",
         "truePeakHelp": "Maximum true peak level to prevent digital clipping (-10 to 0 dBTP). -2 dBTP provides safe headroom for most playback systems.",
         "normalizationNote": "EBU R128 Standard",
@@ -3371,6 +3734,7 @@
         "typeHelp": "Audio format for saved clips. WAV and FLAC are lossless (best quality, larger files). MP3, AAC, and Opus are lossy (smaller files, slight quality loss).",
         "bitrateLabel": "Bitrate",
         "bitrateHelp": "Audio compression bitrate for lossy formats. Range: {min}-{max} kbps. Higher values provide better quality but larger files.",
+        "losslessBitrateValue": "N/A - Lossless",
         "losslessNote": "Lossless formats preserve original audio quality without compression artifacts."
       },
       "audioNormalization": {
@@ -3382,8 +3746,6 @@
         "requiresRecording": "Enable clip recording in the Recording tab to use audio normalization.",
         "targetLUFSLabel": "Target Loudness (LUFS)",
         "targetLUFSHelp": "Integrated loudness target in LUFS (Loudness Units relative to Full Scale). -23 LUFS is the EBU R128 broadcast standard. Range: -40 to -10 LUFS.",
-        "loudnessRangeLabel": "Loudness Range (LU)",
-        "loudnessRangeHelp": "Maximum variation in loudness within the clip (0-20 LU). Lower values create more consistent volume but may reduce dynamics.",
         "truePeakLabel": "True Peak Limit (dBTP)",
         "truePeakHelp": "Maximum true peak level to prevent digital clipping (-10 to 0 dBTP). -2 dBTP provides safe headroom for most playback systems.",
         "noteTitle": "EBU R128 Standard",
@@ -3604,7 +3966,7 @@
       },
       "privateMode": {
         "label": "Require login for all UI pages (private mode)",
-        "help": "When enabled, the dashboard, detections, analytics, search, about, and notifications pages all require authentication. Settings and system pages are always protected regardless of this setting. The Public Live Audio toggle below is honoured independently — leaving it on still allows unauthenticated playback. Default is off so guests can browse the read-only UI."
+        "help": "When enabled, the dashboard, detections, analytics, search, about, and notifications pages all require authentication. Settings and system pages are always protected regardless of this setting. The Public Live Audio toggle below is honoured independently - leaving it on still allows unauthenticated playback. Default is off so guests can browse the read-only UI."
       },
       "placeholders": {
         "baseUrl": "https://birdnet.example.com:5500",
@@ -3949,6 +4311,18 @@
             "hemisphereNote": "Season dates are automatically configured based on your latitude. Northern hemisphere uses standard seasons, southern hemisphere has shifted dates, and equatorial regions use wet/dry seasons."
           }
         },
+        "infrequent": {
+          "title": "Infrequent Tracking",
+          "description": "Flag species returning after a long absence (rare returning visitors)",
+          "enabled": {
+            "label": "Enable Infrequent Tracking",
+            "helpText": "Track and notify when a species is detected again after a long absence"
+          },
+          "absenceDays": {
+            "label": "Absence Threshold (days)",
+            "helpText": "Minimum days since the last detection before a returning species is flagged 'infrequent' (1-365)"
+          }
+        },
         "months": {
           "january": "January",
           "february": "February",
@@ -4121,8 +4495,8 @@
         "templateTitlePlaceholder": "Leave empty for default",
         "templateMessage": "Message Template",
         "templateMessagePlaceholder": "Leave empty for default",
-        "noConditionsEvent": "No conditions — rule fires on every event",
-        "noConditionsMetric": "No conditions — rule fires on every metric update",
+        "noConditionsEvent": "No conditions - rule fires on every event",
+        "noConditionsMetric": "No conditions - rule fires on every metric update",
         "eventsCount": "events",
         "metricsCount": "metrics",
         "durationFor": "for",
@@ -4146,6 +4520,7 @@
           "stream_disconnected": "Stream Disconnected",
           "stream_error": "Stream Error",
           "detection_new_species": "New Species Detected",
+          "detection_infrequent_species": "Infrequent Species Detected",
           "detection_occurred": "Detection Occurred",
           "application_started": "Application Started",
           "application_stopped": "Application Stopped",
@@ -4195,6 +4570,10 @@
         "newSpecies": {
           "name": "New species detected",
           "description": "Notifies when a species is detected for the first time"
+        },
+        "infrequentSpecies": {
+          "name": "Infrequent species detected",
+          "description": "Notifies when a species returns after a long absence"
         },
         "streamDisconnected": {
           "name": "Audio stream disconnected",
@@ -4487,8 +4866,10 @@
       "spectrogramLoaded": "Spectrogram loaded",
       "spectrogramLoadingAria": "Loading spectrogram",
       "spectrogramAlt": "Audio spectrogram",
+      "spectrogramForSpecies": "Spectrogram for {species}",
       "spectrogramGeneratingAria": "Generating spectrogram",
       "generating": "Generating...",
+      "waiting": "Waiting...",
       "queuePosition": "Queue: {position}",
       "loadError": "Failed to load audio"
     },
@@ -4560,7 +4941,7 @@
         "extracting": "Extracting clip...",
         "extractError": "Failed to extract clip",
         "formatLabel": "Format",
-        "rangeLabel": "{start}s – {end}s"
+        "rangeLabel": "{start}s - {end}s"
       },
       "processing": {
         "playSelection": "Play selection",
@@ -4618,7 +4999,7 @@
   },
   "quietHours": {
     "indicator": {
-      "tooltip": "Quiet hours active — {count} source(s) paused"
+      "tooltip": "Quiet hours active - {count} source(s) paused"
     }
   },
   "errors": {
@@ -4641,7 +5022,8 @@
       "typesRequired": "Object type and trigger type are required",
       "duplicateName": "A rule with this name already exists",
       "invalidJSON": "Invalid JSON",
-      "invalidEscalation": "Escalation steps are invalid"
+      "invalidEscalation": "Escalation steps are invalid",
+      "engineUnavailable": "Alerting engine is unavailable"
     },
     "detection": {
       "invalidDate": "Invalid {paramName} format, use YYYY-MM-DD"
@@ -4655,7 +5037,7 @@
       "createFailed": "Failed to create backup job",
       "notFound": "Backup job not found or expired",
       "notReady": "Backup not ready for download",
-      "fileNotFound": "Backup file not found — job may have expired",
+      "fileNotFound": "Backup file not found - job may have expired",
       "sqliteOnly": "Backup only available for SQLite databases",
       "dbNotConfigured": "Database not configured",
       "unsupportedType": "Cannot perform backup on this datastore type",
@@ -4674,7 +5056,7 @@
       "noLegacyDB": "No legacy database found",
       "accessFailed": "Cannot access legacy database",
       "restartRequired": "Application must be restarted after migration before cleanup is available",
-      "safetyCheck": "Target file appears to be a V2 database — cleanup not allowed for safety",
+      "safetyCheck": "Target file appears to be a V2 database - cleanup not allowed for safety",
       "noLegacyTables": "No legacy tables found",
       "restartNeeded": "Cannot cleanup: Application must be restarted after migration",
       "alreadyRunning": "Cleanup already in progress"
@@ -4746,9 +5128,9 @@
       "waningCrescent": "Waning Crescent"
     },
     "birding": {
-      "excellent": "Calm — excellent for hearing bird calls",
-      "moderate": "Moderate wind — some bird calls may be harder to hear",
-      "poor": "High wind — bird calls unlikely to be heard"
+      "excellent": "Calm - excellent for hearing bird calls",
+      "moderate": "Moderate wind - some bird calls may be harder to hear",
+      "poor": "High wind - bird calls unlikely to be heard"
     }
   },
   "wizard": {
@@ -4802,7 +5184,7 @@
         "rtspUrlPlaceholder": "rtsp://user:password@host:port/stream",
         "rtspUrlHelp": "Enter the URL of your RTSP audio stream",
         "additionalSourcesHint": "You can add more audio sources later in Settings.",
-        "configureLater": "Skip — configure later"
+        "configureLater": "Skip - configure later"
       },
       "detection": {
         "title": "Detection Threshold",
@@ -4887,6 +5269,20 @@
       "locale": {
         "label": "Species Language",
         "helpText": "Language used for species common names in the interface."
+      },
+      "secondaryThresholdOverride": {
+        "label": "Override confidence threshold",
+        "helpText": "When enabled, this model uses its own confidence threshold. When disabled, it follows the main BirdNET confidence threshold."
+      },
+      "secondaryThreshold": {
+        "helpText": "Minimum confidence score (0.01 - 0.99) required for a detection from this model to be recorded.",
+        "followsBirdnet": "Enable the override to set a custom value. This model currently follows the main BirdNET confidence threshold."
+      },
+      "perchThreshold": {
+        "label": "Perch v2 Confidence Threshold"
+      },
+      "birdnetv3Threshold": {
+        "label": "BirdNET v3.0 Confidence Threshold"
       }
     },
     "rangeFilter": {
@@ -4913,9 +5309,92 @@
       "title": "Advanced",
       "description": "Processing and custom model configuration."
     },
+    "downloadSource": {
+      "title": "Download Source",
+      "description": "Where model files are downloaded from.",
+      "note": "Leave this empty unless huggingface.co is blocked or slow on your network. The HF_ENDPOINT environment variable is used when this field is empty, and huggingface.co when neither is set. A value that is not a valid http or https address is ignored and the default is used instead.",
+      "endpoint": {
+        "label": "HuggingFace endpoint",
+        "helpText": "Mirror to download models from, for example https://hf-mirror.com. Applies to the next download; no restart needed.",
+        "validationMessage": "Enter a full address starting with http:// or https://, or leave the field empty."
+      }
+    },
     "gallery": {
       "title": "Model Gallery",
       "description": "Manage classifier models for bird and bat detection.",
+      "region": {
+        "title": "Model region",
+        "modeAuto": "Automatic",
+        "modeAutoHint": "Detect the best region from your station location",
+        "modeManual": "Manual region select",
+        "modeManualHint": "Choose a region yourself, or the worldwide model",
+        "worldwideTitle": "Worldwide",
+        "worldwideSubtitle": "Every region, all species",
+        "worldwideResourceNote": "Largest model, uses the most RAM and CPU",
+        "selectedBadge": "Selected",
+        "orSpecificRegion": "Or a specific region",
+        "search": "Search regions or countries",
+        "searchNoResults": "No regions match \"{query}\"",
+        "manualPrompt": "Choose a region below, or the worldwide model.",
+        "countriesOverflow": "+{count}",
+        "coreCoverage": "Core coverage:",
+        "partialCoverage": "Partial coverage:",
+        "pinAction": "Use {region}",
+        "switchToAuto": "Switch to automatic",
+        "loading": "Loading regions...",
+        "loadFailed": "Failed to load region data",
+        "mapUnavailable": "Coverage map unavailable",
+        "mapAria": "{region} coverage map",
+        "why": {
+          "noLocation": "Automatic selection needs a station location. Set it in Main settings; the worldwide model is used until then.",
+          "outsideCoverage": "Your location is outside every regional model's coverage, so the worldwide model is used.",
+          "ambiguous": "Your location is near the border between {region} and {runnerUp}. Automatic selection uses {region}; select either one to make the choice explicit.",
+          "resolved": "Detected region from your location: {region}.",
+          "global": "The worldwide model is used, regardless of the station location.",
+          "pinned": "Using {region}. The station location does not affect model selection.",
+          "pinnedMismatch": "Your location currently resolves to {resolved}.",
+          "pinnedUnknown": "The selected region \"{region}\" is not available in the current model catalog. Model families fall back to your location or the worldwide model."
+        }
+      },
+      "variants": {
+        "title": "Model variant",
+        "recommended": "Recommended",
+        "recommendedForHardware": "Best for your hardware",
+        "installed": "Installed",
+        "default": "Default",
+        "incompatible": "Not available for your hardware",
+        "showAll": "Show all variants ({count})",
+        "showRegion": "Show variants for {region} and your hardware ({count})",
+        "showHardware": "Show hardware variants ({count})",
+        "showAllRegions": "Show all variants, including other regions ({count})",
+        "regionContext": "Regional variants shown for {region}, set by the model region selection above",
+        "regionContextNone": "Regional variants are available. Pick a region in the model region selection above to scope them to your area.",
+        "otherRegions": "Other regions",
+        "filterPlaceholder": "Filter regions",
+        "filterAria": "Filter region-tuned builds",
+        "filterNoMatch": "No regions match \"{query}\"",
+        "latency": "~{ms} ms",
+        "precisionInfo": "About precision and variants",
+        "precisionHelp": "Precision (FP32, FP16, INT8) trades accuracy for size and speed: FP32 is most accurate, INT8 is smallest and fastest. Recommended is the best match for your detected hardware; Default is the model's standard build."
+      },
+      "actionInProgress": "Wait for the current model install, reinstall, or remove to finish",
+      "removeSuccess": "Removed {name}",
+      "reasons": {
+        "backendRecommended": "Runs on {backend}, the recommended backend for your hardware",
+        "backendSupported": "Runs on {backend}",
+        "regionMatched": "Matched to your region ({region})",
+        "regionGlobalFallback": "Global model for your location",
+        "precisionFp16Native": "Half-precision build matched to your CPU",
+        "precisionFp16GpuPreferred": "Half-precision build: half the download, runs on your GPU",
+        "ramConstrainedFit": "Quantized build sized for your available memory",
+        "benchmarkMeasured": "Fastest on your device in measured benchmarks",
+        "variantLegacy": "Superseded by a newer build",
+        "archUnsupported": "Requires {required} CPU architecture",
+        "backendMissing": "Needs an inference backend your build cannot reach ({required})",
+        "ramInsufficient": "Needs at least {requiredMb} MB of memory",
+        "hardwareExcluded": "Not supported on your hardware ({token})",
+        "backendOnnxUnavailable": "Requires ONNX Runtime, which isn't available on this system. Docker images and release tarballs include it; see the ONNX Runtime installation guide."
+      },
       "tabs": {
         "installed": "Installed",
         "available": "Available"
@@ -4923,7 +5402,6 @@
       "loading": "Loading models...",
       "retry": "Retry",
       "builtIn": "Built-in",
-      "builtInDescription": "Built-in bird species classifier by the BirdNET team.",
       "species": "{count} species",
       "install": "Install",
       "installing": "Installing...",
@@ -4968,7 +5446,13 @@
       "errors": {
         "catalogLoadFailed": "Failed to load model catalog",
         "installFailed": "Failed to start model installation",
-        "removeFailed": "Failed to remove model"
+        "removeFailed": "Failed to remove model",
+        "actionFailed": "There was a problem with {name}",
+        "downloadSourceHint": "If huggingface.co is blocked or slow on your network, set a mirror in the Download Source section below.",
+        "goToDownloadSource": "Go to Download Source",
+        "dismiss": "Dismiss",
+        "details": "Details",
+        "removeRetryHint": "To try again, use the Remove button on the model's card."
       },
       "regionLabel": "Region",
       "speciesLabel": "Species",
@@ -4976,9 +5460,40 @@
       "reinstalling": "Reinstalling...",
       "reinstallComplete": "Files verified successfully",
       "geomodelBadge": "Includes BirdNET v3.0 geomodel",
-      "onnxRuntimeRequired": "Requires ONNX Runtime which is not available on this system.",
-      "onnxRuntimeMissing": "ONNX Runtime is not available. This model cannot run.",
-      "unavailable": "Unavailable"
+      "preview": {
+        "badge": "Preview",
+        "buildLabel": "{version} · {build}",
+        "cardNotice": "Developer preview, not the final release. This is an early build for testing; results may change before the stable version.",
+        "dialogNotice": "You are installing a developer preview ({build}). Fine for trying it out, but not recommended as your only classifier yet."
+      },
+      "entryIncompatible": "This model is not available on this system.",
+      "regionGlobal": "Global",
+      "hardwareLabel": "Hardware",
+      "hardware": {
+        "gpuNvidia": "GPU (NVIDIA)",
+        "gpuIntel": "GPU (Intel)",
+        "armCpu": "ARM CPU",
+        "amd64Cpu": "AMD64 CPU",
+        "arm64Cpu": "ARM64 CPU",
+        "cpu": "CPU"
+      },
+      "optimize": {
+        "bannerTitle": "{count, plural, one {# model can run faster on your hardware} other {# models can run faster on your hardware}}",
+        "review": "Review",
+        "dismiss": "Dismiss",
+        "badgeTitle": "A faster build is available for your hardware",
+        "swap": "Optimize",
+        "dialogTitle": "Optimize your models",
+        "installedBuild": "Installed build",
+        "fromTo": "{from} to {to}",
+        "apply": "Apply",
+        "applyAll": "Apply all",
+        "applying": "Applying...",
+        "applied": "Applied",
+        "applyFailed": "Failed to apply",
+        "upToDate": "All your models are already optimized for this hardware.",
+        "licenseNote": "Swapping stays within the same model, so its license does not change."
+      }
     },
     "bird": {
       "title": "Bird Detection",
@@ -4990,6 +5505,14 @@
     },
     "dynamicThreshold": {
       "birdOnlyNote": "Dynamic threshold applies to bird classifiers only."
+    },
+    "perch": {
+      "title": "Perch v2 Detection",
+      "description": "Set a dedicated confidence threshold for Google Perch v2 detections, independent of the BirdNET threshold."
+    },
+    "birdnetv3": {
+      "title": "BirdNET v3.0 Detection",
+      "description": "Set a dedicated confidence threshold for BirdNET v3.0 detections, independent of the main BirdNET threshold."
     }
   },
   "restart": {
@@ -5005,6 +5528,7 @@
     "restartFailed": "Failed to initiate restart",
     "reasons": {
       "webserver": "Web server / network settings",
+      "oauth": "Authentication provider settings",
       "database": "Database settings",
       "logging": "Logging settings",
       "tlsCertificate": "TLS certificate"

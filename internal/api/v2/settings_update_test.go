@@ -10,6 +10,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 	"github.com/tphakala/birdnet-go/internal/conf"
 )
 
@@ -28,11 +30,7 @@ func TestDashboardLayoutWidthPersistence(t *testing.T) {
 	}
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Simulate the frontend save: elements without width field (user set to full)
@@ -106,11 +104,7 @@ func TestMergePreservesJSONDashFields(t *testing.T) {
 	initialSettings.BirdNET.Labels = []string{"species1", "species2"}
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// PATCH birdnet section — Labels (json:"-") must survive
@@ -149,11 +143,7 @@ func TestDashboardPartialUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Update only summary field
@@ -204,11 +194,7 @@ func TestWeatherPartialUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Update only provider
@@ -254,11 +240,7 @@ func TestMQTTPartialUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Update only broker
@@ -297,11 +279,7 @@ func TestBirdNETCoordinatesUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Update only coordinates
@@ -342,11 +320,7 @@ func TestNestedRangeFilterUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Update only range filter threshold
@@ -386,11 +360,7 @@ func TestAudioExportPartialUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Update only export type
@@ -441,11 +411,7 @@ func TestSpeciesConfigUpdate(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Update only threshold
@@ -498,11 +464,7 @@ func TestEmptyUpdatePreservesEverything(t *testing.T) {
 
 	// Create controller with settings
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Send empty update
@@ -565,10 +527,7 @@ func TestValidationErrors(t *testing.T) {
 			t.Parallel()
 
 			e := echo.New()
-			controller := &Controller{
-				Echo:        e,
-				controlChan: make(chan string, 10),
-			}
+			controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10)}
 
 			var body []byte
 			var err error
@@ -589,7 +548,7 @@ func TestValidationErrors(t *testing.T) {
 			err = controller.UpdateSectionSettings(ctx)
 
 			// Use helper function to assert error response
-			assertControllerError(t, err, rec, tt.expectedCode, tt.expectedError)
+			apitest.AssertControllerError(t, err, rec, tt.expectedCode, tt.expectedError)
 		})
 	}
 }
@@ -609,11 +568,7 @@ func TestDeepNestedUpdates(t *testing.T) {
 	initialTLSEnabled := initialSettings.Realtime.MQTT.TLS.Enabled
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, 10),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, 10), DisableSaveSettings: true}
 	controller.Settings.Store(initialSettings)
 
 	// Update only one deeply nested field
@@ -821,6 +776,52 @@ func TestStreamsSettingsChanged_ChannelMode(t *testing.T) {
 		{"downmix to left changes", conf.ChannelModeDownmix, conf.ChannelModeLeft, true},
 		{"left to right changes", conf.ChannelModeLeft, conf.ChannelModeRight, true},
 		{"left to downmix changes", conf.ChannelModeLeft, conf.ChannelModeDownmix, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			old := makeSettings(tc.old)
+			cur := makeSettings(tc.new)
+			assert.Equal(t, tc.want, streamsSettingsChanged(old, cur))
+		})
+	}
+}
+
+// TestStreamsSettingsChanged_MediaMode verifies that a real media-mode edit
+// triggers reconfiguration while the no-op transition between the empty default
+// and its canonical form ("" <-> "full-stream") does NOT. Without canonical
+// comparison the first save after the frontend starts sending an explicit
+// "full-stream" would needlessly restart the stream.
+func TestStreamsSettingsChanged_MediaMode(t *testing.T) {
+	t.Parallel()
+
+	makeSettings := func(mode conf.MediaMode) *conf.Settings {
+		s := &conf.Settings{}
+		s.Realtime.RTSP.Streams = []conf.StreamConfig{{
+			Name:      "Front Yard",
+			URL:       "rtsp://192.168.1.10/stream",
+			Type:      conf.StreamTypeRTSP,
+			Transport: "tcp",
+			Enabled:   true,
+			MediaMode: mode,
+			Models:    []string{"birdnet"},
+		}}
+		return s
+	}
+
+	tests := []struct {
+		name string
+		old  conf.MediaMode
+		new  conf.MediaMode
+		want bool
+	}{
+		{"unset to explicit full-stream is a no-op", "", conf.MediaModeFullStream, false},
+		{"explicit full-stream to unset is a no-op", conf.MediaModeFullStream, "", false},
+		{"identical auto", conf.MediaModeAuto, conf.MediaModeAuto, false},
+		{"unset to auto changes", "", conf.MediaModeAuto, true},
+		{"full-stream to auto changes", conf.MediaModeFullStream, conf.MediaModeAuto, true},
+		{"auto to audio-only changes", conf.MediaModeAuto, conf.MediaModeAudioOnly, true},
 	}
 
 	for _, tc := range tests {
