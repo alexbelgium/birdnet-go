@@ -13,8 +13,9 @@ import (
 	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/classifier/inferencestats"
 	"github.com/tphakala/birdnet-go/internal/conf"
-	"github.com/tphakala/birdnet-go/internal/cpuspec"
+	"github.com/tphakala/birdnet-go/internal/hwprofile"
 	"github.com/tphakala/birdnet-go/internal/inference"
+	"github.com/tphakala/birdnet-go/internal/inference/vad"
 	"github.com/tphakala/birdnet-go/internal/observability"
 	"github.com/tphakala/birdnet-go/internal/sysinfo"
 )
@@ -31,20 +32,130 @@ const eventInferenceTopologyChanged = "system.inference_topology_changed"
 
 // InferenceStatusResponse is the top-level payload for GET /api/v2/system/inference.
 type InferenceStatusResponse struct {
-	Hardware             HardwareInfo           `json:"hardware"`
-	Backends             BackendsInfo           `json:"backends"`
-	Models               []InferenceModelStatus `json:"models"`
-	Audio                AudioMetricsInfo       `json:"audio"`
-	RuntimeBaselineBytes int64                  `json:"runtimeBaselineBytes,omitempty"`
-	SnapshotAtUnix       int64                  `json:"snapshotAtUnix"`
+	Hardware HardwareInfo           `json:"hardware"`
+	Backends BackendsInfo           `json:"backends"`
+	Models   []InferenceModelStatus `json:"models"`
+	Audio    AudioMetricsInfo       `json:"audio"`
+	// VAD is the privacy-filter Silero VAD speech-gate status. Present only when
+	// the privacy filter is enabled (nil hides the dashboard panel entirely).
+	VAD                  *VADStatusInfo `json:"vad,omitempty"`
+	RuntimeBaselineBytes int64          `json:"runtimeBaselineBytes,omitempty"`
+	SnapshotAtUnix       int64          `json:"snapshotAtUnix"`
+}
+
+// VADStatusInfo reports the privacy-filter Silero VAD speech gate for the
+// inference dashboard. Stats are lifetime totals that survive session reloads.
+type VADStatusInfo struct {
+	// Enabled is the configured VAD gate toggle (realtime.privacyfilter.vad.enabled).
+	Enabled bool `json:"enabled"`
+	// Available reports whether a model source resolves (an embedded model is
+	// present, or a modelpath override is set). When false the gate is inert even
+	// if Enabled is true (e.g. a noembed build with no modelpath).
+	Available bool `json:"available"`
+	// Loaded is true when a session is currently held (loaded and scoring). It is
+	// set on a successful load and cleared on unload or an inference error.
+	Loaded bool `json:"loaded"`
+	// Threshold is the configured speech-probability gate threshold.
+	Threshold float64 `json:"threshold"`
+	// ModelSource is "embedded", "path" or "" (unloaded); never the on-disk path.
+	ModelSource string `json:"modelSource,omitempty"`
+	// Strategy is the active windowing strategy ("sequence"),
+	// empty when unloaded.
+	Strategy string `json:"strategy,omitempty"`
+	// SampleRate is the native sample rate of the loaded Silero VAD model (16 kHz),
+	// 0 when unloaded.
+	SampleRate int `json:"sampleRate,omitempty"`
+	// Stats holds lifetime inference counters for the gate.
+	Stats VADStatsInfo `json:"stats"`
+	// LastSpeechAtUnix is the Unix timestamp (seconds) of the most recent speech
+	// hit, 0 when none since start.
+	LastSpeechAtUnix int64 `json:"lastSpeechAtUnix,omitempty"`
+	// LastSpeechProbability is the VAD speech probability [0,1] of the most recent
+	// speech hit (pairs with LastSpeechAtUnix); 0 when none since start.
+	LastSpeechProbability float64 `json:"lastSpeechProbability,omitempty"`
+	// RecentHits is the newest-first history of recent speech hits (up to 10),
+	// always present (empty when none) so the frontend renders a stable feed.
+	RecentHits []VADHitInfo `json:"recentHits"`
+}
+
+// VADStatsInfo holds lifetime inference statistics for the VAD speech gate.
+type VADStatsInfo struct {
+	// Invocations is the total number of VAD inference calls performed.
+	Invocations int64 `json:"invocations"`
+	// AvgMs is the lifetime average inference time in milliseconds.
+	AvgMs float64 `json:"avgMs"`
+	// MaxMs is the lifetime peak inference time in milliseconds.
+	MaxMs float64 `json:"maxMs"`
+	// SpeechHits is the total number of chunks scored at or above the threshold.
+	SpeechHits int64 `json:"speechHits"`
+}
+
+// VADHitInfo is one recent VAD speech hit in the dashboard history feed.
+type VADHitInfo struct {
+	// AtUnix is the Unix timestamp (seconds) of the speech hit.
+	AtUnix int64 `json:"atUnix"`
+	// Probability is the VAD speech probability [0,1] that tripped the gate.
+	Probability float64 `json:"probability"`
+	// Source is the display name of the audio source; may be empty.
+	Source string `json:"source,omitempty"`
 }
 
 // HardwareInfo describes the host CPU/environment reported at snapshot time.
+// The first four fields predate the hardware profile and keep their names,
+// types and sources; everything below them is additive and omitted when the
+// probe found nothing to report.
 type HardwareInfo struct {
 	Arch        string `json:"arch"`
 	CPUModel    string `json:"cpuModel"`
 	Environment string `json:"environment"`
 	FP16        bool   `json:"fp16"`
+	// Board identifies the single-board computer this runs on, absent on hosts
+	// with no device tree (every PC).
+	Board *BoardInfo `json:"board,omitempty"`
+	// Accelerators lists the GPUs present on the host, whether or not this build
+	// can use them, so the UI can explain an unusable one instead of hiding it.
+	Accelerators []AcceleratorInfo `json:"accelerators,omitempty"`
+	// TotalRamBytes is the effective memory ceiling, host RAM clamped by any
+	// cgroup limit.
+	TotalRAMBytes int64 `json:"totalRamBytes,omitempty"`
+	// PhysicalCores is the physical core count.
+	PhysicalCores int `json:"physicalCores,omitempty"`
+	// Capabilities are the capability tokens this host matches, in the same
+	// vocabulary the published model manifests use.
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+
+// BoardInfo identifies the host board as named by its device tree.
+type BoardInfo struct {
+	// Kind is the board family ("raspberry-pi", "generic").
+	Kind string `json:"kind"`
+	// Model is the device-tree model string.
+	Model string `json:"model,omitempty"`
+	// SoC is the system-on-chip identifier, e.g. "bcm2712".
+	SoC string `json:"soc,omitempty"`
+	// Tier is the performance band ("pi5", "pi4", "pi3"), empty for boards the
+	// model catalog does not distinguish.
+	Tier string `json:"tier,omitempty"`
+}
+
+// AcceleratorInfo describes one GPU the host exposes.
+type AcceleratorInfo struct {
+	// Kind is "igpu" or "dgpu".
+	Kind string `json:"kind"`
+	// Vendor is "intel", "amd" or "nvidia".
+	Vendor string `json:"vendor"`
+	// Name is a display name pairing the vendor with the PCI IDs. It is not
+	// unique: two identical cards produce the same name, so no client may key
+	// off it.
+	Name string `json:"name,omitempty"`
+	// Accessible reports whether the server can reach the device's DRM render
+	// node. It is not a prediction that inference will run here; which device a
+	// model actually runs on is reported per model in the models list.
+	Accessible bool `json:"accessible"`
+	// Reasons lists every reason code explaining why this GPU is not an
+	// inference target, most fundamental first. The frontend renders them
+	// through the i18n catalog.
+	Reasons []string `json:"reasons,omitempty"`
 }
 
 // BackendsInfo groups availability status for all supported inference backends.
@@ -325,17 +436,9 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 		SnapshotAtUnix: time.Now().Unix(),
 	}
 
-	// Hardware.
-	envType, _ := sysinfo.GetEnvironment() // detail (sub-type) intentionally omitted in Phase 1
-	resp.Hardware = HardwareInfo{
-		Arch:        sysinfo.GetCPUArch(),
-		CPUModel:    sysinfo.GetCPUModel(),
-		Environment: envType,
-		FP16:        cpuspec.HasNativeF16(),
-	}
-
 	// Backends: TFLite is always compiled in; ORT and OpenVINO are probed.
-	resp.Backends.TFLite = BackendStatus{Available: true}
+	// Probed before hardware because the ORT result feeds capability derivation.
+	resp.Backends.TFLite = BackendStatus{Available: hwprofile.TFLiteLinked()}
 	ort := inference.CheckORTAvailability(settings.BirdNET.ONNXRuntimePath)
 	resp.Backends.ONNX = BackendStatus{Available: ort.Available, Initialized: ort.Initialized, Version: ort.Version}
 	ov := inference.CheckOpenVINOAvailability()
@@ -347,6 +450,28 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 			}
 		}
 	}
+
+	// Hardware. The backends probed just above are the authoritative ones: they
+	// honour the user-configured ONNX Runtime path, which hwprofile cannot see
+	// because it carries no settings dependency. Handing them to the profile
+	// rather than letting it probe again keeps one probe behind every field of
+	// this response, so the backends card and the capability tokens cannot
+	// disagree, and halves the per-request OpenVINO device queries.
+	profile := hwprofile.Hardware().WithBackends(hwprofile.Backends{
+		TFLite: hwprofile.BackendStatus{Available: resp.Backends.TFLite.Available},
+		ONNX: hwprofile.BackendStatus{
+			Available:   ort.Available,
+			Initialized: ort.Initialized,
+			Version:     ort.Version,
+		},
+		OpenVINO: hwprofile.OpenVINOStatus{
+			Supported: ov.Supported,
+			Active:    ov.Active,
+			Devices:   resp.Backends.OpenVINO.Devices,
+		},
+	})
+	envType, _ := sysinfo.GetEnvironment() // detail (sub-type) intentionally omitted in Phase 1
+	resp.Hardware = buildHardwareInfo(profile, envType)
 
 	// Models: fetch loaded model list, RSS, and inference counters.
 	var infos []classifier.ModelInfo
@@ -448,6 +573,44 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 		MetricKeys:         AudioMetricKeys{QueueDepth: observability.MetricKeyAudioQueueDepthAggregate},
 	}
 
+	// Privacy-filter Silero VAD speech gate. Reported only when the privacy filter
+	// is enabled; a nil VAD block hides the dashboard panel. The runtime stats come
+	// from the processor's always-on counters (independent of Prometheus), so the
+	// panel works with telemetry disabled.
+	if settings.Realtime.PrivacyFilter.Enabled {
+		vadCfg := settings.Realtime.PrivacyFilter.VAD
+		info := &VADStatusInfo{
+			Enabled:   vadCfg.Enabled,
+			Available: vad.HasEmbeddedModel() || vadCfg.ModelPath != "",
+			Threshold: vadCfg.Threshold,
+		}
+		if c.Processor != nil {
+			st := c.Processor.VADStatus()
+			info.Loaded = st.Loaded
+			info.ModelSource = st.Source
+			info.Strategy = st.Strategy
+			info.SampleRate = st.SampleRate
+			info.Stats = VADStatsInfo{
+				Invocations: st.Invocations,
+				AvgMs:       st.AvgMs,
+				MaxMs:       st.MaxMs,
+				SpeechHits:  st.SpeechHits,
+			}
+			info.LastSpeechAtUnix = st.LastSpeechUnix
+			info.LastSpeechProbability = st.LastSpeechProbability
+			if len(st.RecentHits) > 0 {
+				info.RecentHits = make([]VADHitInfo, len(st.RecentHits))
+				for i, h := range st.RecentHits {
+					info.RecentHits[i] = VADHitInfo{AtUnix: h.AtUnix, Probability: h.Probability, Source: h.Source}
+				}
+			}
+		}
+		if info.RecentHits == nil {
+			info.RecentHits = []VADHitInfo{}
+		}
+		resp.VAD = info
+	}
+
 	resp.Models = make([]InferenceModelStatus, 0, len(infos))
 	for i := range infos {
 		id := infos[i].ID
@@ -474,6 +637,51 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 	sortInferenceModelsByName(resp.Models)
 
 	return ctx.JSON(http.StatusOK, resp)
+}
+
+// buildHardwareInfo maps a hardware profile onto the API payload. It is a pure
+// function with no side effects, so the mapping can be asserted without a live
+// host. environment stays a parameter rather than being read off the profile so
+// a test can vary it independently of everything else the profile carries.
+//
+//nolint:gocritic // hugeParam: the value parameter keeps this a pure mapper.
+func buildHardwareInfo(profile hwprofile.Profile, environment string) HardwareInfo {
+	info := HardwareInfo{
+		Arch:          profile.CPUArch,
+		CPUModel:      profile.CPUModel,
+		Environment:   environment,
+		FP16:          profile.HasNativeF16,
+		TotalRAMBytes: profile.TotalRAMBytes,
+		PhysicalCores: profile.PhysicalCores,
+		Capabilities:  profile.Capabilities(),
+	}
+
+	// A board is reported only when the device tree named one. Every PC would
+	// otherwise carry an empty "generic" row that tells the user nothing.
+	if profile.Board.Model != "" || profile.Board.SoC != "" {
+		info.Board = &BoardInfo{
+			Kind:  profile.Board.Kind,
+			Model: profile.Board.Model,
+			SoC:   profile.Board.SoC,
+			Tier:  profile.Board.Tier,
+		}
+	}
+
+	if len(profile.Accelerators) > 0 {
+		info.Accelerators = make([]AcceleratorInfo, 0, len(profile.Accelerators))
+		for i := range profile.Accelerators {
+			accelerator := profile.Accelerators[i]
+			info.Accelerators = append(info.Accelerators, AcceleratorInfo{
+				Kind:       accelerator.Kind,
+				Vendor:     accelerator.Vendor,
+				Name:       accelerator.Name,
+				Accessible: accelerator.Accessible,
+				Reasons:    accelerator.Reasons,
+			})
+		}
+	}
+
+	return info
 }
 
 // sortInferenceModelsByName orders model statuses by display name

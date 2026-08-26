@@ -674,7 +674,7 @@ func (s *testLegacyInterface) GetAllNotes() ([]datastore.Note, error)           
 func (s *testLegacyInterface) GetTopBirdsData(_ context.Context, _ string, _ float64, _ int) ([]datastore.Note, error) {
 	return nil, nil
 }
-func (s *testLegacyInterface) GetBatchHourlyOccurrences(_ context.Context, _ string, _ []string, _ float64) (map[string][24]int, error) {
+func (s *testLegacyInterface) GetBatchHourlyOccurrences(_ context.Context, _, _ string, _ []string, _ float64) (map[string][24]int, error) {
 	return make(map[string][24]int), nil
 }
 func (s *testLegacyInterface) SpeciesDetections(_, _, _ string, _ int, _ bool, _, _ int) ([]datastore.Note, error) {
@@ -764,7 +764,7 @@ func (s *testLegacyInterface) GetSpeciesDiversityData(_ context.Context, _, _ st
 func (s *testLegacyInterface) GetActivityHeatmap(_ context.Context, _, _, _ string) (datastore.ActivityHeatmapData, error) {
 	return datastore.ActivityHeatmapData{}, nil
 }
-func (s *testLegacyInterface) GetHourlyDistributionBySpecies(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesHourlyDistribution, error) {
+func (s *testLegacyInterface) GetHourlyDistributionBySpecies(_ context.Context, _, _ string, _ []string, _ int) ([]datastore.SpeciesHourlyDistribution, error) {
 	return []datastore.SpeciesHourlyDistribution{}, nil
 }
 func (s *testLegacyInterface) GetDailyActivityOnset(_ context.Context, _, _, _ string) ([]datastore.DailyActivityOnset, error) {
@@ -786,14 +786,14 @@ func (s *testLegacyInterface) GetYearOverYear(_ context.Context, _ string) (data
 func (s *testLegacyInterface) GetSpeciesPhenology(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesPhenologyPoint, error) {
 	return []datastore.SpeciesPhenologyPoint{}, nil
 }
-func (s *testLegacyInterface) GetAcousticSuccession(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesHourlyCounts, error) {
+func (s *testLegacyInterface) GetAcousticSuccession(_ context.Context, _, _ string, _ []string, _ int) ([]datastore.SpeciesHourlyCounts, error) {
 	return []datastore.SpeciesHourlyCounts{}, nil
 }
 func (s *testLegacyInterface) SearchDetections(_ *datastore.SearchFilters) ([]datastore.DetectionRecord, int, error) {
 	return nil, 0, nil
 }
 func (s *testLegacyInterface) SaveDynamicThreshold(_ *datastore.DynamicThreshold) error { return nil }
-func (s *testLegacyInterface) GetDynamicThreshold(_, _ string) (*datastore.DynamicThreshold, error) {
+func (s *testLegacyInterface) GetDynamicThreshold(_ string) (*datastore.DynamicThreshold, error) {
 	return nil, nil //nolint:nilnil // stub
 }
 func (s *testLegacyInterface) DeleteDynamicThreshold(_ string) error { return nil }

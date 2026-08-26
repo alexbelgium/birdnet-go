@@ -1311,26 +1311,49 @@ func (ds *Datastore) GetTopBirdsData(ctx context.Context, selectedDate string, m
 // of the number of species. A failure in either query is returned to the caller rather
 // than silently zeroing a species, so a cancelled context aborts the request instead of
 // producing partial counts.
-func (ds *Datastore) GetBatchHourlyOccurrences(ctx context.Context, date string, species []string, minConfidence float64) (map[string][24]int, error) {
+func (ds *Datastore) GetBatchHourlyOccurrences(ctx context.Context, startDate, endDate string, species []string, minConfidence float64) (map[string][24]int, error) {
 	if len(species) == 0 {
 		return make(map[string][24]int), nil
 	}
 
-	// Parse date
-	targetDate, err := time.ParseInLocation(time.DateOnly, date, ds.timezone)
+	// Parse the inclusive range bounds.
+	firstDate, err := time.ParseInLocation(time.DateOnly, startDate, ds.timezone)
 	if err != nil {
 		return nil, errors.New(err).
 			Component("datastore").
 			Category(errors.CategoryValidation).
 			Context("operation", "get_batch_hourly_occurrences").
-			Context("date", date).
+			Context("start_date", startDate).
+			Build()
+	}
+	lastDate, err := time.ParseInLocation(time.DateOnly, endDate, ds.timezone)
+	if err != nil {
+		return nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryValidation).
+			Context("operation", "get_batch_hourly_occurrences").
+			Context("end_date", endDate).
 			Build()
 	}
 
-	// Calculate Unix timestamp range for the date
-	// Use calendar-based arithmetic to handle DST transitions correctly
-	startOfDay := targetDate.Unix()
-	endOfDay := targetDate.AddDate(0, 0, 1).Unix()
+	// Reject an inverted range explicitly. It would otherwise yield no zone segments below, and the
+	// method would return all-zero counts for every species with a nil error - a silent wrong answer
+	// that is painful to debug. The API layer validates the order too, but this is an exported
+	// interface method that other callers can reach without that guard.
+	if lastDate.Before(firstDate) {
+		return nil, errors.Newf("end_date %q precedes start_date %q", endDate, startDate).
+			Component("datastore").
+			Category(errors.CategoryValidation).
+			Context("operation", "get_batch_hourly_occurrences").
+			Context("start_date", startDate).
+			Context("end_date", endDate).
+			Build()
+	}
+
+	// Calculate the Unix timestamp range. endDate is inclusive, so the exclusive upper bound is
+	// the start of the day *after* it. Calendar-based arithmetic handles DST transitions correctly.
+	startOfDay := firstDate.Unix()
+	endOfDay := lastDate.AddDate(0, 0, 1).Unix()
 
 	// Resolve all scientific names to label IDs in one batched query (avoids the
 	// per-species N+1 round-trip). The returned map is keyed by the stored scientific
@@ -1368,14 +1391,29 @@ func (ds *Datastore) GetBatchHourlyOccurrences(ctx context.Context, date string,
 		return resultMap, nil
 	}
 
-	// Fetch per-label hourly counts in one batched query (chunked internally).
-	hourlyByLabel, err := ds.detection.GetBatchHourlyOccurrences(ctx, flatLabelIDs, startOfDay, endOfDay, ds.zoneOffsetSeconds(startOfDay), minConfidence)
-	if err != nil {
-		return nil, errors.New(err).
-			Component("datastore").
-			Category(errors.CategoryDatabase).
-			Context("operation", "get_batch_hourly_occurrences").
-			Build()
+	// Fetch per-label hourly counts (each query is chunked internally). The hour bucket is computed
+	// from a single fixed UTC offset, so the range is split at every zone transition and each part
+	// queried with its own offset: a range spanning a DST change would otherwise bucket everything
+	// after the transition an hour out. Most ranges yield exactly one segment.
+	hourlyByLabel := make(map[uint][24]int, len(flatLabelIDs))
+	for _, segment := range ds.splitByZoneOffset(startOfDay, endOfDay) {
+		part, err := ds.detection.GetBatchHourlyOccurrences(ctx, flatLabelIDs, segment.start, segment.end, segment.offset, minConfidence)
+		if err != nil {
+			return nil, errors.New(err).
+				Component("datastore").
+				Category(errors.CategoryDatabase).
+				Context("operation", "get_batch_hourly_occurrences").
+				Build()
+		}
+		// Range over keys only to avoid copying the 192-byte [24]int value on every iteration.
+		for labelID := range part {
+			hours := part[labelID]
+			acc := hourlyByLabel[labelID]
+			for h := range hoursPerDay {
+				acc[h] += hours[h]
+			}
+			hourlyByLabel[labelID] = acc
+		}
 	}
 
 	// Aggregate per-label counts into per-species counts, keyed by the input scientific
@@ -2575,6 +2613,46 @@ func (ds *Datastore) zoneOffsetSeconds(epoch int64) int {
 	return repository.GetTimezoneOffsetAt(ds.timezone, ref)
 }
 
+// zoneOffsetSegment is a half-open [start, end) slice of a query range over which the configured
+// timezone's UTC offset is constant, so the whole slice can be hour-bucketed with `offset`.
+type zoneOffsetSegment struct {
+	start, end int64 // Unix seconds
+	offset     int   // seconds east of UTC, constant across the segment
+}
+
+// maxZoneSegments caps the segment slice's initial capacity: a year crosses at most a couple of
+// DST transitions, so a handful of segments covers any realistic analytics range.
+const maxZoneSegments = 4
+
+// splitByZoneOffset divides [start, end) into segments whose UTC offset is constant.
+//
+// SQL hour bucketing applies one fixed offset to the whole query (see zoneOffsetSeconds), which is
+// exact for a single day but wrong for a range spanning a DST change: every detection after the
+// transition lands an hour off. Splitting at the transitions lets each part be bucketed with the
+// offset actually in effect. A range with no transition returns a single segment, so the common
+// case still issues exactly one query.
+func (ds *Datastore) splitByZoneOffset(start, end int64) []zoneOffsetSegment {
+	segments := make([]zoneOffsetSegment, 0, maxZoneSegments)
+	for cur := start; cur < end; {
+		at := time.Unix(cur, 0).In(ds.timezone)
+		_, offset := at.Zone()
+
+		// ZoneBounds reports when the current zone period ends; zero means it never does.
+		segmentEnd := end
+		if _, zoneEnd := at.ZoneBounds(); !zoneEnd.IsZero() && zoneEnd.Unix() < end {
+			segmentEnd = zoneEnd.Unix()
+		}
+		// Defensive: a non-advancing bound would loop forever.
+		if segmentEnd <= cur {
+			segmentEnd = end
+		}
+
+		segments = append(segments, zoneOffsetSegment{start: cur, end: segmentEnd, offset: offset})
+		cur = segmentEnd
+	}
+	return segments
+}
+
 // dateRangeOffsetAnchor returns the epoch to anchor the timezone offset to for a date-bucketed
 // query over [start, end) (epochs from parseDateRange: start==0 means open-start, end==MaxInt64
 // means open-end). It prefers the start boundary, falls back to the end boundary for a left-open
@@ -3085,9 +3163,11 @@ func (ds *Datastore) GetActivityHeatmap(ctx context.Context, startDate, endDate,
 // false-positive-excluded per-hour counts in a single batched (label_id, hour) group-by
 // (GetBatchHourlyOccurrences). The two charts differ only in how they fold these counts, so that
 // folding stays in the caller. minConfidence is 0 so it counts every detection, matching the heatmap
-// and the other time-based analytics endpoints. Returns a nil top slice (with nil error) when no
-// species qualify, so each caller emits its own empty, non-nil result.
-func (ds *Datastore) selectTopSpeciesHourly(ctx context.Context, startDate, endDate string, limit int) ([]repository.SpeciesCount, map[uint][24]int, error) {
+// and the other time-based analytics endpoints. species is an optional scientific-name filter passed
+// straight to GetTopSpecies: when non-empty the ranking is restricted to those species (still
+// volume-ordered, capped at `limit`); when nil/empty it is the top-N by volume. Returns a nil top
+// slice (with nil error) when no species qualify, so each caller emits its own empty, non-nil result.
+func (ds *Datastore) selectTopSpeciesHourly(ctx context.Context, startDate, endDate string, species []string, limit int) ([]repository.SpeciesCount, map[uint][24]int, error) {
 	start, end, err := ds.parseDateRange(startDate, endDate)
 	if err != nil {
 		return nil, nil, err
@@ -3105,7 +3185,16 @@ func (ds *Datastore) selectTopSpeciesHourly(ctx context.Context, startDate, endD
 	if end != math.MaxInt64 {
 		topEnd--
 	}
-	top, err := ds.detection.GetTopSpecies(ctx, start, topEnd, noConfidenceFloor, nil, limit)
+	// A species can own several model labels (one per model). Limiting GetTopSpecies by label ROW
+	// would drop the lowest-volume SELECTED species before those rows are merged back into one series
+	// per species. An explicit selection is already bounded by the scientific-name filter, so fetch
+	// all of its label rows (limit 0 = no limit) and let the merge pick the distinct species. The
+	// unfiltered top-N default still honors `limit`.
+	topLimit := limit
+	if len(species) > 0 {
+		topLimit = 0
+	}
+	top, err := ds.detection.GetTopSpecies(ctx, start, topEnd, noConfidenceFloor, nil, species, topLimit)
 	if err != nil {
 		return nil, nil, errors.New(err).
 			Component("datastore").
@@ -3141,8 +3230,8 @@ func (ds *Datastore) selectTopSpeciesHourly(ctx context.Context, startDate, endD
 // It selects the top-N species and their per-hour counts via selectTopSpeciesHourly, then merges and
 // normalizes per species in Go (buildSpeciesHourlyDistribution) so each species' timing shape is
 // comparable regardless of raw volume. Powers the who-sings-when ridgeline.
-func (ds *Datastore) GetHourlyDistributionBySpecies(ctx context.Context, startDate, endDate string, limit int) ([]datastore.SpeciesHourlyDistribution, error) {
-	top, hourlyByLabel, err := ds.selectTopSpeciesHourly(ctx, startDate, endDate, limit)
+func (ds *Datastore) GetHourlyDistributionBySpecies(ctx context.Context, startDate, endDate string, species []string, limit int) ([]datastore.SpeciesHourlyDistribution, error) {
+	top, hourlyByLabel, err := ds.selectTopSpeciesHourly(ctx, startDate, endDate, species, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3158,8 +3247,8 @@ func (ds *Datastore) GetHourlyDistributionBySpecies(ctx context.Context, startDa
 // same path as the ridgeline), then merges per species in Go (buildAcousticSuccession). Unlike the
 // ridgeline it does NOT normalize: the streamgraph stacks raw counts so band width is detection
 // volume. Powers the acoustic succession streamgraph.
-func (ds *Datastore) GetAcousticSuccession(ctx context.Context, startDate, endDate string, limit int) ([]datastore.SpeciesHourlyCounts, error) {
-	top, hourlyByLabel, err := ds.selectTopSpeciesHourly(ctx, startDate, endDate, limit)
+func (ds *Datastore) GetAcousticSuccession(ctx context.Context, startDate, endDate string, species []string, limit int) ([]datastore.SpeciesHourlyCounts, error) {
+	top, hourlyByLabel, err := ds.selectTopSpeciesHourly(ctx, startDate, endDate, species, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3255,7 +3344,7 @@ func (ds *Datastore) GetConfidenceHistogram(ctx context.Context, startDate, endD
 		if end != math.MaxInt64 {
 			topEnd--
 		}
-		top, topErr := ds.detection.GetTopSpecies(ctx, start, topEnd, noConfidenceFloor, nil, limit)
+		top, topErr := ds.detection.GetTopSpecies(ctx, start, topEnd, noConfidenceFloor, nil, nil, limit)
 		if topErr != nil {
 			return nil, errors.New(topErr).
 				Component("datastore").
@@ -3458,17 +3547,6 @@ func thresholdScientificName(t *entities.DynamicThreshold) string {
 	return ""
 }
 
-// labelModelName constructs the classifier-style model ID ("Name_VVersion") from a
-// label's associated AIModel, used for both threshold records and threshold events.
-// Requires the caller's query to preload Label.Model; falls back to the default
-// BirdNET model identifier when the label or model is absent.
-func labelModelName(l *entities.Label) string {
-	if l != nil && l.Model != nil && l.Model.Name != "" {
-		return l.Model.Name + "_V" + l.Model.Version
-	}
-	return detection.DefaultModelName + "_V" + detection.DefaultModelVersion
-}
-
 // resolveCommonName maps a scientific name to its common name using the
 // pre-built name maps. Falls back to the scientific name if no mapping exists.
 // Handles legacy concatenated "ScientificName_CommonName" format by extracting
@@ -3555,10 +3633,9 @@ func (ds *Datastore) SaveDynamicThreshold(threshold *datastore.DynamicThreshold)
 	return ds.threshold.SaveDynamicThreshold(ctx, v2Threshold)
 }
 
-// GetDynamicThreshold retrieves a dynamic threshold by scientific name and model.
-// Note: modelName is accepted for interface compatibility but not used in the v2 schema
-// because v2 thresholds are scoped through LabelID (which is already per-model).
-func (ds *Datastore) GetDynamicThreshold(speciesName, _ string) (*datastore.DynamicThreshold, error) {
+// GetDynamicThreshold retrieves a dynamic threshold by species name.
+// Thresholds are tracked per species; the v2 schema scopes them through LabelID.
+func (ds *Datastore) GetDynamicThreshold(speciesName string) (*datastore.DynamicThreshold, error) {
 	if ds.threshold == nil {
 		return nil, fmt.Errorf("threshold repository not configured")
 	}
@@ -3592,7 +3669,6 @@ func (ds *Datastore) GetDynamicThreshold(speciesName, _ string) (*datastore.Dyna
 		ID:             t.ID,
 		SpeciesName:    strings.ToLower(ds.resolveCommonName(scientificName)),
 		ScientificName: scientificName,
-		ModelName:      labelModelName(t.Label),
 		Level:          t.Level,
 		CurrentValue:   t.CurrentValue,
 		BaseThreshold:  t.BaseThreshold,
@@ -3628,7 +3704,6 @@ func (ds *Datastore) GetAllDynamicThresholds(limit ...int) ([]datastore.DynamicT
 			ID:             t.ID,
 			SpeciesName:    strings.ToLower(ds.resolveCommonName(scientificName)),
 			ScientificName: scientificName,
-			ModelName:      labelModelName(t.Label),
 			Level:          t.Level,
 			CurrentValue:   t.CurrentValue,
 			BaseThreshold:  t.BaseThreshold,
@@ -3863,7 +3938,6 @@ func (ds *Datastore) GetThresholdEvents(speciesName string, limit int) ([]datast
 		result = append(result, datastore.ThresholdEvent{
 			ID:            e.ID,
 			SpeciesName:   eventSpeciesName(e),
-			ModelName:     labelModelName(e.Label),
 			PreviousLevel: e.PreviousLevel,
 			NewLevel:      e.NewLevel,
 			PreviousValue: e.PreviousValue,
@@ -3896,7 +3970,6 @@ func (ds *Datastore) GetRecentThresholdEvents(limit int) ([]datastore.ThresholdE
 		result = append(result, datastore.ThresholdEvent{
 			ID:            e.ID,
 			SpeciesName:   eventSpeciesName(e),
-			ModelName:     labelModelName(e.Label),
 			PreviousLevel: e.PreviousLevel,
 			NewLevel:      e.NewLevel,
 			PreviousValue: e.PreviousValue,

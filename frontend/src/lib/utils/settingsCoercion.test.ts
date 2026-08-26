@@ -142,4 +142,100 @@ describe('settingsCoercion realtime rtsp streams', () => {
 
     expect(result.rtsp.streams[0]?.gain).toBeUndefined();
   });
+
+  it('preserves valid media modes', () => {
+    for (const mode of ['auto', 'audio-only', 'full-stream']) {
+      const result = coerceSettings('realtime', {
+        rtsp: {
+          streams: [{ name: 'Cam', url: 'rtsp://cam7', type: 'rtsp', mediaMode: mode }],
+        },
+      }) as { rtsp: { streams: Array<Record<string, unknown>> } };
+
+      expect(result.rtsp.streams[0]?.mediaMode).toBe(mode);
+    }
+  });
+
+  it('drops an invalid media mode', () => {
+    const result = coerceSettings('realtime', {
+      rtsp: {
+        streams: [{ name: 'Cam', url: 'rtsp://cam8', type: 'rtsp', mediaMode: 'video-only' }],
+      },
+    }) as { rtsp: { streams: Array<Record<string, unknown>> } };
+
+    expect(result.rtsp.streams[0]?.mediaMode).toBeUndefined();
+  });
+});
+
+describe('settingsCoercion realtime privacyFilter and VAD', () => {
+  it('coerces privacyFilter with default vad settings when vad is absent', () => {
+    const result = coerceSettings('realtime', {
+      privacyFilter: {
+        enabled: true,
+        confidence: 0.05,
+      },
+    }) as {
+      privacyFilter: {
+        enabled: boolean;
+        confidence: number;
+        debug: boolean;
+        vad: { enabled: boolean; threshold: number; modelPath: string };
+      };
+    };
+
+    expect(result.privacyFilter).toEqual({
+      enabled: true,
+      confidence: 0.05,
+      debug: false,
+      vad: {
+        enabled: false,
+        threshold: 0.35,
+        modelPath: '',
+      },
+    });
+  });
+
+  it('coerces string values and clamps vad threshold to valid bounds', () => {
+    const result = coerceSettings('realtime', {
+      privacyFilter: {
+        enabled: 'true',
+        confidence: '0.8',
+        debug: 'false',
+        vad: {
+          enabled: 'true',
+          threshold: '1.5', // should clamp to 1.0
+          modelPath: '/path/to/model.onnx',
+        },
+      },
+    }) as {
+      privacyFilter: {
+        enabled: boolean;
+        confidence: number;
+        debug: boolean;
+        vad: { enabled: boolean; threshold: number; modelPath: string };
+      };
+    };
+
+    expect(result.privacyFilter).toEqual({
+      enabled: true,
+      confidence: 0.8,
+      debug: false,
+      vad: {
+        enabled: true,
+        threshold: 1.0,
+        modelPath: '/path/to/model.onnx',
+      },
+    });
+  });
+
+  it('clamps vad threshold below minimum to 0.01', () => {
+    const result = coerceSettings('realtime', {
+      privacyFilter: {
+        vad: {
+          threshold: -0.5,
+        },
+      },
+    }) as { privacyFilter: { vad: { threshold: number } } };
+
+    expect(result.privacyFilter.vad.threshold).toBe(0.01);
+  });
 });

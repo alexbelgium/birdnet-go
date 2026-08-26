@@ -85,6 +85,54 @@ func ensureSessionSecret(settings *Settings) error {
 	return nil
 }
 
+// EnsureProfilingToken mints diagnostics.profiling.token when the pprof
+// endpoints are enabled on an instance that has no way to authenticate a user.
+// It follows the SessionSecret pattern deliberately: a stable secret generated
+// from crypto/rand and persisted to the config file, so a profiling session
+// survives the restart it often spans.
+//
+// Nothing is generated when an authentication provider is configured. There the
+// web server's auth middleware already gates the routes, and a second
+// credential sitting in the config would only widen the way in.
+//
+// It runs on the config load path AND on every settings-save path, so switching
+// profiling on at runtime yields a usable credential rather than an endpoint
+// that refuses everything until the next restart.
+//
+// Unlike ensureSessionSecret this does NOT mirror the value into viper. That
+// mirror is vestigial there: nothing in this repository persists through viper
+// (SaveYAMLConfig marshals the struct), and viper.Set is not goroutine-safe, so
+// staging a value it would never write is cost without a payer.
+//
+// The caller owns persistence, and is told whether anything changed so it can
+// decide whether a write is needed.
+func EnsureProfilingToken(settings *Settings) (bool, error) {
+	if settings == nil {
+		return false, nil
+	}
+
+	profiling := &settings.Diagnostics.Profiling
+	if !profiling.Enabled || profiling.Token != "" || settings.IsAuthProviderConfigured() {
+		return false, nil
+	}
+
+	token, err := GenerateRandomSecret()
+	if err != nil {
+		return false, errors.New(err).
+			Component("conf").
+			Category(errors.CategoryConfiguration).
+			Context("operation", "generate_profiling_token").
+			Build()
+	}
+
+	profiling.Token = token
+
+	// The value itself is never logged.
+	GetLogger().Info("Generated profiling token; no authentication provider is configured, so /debug/pprof/ requires the token from diagnostics.profiling.token")
+
+	return true, nil
+}
+
 // migrateLegacyProvider converts a legacy SocialProvider to the new OAuthProviderConfig format.
 // Returns nil if the legacy provider is not configured (no ClientID).
 func migrateLegacyProvider(providerName string, legacy SocialProvider) *OAuthProviderConfig {
@@ -351,6 +399,96 @@ func normalizeRTSPStreamEnabledDefaults(rawStreams any) ([]any, bool) {
 	return normalized, true
 }
 
+// catalogModelIDAliases maps a hyphenated model *catalog* entry ID
+// (classifier/model_catalog.go) to its canonical config-level ID. Keys are
+// lowercase for case-insensitive matching. Bat is intentionally absent: it has
+// many regional catalog IDs mapping to one registry entry, so there is no
+// single canonical spelling to normalize toward.
+var catalogModelIDAliases = map[string]string{
+	ModelIDBirdNETCatalog:   ModelIDBirdNET,
+	ModelIDBirdNETV3Catalog: ModelIDBirdNETV3,
+	ModelIDPerchV2Catalog:   ModelIDPerchV2,
+	ModelIDBSGCatalog:       ModelIDBSG,
+}
+
+// canonicalizeModelID returns the canonical config ID for a catalog-style
+// (hyphenated) model ID, or the input unchanged when it is not an alias.
+// Matching is case-insensitive; the returned canonical form preserves the
+// registry's own casing.
+func canonicalizeModelID(id string) string {
+	if canonical, ok := catalogModelIDAliases[strings.ToLower(id)]; ok {
+		return canonical
+	}
+	return id
+}
+
+// normalizeModelIDList rewrites catalog-style model IDs to their canonical form
+// and drops any case-insensitive duplicate that the rewrite (or a pre-existing
+// mixed-spelling config) produced, preserving first-seen order. Returns the
+// normalized slice and whether anything changed.
+func normalizeModelIDList(ids []string) ([]string, bool) {
+	if len(ids) == 0 {
+		return ids, false
+	}
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	changed := false
+	for _, id := range ids {
+		canonical := canonicalizeModelID(id)
+		if canonical != id {
+			changed = true
+		}
+		key := strings.ToLower(canonical)
+		if seen[key] {
+			changed = true // a duplicate was collapsed
+			continue
+		}
+		seen[key] = true
+		out = append(out, canonical)
+	}
+	return out, changed
+}
+
+// MigrateModelIDAliases canonicalizes catalog-style (hyphenated) model IDs in
+// models.enabled and in every source/stream model list to their underscore/
+// short config IDs. A user who hand-edits a config with the catalog spelling
+// (e.g. "perch-v2") is otherwise left with an entry that validation and
+// resolution accept as an alias but that model install/uninstall bookkeeping
+// (which keys on the canonical alias) would duplicate on install and fail to
+// remove on uninstall. Normalizing at load keeps a single canonical spelling
+// persisted so that lifecycle code stays consistent. Returns true if any value
+// changed. See Sentry BIRDNET-GO-2FZ.
+func (s *Settings) MigrateModelIDAliases() bool {
+	changed := false
+
+	if normalized, did := normalizeModelIDList(s.Models.Enabled); did {
+		s.Models.Enabled = normalized
+		changed = true
+	}
+
+	for i := range s.Realtime.Audio.Sources {
+		src := &s.Realtime.Audio.Sources[i]
+		if canonical := canonicalizeModelID(src.Model); canonical != src.Model {
+			src.Model = canonical
+			changed = true
+		}
+		if normalized, did := normalizeModelIDList(src.Models); did {
+			src.Models = normalized
+			changed = true
+		}
+	}
+
+	for i := range s.Realtime.RTSP.Streams {
+		stream := &s.Realtime.RTSP.Streams[i]
+		if normalized, did := normalizeModelIDList(stream.Models); did {
+			stream.Models = normalized
+			changed = true
+		}
+	}
+
+	return changed
+}
+
 // ValidateModelConfig checks model-related configuration for errors and
 // warnings. Returns a slice of warning/error strings. Fatal errors are
 // prefixed with "error:"; non-fatal issues with "warning:".
@@ -402,18 +540,21 @@ func (s *Settings) ValidateModelConfig(knownIDs map[string]bool, checkSourceRefs
 // errors are collected and returned together so the user can fix them in
 // one pass.
 func (s *Settings) applyModelValidation() error {
-	// Default known IDs - matches classifier.KnownConfigIDs() at compile time.
-	// This fallback is used during config loading before the classifier package
-	// is available. The orchestrator re-validates with the authoritative list.
-	knownIDs := map[string]bool{ModelIDBirdNET: true, ModelIDPerchV2: true, ModelIDBat: true, ModelIDBSG: true}
-	modelIssues := s.ValidateModelConfig(knownIDs, false)
+	// Fallback known-ID set used during config loading before the classifier
+	// package is available; the orchestrator re-validates with the authoritative
+	// classifier.KnownConfigIDs() later. Reuse ValidAudioModels (the same
+	// canonical + catalog-alias set, kept in lockstep with the registry by
+	// TestKnownConfigIDs_MatchesConfValidAudioModels) rather than hand-maintaining
+	// a third copy that could drift. The extra "" default key is harmless here
+	// because models.enabled never contains an empty entry. ValidateModelConfig
+	// only reads the map.
+	modelIssues := s.ValidateModelConfig(ValidAudioModels, false)
 	var fatalErrors []string
 	for _, issue := range modelIssues {
 		if strings.HasPrefix(issue, "error:") {
 			fatalErrors = append(fatalErrors, strings.TrimPrefix(issue, "error: "))
 		} else {
-			GetLogger().Warn("model configuration issue", logger.String("issue", issue))
-			s.ValidationWarnings = append(s.ValidationWarnings, issue)
+			s.recordValidationWarning(warnComponentModels, "%s", strings.TrimPrefix(issue, "warning: "))
 		}
 	}
 	if len(fatalErrors) > 0 {
@@ -515,9 +656,9 @@ func (s *Settings) ReconcileMisplacedAudioSources() bool {
 		}
 
 		if src.SampleRate > 0 {
-			s.ValidationWarnings = append(s.ValidationWarnings,
-				fmt.Sprintf("audio source %q sample rate %d Hz was not carried to stream %q: stream sample rate is auto-detected",
-					src.Name, src.SampleRate, privacy.SanitizeStreamUrl(device)))
+			s.recordValidationWarning(warnComponentStreams,
+				"audio source %q sample rate %d Hz was not carried to stream %q; a stream's sample rate is auto-detected",
+				src.Name, src.SampleRate, privacy.SanitizeStreamUrl(device))
 		}
 
 		changed = true
@@ -575,9 +716,9 @@ func (s *Settings) appendStreamFromSource(src *AudioSourceConfig, url, streamTyp
 		Models:     src.Models,
 	})
 
-	s.ValidationWarnings = append(s.ValidationWarnings,
-		fmt.Sprintf("moved misplaced stream URL %q from realtime.audio.sources to realtime.rtsp.streams as %q",
-			privacy.SanitizeStreamUrl(url), name))
+	s.recordValidationWarning(warnComponentStreams,
+		"moved misplaced stream URL %q from realtime.audio.sources to realtime.rtsp.streams as %q",
+		privacy.SanitizeStreamUrl(url), name)
 }
 
 // uniqueStreamName derives a stream name from the requested source name that
@@ -689,7 +830,7 @@ func (s *Settings) mergeSourceIntoStream(src *AudioSourceConfig, stream *StreamC
 		kept = append(kept, "quietHours")
 	}
 
-	s.ValidationWarnings = append(s.ValidationWarnings,
+	s.recordValidationWarning(warnComponentStreams, "%s",
 		formatReconcileMergeWarning(privacy.SanitizeStreamUrl(url), stream.Name, applied, kept))
 }
 

@@ -275,7 +275,29 @@ func (p *AudioPipelineService) Start(_ context.Context) error {
 	p.quietHoursScheduler.Start()
 
 	// Start audio liveness watchdog for detecting silent capture deaths.
-	notifSvc := notification.GetService()
+	// Coalesce transient silence/recovery notifications so a source that
+	// repeatedly drops and self-recovers (e.g. a flaky RTSP camera) does not spam
+	// one high-priority notification per cycle. Critical escalated/failed states
+	// bypass coalescing. This affects only notifications; source restart and
+	// recovery are unchanged.
+	livenessNotif := newLivenessNotifier(func(priority notification.Priority, title, body string) {
+		// Resolve the notification service at send time rather than capturing it
+		// once at Start, matching the error-hook pattern, so notifications are not
+		// permanently dropped if the service initializes after the pipeline starts.
+		notifSvc := notification.GetService()
+		if notifSvc == nil {
+			return
+		}
+		if _, err := notifSvc.CreateWithComponent(
+			notification.TypeSystem, priority,
+			title, body, livenessComponent,
+		); err != nil {
+			audiocore.GetLogger().Warn("failed to send liveness notification",
+				logger.Error(err),
+				logger.String("operation", "liveness_notify"),
+				logger.String("title", title))
+		}
+	})
 	watchdogCallbacks := audiocore.LivenessCallbacks{
 		RestartSource: p.RestartSource,
 		Escalate: func(_ string) {
@@ -285,23 +307,7 @@ func (p *AudioPipelineService) Start(_ context.Context) error {
 			}
 		},
 		Notify: func(sourceID string, state audiocore.LivenessState, msg string) {
-			if notifSvc == nil {
-				return
-			}
-			priority := notification.PriorityHigh
-			title := "Audio source " + msg
-			body := "Source " + sourceID + ": " + msg
-			if state == audiocore.StateFailed || state == audiocore.StateEscalated {
-				priority = notification.PriorityCritical
-			}
-			if _, err := notifSvc.CreateWithComponent(
-				notification.TypeSystem, priority,
-				title, body, "audiocore.liveness",
-			); err != nil {
-				audiocore.GetLogger().Warn("failed to send liveness notification",
-					logger.Error(err),
-					logger.String("operation", "liveness_notify"))
-			}
+			livenessNotif.notify(sourceID, state, msg)
 		},
 		IsQuietHours: func(sourceID string) bool {
 			if p.quietHoursScheduler == nil {
@@ -344,14 +350,15 @@ func (p *AudioPipelineService) Start(_ context.Context) error {
 			logger.String("operation", "rtsp_monitoring_setup"))
 	}
 
-	// Start clip cleanup monitor.
-	// Uses conf.Setting() instead of local settings for hot-reload support:
-	// retention policy can be changed at runtime via the web UI.
-	if conf.Setting().Realtime.Audio.Export.Retention.Policy != policyNone {
-		p.wg.Go(func() {
-			clipCleanupMonitor(p.done, dataStore)
-		})
-	}
+	// Start clip cleanup monitor unconditionally. It re-reads the retention
+	// policy every iteration (see the policyNone check inside the loop) so
+	// enabling retention via the web UI after startup takes effect without a
+	// restart, matching every other hot-reloadable setting here. Gating the
+	// goroutine itself on the startup-time policy would strand a config change
+	// from "none" to "age"/"usage" until the process restarts.
+	p.wg.Go(func() {
+		clipCleanupMonitor(p.done, dataStore)
+	})
 
 	// Start clip reconcile monitor. Runs unconditionally (regardless of retention
 	// policy and regardless of whether audio export is enabled) because orphaned
@@ -1045,11 +1052,18 @@ func sourceNeedsReconfigure(running *audiocore.AudioSource, desired *audiocore.S
 	// needlessly restart the stream.
 	channelModeChanged := conf.ChannelMode(running.ChannelMode).Canonical() !=
 		conf.ChannelMode(desired.ChannelMode).Canonical()
+	// Compare canonical media modes so an unset value and an explicit default
+	// (which build identical FFmpeg args) are not treated as a change. Without
+	// this, a mediaMode-only edit would persist to disk but never restart the
+	// running FFmpeg, silently breaking hot-reload.
+	mediaModeChanged := conf.MediaMode(running.MediaMode).Canonical() !=
+		conf.MediaMode(desired.MediaMode).Canonical()
 	return running.SampleRate != desired.SampleRate ||
 		sourceSampleRateChanged ||
 		running.BitDepth != desired.BitDepth ||
 		running.Channels != desired.Channels ||
 		channelModeChanged ||
+		mediaModeChanged ||
 		sourceChannelsChanged
 }
 
@@ -1379,6 +1393,7 @@ func (p *AudioPipelineService) buildSourceConfigsWithModels() []sourceConfigWith
 				Channels:         1,
 				SourceChannels:   probe.channels,
 				ChannelMode:      string(stream.ChannelMode),
+				MediaMode:        string(stream.MediaMode),
 				Gain:             stream.Gain,
 			},
 			modelIDs: stream.Models,
@@ -1711,6 +1726,14 @@ func clipCleanupMonitor(quitChan chan struct{}, dataStore datastore.Interface) {
 			currentSettings := conf.Setting()
 			exportCfg := currentSettings.Realtime.Audio.Export
 			currentPolicy := exportCfg.Retention.Policy
+
+			// Re-checked every iteration (not just at Start()) so toggling
+			// retention off/on via the web UI takes effect without a restart.
+			if currentPolicy == policyNone {
+				log.Debug("skipping clip cleanup: retention policy is none",
+					logger.String("operation", "clip_cleanup_skip"))
+				continue
+			}
 
 			if strings.TrimSpace(exportCfg.Path) == "" {
 				log.Debug("skipping clip cleanup: export path not configured",

@@ -422,7 +422,7 @@ func TestV2OnlyDatastore_DynamicThreshold(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get threshold by scientific name
-	retrieved, err := ds.GetDynamicThreshold("Passer domesticus", "")
+	retrieved, err := ds.GetDynamicThreshold("Passer domesticus")
 	require.NoError(t, err)
 	assert.Equal(t, "passer domesticus", retrieved.SpeciesName)
 	assert.Equal(t, "Passer domesticus", retrieved.ScientificName)
@@ -474,7 +474,7 @@ func TestV2OnlyDatastore_DynamicThreshold_CommonNameDisplay(t *testing.T) {
 	require.NoError(t, err)
 
 	// GetDynamicThreshold should return common name in SpeciesName
-	retrieved, err := ds.GetDynamicThreshold("Parus major", "")
+	retrieved, err := ds.GetDynamicThreshold("Parus major")
 	require.NoError(t, err)
 	assert.Equal(t, "great tit", retrieved.SpeciesName, "SpeciesName should be common name")
 	assert.Equal(t, "Parus major", retrieved.ScientificName, "ScientificName should stay scientific")
@@ -487,11 +487,9 @@ func TestV2OnlyDatastore_DynamicThreshold_CommonNameDisplay(t *testing.T) {
 	assert.Equal(t, "Parus major", all[0].ScientificName, "ScientificName should stay scientific in list")
 }
 
-// TestV2OnlyDatastore_DynamicThreshold_ModelName verifies that
-// GetAllDynamicThresholds and GetDynamicThreshold return ModelName
-// constructed from the Label's AIModel (e.g., "BirdNET_V2.4").
-// Regression test for GitHub issue #2902.
-func TestV2OnlyDatastore_DynamicThreshold_ModelName(t *testing.T) {
+// TestV2OnlyDatastore_DynamicThreshold_SpeciesNameRetrieval verifies that
+// GetAllDynamicThresholds and GetDynamicThreshold return common names.
+func TestV2OnlyDatastore_DynamicThreshold_SpeciesNameRetrieval(t *testing.T) {
 	labels := []string{
 		"Parus major_Great Tit",
 	}
@@ -501,7 +499,6 @@ func TestV2OnlyDatastore_DynamicThreshold_ModelName(t *testing.T) {
 	threshold := &datastore.DynamicThreshold{
 		SpeciesName:    "Parus major",
 		ScientificName: "Parus major",
-		ModelName:      "BirdNET_V2.4",
 		Level:          2,
 		CurrentValue:   0.5,
 		BaseThreshold:  0.8,
@@ -516,20 +513,16 @@ func TestV2OnlyDatastore_DynamicThreshold_ModelName(t *testing.T) {
 	err := ds.SaveDynamicThreshold(threshold)
 	require.NoError(t, err)
 
-	// GetAllDynamicThresholds must return non-empty ModelName
+	// GetAllDynamicThresholds must return lowercase common name
 	all, err := ds.GetAllDynamicThresholds()
 	require.NoError(t, err)
 	require.Len(t, all, 1)
-	assert.Equal(t, "BirdNET_V2.4", all[0].ModelName,
-		"ModelName must be constructed from Label's Model (Name_VVersion)")
 	assert.Equal(t, "great tit", all[0].SpeciesName,
 		"SpeciesName must be lowercase to match processor convention")
 
-	// GetDynamicThreshold (single lookup) must also return ModelName
-	single, err := ds.GetDynamicThreshold("Parus major", "")
+	// GetDynamicThreshold (single lookup) must also return lowercase common name
+	single, err := ds.GetDynamicThreshold("Parus major")
 	require.NoError(t, err)
-	assert.Equal(t, "BirdNET_V2.4", single.ModelName,
-		"Single lookup must also return ModelName")
 	assert.Equal(t, "great tit", single.SpeciesName,
 		"Single lookup SpeciesName must be lowercase")
 }
@@ -602,7 +595,7 @@ func TestV2OnlyDatastore_DynamicThreshold_GetByCommonName(t *testing.T) {
 	require.NoError(t, err)
 
 	// Retrieve using lowercase common name
-	retrieved, err := ds.GetDynamicThreshold("great tit", "")
+	retrieved, err := ds.GetDynamicThreshold("great tit")
 	require.NoError(t, err)
 	assert.Equal(t, "great tit", retrieved.SpeciesName)
 	assert.Equal(t, "Parus major", retrieved.ScientificName)
@@ -632,7 +625,7 @@ func TestV2OnlyDatastore_DynamicThreshold_FallbackWithoutMapping(t *testing.T) {
 	require.NoError(t, err)
 
 	// Without label mapping, should fall back to scientific name
-	retrieved, err := ds.GetDynamicThreshold("Passer domesticus", "")
+	retrieved, err := ds.GetDynamicThreshold("Passer domesticus")
 	require.NoError(t, err)
 	assert.Equal(t, "passer domesticus", retrieved.SpeciesName, "should fallback to scientific name")
 	assert.Equal(t, "Passer domesticus", retrieved.ScientificName)
@@ -666,7 +659,7 @@ func TestV2OnlyDatastore_DynamicThreshold_UpdateExpiryByCommonName(t *testing.T)
 	require.NoError(t, err, "UpdateDynamicThresholdExpiry should work with common name")
 
 	// Verify the expiry was updated
-	retrieved, err := ds.GetDynamicThreshold("Parus major", "")
+	retrieved, err := ds.GetDynamicThreshold("Parus major")
 	require.NoError(t, err)
 	assert.WithinDuration(t, newExpiry, retrieved.ExpiresAt, time.Second, "expiry should be updated")
 }
@@ -912,7 +905,7 @@ func TestV2OnlyDatastore_ThresholdReads_ErrorTelemetry(t *testing.T) {
 		// reachable via errors.Is (EnhancedError.Unwrap) and the CategoryNotFound
 		// "dynamic threshold not found" message is suppressed from Sentry, so it is never
 		// surfaced as a database error (#1019).
-		_, err := ds.GetDynamicThreshold("Parus major", "")
+		_, err := ds.GetDynamicThreshold("Parus major")
 		require.Error(t, err)
 		require.ErrorIs(t, err, repository.ErrDynamicThresholdNotFound,
 			"not-found sentinel must propagate so callers can distinguish a benign miss from a genuine DB fault")
@@ -939,7 +932,7 @@ func TestV2OnlyDatastore_ThresholdReads_ErrorTelemetry(t *testing.T) {
 			assert.Equal(t, string(errors.CategoryDatabase), ee.GetCategory(), "%s must tag database category", op)
 		}
 
-		_, errGet := ds.GetDynamicThreshold("Parus major", "")
+		_, errGet := ds.GetDynamicThreshold("Parus major")
 		assertDatastoreWrapped(t, errGet, "GetDynamicThreshold")
 
 		_, errAll := ds.GetAllDynamicThresholds()
@@ -953,12 +946,9 @@ func TestV2OnlyDatastore_ThresholdReads_ErrorTelemetry(t *testing.T) {
 	})
 }
 
-// TestV2OnlyDatastore_ThresholdEvent_ModelName verifies that GetThresholdEvents and
-// GetRecentThresholdEvents return ModelName constructed from the event Label's AIModel
-// (e.g., "BirdNET_V2.4"), the event-side parallel of the GitHub #2902 record fix.
-// Regression test for #1025: events previously returned an empty ModelName because the
-// repository only preloaded Label (not Label.Model) and the converter never set it.
-func TestV2OnlyDatastore_ThresholdEvent_ModelName(t *testing.T) {
+// TestV2OnlyDatastore_ThresholdEvent_Retrieval verifies that GetThresholdEvents and
+// GetRecentThresholdEvents return events for the species.
+func TestV2OnlyDatastore_ThresholdEvent_Retrieval(t *testing.T) {
 	ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Parus major_Great Tit"})
 	defer cleanup()
 
@@ -977,14 +967,12 @@ func TestV2OnlyDatastore_ThresholdEvent_ModelName(t *testing.T) {
 	events, err := ds.GetThresholdEvents("Parus major", 10)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
-	assert.Equal(t, "BirdNET_V2.4", events[0].ModelName,
-		"event ModelName must be constructed from the Label's Model (Name_VVersion)")
+	assert.Equal(t, "Parus major", events[0].SpeciesName)
 
 	recent, err := ds.GetRecentThresholdEvents(10)
 	require.NoError(t, err)
 	require.Len(t, recent, 1)
-	assert.Equal(t, "BirdNET_V2.4", recent[0].ModelName,
-		"recent event ModelName must be constructed from the Label's Model")
+	assert.Equal(t, "Parus major", recent[0].SpeciesName)
 }
 
 // TestV2OnlyDatastore_GetThresholdEvents_ResolvesScientificName covers the
@@ -1718,7 +1706,7 @@ func TestV2OnlyDatastore_GetBatchHourlyOccurrences_ScientificName(t *testing.T) 
 	// including the scientific-only bat label. Assert the daily total per species
 	// rather than a specific hour index: the query buckets hours using SQLite's
 	// OS-local timezone, which may differ from the test datastore's configured UTC.
-	counts, err := ds.GetBatchHourlyOccurrences(t.Context(), date,
+	counts, err := ds.GetBatchHourlyOccurrences(t.Context(), date, date,
 		[]string{"Turdus merula", "Barbastella barbastellus"}, 0.0)
 	require.NoError(t, err)
 
@@ -1733,12 +1721,56 @@ func TestV2OnlyDatastore_GetBatchHourlyOccurrences_ScientificName(t *testing.T) 
 	// The localized common name is no longer an accepted key. Pre-fix, the batch
 	// query reverse-mapped "Common Blackbird" -> "Turdus merula" and returned the
 	// blackbird's count under the common-name key; the fixed query returns zero.
-	byCommon, err := ds.GetBatchHourlyOccurrences(t.Context(), date, []string{"Common Blackbird"}, 0.0)
+	byCommon, err := ds.GetBatchHourlyOccurrences(t.Context(), date, date, []string{"Common Blackbird"}, 0.0)
 	require.NoError(t, err)
 	common, ok := byCommon["Common Blackbird"]
 	require.True(t, ok)
 	assert.Equal(t, 0, hourlyTotal(&common),
 		"localized common name must not resolve to detections")
+}
+
+// TestV2OnlyDatastore_GetBatchHourlyOccurrences_DateRange verifies the batch hourly query sums
+// detections across every day in the inclusive [startDate, endDate] range rather than a single
+// day. The time-of-day chart requests the user's whole selected range; querying only one day made
+// species that happened to be silent that day read as zero for the entire range.
+func TestV2OnlyDatastore_GetBatchHourlyOccurrences_DateRange(t *testing.T) {
+	ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Turdus merula_Common Blackbird"})
+	defer cleanup()
+
+	// One detection on each of three consecutive days.
+	saveTestNote(t, ds, "2024-01-15", "08:20:00", "Turdus merula", 0.8)
+	saveTestNote(t, ds, "2024-01-16", "08:30:00", "Turdus merula", 0.8)
+	saveTestNote(t, ds, "2024-01-17", "08:40:00", "Turdus merula", 0.8)
+
+	// The full range sums all three days, including the end date itself.
+	counts, err := ds.GetBatchHourlyOccurrences(t.Context(), "2024-01-15", "2024-01-17",
+		[]string{"Turdus merula"}, 0.0)
+	require.NoError(t, err)
+	blackbird, ok := counts["Turdus merula"]
+	require.True(t, ok)
+	assert.Equal(t, 3, hourlyTotal(&blackbird), "range must cover every day, end date inclusive")
+
+	// start == end still covers exactly that one day (the single-date callers' behavior).
+	oneDay, err := ds.GetBatchHourlyOccurrences(t.Context(), "2024-01-16", "2024-01-16",
+		[]string{"Turdus merula"}, 0.0)
+	require.NoError(t, err)
+	single, ok := oneDay["Turdus merula"]
+	require.True(t, ok)
+	assert.Equal(t, 1, hourlyTotal(&single), "start == end covers that single day only")
+}
+
+// TestV2OnlyDatastore_GetBatchHourlyOccurrences_InvertedRange verifies an end date before the start
+// date is rejected. Such a range produces no zone segments, so without the guard the query would
+// return all-zero counts for every species with a nil error - a silent wrong answer.
+func TestV2OnlyDatastore_GetBatchHourlyOccurrences_InvertedRange(t *testing.T) {
+	ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Turdus merula_Common Blackbird"})
+	defer cleanup()
+	saveTestNote(t, ds, "2024-01-15", "08:20:00", "Turdus merula", 0.8)
+
+	_, err := ds.GetBatchHourlyOccurrences(t.Context(), "2024-01-17", "2024-01-15",
+		[]string{"Turdus merula"}, 0.0)
+	require.Error(t, err, "an inverted range must not silently return zeroes")
+	assert.Contains(t, err.Error(), "precedes")
 }
 
 // TestV2OnlyDatastore_GetBatchHourlyOccurrences_CancelledContext verifies that a cancelled
@@ -1753,7 +1785,7 @@ func TestV2OnlyDatastore_GetBatchHourlyOccurrences_CancelledContext(t *testing.T
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := ds.GetBatchHourlyOccurrences(ctx, "2024-01-15", []string{"Turdus merula"}, 0.0)
+	_, err := ds.GetBatchHourlyOccurrences(ctx, "2024-01-15", "2024-01-15", []string{"Turdus merula"}, 0.0)
 	require.ErrorIs(t, err, context.Canceled, "cancelled context must surface as context.Canceled, not silently zeroed counts")
 }
 
