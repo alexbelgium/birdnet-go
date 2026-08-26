@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/conf"
 )
 
@@ -40,9 +41,8 @@ func putTestSettingsJSON(t *testing.T, settings *conf.Settings, eqOverride map[s
 }
 
 // TestEQFilterRoundTrip_PUT verifies that equalizer filters survive the full
-// PUT /api/v2/settings path that the frontend save button uses. This tests
-// the ctx.Bind -> updateAllowedFieldsRecursivelyWithTracking flow, not the
-// PATCH mergeJSONIntoStruct flow.
+// PUT /api/v2/settings path that the frontend save button uses. PUT now runs the
+// same omission-preserving deep-merge family as PATCH (mergeFullSettings).
 func TestEQFilterRoundTrip_PUT(t *testing.T) {
 	t.Parallel()
 
@@ -54,11 +54,7 @@ func TestEQFilterRoundTrip_PUT(t *testing.T) {
 	}
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, testControlChanBuffer),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, testControlChanBuffer), DisableSaveSettings: true}
 	controller.Settings.Store(initial)
 
 	eqConfig := map[string]any{
@@ -164,11 +160,7 @@ func TestEQFilterRoundTrip_PUT_PerSource(t *testing.T) {
 	}}
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, testControlChanBuffer),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, testControlChanBuffer), DisableSaveSettings: true}
 	controller.Settings.Store(initial)
 
 	sourceEQ := map[string]any{
@@ -223,11 +215,7 @@ func TestEQFilterRoundTrip_PATCH(t *testing.T) {
 	}
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, testControlChanBuffer),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, testControlChanBuffer), DisableSaveSettings: true}
 	controller.Settings.Store(initial)
 
 	payload := map[string]any{
@@ -305,11 +293,7 @@ func TestEQFilterRoundTrip_PUT_PerStream(t *testing.T) {
 	}}
 
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, testControlChanBuffer),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, testControlChanBuffer), DisableSaveSettings: true}
 	controller.Settings.Store(initial)
 
 	streamEQ := map[string]any{
@@ -357,11 +341,7 @@ func TestEQFilterRoundTrip_PUT_WithFrontendIDField(t *testing.T) {
 
 	initial := getTestSettings(t)
 	e := echo.New()
-	controller := &Controller{
-		Echo:                e,
-		controlChan:         make(chan string, testControlChanBuffer),
-		DisableSaveSettings: true,
-	}
+	controller := &Controller{Core: &apicore.Core{Echo: e}, controlChan: make(chan string, testControlChanBuffer), DisableSaveSettings: true}
 	controller.Settings.Store(initial)
 
 	eqConfig := map[string]any{

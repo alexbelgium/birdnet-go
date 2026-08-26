@@ -19,6 +19,12 @@
 <script lang="ts">
   import { generateId } from '$lib/utils/uuid';
   import {
+    deviceValue,
+    deviceMatches,
+    deviceLabel,
+    type AudioDevice,
+  } from '$lib/utils/audioDevices';
+  import {
     Settings,
     Trash2,
     Check,
@@ -34,7 +40,10 @@
   import { t } from '$lib/i18n';
   import { cn } from '$lib/utils/cn';
   import { loggers } from '$lib/utils/logger';
-  import { fetchDeviceCapabilities as fetchCapabilities } from '$lib/utils/audio/sampleRate';
+  import {
+    fetchDeviceCapabilities as fetchCapabilities,
+    coerceSupportedRate,
+  } from '$lib/utils/audio/sampleRate';
   import { DEFAULT_MODEL_ID } from '$lib/stores/models.svelte';
   import SelectDropdown from './SelectDropdown.svelte';
   import InlineSlider from './InlineSlider.svelte';
@@ -46,7 +55,11 @@
     EqualizerFilterType,
     QuietHoursConfig,
   } from '$lib/stores/settings';
-  import { defaultQuietHoursConfig } from '$lib/stores/settings';
+  import {
+    defaultQuietHoursConfig,
+    AUDIO_GAIN_MIN_DB,
+    AUDIO_GAIN_MAX_DB,
+  } from '$lib/stores/settings';
 
   // Local EqualizerSettings type matching AudioEqualizerSettings component's interface
   // where filter.id is optional (assigned on save)
@@ -75,7 +88,7 @@
     source: AudioSourceConfig;
     index: number;
     sources: AudioSourceConfig[];
-    audioDevices: Array<{ index: number; name: string; id: string }>;
+    audioDevices: AudioDevice[];
     modelOptions: Array<{ value: string; label: string }>;
     availableModels: Array<{
       id: string;
@@ -117,11 +130,16 @@
   ]);
   let sampleRateVerified = $state(true);
   let sampleRateLoading = $state(false);
-  let fetchController: AbortController | null = $state(null);
+  // Plain (non-reactive) ref: the probe effect both reads (abort) and writes this
+  // controller in its synchronous prefix. As $state that read/write would register
+  // the controller as a dependency of the effect and immediately re-run it, whose
+  // cleanup then aborts the brand-new in-flight probe (issue #3593). It is only
+  // used imperatively for abort(), never in markup, so it must not be reactive.
+  let fetchController: AbortController | null = null;
 
-  // Device display name lookup
+  // Device display name lookup (matches a saved stable token or legacy ALSA id)
   let deviceDisplayName = $derived(
-    audioDevices.find(d => d.id === source.device)?.name ?? source.device
+    audioDevices.find(d => deviceMatches(d, source.device))?.name ?? source.device
   );
 
   // Model display names (comma-separated for multiple)
@@ -131,11 +149,19 @@
       : (modelOptions[0]?.label ?? '')
   );
 
-  // Device dropdown options — show current source's device + devices not used by other sources
+  // Device dropdown options: the current source's device plus devices not used by
+  // other sources. The currently-configured device keeps its saved value (which
+  // may be a legacy ALSA id) so the dropdown pre-selects it; other devices use the
+  // reboot-stable token so a new pick persists the stable form (GH #3651).
   let deviceOptions = $derived(
     audioDevices
-      .filter(d => d.id === source.device || !sources.some(s => s.device === d.id))
-      .map(d => ({ value: d.id, label: d.name }))
+      .filter(
+        d => deviceMatches(d, source.device) || !sources.some(s => deviceMatches(d, s.device))
+      )
+      .map(d => ({
+        value: deviceMatches(d, source.device) ? source.device : deviceValue(d),
+        label: deviceLabel(d, audioDevices),
+      }))
   );
 
   // Edit mode functions
@@ -236,16 +262,30 @@
   async function fetchDeviceCapabilities(deviceId: string) {
     if (!deviceId) return;
     fetchController?.abort();
-    fetchController = new AbortController();
+    const controller = new AbortController();
+    fetchController = controller;
     sampleRateLoading = true;
+    // Drop the previous device's probed rates so a slower probe cannot leave
+    // stale, unverified options on screen while the new one is in flight.
+    sampleRateOptions = [{ value: '48000', label: '48 kHz' }];
+    sampleRateVerified = true;
     try {
-      const result = await fetchCapabilities(deviceId, fetchController.signal);
+      const result = await fetchCapabilities(deviceId, controller.signal);
+      // Ignore a superseded probe: a newer device selection has replaced this
+      // controller, so applying these results (or clearing the loading flag)
+      // would clobber the newer probe's state.
+      if (fetchController !== controller) return;
       sampleRateOptions = result.options;
       sampleRateVerified = result.verified;
+      // Coerce the selection to a rate the new device actually supports so an
+      // unsupported rate is never persisted.
+      editSampleRate = coerceSupportedRate(result.options, editSampleRate);
     } catch {
       // Only AbortError reaches here (utility handles all other failures internally)
     } finally {
-      sampleRateLoading = false;
+      if (fetchController === controller) {
+        sampleRateLoading = false;
+      }
     }
   }
 
@@ -255,8 +295,13 @@
       prevEditDevice = editDevice;
       fetchDeviceCapabilities(editDevice);
     }
+    // Capture the controller this run started so the cleanup only aborts that
+    // probe. startEdit() starts a probe directly and then flips isEditing, which
+    // re-runs this effect; without the capture the cleanup would abort that
+    // just-started probe and the edit form would open stuck at 48 kHz (issue #3593).
+    const controllerToAbort = fetchController;
     return () => {
-      fetchController?.abort();
+      controllerToAbort?.abort();
     };
   });
 </script>
@@ -376,8 +421,8 @@
           label={t('settings.audio.soundCards.gainLabel')}
           value={editGain}
           onUpdate={value => (editGain = value)}
-          min={-40}
-          max={40}
+          min={AUDIO_GAIN_MIN_DB}
+          max={AUDIO_GAIN_MAX_DB}
           step={1}
           unit=" dB"
           {disabled}

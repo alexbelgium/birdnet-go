@@ -7,39 +7,140 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/tphakala/birdnet-go/internal/audiocore"
-	"github.com/tphakala/birdnet-go/internal/audiocore/convert"
+	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
 // ffmpegTimeoutParam is the FFmpeg flag name for the connection timeout parameter.
 const ffmpegTimeoutParam = "-timeout"
 
-// ffmpegRTSPTimeoutParam is the RTSP-specific stream timeout flag.
-// Older FFmpeg used -stimeout for RTSP, but it was removed in FFmpeg 5.x+.
-// Using -timeout works across all supported versions.
+// ffmpegStimeoutMaxMajor is the first FFmpeg major version that removed -stimeout.
+// FFmpeg < 5 needs -stimeout for RTSP; 5.x+ uses -timeout.
+const ffmpegStimeoutMaxMajor = 5
+
+// ffmpegRTSPTimeoutParam is the RTSP timeout flag for FFmpeg 5.x+ and unknown versions.
 const ffmpegRTSPTimeoutParam = "-timeout"
 
-// ffmpegLegacyRTSPTimeoutParam is the deprecated -stimeout flag that older FFmpeg
-// used for RTSP. We no longer emit it, but we still recognise it in user-supplied
-// parameters so a carried-over value is honoured and the unsupported flag is
-// stripped before reaching FFmpeg.
+// ffmpegLegacyRTSPTimeoutParam is the RTSP timeout flag required by FFmpeg 4.x.
 const ffmpegLegacyRTSPTimeoutParam = "-stimeout"
 
+// ffmpegAllowedMediaTypesFlag restricts the RTSP demuxer to SETUP only the
+// listed media types during the RTSP handshake. BirdNET-Go consumes audio only,
+// so requesting audio alone avoids opening a video client slot on cameras with a
+// limited number of RTSP sessions (issue #3798). Shared by every RTSP-opening
+// path: live capture (buildInputArgs), stream inspection (buildProbeArgs), and
+// channel-energy analysis (buildAnalysisArgs), so they stay in lockstep.
+const ffmpegAllowedMediaTypesFlag = "-allowed_media_types"
+
+// ffmpegAllowedMediaTypesAudio is the value paired with ffmpegAllowedMediaTypesFlag
+// to accept audio tracks only.
+const ffmpegAllowedMediaTypesAudio = "audio"
+
+// isRTSPURL reports whether a raw URL string is an RTSP or RTSPS stream. Used by
+// the probe and channel-analysis paths, which take a bare URL rather than a
+// StreamConfig, to decide whether RTSP-specific FFmpeg flags apply.
+func isRTSPURL(url string) bool {
+	lower := strings.ToLower(url)
+	return strings.HasPrefix(lower, "rtsp://") || strings.HasPrefix(lower, "rtsps://")
+}
+
+// appendRTSPMediaArgs appends the RTSP transport flag and, when audioOnly is
+// true, the -allowed_media_types audio restriction. audioOnly is false only when
+// a camera has proven it cannot SETUP the audio track alone and the caller has
+// fallen back to requesting the full stream (issue #3902); video is still
+// dropped after decode via -vn, so the fallback only affects the RTSP handshake.
+func appendRTSPMediaArgs(args []string, transport string, audioOnly bool) []string {
+	args = append(args, "-rtsp_transport", transport)
+	if audioOnly {
+		args = append(args, ffmpegAllowedMediaTypesFlag, ffmpegAllowedMediaTypesAudio)
+	}
+	return args
+}
+
+// ffmpegMajorCache stores detected FFmpeg major versions by binary path.
+var ffmpegMajorCache sync.Map
+
+// ffmpegMajorGroup coalesces concurrent first-time version probes for the same
+// binary path, so a burst of streams starting at once spawns a single
+// `ffmpeg -version` process instead of one per stream.
+var ffmpegMajorGroup singleflight.Group
+
+// rtspTimeoutParamForMajor returns the RTSP connection-timeout flag for the
+// given FFmpeg major version: -stimeout below 5 (FFmpeg 4.x), -timeout on 5.x+
+// and unknown versions. This is the single source of truth shared by the live
+// capture path (timeoutParamForSource) and the channel-energy analysis path
+// (buildAnalysisArgs), so both stay in lockstep.
+func rtspTimeoutParamForMajor(ffmpegMajor int) string {
+	if ffmpegMajor > 0 && ffmpegMajor < ffmpegStimeoutMaxMajor {
+		return ffmpegLegacyRTSPTimeoutParam
+	}
+	return ffmpegRTSPTimeoutParam
+}
+
 // timeoutParamForSource returns the correct FFmpeg timeout flag for the given source type.
-func timeoutParamForSource(st audiocore.SourceType) string {
+func timeoutParamForSource(st audiocore.SourceType, ffmpegMajor int) string {
 	if st == audiocore.SourceTypeRTSP {
-		return ffmpegRTSPTimeoutParam
+		return rtspTimeoutParamForMajor(ffmpegMajor)
 	}
 	return ffmpegTimeoutParam
+}
+
+// ffmpegVersionProbeTimeout bounds the one-time `ffmpeg -version` probe so a
+// hung or wrapped binary cannot stall stream startup. On timeout the probe
+// yields major 0, which falls back to the safe -timeout default.
+const ffmpegVersionProbeTimeout = 5 * time.Second
+
+// resolveFfmpegMajor returns the cached or detected FFmpeg major version for a binary path.
+func resolveFfmpegMajor(ffmpegPath string) int {
+	if ffmpegPath == "" {
+		return 0
+	}
+	if cached, ok := ffmpegMajorCache.Load(ffmpegPath); ok {
+		if major, ok := cached.(int); ok {
+			return major
+		}
+	}
+
+	// Coalesce concurrent cold-cache probes for the same path into one
+	// `ffmpeg -version` execution.
+	val, _, _ := ffmpegMajorGroup.Do(ffmpegPath, func() (any, error) {
+		// Re-check the cache: another caller may have populated it while this
+		// call was waiting for the singleflight slot.
+		if cached, ok := ffmpegMajorCache.Load(ffmpegPath); ok {
+			if major, ok := cached.(int); ok {
+				return major, nil
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), ffmpegVersionProbeTimeout)
+		defer cancel()
+
+		_, major, _ := conf.GetFfmpegVersionFromContext(ctx, ffmpegPath)
+		// Only cache a successful detection. Caching a failed probe (major 0)
+		// would pin the safe -timeout fallback for the process lifetime, so a
+		// transient first-probe failure on a real FFmpeg 4.x host would silently
+		// suppress -stimeout until restart. Re-probing on the next start is cheap.
+		if major > 0 {
+			ffmpegMajorCache.Store(ffmpegPath, major)
+		}
+		return major, nil
+	})
+
+	if major, ok := val.(int); ok {
+		return major
+	}
+	return 0
 }
 
 // stripTimeoutParams returns a copy of params with any -timeout/-stimeout key-value pairs removed.
@@ -121,7 +222,7 @@ func BuildProcessingFilterChain(f AudioFilters) string {
 
 	// 2. Normalize (loudnorm).
 	if f.Normalize {
-		if f.LoudnessStats != nil && f.LoudnessStats.isValid() {
+		if f.LoudnessStats != nil && f.LoudnessStats.IsValid() {
 			// Pass 2: apply with measured values using linear normalisation.
 			filters = append(filters, fmt.Sprintf(
 				"loudnorm=I=%.1f:LRA=%.1f:TP=%.1f:measured_I=%s:measured_LRA=%s:measured_TP=%s:measured_thresh=%s:linear=true:offset=%s",
@@ -139,13 +240,11 @@ func BuildProcessingFilterChain(f AudioFilters) string {
 		}
 	}
 
-	// 3. Gain (volume).
-	if f.GainDB != 0 && !math.IsNaN(f.GainDB) {
-		sign := "+"
-		if f.GainDB < 0 {
-			sign = ""
-		}
-		filters = append(filters, fmt.Sprintf("volume=%s%.1fdB", sign, f.GainDB))
+	// 3. Gain (volume). Rendered by the same helper the export path uses, so the
+	// two filter builders in this package cannot drift in precision or sign
+	// handling again.
+	if f.GainDB != 0 && IsValidGainDB(f.GainDB) {
+		filters = append(filters, buildVolumeFilter(f.GainDB))
 	}
 
 	return strings.Join(filters, ",")
@@ -165,9 +264,9 @@ type LoudnessStats struct {
 	TargetOffset      string `json:"target_offset"` // Not used for 2-pass.
 }
 
-// isValid returns true if the measured loudness stats contain valid numeric values.
+// IsValid returns true if the measured loudness stats contain valid numeric values.
 // This prevents injection of malformed values into FFmpeg filter chains.
-func (s *LoudnessStats) isValid() bool {
+func (s *LoudnessStats) IsValid() bool {
 	for _, v := range []string{s.InputI, s.InputTP, s.InputLRA, s.InputThresh, s.TargetOffset} {
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
@@ -256,27 +355,6 @@ func parseLoudnessJSON(stderr string) (*LoudnessStats, error) {
 	}
 
 	return &stats, nil
-}
-
-// AnalyzePCMLoudness analyzes the loudness of raw mono PCM audio data using
-// FFmpeg's loudnorm filter. It writes pcmData to a temporary WAV file, runs
-// loudness analysis via AnalyzeFileLoudness, and cleans up the temp file.
-// sampleRate and bitDepth describe the PCM encoding (e.g. 48000, 16).
-func AnalyzePCMLoudness(ctx context.Context, pcmData []byte, ffmpegPath string, sampleRate, bitDepth int) (*LoudnessStats, error) {
-	if len(pcmData) == 0 {
-		return nil, fmt.Errorf("empty PCM data provided for loudness analysis")
-	}
-
-	// Write PCM to a temporary WAV file so AnalyzeFileLoudness can process it.
-	tempDir := os.TempDir()
-	wavPath := filepath.Join(tempDir, fmt.Sprintf("birdnet-loudness-%d.wav", time.Now().UnixNano()))
-	defer os.Remove(wavPath) //nolint:errcheck // best-effort cleanup
-
-	if err := convert.SavePCMDataToWAV(wavPath, pcmData, sampleRate, bitDepth); err != nil {
-		return nil, fmt.Errorf("failed to write temp WAV for loudness analysis: %w", err)
-	}
-
-	return AnalyzeFileLoudness(ctx, wavPath, ffmpegPath, AudioFilters{}, nil)
 }
 
 // processingTimeout is the maximum time allowed for the entire processing operation
@@ -399,8 +477,47 @@ func ProcessAudioToFile(ctx context.Context, filePath, ffmpegPath string, filter
 // RTSP-specific flags like -rtsp_transport are only added for RTSP sources.
 // A default -timeout is added unless the caller supplies one via ffmpegParameters.
 func BuildFFmpegArgs(cfg *StreamConfig, ffmpegParameters []string) []string {
-	args := buildInputArgs(cfg, ffmpegParameters)
+	// Represent the initial request (no reactive fallback engaged yet). The audio
+	// mode is decided by resolveAudioOnly so this mirror matches the runtime path
+	// (buildFFmpegInputArgs) under every media mode.
+	args := buildInputArgs(cfg, ffmpegParameters, resolveAudioOnly(cfg, false))
 	return buildOutputArgs(args, cfg)
+}
+
+// resolveAudioOnly reports whether the stream should request audio-only RTSP
+// media (-allowed_media_types audio). It is the single source of truth for that
+// decision, shared by the runtime path (Stream.buildFFmpegInputArgs) and the
+// unit-tested mirror (BuildFFmpegArgs), so the two cannot diverge.
+//
+// fallbackEngaged is consulted only in auto mode; audio-only and full-stream are
+// deterministic and ignore it. An empty mode canonicalizes to the default
+// (full-stream); any other unrecognized value (rejected at config validation)
+// falls through to the default branch and is also treated as full-stream.
+func resolveAudioOnly(cfg *StreamConfig, fallbackEngaged bool) bool {
+	switch conf.MediaMode(cfg.MediaMode).Canonical() {
+	case conf.MediaModeAudioOnly:
+		return true
+	case conf.MediaModeFullStream:
+		return false
+	case conf.MediaModeAuto:
+		// Audio-only first, dropping the restriction once the reactive fallback
+		// latches because the camera cannot deliver audio alone (issue #3902).
+		return !fallbackEngaged
+	default:
+		return false
+	}
+}
+
+// mediaModeAllowsFallback reports whether the reactive audio-only fallback may
+// engage for this stream. Only auto mode allows it; audio-only fails visibly
+// rather than falling back, and full-stream never requested audio-only at all.
+func mediaModeAllowsFallback(cfg *StreamConfig) bool {
+	return conf.MediaMode(cfg.MediaMode).Canonical() == conf.MediaModeAuto
+}
+
+// effectiveMediaMode returns the canonical media mode as a string, for logging.
+func effectiveMediaMode(cfg *StreamConfig) string {
+	return string(conf.MediaMode(cfg.MediaMode).Canonical())
 }
 
 // buildOutputArgs appends the post-input FFmpeg flags: the input URL, decode
@@ -435,6 +552,15 @@ func buildOutputArgs(args []string, cfg *StreamConfig) []string {
 	return args
 }
 
+// channelModeLeft and channelModeRight are the ChannelMode values that make
+// appendChannelArgs insert a pan filter and force mono output. They are shared
+// with effectiveOutputChannels so the frame-size derivation and the argument
+// builder cannot drift apart.
+const (
+	channelModeLeft  = "left"
+	channelModeRight = "right"
+)
+
 // appendChannelArgs appends the appropriate FFmpeg channel selection flags.
 // When channelMode is "left" or "right" and the source has >1 channel,
 // it uses a pan filter to extract the selected channel. Falls back to
@@ -442,24 +568,42 @@ func buildOutputArgs(args []string, cfg *StreamConfig) []string {
 func appendChannelArgs(args []string, channelMode string, sourceChannels int, numChannels string) []string {
 	if sourceChannels > 1 {
 		switch strings.ToLower(channelMode) {
-		case "left":
+		case channelModeLeft:
 			return append(args, "-af", "pan=mono|c0=c0", "-ac", "1")
-		case "right":
+		case channelModeRight:
 			return append(args, "-af", "pan=mono|c0=c1", "-ac", "1")
 		}
 	}
 	return append(args, "-ac", numChannels)
 }
 
+// effectiveOutputChannels returns the channel count of the PCM stream FFmpeg
+// actually emits for cfg. The left and right channel modes make
+// appendChannelArgs pan a multi-channel source down to mono regardless of
+// cfg.Channels, so readers of the output stream must use this, not the
+// configured count. Every other configuration emits cfg.Channels unchanged.
+func effectiveOutputChannels(cfg *StreamConfig) int {
+	if cfg.SourceChannels > 1 {
+		switch strings.ToLower(cfg.ChannelMode) {
+		case channelModeLeft, channelModeRight:
+			return 1
+		}
+	}
+	return cfg.Channels
+}
+
 // buildInputArgs constructs the pre-input FFmpeg flags (transport, timeout, extra parameters).
 // This mirrors the logic in Stream.buildFFmpegInputArgs but accepts explicit parameters.
-// RTSP streams use -timeout for connection timeout.
-func buildInputArgs(cfg *StreamConfig, ffmpegParameters []string) []string {
+// RTSP streams use the timeout flag supported by the configured FFmpeg major version.
+// When audioOnly is false, the RTSP handshake is not restricted to audio tracks
+// (the full-stream fallback for cameras that cannot SETUP audio alone, issue #3902).
+func buildInputArgs(cfg *StreamConfig, ffmpegParameters []string, audioOnly bool) []string {
 	args := make([]string, 0, 8+len(ffmpegParameters))
-	timeoutFlag := timeoutParamForSource(cfg.sourceType())
+	ffmpegMajor := resolveFfmpegMajor(cfg.FFmpegPath)
+	timeoutFlag := timeoutParamForSource(cfg.sourceType(), ffmpegMajor)
 
 	if cfg.sourceType() == audiocore.SourceTypeRTSP {
-		args = append(args, "-rtsp_transport", cfg.Transport)
+		args = appendRTSPMediaArgs(args, cfg.Transport, audioOnly)
 	}
 
 	hasUserTimeout, userTimeoutValue := detectUserTimeout(ffmpegParameters)
