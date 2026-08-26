@@ -34,17 +34,27 @@ type Note struct {
 	EndTime     time.Time
 	SpeciesCode string
 	// ScientificName includes optimized index (scientific_name, date) for new species tracking performance
-	ScientificName string  `gorm:"index:idx_notes_sciname;index:idx_notes_sciname_date;index:idx_notes_sciname_date_optimized,priority:1"`
-	CommonName     string  `gorm:"index:idx_notes_comname;index:idx_notes_date_commonname_confidence"`
-	Confidence     float64 `gorm:"index:idx_notes_date_commonname_confidence"`
-	Latitude       float64
-	Longitude      float64
-	Threshold      float64
-	Sensitivity    float64
-	ClipName       string
-	ProcessingTime time.Duration
-	Unlikely       bool    `gorm:"default:false"`                 // Tagged by ultrasonic validation filter
-	Occurrence     float64 `gorm:"-" json:"occurrence,omitempty"` // Runtime only, occurrence probability (0-1) based on location/time
+	ScientificName string `gorm:"index:idx_notes_sciname;index:idx_notes_sciname_date;index:idx_notes_sciname_date_optimized,priority:1"`
+	CommonName     string `gorm:"index:idx_notes_comname;index:idx_notes_date_commonname_confidence"`
+	// RawScientificName preserves the exact scientific name the model emitted before
+	// canonical-name normalization collapsed it into ScientificName. Nullable column:
+	// NULL/empty means the raw name equals ScientificName (no taxonomic alias applied).
+	// Persisted so a future re-split can un-merge; json:"-" keeps it out of API/MQTT/SSE
+	// payloads while GORM maps it to the raw_scientific_name column.
+	// NOTE: only the legacy notes datastore persists this column. The v2only normalized
+	// datastore (the default for fresh installs and migrated databases) drops it; the
+	// canonical ScientificName still flows there, so de-duplication works, but the raw
+	// name is not retained on that path. See PR discussion / follow-up for v2 support.
+	RawScientificName string  `json:"-"`
+	Confidence        float64 `gorm:"index:idx_notes_date_commonname_confidence"`
+	Latitude          float64
+	Longitude         float64
+	Threshold         float64
+	Sensitivity       float64
+	ClipName          string
+	ProcessingTime    time.Duration
+	Unlikely          bool    `gorm:"default:false"`                 // Tagged by ultrasonic validation filter
+	Occurrence        float64 `gorm:"-" json:"occurrence,omitempty"` // Runtime only, occurrence probability (0-1) based on location/time
 	// RawLabel is the full un-truncated classifier label (e.g. "power_tool"); runtime-only,
 	// not persisted. Used at Save time to classify non-bird sound classes correctly.
 	RawLabel string        `gorm:"-"`
@@ -187,6 +197,7 @@ type DetectionRecord struct {
 	Device         string    `json:"device,omitempty"`
 	Source         string    `json:"source,omitempty"`
 	TimeOfDay      string    `json:"timeOfDay,omitempty"`
+	ModelType      string    `json:"modelType,omitempty"` // AI model type (e.g. "bird", "bat"); drives the spectrogram frequency range
 }
 
 // DynamicThreshold represents a persisted dynamic threshold for a species
@@ -194,34 +205,32 @@ type DetectionRecord struct {
 // users experience a sudden drop in detections after restart when learned thresholds are lost.
 type DynamicThreshold struct {
 	ID             uint      `gorm:"primaryKey"`
-	SpeciesName    string    `gorm:"uniqueIndex:idx_dt_species_model;not null;size:200"`                   // Common name (lowercase)
-	ModelName      string    `gorm:"uniqueIndex:idx_dt_species_model;not null;size:100;default:'BirdNET'"` // Model that produced this threshold
-	ScientificName string    `gorm:"size:200"`                                                             // Scientific name for thumbnails
-	Level          int       `gorm:"not null;default:0"`                                                   // Adjustment level (0-3)
-	CurrentValue   float64   `gorm:"not null"`                                                             // Current threshold value
-	BaseThreshold  float64   `gorm:"not null"`                                                             // Original base threshold for reference
-	HighConfCount  int       `gorm:"not null;default:0"`                                                   // Count of high-confidence detections
-	ValidHours     int       `gorm:"not null"`                                                             // Hours until expiry
-	ExpiresAt      time.Time `gorm:"index;not null"`                                                       // When this threshold expires
-	LastTriggered  time.Time `gorm:"index;not null"`                                                       // Last time threshold was triggered
-	FirstCreated   time.Time `gorm:"not null"`                                                             // When first created
-	UpdatedAt      time.Time `gorm:"not null"`                                                             // Last update time
-	TriggerCount   int       `gorm:"not null;default:0"`                                                   // Total number of times triggered (for statistics)
+	SpeciesName    string    `gorm:"uniqueIndex;not null;size:200"` // Common name (lowercase); tracking is per species, not per model
+	ScientificName string    `gorm:"size:200"`                      // Scientific name for thumbnails
+	Level          int       `gorm:"not null;default:0"`            // Adjustment level (0-3)
+	CurrentValue   float64   `gorm:"not null"`                      // Current threshold value
+	BaseThreshold  float64   `gorm:"not null"`                      // model-global base of the model that last learned (display only)
+	HighConfCount  int       `gorm:"not null;default:0"`            // Count of high-confidence detections
+	ValidHours     int       `gorm:"not null"`                      // Hours until expiry
+	ExpiresAt      time.Time `gorm:"index;not null"`                // When this threshold expires
+	LastTriggered  time.Time `gorm:"index;not null"`                // Last time threshold was triggered
+	FirstCreated   time.Time `gorm:"not null"`                      // When first created
+	UpdatedAt      time.Time `gorm:"not null"`                      // Last update time
+	TriggerCount   int       `gorm:"not null;default:0"`            // Total number of times triggered (for statistics)
 }
 
 // ThresholdEvent records each change to a dynamic threshold for audit/history purposes.
 // This enables the frontend to display a timeline of threshold adjustments per species.
 type ThresholdEvent struct {
 	ID            uint      `gorm:"primaryKey"`
-	SpeciesName   string    `gorm:"index;not null;size:200"`             // Common name (lowercase)
-	ModelName     string    `gorm:"not null;size:100;default:'BirdNET'"` // Model that produced this event
-	PreviousLevel int       `gorm:"not null"`                            // Level before change
-	NewLevel      int       `gorm:"not null"`                            // Level after change
-	PreviousValue float64   `gorm:"not null"`                            // Threshold value before change
-	NewValue      float64   `gorm:"not null"`                            // Threshold value after change
-	ChangeReason  string    `gorm:"not null;size:50"`                    // "high_confidence", "expiry", "manual_reset"
-	Confidence    float64   `gorm:"default:0"`                           // Detection confidence that triggered change (if applicable)
-	CreatedAt     time.Time `gorm:"index;not null"`                      // When the event occurred
+	SpeciesName   string    `gorm:"index;not null;size:200"` // Common name (lowercase); events are per species, not per model
+	PreviousLevel int       `gorm:"not null"`                // Level before change
+	NewLevel      int       `gorm:"not null"`                // Level after change
+	PreviousValue float64   `gorm:"not null"`                // Threshold value before change
+	NewValue      float64   `gorm:"not null"`                // Threshold value after change
+	ChangeReason  string    `gorm:"not null;size:50"`        // "high_confidence", "expiry", "manual_reset"
+	Confidence    float64   `gorm:"default:0"`               // Detection confidence that triggered change (if applicable)
+	CreatedAt     time.Time `gorm:"index;not null"`          // When the event occurred
 
 	// ScientificName is a virtual field (not persisted in legacy DB) used by v2only
 	// datastore to correctly resolve the Label foreign key. The processor populates

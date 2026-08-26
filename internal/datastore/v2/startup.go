@@ -11,6 +11,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
+	"github.com/tphakala/birdnet-go/internal/diagnostics"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/telemetry"
@@ -64,6 +65,24 @@ func logStartupDecision(decision string, fields ...logger.Field) {
 // dbStartupTimeout is the timeout for database startup operations.
 const dbStartupTimeout = "5s"
 
+// Startup decision labels. Each value is both logged by
+// logStartupDecision and stored in StartupState.Decision so callers
+// (diagnostics boot journal) can persist the exact decision.
+const (
+	// DecisionFreshInstall: neither configured DB nor v2 sidecar exists.
+	DecisionFreshInstall = "fresh_install"
+	// DecisionV2Restart: configured path already holds a completed v2 DB.
+	DecisionV2Restart = "v2_restart"
+	// DecisionLegacyMode: only a legacy database exists.
+	DecisionLegacyMode = "legacy_mode"
+	// DecisionStaleSidecarFallback: corrupt/stale sidecar removed, v2 at configured path.
+	DecisionStaleSidecarFallback = "stale_sidecar_fallback"
+	// DecisionV2Corrupted: v2 sidecar exists but is unreadable/incomplete.
+	DecisionV2Corrupted = "v2_corrupted"
+	// DecisionMigrationPrefix prefixes a migration-state decision, e.g. "migration_completed".
+	DecisionMigrationPrefix = "migration_"
+)
+
 // Startup state checking errors.
 var (
 	// ErrV2DatabaseNotFound indicates the v2 database does not exist.
@@ -85,6 +104,10 @@ type StartupState struct {
 	LegacyRequired bool
 	// FreshInstall indicates no database exists (new installation).
 	FreshInstall bool
+	// Decision is the startup decision label (Decision* constants), the
+	// same string passed to logStartupDecision. Persisted by the
+	// diagnostics boot journal.
+	Decision string
 	// Error contains any error that occurred during state checking.
 	Error error
 }
@@ -167,12 +190,13 @@ func checkSQLiteMigrationState(settings *conf.Settings) StartupState {
 				}
 			}
 		}
-		logStartupDecision("fresh_install")
+		logStartupDecision(DecisionFreshInstall)
 		return StartupState{
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  false,
 			FreshInstall:    true,
+			Decision:        DecisionFreshInstall,
 			Error:           nil,
 		}
 	}
@@ -181,16 +205,17 @@ func checkSQLiteMigrationState(settings *conf.Settings) StartupState {
 	if !v2MigrationExists {
 		if configuredExists && CheckSQLiteHasV2Schema(configuredPath) {
 			// Fresh v2 install (restart after initial fresh install)
-			logStartupDecision("v2_restart")
-			return completedV2StartupState()
+			logStartupDecision(DecisionV2Restart)
+			return completedV2StartupState(DecisionV2Restart)
 		}
 		// Configured path exists but is not v2 = legacy mode
-		logStartupDecision("legacy_mode")
+		logStartupDecision(DecisionLegacyMode)
 		return StartupState{
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  true,
 			FreshInstall:    false,
+			Decision:        DecisionLegacyMode,
 			Error:           nil,
 		}
 	}
@@ -203,14 +228,15 @@ func checkSQLiteMigrationState(settings *conf.Settings) StartupState {
 	if err != nil {
 		reportStartupError("sqlite", "openV2Database", err, v2MigrationPath)
 		if fallback, ok := fallbackConsolidatedV2State(configuredPath, v2MigrationPath); ok {
-			logStartupDecision("stale_sidecar_fallback", logger.String("trigger", "openV2Database"))
+			logStartupDecision(DecisionStaleSidecarFallback, logger.String("trigger", "openV2Database"))
 			return fallback
 		}
-		logStartupDecision("v2_corrupted", logger.String("trigger", "openV2Database"))
+		logStartupDecision(DecisionV2Corrupted, logger.String("trigger", "openV2Database"))
 		return StartupState{
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("%w: %w", ErrV2DatabaseCorrupted, err),
 		}
 	}
@@ -220,35 +246,37 @@ func checkSQLiteMigrationState(settings *conf.Settings) StartupState {
 	if err != nil {
 		reportStartupError("sqlite", "getUnderlyingDB", err, v2MigrationPath)
 		if fallback, ok := fallbackConsolidatedV2State(configuredPath, v2MigrationPath); ok {
-			logStartupDecision("stale_sidecar_fallback", logger.String("trigger", "getUnderlyingDB"))
+			logStartupDecision(DecisionStaleSidecarFallback, logger.String("trigger", "getUnderlyingDB"))
 			return fallback
 		}
-		logStartupDecision("v2_corrupted", logger.String("trigger", "getUnderlyingDB"))
+		logStartupDecision(DecisionV2Corrupted, logger.String("trigger", "getUnderlyingDB"))
 		return StartupState{
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("%w: failed to get underlying DB: %w", ErrV2DatabaseCorrupted, err),
 		}
 	}
 	defer func() { _ = sqlDB.Close() }()
 
-	// Read migration state — try both table names (plural is current, singular is pre-PR #2165)
+	// Read migration state - try both table names (plural is current, singular is pre-PR #2165)
 	migrationTable := resolveSQLiteTableName(db, "migration_states", "migration_state")
 	if migrationTable == "" {
 		// Close the sidecar handle before the fallback may delete the file.
 		// sql.DB.Close is idempotent, so the deferred close remains safe.
 		_ = sqlDB.Close()
 		if fallback, ok := fallbackConsolidatedV2State(configuredPath, v2MigrationPath); ok {
-			logStartupDecision("stale_sidecar_fallback", logger.String("trigger", "migrationTableNotFound"))
+			logStartupDecision(DecisionStaleSidecarFallback, logger.String("trigger", "migrationTableNotFound"))
 			return fallback
 		}
-		logStartupDecision("v2_corrupted", logger.String("trigger", "migrationTableNotFound"))
+		logStartupDecision(DecisionV2Corrupted, logger.String("trigger", "migrationTableNotFound"))
 		reportStartupError("sqlite", "readMigrationState", fmt.Errorf("migration state table not found"), v2MigrationPath)
 		return StartupState{
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     true,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("%w: migration state table not found", ErrV2DatabaseCorrupted),
 		}
 	}
@@ -256,15 +284,16 @@ func checkSQLiteMigrationState(settings *conf.Settings) StartupState {
 	if err := db.Table(migrationTable).First(&state).Error; err != nil {
 		_ = sqlDB.Close()
 		if fallback, ok := fallbackConsolidatedV2State(configuredPath, v2MigrationPath); ok {
-			logStartupDecision("stale_sidecar_fallback", logger.String("trigger", "readMigrationState"))
+			logStartupDecision(DecisionStaleSidecarFallback, logger.String("trigger", "readMigrationState"))
 			return fallback
 		}
-		logStartupDecision("v2_corrupted", logger.String("trigger", "readMigrationState"))
+		logStartupDecision(DecisionV2Corrupted, logger.String("trigger", "readMigrationState"))
 		reportStartupError("sqlite", "readMigrationState", err, v2MigrationPath)
 		return StartupState{
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     true,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("%w: %w", ErrV2DatabaseCorrupted, err),
 		}
 	}
@@ -272,7 +301,8 @@ func checkSQLiteMigrationState(settings *conf.Settings) StartupState {
 	// Determine if legacy is required based on migration status
 	legacyRequired := state.State != entities.MigrationStatusCompleted
 
-	logStartupDecision("migration_"+string(state.State),
+	decision := DecisionMigrationPrefix + string(state.State)
+	logStartupDecision(decision,
 		logger.Bool("legacy_required", legacyRequired),
 	)
 
@@ -280,6 +310,7 @@ func checkSQLiteMigrationState(settings *conf.Settings) StartupState {
 		MigrationStatus: state.State,
 		V2Available:     true,
 		LegacyRequired:  legacyRequired,
+		Decision:        decision,
 		Error:           nil,
 	}
 }
@@ -288,11 +319,12 @@ func checkSQLiteMigrationState(settings *conf.Settings) StartupState {
 // install with a fully consolidated (completed) migration. Used by both the
 // fresh-v2-restart branch and the stale-sidecar fallback so the two paths
 // cannot drift apart.
-func completedV2StartupState() StartupState {
+func completedV2StartupState(decision string) StartupState {
 	return StartupState{
 		MigrationStatus: entities.MigrationStatusCompleted,
 		V2Available:     true,
 		LegacyRequired:  false,
+		Decision:        decision,
 	}
 }
 
@@ -324,7 +356,7 @@ func fallbackConsolidatedV2State(configuredPath, v2MigrationPath string) (Startu
 		return StartupState{}, false
 	}
 	removeStaleV2Sidecar(v2MigrationPath, configuredPath, "fallback_consolidated_v2_state")
-	return completedV2StartupState(), true
+	return completedV2StartupState(DecisionStaleSidecarFallback), true
 }
 
 // buildMySQLStartupDSN builds a MySQL DSN for startup-time checks.
@@ -371,6 +403,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("%w: %w", ErrV2DatabaseCorrupted, err),
 		}
 	}
@@ -382,6 +415,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("%w: failed to get underlying DB: %w", ErrV2DatabaseCorrupted, err),
 		}
 	}
@@ -397,6 +431,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("failed to check legacy tables: %w", err),
 		}
 	}
@@ -415,6 +450,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           ErrV2DatabaseNotFound,
 		}
 	}
@@ -430,6 +466,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     false,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("failed to check fresh v2 tables: %w", err),
 		}
 	}
@@ -442,6 +479,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			V2Available:     false,
 			LegacyRequired:  false,
 			FreshInstall:    true,
+			Decision:        DecisionFreshInstall,
 			Error:           nil,
 		}
 	}
@@ -453,6 +491,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			V2Available:     true,
 			LegacyRequired:  false,
 			FreshInstall:    false,
+			Decision:        DecisionV2Restart,
 			Error:           nil,
 		}
 	}
@@ -467,6 +506,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			V2Available:     false,
 			LegacyRequired:  true,
 			FreshInstall:    false,
+			Decision:        DecisionLegacyMode,
 			Error:           nil,
 		}
 	}
@@ -478,11 +518,12 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			V2Available:     false,
 			LegacyRequired:  true,
 			FreshInstall:    false,
+			Decision:        DecisionLegacyMode,
 			Error:           nil,
 		}
 	}
 
-	// Read migration state from v2 table — resolve actual table name (old singular or new plural)
+	// Read migration state from v2 table - resolve actual table name (old singular or new plural)
 	var v2MigrationTableName string
 	err = db.Raw("SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_name IN (?, ?) LIMIT 1",
 		settings.Output.MySQL.Database, tableNameNew, tableNameOld).Scan(&v2MigrationTableName).Error
@@ -492,6 +533,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     true,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("%w: migration state table not found", ErrV2DatabaseCorrupted),
 		}
 	}
@@ -502,6 +544,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 			MigrationStatus: entities.MigrationStatusIdle,
 			V2Available:     true,
 			LegacyRequired:  true,
+			Decision:        DecisionV2Corrupted,
 			Error:           fmt.Errorf("%w: %w", ErrV2DatabaseCorrupted, err),
 		}
 	}
@@ -512,6 +555,7 @@ func checkMySQLMigrationState(settings *conf.Settings) StartupState {
 		MigrationStatus: state.State,
 		V2Available:     true,
 		LegacyRequired:  legacyRequired,
+		Decision:        DecisionMigrationPrefix + string(state.State),
 		Error:           nil,
 	}
 }
@@ -530,15 +574,26 @@ func ShouldSkipLegacyDatabase(settings *conf.Settings) bool {
 	return !state.LegacyRequired && state.MigrationStatus == entities.MigrationStatusCompleted
 }
 
-// HasUnmigratedLegacyRecords checks whether legacy records exist beyond the last
-// migrated ID after migration completed. This detects data loss from hard crashes
-// (kill -9, power loss, OOM) during the tail sync window.
+// HasUnmigratedLegacyRecords reports whether the migration is complete but some
+// legacy records are not yet safely present in v2. This detects data loss from
+// hard crashes (kill -9, power loss, OOM) during the tail sync window, and (issue
+// #3991) distinguishes that genuine straggler case from the normal, harmless
+// dual-write residue that keeps legacy notes growing after completion.
 //
-// When unmigrated records are found, the caller should:
+// It answers the question by primary key rather than by row count: because the v2
+// Detection.ID equals the originating legacy notes.id, a legacy tail record is
+// "unmigrated" only when it is actually absent from v2 (or still pending in the
+// dirty-ID set). A busy install that dual-wrote every tail record into v2 is
+// therefore reported as fully reconciled and free to promote this boot.
+//
+// When it returns true, the caller should:
 //  1. Skip database consolidation (keep files in place)
 //  2. Override v2-only mode so the worker can tail-sync the stragglers
 //
-// Best-effort: returns false on any error to avoid blocking startup.
+// It only inspects a COMPLETED migration; every earlier state and every
+// missing-database case returns false (there is nothing to promote yet). Once the
+// COMPLETED marker is confirmed, verification failures fail CLOSED (return true)
+// so an unverifiable state keeps dual-write running rather than promoting blindly.
 func HasUnmigratedLegacyRecords(settings *conf.Settings, log logger.Logger) bool {
 	if settings.Output.MySQL.Enabled {
 		return hasUnmigratedLegacyMySQL(settings, log)
@@ -611,21 +666,15 @@ func hasUnmigratedLegacySQLite(settings *conf.Settings, log logger.Logger) bool 
 	}
 	defer func() { _ = legacySQL.Close() }()
 
-	// Count legacy notes beyond the last migrated ID
-	var count int64
-	if err := legacyDB.Raw("SELECT COUNT(*) FROM notes WHERE id > ?", state.LastMigratedID).Scan(&count).Error; err != nil {
-		log.Warn("reconciliation: failed to count unmigrated legacy records", logger.Error(err))
-		return false
-	}
-
-	if count > 0 {
-		log.Warn("found unmigrated legacy records after potential crash recovery",
-			logger.Int64("count", count),
-			logger.Uint64("last_migrated_id", uint64(state.LastMigratedID)))
-		return true
-	}
-
-	return false
+	// A completed migration keeps dual-writing to legacy notes, so a raw count of
+	// notes.id > LastMigratedID is always non-zero on a busy install and is NOT a
+	// reliable signal of data loss (issue #3991). During dual-write every detection
+	// is written to BOTH legacy and v2, and the v2 Detection.ID equals the legacy
+	// notes.id, so the authoritative question is whether any legacy tail record is
+	// actually ABSENT from v2. Answer it with a targeted primary-key membership check
+	// plus the dirty-ID set. Only genuinely unreconciled records defer promotion.
+	dirtyTable := resolveSQLiteTableName(v2DB, "migration_dirty_ids", "migration_dirty_id")
+	return !legacyTailReconciledInV2(legacyDB, v2DB, state.LastMigratedID, "notes", "detections", dirtyTable, log)
 }
 
 // hasUnmigratedLegacyMySQL checks for unmigrated records in a MySQL legacy database.
@@ -672,21 +721,189 @@ func hasUnmigratedLegacyMySQL(settings *conf.Settings, log logger.Logger) bool {
 		return false
 	}
 
-	// Count legacy notes beyond the last migrated ID
-	var count int64
-	if err := db.Raw("SELECT COUNT(*) FROM notes WHERE id > ?", state.LastMigratedID).Scan(&count).Error; err != nil {
-		log.Warn("reconciliation: failed to count unmigrated MySQL legacy records", logger.Error(err))
+	// Same reasoning as the SQLite path (issue #3991): dual-write keeps legacy notes
+	// growing after completion, so a raw count is meaningless. Verify the legacy tail
+	// against v2 by primary key (v2 Detection.ID == legacy notes.id) and check the
+	// dirty-ID set. MySQL keeps both schemas in one database, so a single connection
+	// serves both the legacy and v2 queries; v2 tables carry the v2_ prefix.
+	dirtyTable := resolveMySQLTableName(db, settings.Output.MySQL.Database,
+		v2TablePrefix+"migration_dirty_ids", v2TablePrefix+"migration_dirty_id")
+	return !legacyTailReconciledInV2(db, db, state.LastMigratedID, "notes", v2TablePrefix+"detections", dirtyTable, log)
+}
+
+// tailScanBatchSize bounds how many legacy tail IDs are compared against v2 per
+// round trip. Keyset pagination over this batch keeps memory flat regardless of how
+// far the legacy tail runs past the migration watermark.
+const tailScanBatchSize = 500
+
+// tailScanMaxBatches caps the keyset scan as a defensive stop against a logic error;
+// the scan terminates naturally at the end of the (static, read-only) legacy table
+// long before this on any real database. Hitting the cap fails closed.
+const tailScanMaxBatches = 100_000
+
+// legacyTailReconciledInV2 reports whether every legacy detection beyond the
+// migration watermark is already present in v2 AND no dual-write records are still
+// pending reconciliation. It is the safe precondition for ending dual-write and
+// consolidating to v2 (issue #3991).
+//
+// legacyDB and v2DB may be the same handle (MySQL keeps both schemas in one
+// database) or two handles (SQLite keeps v2 in a separate file). dirtyTable may be
+// empty when the dirty-ID table does not exist (older schema), in which case only
+// the membership check applies. It fails CLOSED: any verification error returns
+// false so an unverifiable state keeps dual-write running rather than promoting.
+func legacyTailReconciledInV2(legacyDB, v2DB *gorm.DB, lastMigratedID uint, notesTable, detectionsTable, dirtyTable string, log logger.Logger) bool {
+	// Outstanding dirty IDs mean dual-write failed to sync some records to v2 and the
+	// worker has not reconciled them yet. Tail sync can advance LastMigratedID past a
+	// record it failed to migrate, so the membership check below would not see those;
+	// the dirty-ID set catches them.
+	if dirtyTable != "" {
+		var dirty int64
+		if err := v2DB.Table(dirtyTable).Count(&dirty).Error; err != nil {
+			log.Warn("reconciliation: failed to count dirty IDs, keeping dual-write", logger.Error(err))
+			return false
+		}
+		if dirty > 0 {
+			log.Warn("legacy tail not reconciled: dual-write records pending sync to v2",
+				logger.Int64("dirty_ids", dirty),
+				logger.Uint64("last_migrated_id", uint64(lastMigratedID)))
+			return false
+		}
+	}
+
+	missing, err := legacyTailMissingFromV2(legacyDB, v2DB, lastMigratedID, notesTable, detectionsTable)
+	if err != nil {
+		log.Warn("reconciliation: failed to verify legacy tail against v2, keeping dual-write", logger.Error(err))
 		return false
 	}
+	if missing {
+		log.Warn("legacy tail not reconciled: records absent from v2 after migration completed",
+			logger.Uint64("last_migrated_id", uint64(lastMigratedID)))
+		return false
+	}
+	return true
+}
 
-	if count > 0 {
-		log.Warn("found unmigrated legacy records after potential crash recovery (MySQL)",
-			logger.Int64("count", count),
-			logger.Uint64("last_migrated_id", uint64(state.LastMigratedID)))
-		return true
+// legacyTailMissingFromV2 reports whether any legacy notesTable.id greater than
+// lastMigratedID is absent from the v2 detectionsTable. Because the v2 Detection.ID
+// is set to the originating legacy notes.id during migration, membership is a direct
+// primary-key comparison. It iterates in keyset batches so it never loads the whole
+// tail into memory, and short-circuits on the first missing id, so a genuinely
+// behind install returns immediately. Table names come from fixed internal
+// constants, never user input.
+func legacyTailMissingFromV2(legacyDB, v2DB *gorm.DB, lastMigratedID uint, notesTable, detectionsTable string) (bool, error) {
+	cursor := lastMigratedID
+	for range tailScanMaxBatches {
+		var ids []uint
+		if err := legacyDB.Table(notesTable).
+			Where("id > ?", cursor).
+			Order("id ASC").
+			Limit(tailScanBatchSize).
+			Pluck("id", &ids).Error; err != nil {
+			return false, err
+		}
+		if len(ids) == 0 {
+			return false, nil // reached the end of the tail, nothing missing
+		}
+
+		var existing []uint
+		if err := v2DB.Table(detectionsTable).
+			Where("id IN ?", ids).
+			Pluck("id", &existing).Error; err != nil {
+			return false, err
+		}
+		if len(existing) < len(ids) {
+			return true, nil // at least one tail record is not in v2
+		}
+
+		cursor = ids[len(ids)-1]
+		if len(ids) < tailScanBatchSize {
+			return false, nil // last (partial) batch, all present
+		}
+	}
+	// Exceeded the defensive batch cap without confirming the tail is covered. Fail
+	// closed: report missing so promotion is deferred rather than risking data loss.
+	return true, nil
+}
+
+// resolveMySQLTableName returns the first of the given table names that exists in the
+// MySQL database, or empty string if none do. It mirrors resolveSQLiteTableName for
+// the MySQL information_schema, handling the migration_dirty_id -> migration_dirty_ids
+// rename from PR #2165.
+func resolveMySQLTableName(db *gorm.DB, database string, names ...string) string {
+	for _, name := range names {
+		var count int64
+		if err := db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
+			database, name).Scan(&count).Error; err == nil && count > 0 {
+			return name
+		}
+	}
+	return ""
+}
+
+// checkpointSQLiteWAL folds any pending write-ahead-log content back into the main
+// database file at dbPath so a subsequent rename carries a complete database. It runs
+// PRAGMA wal_checkpoint(TRUNCATE), which copies all WAL frames into the main file and
+// truncates the WAL to zero bytes. It opens the database read-write (a TRUNCATE
+// checkpoint needs write access) and closes it again, so it must only be called when
+// no other connection holds the file, i.e. at startup before any manager opens it.
+// A missing file is not an error (nothing to checkpoint).
+func checkpointSQLiteWAL(dbPath string, log logger.Logger) error {
+	if _, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 
-	return false
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+	})
+	if err != nil {
+		return err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			log.Warn("failed to close database after WAL checkpoint",
+				logger.String("path", dbPath), logger.Error(closeErr))
+		}
+	}()
+
+	if err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
+		return fmt.Errorf("WAL checkpoint failed: %w", err)
+	}
+	return nil
+}
+
+// moveSQLiteDBFiles renames a SQLite database file together with its -wal and -shm
+// sidecars, so no committed WAL data is left behind or discarded during consolidation.
+// The main file rename is authoritative and its failure is returned; sidecar moves are
+// best-effort and only logged, because after a successful checkpoint the sidecars are
+// empty and after an unclean shutdown moving them alongside preserves their data.
+func moveSQLiteDBFiles(from, to string, log logger.Logger) error {
+	if err := os.Rename(from, to); err != nil {
+		return err
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		src := from + suffix
+		if _, err := os.Stat(src); err != nil {
+			// Source sidecar absent (e.g. checkpoint truncated it and SQLite removed the
+			// file). Remove any stale sidecar left at the destination so it is not wrongly
+			// paired with the moved database when it is next opened.
+			_ = os.Remove(to + suffix)
+			continue
+		}
+		if err := os.Rename(src, to+suffix); err != nil {
+			log.Warn("failed to move SQLite sidecar file during consolidation",
+				logger.String("from", src),
+				logger.String("to", to+suffix),
+				logger.Error(err))
+		}
+	}
+	return nil
 }
 
 // CheckSQLiteHasV2Schema checks if a SQLite database at the given path is a fully initialized v2 database.
@@ -749,8 +966,32 @@ func CheckSQLiteHasV2Schema(dbPath string) bool {
 		return false
 	}
 
-	// Only return true if the database is fully initialized (COMPLETED)
-	return state.State == entities.MigrationStatusCompleted
+	if state.State != entities.MigrationStatusCompleted {
+		return false
+	}
+
+	// A COMPLETED marker together with a *populated* legacy data table ('results' or 'notes')
+	// means real user data is still stranded in the legacy schema: a PR #2165-contaminated
+	// legacy database masquerading as v2 (GitHub #3924). Treating it as v2 lets
+	// CheckAndConsolidateAtStartup delete the real migrated sidecar, so reject it.
+	//
+	// An EMPTY legacy table, by contrast, is harmless residue: a fully migrated v2 database can
+	// still carry the old 'notes'/'results' tables (GORM never drops tables) with no rows left in
+	// them. Such databases MUST still be recognised as v2. Keying on table existence alone (as
+	// PR #3926 first did) forced these healthy databases into legacy mode, where legacy AutoMigrate
+	// then crashes with "Cannot add a NOT NULL column with default value NULL" while adding a
+	// legacy column to an already-populated table. Discriminate on row count, not mere table
+	// existence.
+	//
+	// Fail closed on probe error: this function gates destructive startup actions, so if we
+	// cannot prove the legacy tables are empty, return false rather than risk misclassifying a
+	// contaminated or corrupt database as v2 (matches the migration_states probe above).
+	hasLegacyData, err := legacyDataPresent(db)
+	if err != nil || hasLegacyData {
+		return false
+	}
+
+	return true
 }
 
 // CheckMySQLHasFreshV2Schema reports whether a MySQL database holds a complete,
@@ -823,7 +1064,64 @@ func hasCompleteFreshV2Schema(db *gorm.DB) bool {
 	// wedging the app in enhanced mode (GitHub #3575). Returning false makes
 	// initializeV2OnlyMode fall back to the v2_ prefixed schema, whose tables are
 	// (re)created by the subsequent Initialize()/AutoMigrate.
+	//
+	// A COMPLETED marker alongside a *populated* legacy data table ('results' or 'notes')
+	// means real user data is still stranded in the legacy schema: a PR #2165-contaminated
+	// legacy database, not a fresh no-prefix v2 schema (GitHub #3924). Reject it. An EMPTY
+	// legacy table is harmless residue that a fully migrated v2 database can still carry and
+	// must NOT disqualify the schema; keying on table existence alone (as PR #3926 first did)
+	// wrongly forced healthy v2 databases into legacy mode. Mirror the same row-based guard
+	// used by CheckSQLiteHasV2Schema, failing closed on a row-count probe error.
+	if hasLegacyData, err := legacyDataPresent(db); err != nil || hasLegacyData {
+		return false
+	}
 	return db.Migrator().HasTable("detections")
+}
+
+// legacyDataTables lists the v1 data tables. After a completed in-place migration these tables
+// are commonly left behind EMPTY (GORM never drops tables); that residue is harmless. Only rows
+// still sitting in them indicate real unmigrated legacy data, i.e. a PR #2165-contaminated
+// database masquerading as a completed v2 schema (GitHub #3924).
+var legacyDataTables = []string{"results", "notes"}
+
+// legacyDataPresent reports whether any legacy data table exists AND still holds at least one row.
+// Table existence alone is not contamination: a genuine completed migration leaves empty legacy
+// tables behind. The bool is meaningful only when the returned error is nil; because this decision
+// gates destructive startup actions, callers should fail closed (treat as not-clean-v2) on error.
+func legacyDataPresent(db *gorm.DB) (bool, error) {
+	// Resolve which tables exist with an error-returning probe. db.Migrator().HasTable swallows
+	// the underlying metadata-query error and just reports false, which would let a probe failure
+	// be misread as "no legacy data" (fail open) on a database this function is meant to fail
+	// closed for. GetTables surfaces the error so the caller can reject the database instead.
+	tables, err := db.Migrator().GetTables()
+	if err != nil {
+		return false, err
+	}
+	existing := make(map[string]struct{}, len(tables))
+	for _, t := range tables {
+		existing[t] = struct{}{}
+	}
+
+	for _, name := range legacyDataTables {
+		if _, ok := existing[name]; !ok {
+			continue
+		}
+		// Existence probe via SELECT EXISTS, not a full COUNT(*): a contaminated legacy table can
+		// hold hundreds of thousands of unmigrated rows (GitHub #3924), and counting all of them on
+		// every startup would scan the whole table and could approach the DB startup timeout. EXISTS
+		// short-circuits at the first row and yields an explicit 0/1, so it does not depend on GORM
+		// populating RowsAffected after Scan (which can vary by version/driver). The table name comes
+		// from the fixed legacyDataTables allowlist, so the interpolation is safe. Backtick quoting
+		// works on both SQLite and MySQL (mirrors cleanupLegacySchemaContamination in this package).
+		var hasRow int
+		if err := db.Raw("SELECT EXISTS(SELECT 1 FROM `" + name + "`)").Scan(&hasRow).Error; err != nil {
+			return false, err
+		}
+		if hasRow != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // cleanupOrphanedBareV2Tables removes bare v2 tables that were created by a broken nightly
@@ -952,15 +1250,24 @@ func CheckAndConsolidateAtStartup(configuredPath string, log logger.Logger) (con
 		return false, nil
 	}
 
+	// Journal handle for consolidation outcomes (best-effort, DB-independent).
+	j := diagnostics.Default()
+
 	// Step 1: Check for interrupted consolidation
 	resumed, newPath, err := ResumeConsolidation(dataDir, log)
 	if err != nil {
 		reportConsolidationError("resumeConsolidation", err, configuredPath)
+		// Journal the failed resume of an interrupted consolidation: it is
+		// exactly the kind of event the boot journal exists to capture. The
+		// v2 sidecar/backup paths are not resolved yet at this point, so the
+		// record carries only the configured path.
+		diagnostics.RecordConsolidation(j, "", configuredPath, "", "failed")
 		return false, fmt.Errorf("failed to check/resume consolidation: %w", err)
 	}
 	if resumed {
 		log.Info("resumed interrupted consolidation",
 			logger.String("path", newPath))
+		diagnostics.RecordConsolidation(j, "", newPath, "", "resumed")
 		return true, nil
 	}
 
@@ -1016,44 +1323,68 @@ func CheckAndConsolidateAtStartup(configuredPath string, log logger.Logger) (con
 	}
 	if err := WriteConsolidationState(dataDir, state); err != nil {
 		reportConsolidationError("writeStateFile", err, configuredPath, v2MigrationPath)
+		diagnostics.RecordConsolidation(j, v2MigrationPath, configuredPath, backupPath, "failed")
 		return false, fmt.Errorf("failed to write consolidation state: %w", err)
 	}
 
-	// Clean up any WAL/SHM files (defensive)
-	cleanupWALFiles(configuredPath)
-	cleanupWALFiles(v2MigrationPath)
+	// Fold any pending WAL content into the main database files BEFORE renaming, so a
+	// rename carries every committed transaction. Blindly deleting -wal/-shm (the old
+	// behaviour here) discards data written since the last checkpoint after an unclean
+	// shutdown, and this promotion fix makes consolidation actually run on busy 24/7
+	// installs where an uncheckpointed WAL is likely (issue #3991). Best-effort: log
+	// and continue, because the sidecar-preserving rename below is the real safety net.
+	if err := checkpointSQLiteWAL(configuredPath, log); err != nil {
+		log.Warn("failed to checkpoint legacy WAL before consolidation", logger.Error(err))
+	}
+	if err := checkpointSQLiteWAL(v2MigrationPath, log); err != nil {
+		log.Warn("failed to checkpoint v2 WAL before consolidation", logger.Error(err))
+	}
 
-	// Rename legacy → backup (if legacy exists)
+	// Rename legacy → backup (if legacy exists), moving its -wal/-shm sidecars along so
+	// no committed WAL data is left behind even if the checkpoint above did not fully
+	// drain it.
 	if _, err := os.Stat(configuredPath); err == nil {
 		log.Debug("renaming legacy database to backup",
 			logger.String("from", configuredPath),
 			logger.String("to", backupPath))
-		if err := os.Rename(configuredPath, backupPath); err != nil {
+		if err := moveSQLiteDBFiles(configuredPath, backupPath, log); err != nil {
 			reportConsolidationError("startupRenameLegacy", err, configuredPath, backupPath)
 			_ = DeleteConsolidationState(dataDir)
+			diagnostics.RecordConsolidation(j, v2MigrationPath, configuredPath, backupPath, "failed")
 			return false, fmt.Errorf("failed to rename legacy database: %w", err)
 		}
 	}
 
-	// Rename v2 → configured path
+	// Rename v2 → configured path, moving its -wal/-shm sidecars so the promoted
+	// database carries any transactions still resident in its WAL.
 	log.Debug("renaming v2 database to configured path",
 		logger.String("from", v2MigrationPath),
 		logger.String("to", configuredPath))
-	if err := os.Rename(v2MigrationPath, configuredPath); err != nil {
+	if err := moveSQLiteDBFiles(v2MigrationPath, configuredPath, log); err != nil {
 		reportConsolidationError("startupRenameV2", err, v2MigrationPath, configuredPath)
+		rolledBack := false
 		// Rollback: restore legacy from backup if it existed
 		if _, statErr := os.Stat(backupPath); statErr == nil {
 			log.Warn("v2 rename failed, rolling back",
 				logger.Error(err))
-			if rollbackErr := os.Rename(backupPath, configuredPath); rollbackErr != nil {
+			if rollbackErr := moveSQLiteDBFiles(backupPath, configuredPath, log); rollbackErr != nil {
 				reportConsolidationError("rollbackFailed", rollbackErr, backupPath, configuredPath)
 				log.Error("rollback failed - manual intervention required",
 					logger.Error(rollbackErr))
 				// Return without deleting state file to allow recovery on next boot
+				diagnostics.RecordConsolidation(j, v2MigrationPath, configuredPath, backupPath, "failed")
 				return false, fmt.Errorf("failed to rename v2 database (rollback also failed: %w): %w", rollbackErr, err)
 			}
+			rolledBack = true
 		}
 		_ = DeleteConsolidationState(dataDir)
+		if rolledBack {
+			// The legacy database was restored: one rolled_back record, no
+			// additional generic failure record.
+			diagnostics.RecordConsolidation(j, v2MigrationPath, configuredPath, backupPath, "rolled_back")
+		} else {
+			diagnostics.RecordConsolidation(j, v2MigrationPath, configuredPath, backupPath, "failed")
+		}
 		return false, fmt.Errorf("failed to rename v2 database: %w", err)
 	}
 
@@ -1065,6 +1396,8 @@ func CheckAndConsolidateAtStartup(configuredPath string, log logger.Logger) (con
 	log.Info("database consolidation completed at startup",
 		logger.String("database_path", configuredPath),
 		logger.String("backup_path", backupPath))
+
+	diagnostics.RecordConsolidation(j, v2MigrationPath, configuredPath, backupPath, "success")
 
 	return true, nil
 }

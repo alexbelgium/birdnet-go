@@ -23,6 +23,7 @@ export interface Detection {
   scientificName: string;
   commonName: string;
   confidence: number;
+  modelType?: string; // AI model type (e.g. 'bird', 'bat'); drives the spectrogram frequency range
   verified: 'correct' | 'false_positive' | 'unverified';
   locked: boolean;
   unlikely?: boolean;
@@ -107,8 +108,12 @@ export interface DetectionQueryParams {
 export interface DetectionReviewRequest {
   comment?: string;
   verified?: 'correct' | 'false_positive';
-  ignoreSpecies?: string;
-  locked?: boolean;
+  // Wire keys must match the /detections/:id/review request body the frontend
+  // sends and the Go DetectionRequest binds (snake_case), otherwise the field
+  // silently fails to bind server-side. See issue #3674. The frontend sends
+  // `null` when the ignore checkbox is unchecked, so allow null here too.
+  ignore_species?: string | null;
+  lock_detection?: boolean;
 }
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';

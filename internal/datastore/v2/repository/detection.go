@@ -104,7 +104,7 @@ type DetectionRepository interface {
 
 	// GetTopSpecies returns the most frequently detected species in a time range.
 	// modelID is optional; pass nil to include all models.
-	GetTopSpecies(ctx context.Context, start, end int64, minConfidence float64, modelID *uint, limit int) ([]SpeciesCount, error)
+	GetTopSpecies(ctx context.Context, start, end int64, minConfidence float64, modelID *uint, species []string, limit int) ([]SpeciesCount, error)
 
 	// GetBatchHourlyOccurrences returns per-label-ID hourly detection counts (0-23)
 	// for the given label IDs in a single grouped query (per chunk). The result maps
@@ -299,6 +299,13 @@ type DetectionRepository interface {
 	// scientific name so multi-model labels collapse to one species. Results are the top `limit` species
 	// by detection volume (ORDER BY count DESC), as required by the arrival/departure phenology chart.
 	GetSpeciesPhenologyInPeriod(ctx context.Context, start, end int64, limit int) ([]SpeciesPhenology, error)
+
+	// GetSourceActivitySummaries returns each audio source with at least one (false-positive-excluded)
+	// detection in the half-open range [start, end): the source's identity columns and its in-period
+	// detection count, ordered by count descending. Sources are INNER JOINed on audio_sources, so
+	// detections with a NULL source_id (legacy-migrated, source-less) are excluded. Powers the analytics
+	// source/mic filter's option list. COUNT is fan-out-immune because reviews are 1:1 with detections.
+	GetSourceActivitySummaries(ctx context.Context, start, end int64) ([]SourceActivitySummary, error)
 
 	// === Utilities ===
 

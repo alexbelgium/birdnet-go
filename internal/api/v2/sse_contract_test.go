@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/imageprovider"
 )
@@ -157,7 +158,7 @@ func createTestBirdImage() imageprovider.BirdImage {
 func createTestSSEDetectionData() SSEDetectionData {
 	note := createTestNoteWithAllFields()
 	birdImage := createTestBirdImage()
-	det := newSSEDetectionData(&note, &birdImage)
+	det := apicore.NewSSEDetectionData(&note, &birdImage)
 	det.IsNewSpecies = true
 	det.DaysSinceFirstSeen = 14
 	return det
@@ -308,7 +309,10 @@ func TestSSEContract_DetectionPayload_FieldNames(t *testing.T) {
 		birdImage, ok := payload[sseContractFields.BirdImage].(map[string]any)
 		require.True(t, ok, "birdImage must be an object")
 
-		assert.Equal(t, "https://example.com/bird.jpg", birdImage[sseContractFields.BirdImageURL],
+		// The stream publishes the media-proxy URL, not the provider's upstream URL,
+		// so a species renders identically here and through the REST API and cannot
+		// be left pointing at a host whose availability this process does not control.
+		assert.Equal(t, imageprovider.ProxyImageURL("Parus major"), birdImage[sseContractFields.BirdImageURL],
 			"SSE API CONTRACT: birdImage.url value mismatch")
 		assert.Equal(t, "CC BY-SA 4.0", birdImage[sseContractFields.BirdImageLicenseName],
 			"SSE API CONTRACT: birdImage.licenseName value mismatch")
@@ -379,7 +383,7 @@ func TestSSEContract_FrontendAccessPaths(t *testing.T) {
 
 		url, exists := birdImage["url"]
 		require.True(t, exists, "FRONTEND BROKEN: Cannot access data.birdImage.url")
-		assert.Equal(t, "https://example.com/bird.jpg", url)
+		assert.Equal(t, imageprovider.ProxyImageURL("Parus major"), url)
 	})
 
 	t.Run("Frontend can access detection ID", func(t *testing.T) {
@@ -403,7 +407,7 @@ func TestSSEContract_IsNewSpeciesOmittedWhenFalse(t *testing.T) {
 
 	note := createTestNoteWithAllFields()
 	birdImage := createTestBirdImage()
-	detection := newSSEDetectionData(&note, &birdImage)
+	detection := apicore.NewSSEDetectionData(&note, &birdImage)
 	detection.IsNewSpecies = false   // Should be omitted
 	detection.DaysSinceFirstSeen = 0 // Should be omitted
 
@@ -508,7 +512,7 @@ func TestSSEContract_SensitiveDataExcluded(t *testing.T) {
 	}
 
 	birdImage := createTestBirdImage()
-	detection := newSSEDetectionData(&note, &birdImage)
+	detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 	jsonBytes, err := json.Marshal(detection)
 	require.NoError(t, err)
@@ -601,7 +605,7 @@ func TestSSEContract_VerifiedAndLocked_Serialization(t *testing.T) {
 		note := createTestNoteWithAllFields()
 		note.Verified = "correct"
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -622,7 +626,7 @@ func TestSSEContract_VerifiedAndLocked_Serialization(t *testing.T) {
 		note := createTestNoteWithAllFields()
 		note.Verified = "" // empty string, omitempty should omit
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -642,7 +646,7 @@ func TestSSEContract_VerifiedAndLocked_Serialization(t *testing.T) {
 		note := createTestNoteWithAllFields()
 		note.Locked = true
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -663,7 +667,7 @@ func TestSSEContract_VerifiedAndLocked_Serialization(t *testing.T) {
 		note := createTestNoteWithAllFields()
 		note.Locked = false
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -690,7 +694,7 @@ func TestSSEContract_Source_NestedFields(t *testing.T) {
 
 		note := createTestNoteWithAllFields()
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -718,7 +722,7 @@ func TestSSEContract_Source_NestedFields(t *testing.T) {
 		// so it should be omitted due to omitempty
 		note := createTestNoteWithAllFields()
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -741,7 +745,7 @@ func TestSSEContract_Source_NestedFields(t *testing.T) {
 		note := createTestNoteWithAllFields()
 		note.Source = datastore.AudioSource{} // empty source
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -766,7 +770,7 @@ func TestSSEContract_BeginTimeEndTime_RFC3339(t *testing.T) {
 
 		note := createTestNoteWithAllFields()
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -813,7 +817,7 @@ func TestSSEContract_BeginTimeEndTime_RFC3339(t *testing.T) {
 		note.BeginTime = time.Time{} // zero value
 		note.EndTime = time.Time{}   // zero value
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -842,7 +846,7 @@ func TestSSEContract_IsNewSpecies_DaysSinceFirstSeen(t *testing.T) {
 
 		note := createTestNoteWithAllFields()
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 		detection.IsNewSpecies = true
 		detection.DaysSinceFirstSeen = 0
 
@@ -869,7 +873,7 @@ func TestSSEContract_IsNewSpecies_DaysSinceFirstSeen(t *testing.T) {
 
 		note := createTestNoteWithAllFields()
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 		detection.IsNewSpecies = false
 		detection.DaysSinceFirstSeen = 42
 
@@ -897,7 +901,7 @@ func TestSSEContract_IsNewSpecies_DaysSinceFirstSeen(t *testing.T) {
 
 		note := createTestNoteWithAllFields()
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 		detection.IsNewSpecies = true
 		detection.DaysSinceFirstSeen = 7
 
@@ -942,8 +946,10 @@ func TestSSEContract_BirdImage_AllSubFields(t *testing.T) {
 		birdImage, ok := birdImageRaw.(map[string]any)
 		require.True(t, ok, "SSE API CONTRACT: birdImage must be an object")
 
-		// Verify all fields are present and have correct values
-		assert.Equal(t, "https://example.com/bird.jpg", birdImage["url"],
+		// Verify all fields are present and have correct values. The URL is the
+		// media-proxy URL, not the provider's upstream address: see the note on the
+		// nil-image case below.
+		assert.Equal(t, imageprovider.ProxyImageURL("Parus major"), birdImage["url"],
 			"SSE API CONTRACT: birdImage.url value must match")
 		assert.Equal(t, "Parus major", birdImage["scientificName"],
 			"SSE API CONTRACT: birdImage.scientificName value must match")
@@ -991,7 +997,7 @@ func TestSSEContract_BirdImage_AllSubFields(t *testing.T) {
 		t.Parallel()
 
 		note := createTestNoteWithAllFields()
-		detection := newSSEDetectionData(&note, nil)
+		detection := apicore.NewSSEDetectionData(&note, nil)
 
 		jsonBytes, err := json.Marshal(detection)
 		require.NoError(t, err)
@@ -1008,11 +1014,16 @@ func TestSSEContract_BirdImage_AllSubFields(t *testing.T) {
 		birdImage, ok := birdImageRaw.(map[string]any)
 		require.True(t, ok, "SSE API CONTRACT: birdImage must be an object")
 
-		// url field should be present but empty (no omitempty on url)
+		// The URL is now derived from the detection's scientific name rather than from
+		// the resolved image, so it is present even when no image has been resolved
+		// yet. That is deliberate: since the proxy stopped fetching on the request
+		// path, "not resolved yet" is the normal state at broadcast time, and an empty
+		// URL would tell the client there is no image rather than not yet. The proxy
+		// answers 404 for a species that genuinely has none.
 		urlVal, urlExists := birdImage["url"]
-		assert.True(t, urlExists, "SSE API CONTRACT: birdImage.url key must exist even when empty")
-		assert.Empty(t, urlVal,
-			"SSE API CONTRACT: birdImage.url must be empty when no image provided")
+		assert.True(t, urlExists, "SSE API CONTRACT: birdImage.url key must exist")
+		assert.Equal(t, imageprovider.ProxyImageURL("Parus major"), urlVal,
+			"SSE API CONTRACT: birdImage.url must be the media-proxy URL even with no image resolved")
 	})
 }
 
@@ -1024,7 +1035,7 @@ func TestSSEContract_ZeroConfidence_NotOmitted(t *testing.T) {
 	note := createTestNoteWithAllFields()
 	note.Confidence = 0.0 // Zero confidence is valid — must not be omitted
 	birdImage := createTestBirdImage()
-	detection := newSSEDetectionData(&note, &birdImage)
+	detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 	jsonBytes, err := json.Marshal(detection)
 	require.NoError(t, err)
@@ -1047,7 +1058,7 @@ func TestSSEContract_AllFieldValues_RoundTrip(t *testing.T) {
 
 	note := createTestNoteWithAllFields()
 	birdImage := createTestBirdImage()
-	detection := newSSEDetectionData(&note, &birdImage)
+	detection := apicore.NewSSEDetectionData(&note, &birdImage)
 	detection.IsNewSpecies = true
 	detection.DaysSinceFirstSeen = 5
 
@@ -1155,7 +1166,7 @@ func TestSSEContract_AllFieldValues_RoundTrip(t *testing.T) {
 		bi, ok := payload["birdImage"].(map[string]any)
 		require.True(t, ok, "birdImage must be an object")
 
-		assert.Equal(t, "https://example.com/bird.jpg", bi["url"])
+		assert.Equal(t, imageprovider.ProxyImageURL("Parus major"), bi["url"])
 		assert.Equal(t, "Parus major", bi["scientificName"])
 		assert.Equal(t, "CC BY-SA 4.0", bi["licenseName"])
 		assert.Equal(t, "https://creativecommons.org/licenses/by-sa/4.0/", bi["licenseURL"])
@@ -1189,7 +1200,7 @@ func TestSSEContract_OmitemptyFields_Comprehensive(t *testing.T) {
 		// Source.ID: ""       (omitempty on Source pointer)
 	}
 
-	detection := newSSEDetectionData(&note, nil)
+	detection := apicore.NewSSEDetectionData(&note, nil)
 	// IsNewSpecies: false    (omitempty)
 	// DaysSinceFirstSeen: 0  (omitempty)
 
@@ -1339,7 +1350,7 @@ func TestSSEContract_NewSSEDetectionData_Constructor(t *testing.T) {
 		note := createTestNoteWithAllFields()
 		note.ClipName = "/deeply/nested/path/to/recordings/2024/clip.wav"
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		assert.Equal(t, "clip.wav", detection.ClipName,
 			"ClipName must be stripped to filename only")
@@ -1351,7 +1362,7 @@ func TestSSEContract_NewSSEDetectionData_Constructor(t *testing.T) {
 		note := createTestNoteWithAllFields()
 		note.ClipName = ""
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		assert.Empty(t, detection.ClipName,
 			"Empty ClipName must remain empty, not '.'")
@@ -1362,7 +1373,7 @@ func TestSSEContract_NewSSEDetectionData_Constructor(t *testing.T) {
 
 		note := createTestNoteWithAllFields()
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 
 		assert.Equal(t, "new_detection", detection.EventType,
 			"EventType must always be 'new_detection'")
@@ -1374,7 +1385,7 @@ func TestSSEContract_NewSSEDetectionData_Constructor(t *testing.T) {
 		before := time.Now()
 		note := createTestNoteWithAllFields()
 		birdImage := createTestBirdImage()
-		detection := newSSEDetectionData(&note, &birdImage)
+		detection := apicore.NewSSEDetectionData(&note, &birdImage)
 		after := time.Now()
 
 		assert.False(t, detection.Timestamp.Before(before),

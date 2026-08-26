@@ -69,6 +69,7 @@
     Info,
   } from '@lucide/svelte';
   import { api } from '$lib/utils/api';
+  import { type AudioDevice } from '$lib/utils/audioDevices';
   import { normalizeForLookup } from '$lib/utils/speciesNames';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
 
@@ -282,8 +283,8 @@
   }
 
   // Audio source options - map to actual device names
-  // Note: v2 API returns lowercase field names (index, name, id)
-  let audioDevices = $state<ApiState<Array<{ index: number; name: string; id: string }>>>({
+  // Note: v2 API returns lowercase field names (index, name, id, stableId, busPath)
+  let audioDevices = $state<ApiState<AudioDevice[]>>({
     loading: true,
     error: null,
     data: [],
@@ -299,11 +300,6 @@
     audioDevices.error = null;
 
     try {
-      interface AudioDevice {
-        index: number;
-        name: string;
-        id: string;
-      }
       const data = await api.get<AudioDevice[]>('/api/v2/system/audio/devices');
       audioDevices.data = data || [];
     } catch (error) {
@@ -843,33 +839,15 @@
                     store.isSaving}
                 />
 
-                <!-- Loudness Range -->
-                <NumberField
-                  label={t('settings.audio.audioNormalization.loudnessRangeLabel')}
-                  value={settings.audio.export.normalization.loudnessRange}
-                  onUpdate={value =>
-                    settingsActions.updateSection('realtime', {
-                      audio: {
-                        ...$audioSettings!,
-                        export: {
-                          ...settings.audio.export,
-                          normalization: {
-                            ...settings.audio.export.normalization,
-                            loudnessRange: value,
-                          },
-                        },
-                      },
-                    })}
-                  min={0}
-                  max={20}
-                  step={0.5}
-                  placeholder="7"
-                  helpText={t('settings.audio.audioNormalization.loudnessRangeHelp')}
-                  disabled={!settings.audio.export.normalization.enabled ||
-                    !settings.audio.export.enabled ||
-                    store.isLoading ||
-                    store.isSaving}
-                />
+                <!--
+                  The loudness range control was removed here. Clip normalization
+                  applies a single linear gain to the integrated-loudness target
+                  under the true-peak ceiling, with no dynamic-range treatment, so
+                  there is no LRA target left to honour. The setting is still
+                  accepted in config.yaml for backward compatibility but nothing
+                  reads it; showing a knob that does nothing is worse than showing
+                  none.
+                -->
 
                 <!-- True Peak -->
                 <NumberField
@@ -1334,7 +1312,7 @@
                   id="export-bitrate-disabled"
                   type="text"
                   class="block w-full px-3 py-1.5 text-sm bg-[var(--color-base-100)] text-[var(--color-base-content)] border border-[var(--border-200)] rounded-md opacity-50 cursor-not-allowed"
-                  value="N/A - Lossless"
+                  value={t('settings.audio.fileSettings.losslessBitrateValue')}
                   disabled
                   aria-describedby="lossless-note"
                 />

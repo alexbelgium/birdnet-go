@@ -16,7 +16,6 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
-	"github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/inference"
 	"github.com/tphakala/birdnet-go/internal/logger"
@@ -456,23 +455,38 @@ func (o *Orchestrator) resolveInstalledPaths(registryID string) (modelPath, labe
 			continue
 		}
 		subdir := filepath.Join(o.modelsDir, entry.ID)
-		var mp, lp, ep string
-		for _, f := range entry.Files {
-			switch f.Role {
-			case RoleModel:
-				mp = filepath.Join(subdir, f.LocalName)
-			case RoleLabels:
-				lp = filepath.Join(subdir, f.LocalName)
-			case RoleEmbeddings:
-				ep = filepath.Join(o.modelsDir, "shared", f.LocalName)
+
+		// A variant entry's resolved Files name the DEFAULT variant, which is not
+		// the file on disk when a non-default variant is installed. Probe each
+		// variant's own files and return the one whose model file exists (a
+		// completed switch leaves exactly one), so a non-default install still
+		// resolves here when settings carry no path. Flat entries probe entry.Files.
+		fileSets := [][]CatalogFile{entry.Files}
+		if len(entry.Variants) > 0 {
+			fileSets = make([][]CatalogFile, 0, len(entry.Variants))
+			for j := range entry.Variants {
+				fileSets = append(fileSets, entry.Variants[j].Files)
 			}
 		}
-		if mp != "" {
-			if _, err := os.Stat(mp); err == nil {
-				log.Debug("resolved model paths from gallery",
-					logger.String("registry_id", registryID),
-					logger.String("model_path", mp))
-				return mp, lp, ep
+		for _, files := range fileSets {
+			var mp, lp, ep string
+			for _, f := range files {
+				switch f.Role {
+				case RoleModel:
+					mp = filepath.Join(subdir, f.LocalName)
+				case RoleLabels:
+					lp = filepath.Join(subdir, f.LocalName)
+				case RoleEmbeddings:
+					ep = filepath.Join(o.modelsDir, "shared", f.LocalName)
+				}
+			}
+			if mp != "" {
+				if _, err := os.Stat(mp); err == nil {
+					log.Debug("resolved model paths from gallery",
+						logger.String("registry_id", registryID),
+						logger.String("model_path", mp))
+					return mp, lp, ep
+				}
 			}
 		}
 	}
@@ -680,7 +694,7 @@ func (o *Orchestrator) GetProbableSpeciesWithSettings(date time.Time, week float
 // "Eptesicus nilssonii") are deliberately kept as distinct scientific names so
 // both pass the scientific-name inclusion gate (conf.Settings.IsSpeciesIncluded)
 // during audio processing. Those near-duplicates are collapsed for the user only
-// at the display boundary (dedupeSpeciesForDisplay in internal/api/v2/range.go),
+// at the display boundary (dedupeSpeciesForDisplay in internal/api/v2/range/range.go),
 // keyed on the resolved common name, so the functional inclusion set stays intact.
 //
 // The bat model is handled separately from the loop above: it has no geomodel,
@@ -713,11 +727,11 @@ func (o *Orchestrator) GetAllProbableSpeciesWithSettings(date time.Time, week fl
 	// name the geomodel can predict at all.
 	seenSci := make(map[string]bool, len(scores))
 	for _, s := range scores {
-		seenSci[strings.ToLower(detection.ExtractScientificName(s.Label))] = true
+		seenSci[canonicalSpeciesKey(s.Label)] = true
 	}
 	geoCovered := make(map[string]bool, len(geoLabels))
 	for _, label := range geoLabels {
-		geoCovered[strings.ToLower(detection.ExtractScientificName(label))] = true
+		geoCovered[canonicalSpeciesKey(label)] = true
 	}
 
 	o.mu.RLock()
@@ -762,7 +776,7 @@ func (o *Orchestrator) GetAllProbableSpeciesWithSettings(date time.Time, week fl
 		}
 
 		for _, label := range labels {
-			sci := strings.ToLower(detection.ExtractScientificName(label))
+			sci := canonicalSpeciesKey(label)
 			switch {
 			case seenSci[sci]:
 				// Already represented via the primary (or an earlier model).
@@ -810,7 +824,7 @@ func (o *Orchestrator) GetAllProbableSpeciesWithSettings(date time.Time, week fl
 			scores = slices.Grow(scores, len(batLabels))
 		}
 		for _, label := range batLabels {
-			sci := strings.ToLower(detection.ExtractScientificName(label))
+			sci := canonicalSpeciesKey(label)
 			if seenSci[sci] || excluder.matches(label) {
 				continue
 			}
@@ -1166,6 +1180,27 @@ func (o *Orchestrator) RunFilterProcess(dateStr string, week float32) {
 // Acquires the per-model lock before reload to prevent concurrent inference,
 // then the write lock to re-key the models map.
 func (o *Orchestrator) ReloadModel() error {
+	return o.reloadPrimaryModel(func(primary *BirdNET) error { return primary.ReloadModel() })
+}
+
+// ReloadPrimaryForVariantSwap reloads the primary classifier in place for a
+// within-model variant swap (the gallery "optimize" flow for the permanent BirdNET
+// v2.4 model), accepting a changed or cleared model file path that ReloadModel would
+// refuse as a model-identity change. It shares reloadPrimaryModel's locking and
+// shared-state re-sync, differing only in delegating to BirdNET.reloadForVariantSwap
+// (allowPathChange=true). The model ID is invariant across a v2.4 variant swap, so
+// the re-key is a no-op in practice. Transactional rollback to the previous model
+// lives in reloadModelInternal, so a failed swap leaves the previous variant serving.
+func (o *Orchestrator) ReloadPrimaryForVariantSwap() error {
+	return o.reloadPrimaryModel(func(primary *BirdNET) error { return primary.reloadForVariantSwap() })
+}
+
+// reloadPrimaryModel performs the shared locking, per-instance reload, shared-state
+// re-sync, and models-map re-key for a primary-model reload. It delegates the actual
+// per-instance reload to reload(primary); ReloadModel passes BirdNET.ReloadModel (a
+// settings reload, path change refused) and ReloadPrimaryForVariantSwap passes
+// BirdNET.reloadForVariantSwap (an in-place variant swap, path change accepted).
+func (o *Orchestrator) reloadPrimaryModel(reload func(primary *BirdNET) error) error {
 	// Step 1: acquire per-model lock to prevent concurrent inference during reload.
 	o.mu.RLock()
 	primary := o.primary
@@ -1194,7 +1229,7 @@ func (o *Orchestrator) ReloadModel() error {
 	func() {
 		entry.mu.Lock()
 		defer entry.mu.Unlock()
-		reloadErr = primary.ReloadModel()
+		reloadErr = reload(primary)
 	}()
 	if reloadErr != nil {
 		return reloadErr
@@ -1518,8 +1553,9 @@ func (o *Orchestrator) IsModelLoaded(registryID string) bool {
 // this map are recognized but not yet implemented; callers log a warning
 // and skip. Adding a new loader only requires one entry here.
 var modelLoaders = map[string]func(o *Orchestrator, threads int) error{
-	RegistryIDPerchV2: (*Orchestrator).loadPerch,
-	RegistryIDBat:     (*Orchestrator).loadBat,
+	RegistryIDBirdNETV3: (*Orchestrator).loadBirdNETV3,
+	RegistryIDPerchV2:   (*Orchestrator).loadPerch,
+	RegistryIDBat:       (*Orchestrator).loadBat,
 }
 
 // secondaryModelBuilder constructs (but does not register) a secondary model
@@ -1535,6 +1571,15 @@ type secondaryModelBuilder func(o *Orchestrator, settings *conf.Settings, thread
 // secondary OpenVINO support is a one-line entry here, paired with the OV fields on
 // its loader config.
 var openvinoCapableSecondaryBuilders = map[string]secondaryModelBuilder{
+	RegistryIDBirdNETV3: func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {
+		// Explicit nil-on-error return avoids the typed-nil interface trap (a
+		// nil *BirdNETV3 wrapped in a non-nil ModelInstance).
+		m, err := o.buildBirdNETV3(settings, threads)
+		if err != nil {
+			return nil, err
+		}
+		return m, nil
+	},
 	RegistryIDPerchV2: func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {
 		// Explicit nil-on-error return avoids the typed-nil interface trap (a
 		// nil *Perch wrapped in a non-nil ModelInstance).
@@ -1892,6 +1937,9 @@ func (o *Orchestrator) PrimaryModelInfo() ModelInfo {
 // For the primary model entry, the live o.ModelInfo is returned rather than the
 // static registry template, so the reported Backend and Quantization match the
 // actually loaded model (e.g. ONNX/INT8 on the arm64 container default).
+// NumSpecies is always sourced from the live instance (not the template) so a
+// sliced or custom model reports its actual loaded label count rather than the
+// stock catalog number.
 func (o *Orchestrator) ModelInfos() []ModelInfo {
 	o.mu.RLock()
 	if o.models == nil {
@@ -1911,9 +1959,17 @@ func (o *Orchestrator) ModelInfos() []ModelInfo {
 
 	infos := make([]ModelInfo, 0, len(refs))
 	for _, ref := range refs {
+		// Capture the instance pointer under entry.mu, then release the lock before
+		// calling any instance method. Those accessors take their own per-model lock
+		// (BirdNET locks bn.mu), so holding entry.mu across them would stall
+		// PredictModel, which needs entry.mu only briefly on the inference hot path.
+		// This mirrors instanceFor / GetModelRuntimeInfo. The captured pointer stays
+		// usable even if the entry is torn down concurrently: the accessors below read
+		// label/settings/info state, not the native classifier that Close() frees.
 		ref.entry.mu.Lock()
-		if ref.entry.instance == nil {
-			ref.entry.mu.Unlock()
+		instance := ref.entry.instance
+		ref.entry.mu.Unlock()
+		if instance == nil {
 			continue
 		}
 		var info ModelInfo
@@ -1926,14 +1982,19 @@ func (o *Orchestrator) ModelInfos() []ModelInfo {
 			info, exists = ModelRegistry[ref.id]
 			if !exists {
 				info = ModelInfo{
-					ID:         ref.entry.instance.ModelID(),
-					Name:       ref.entry.instance.ModelName(),
-					Spec:       ref.entry.instance.Spec(),
-					NumSpecies: ref.entry.instance.NumSpecies(),
+					ID:   instance.ModelID(),
+					Name: instance.ModelName(),
+					Spec: instance.Spec(),
 				}
 			}
 		}
-		ref.entry.mu.Unlock()
+		// NumSpecies depends on the model's loaded label file, which a user can
+		// override with a sliced or custom model (e.g. a regional Perch v2 slice
+		// with far fewer classes than the stock 14,795). Both the primary template
+		// (o.ModelInfo) and the static registry template carry the stock catalog
+		// count, so source it from the live instance to report what is actually
+		// loaded.
+		info.NumSpecies = instance.NumSpecies()
 		infos = append(infos, info)
 	}
 	return infos
@@ -2033,4 +2094,49 @@ func (o *Orchestrator) loadAdditionalModels(threadAlloc map[string]int) error {
 	}
 
 	return nil
+}
+
+// GetRarityContext returns the primary model's probable-species scores together with
+// the two label vocabularies needed to interpret them, so a caller computing rarity
+// does not have to reassemble them from calls that can each observe a different model.
+//
+// Rarity is the geomodel occurrence probability, so the scores come from the primary
+// (geomodel-backed) range filter, not the multi-model union: the union assigns
+// synthetic always-active scores to secondary-model species that have no real
+// occurrence probability.
+//
+// Consistency, stated precisely because the guarantee is partial: scores and
+// geomodelLabels always describe the same range-filter instance, because
+// getProbableSpecies captures the geomodel vocabulary under the same bn.mu hold that
+// produces the scores. classifierLabels comes from the settings snapshot read here,
+// which is the same snapshot getProbableSpecies indexes for zeroScoresForAllLabels and
+// the unmapped-species mapping, so it agrees with the scores; but the range-filter
+// instance is resolved later, under its own lock, so a reload landing in that window can
+// still leave classifierLabels one generation behind the backend. That is narrower than
+// the skew separate GetProbableSpecies + Labels calls admit, not an absence of skew.
+//
+// Note also that currentSettings resolves through conf.CurrentOrFallback, which prefers
+// the globally published snapshot; an in-place model reload republishes only to the
+// instance, so classifierLabels can lag a label-set change until the next restart.
+//
+// geomodelLabels is nil unless the universal geomodel path ran. It is nil for the
+// TFLite meta model and the plain ONNX range filter, and when no range filter or
+// location is configured; in every one of those cases the scores are labeled with the
+// classifier's own vocabulary, so callers must fall back to classifierLabels.
+func (o *Orchestrator) GetRarityContext(date time.Time) (scores []SpeciesScore, geomodelLabels, classifierLabels []string, err error) {
+	// Snapshot the primary once and drive every read below from it. Delegating to
+	// o.GetProbableSpecies would re-resolve o.primary under a fresh lock and could
+	// score against a different model than the labels describe.
+	o.mu.RLock()
+	primary := o.primary
+	o.mu.RUnlock()
+	if primary == nil {
+		return nil, nil, nil, nil
+	}
+
+	settings := primary.currentSettings()
+	scores, geomodelLabels, err = primary.getProbableSpecies(date, 0.0, settings)
+	classifierLabels = slices.Clone(settings.BirdNET.Labels)
+
+	return scores, geomodelLabels, classifierLabels, err
 }

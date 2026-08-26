@@ -38,6 +38,12 @@ import type {
   PhenologyDatum,
   PhenologyRow,
 } from '../components/charts/d3/utils/phenology';
+import YearOverYearChart from '../components/charts/d3/YearOverYearChart.svelte';
+import { peakCumulative } from '../components/charts/d3/utils/yearOverYear';
+import type {
+  YearOverYearData,
+  YearOverYearPoint,
+} from '../components/charts/d3/utils/yearOverYear';
 
 import { formatDateForAPI } from './analyticsParams';
 import type { AnalyticsParams, ChartDef } from './types';
@@ -87,9 +93,27 @@ function ensureOk(response: Response): void {
 
 // --- Fetchers (verbatim endpoints/params from the legacy page) -------------
 
+// Milliseconds per day, for the inclusive day count used to average the range.
+const MS_PER_DAY = 86_400_000;
+
 /**
- * Hourly detection counts for the range's start date, per selected species.
- * Endpoint and the single-date semantics match the legacy page exactly.
+ * Inclusive number of calendar days spanned by [start, end].
+ *
+ * Compared on local calendar dates (not raw timestamps) so a DST shift inside the range cannot
+ * round the count up or down by a day. Always at least 1 so the average never divides by zero.
+ */
+function daysInRange(start: Date, end: Date): number {
+  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+  return Math.max(1, Math.round((endDay - startDay) / MS_PER_DAY) + 1);
+}
+
+/**
+ * Hour-of-day detection pattern for the selected date range, per selected species.
+ *
+ * The endpoint returns each hour's total summed across the whole range; dividing by the number of
+ * days yields the average detections per day for that hour, which is what the chart plots. Averaging
+ * (rather than plotting the raw total) keeps the Y axis comparable when the range length changes.
  */
 async function fetchTimeOfDay(
   params: AnalyticsParams,
@@ -98,7 +122,8 @@ async function fetchTimeOfDay(
   if (params.species.length === 0) return [];
 
   const search = new URLSearchParams({
-    date: formatDateForAPI(params.startDate),
+    start_date: formatDateForAPI(params.startDate),
+    end_date: formatDateForAPI(params.endDate),
     min_confidence: '0',
   });
   params.species.forEach(name => search.append('species', name));
@@ -113,12 +138,15 @@ async function fetchTimeOfDay(
     throw new Error('Invalid hourly batch response: expected an object');
   }
 
+  const days = daysInRange(params.startDate, params.endDate);
+
   return Object.entries(data as Record<string, unknown>).map(([species, hourlyData]) => ({
     species,
     data: Array.isArray(hourlyData)
       ? (hourlyData as TimeOfDayDatum[]).map(item => ({
           hour: typeof item.hour === 'number' ? item.hour : 0,
-          count: typeof item.count === 'number' ? item.count : 0,
+          // Range total -> average per day, rounded to 2dp so tooltips stay readable.
+          count: typeof item.count === 'number' ? Math.round((item.count / days) * 100) / 100 : 0,
         }))
       : [],
   }));
@@ -258,12 +286,22 @@ function coerceCells(cells: { dateIndex?: unknown; slot?: unknown; count?: unkno
  * Returns the server's columnar sparse payload, defensively coerced.
  */
 async function fetchHeatmap(params: AnalyticsParams, signal?: AbortSignal): Promise<HeatmapData> {
+  // Every patterns chart honors the species selection: with none selected, return an empty heatmap so
+  // the card shows its "pick species" empty state instead of aggregating every species.
+  if (params.species.length === 0) {
+    return {
+      dates: [],
+      slotResolutionMinutes: DEFAULT_SLOT_RESOLUTION_MINUTES,
+      cells: coerceCells({}),
+    };
+  }
+
   const search = new URLSearchParams({
     start_date: formatDateForAPI(params.startDate),
     end_date: formatDateForAPI(params.endDate),
   });
-  // The endpoint filters by a single species; use the first selected (none = all species).
-  if (params.species.length > 0) search.append('species', params.species[0]);
+  // The endpoint filters by a single species; use the first selected.
+  search.append('species', params.species[0]);
 
   const response = await fetch(buildAppUrl(`/api/v2/analytics/time/heatmap?${search}`), { signal });
   ensureOk(response);
@@ -303,19 +341,28 @@ interface SpeciesDistributionDatum {
 }
 
 /**
- * Who-sings-when ridgeline: the top-N species by detection volume in range, each with a normalized
- * 24-bucket hour-of-day distribution. Server-ranked and server-normalized; this defensively coerces
- * the array payload. Common names are resolved later (registry mapProps) from the hub's species map.
+ * Who-sings-when ridgeline: per-species normalized 24-bucket hour-of-day distributions. With no
+ * species selected it is the top-N by detection volume in range; with a selection it is those species
+ * (still volume-ordered, capped at the limit), so Clear reverts to the top-N. Server-ranked and
+ * server-normalized; this defensively coerces the array payload. Common names are resolved later
+ * (registry mapProps) from the hub's species map.
  */
 async function fetchSpeciesDistribution(
   params: AnalyticsParams,
   signal?: AbortSignal
 ): Promise<SpeciesDistributionDatum[]> {
+  // Every patterns chart honors the species selection: with none selected, return empty so the card
+  // shows its "pick species" empty state instead of a top-N default (matches fetchTimeOfDay).
+  if (params.species.length === 0) return [];
+
   const search = new URLSearchParams({
     start_date: formatDateForAPI(params.startDate),
     end_date: formatDateForAPI(params.endDate),
-    limit: String(SPECIES_RIDGELINE_LIMIT),
+    // Request one row per selected species so the server's volume-ordered LIMIT returns all of them
+    // (a species owning several model labels would otherwise push the lowest-volume picks off).
+    limit: String(params.species.length),
   });
+  params.species.forEach(name => search.append('species', name));
 
   const response = await fetch(
     buildAppUrl(`/api/v2/analytics/time/distribution/species?${search}`),
@@ -361,22 +408,29 @@ interface SuccessionDatum {
 }
 
 /**
- * Acoustic succession streamgraph: the top-N species by detection volume in range, each with their
- * raw 24-bucket hour-of-day detection counts. Like the who-sings-when ridgeline (#1159) it always
- * requests the top-N and does not honor the species filter, so the chart shows the diel acoustic
- * handover among the dominant species rather than a single species; the server ranks. Defensively
- * coerces the array payload, padding/truncating counts to 24 so the chart's hour axis stays
- * well-defined even on a malformed payload.
+ * Acoustic succession streamgraph: per-species raw 24-bucket hour-of-day detection counts. With no
+ * species selected it is the top-N by detection volume in range (the diel acoustic handover among the
+ * dominant species); with a selection it is those species (still volume-ordered, capped at the
+ * limit), so Clear reverts to the top-N. The server ranks. Defensively coerces the array payload,
+ * padding/truncating counts to 24 so the chart's hour axis stays well-defined even on a malformed
+ * payload.
  */
 async function fetchAcousticSuccession(
   params: AnalyticsParams,
   signal?: AbortSignal
 ): Promise<SuccessionDatum[]> {
+  // Every patterns chart honors the species selection: with none selected, return empty so the card
+  // shows its "pick species" empty state instead of a top-N default (matches fetchTimeOfDay).
+  if (params.species.length === 0) return [];
+
   const search = new URLSearchParams({
     start_date: formatDateForAPI(params.startDate),
     end_date: formatDateForAPI(params.endDate),
-    limit: String(SUCCESSION_LIMIT),
+    // Request one band per selected species so the server's volume-ordered LIMIT returns all of them
+    // (a species owning several model labels would otherwise push the lowest-volume picks off).
+    limit: String(params.species.length),
   });
+  params.species.forEach(name => search.append('species', name));
 
   const response = await fetch(buildAppUrl(`/api/v2/analytics/time/succession?${search}`), {
     signal,
@@ -425,12 +479,16 @@ async function fetchDawnOnset(
   params: AnalyticsParams,
   signal?: AbortSignal
 ): Promise<DawnOnsetData> {
+  // Every patterns chart honors the species selection: with none selected, return empty so the card
+  // shows its "pick species" empty state instead of aggregating every species.
+  if (params.species.length === 0) return { points: [] };
+
   const search = new URLSearchParams({
     start_date: formatDateForAPI(params.startDate),
     end_date: formatDateForAPI(params.endDate),
   });
-  // The endpoint filters by a single species; use the first selected (none = all species).
-  if (params.species.length > 0) search.append('species', params.species[0]);
+  // The endpoint filters by a single species; use the first selected.
+  search.append('species', params.species[0]);
 
   const response = await fetch(buildAppUrl(`/api/v2/analytics/time/dawn-onset?${search}`), {
     signal,
@@ -664,6 +722,74 @@ async function fetchSpeciesAccumulation(
   return { points };
 }
 
+interface YearOverYearResponseItem {
+  date?: unknown;
+  monthDay?: unknown;
+  thisYear?: unknown;
+  lastYear?: unknown;
+  delta?: unknown;
+}
+
+interface YearOverYearResponseShape {
+  currentYear?: unknown;
+  previousYear?: unknown;
+  points?: unknown;
+}
+
+/**
+ * Year-over-year tracker: current year-to-date cumulative detections versus the same calendar span one
+ * year earlier (false positives excluded). The server returns an object with year labels and a points
+ * array (one entry per current-year day). All-species, so the species filter is never sent; the
+ * control bar's end date is the as-of date. Defensively coerces the payload into the chart's shape.
+ */
+async function fetchYearOverYear(
+  params: AnalyticsParams,
+  signal?: AbortSignal
+): Promise<YearOverYearData> {
+  const search = new URLSearchParams({
+    date: formatDateForAPI(params.endDate),
+  });
+
+  const response = await fetch(buildAppUrl(`/api/v2/analytics/time/year-over-year?${search}`), {
+    signal,
+  });
+  ensureOk(response);
+
+  const raw: unknown = await response.json();
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Invalid year-over-year response: expected an object');
+  }
+  const body = raw as YearOverYearResponseShape;
+  const currentYear =
+    typeof body.currentYear === 'number' && Number.isFinite(body.currentYear)
+      ? body.currentYear
+      : 0;
+  const previousYear =
+    typeof body.previousYear === 'number' && Number.isFinite(body.previousYear)
+      ? body.previousYear
+      : 0;
+  const rawPoints = Array.isArray(body.points) ? body.points : [];
+
+  const points: YearOverYearPoint[] = [];
+  for (const r of rawPoints) {
+    if (!r || typeof r !== 'object') continue;
+    const item = r as YearOverYearResponseItem;
+    if (typeof item.date !== 'string') continue;
+    const monthDay = typeof item.monthDay === 'string' ? item.monthDay : '';
+    const thisYear =
+      typeof item.thisYear === 'number' && Number.isFinite(item.thisYear) ? item.thisYear : 0;
+    const lastYear =
+      typeof item.lastYear === 'number' && Number.isFinite(item.lastYear) ? item.lastYear : 0;
+    const delta =
+      typeof item.delta === 'number' && Number.isFinite(item.delta)
+        ? item.delta
+        : thisYear - lastYear;
+    points.push({ date: item.date, monthDay, thisYear, lastYear, delta });
+  }
+
+  return { currentYear, previousYear, points };
+}
+
 // Top-N species the phenology Gantt requests; mirrors the chart's maxSpecies cap and the server
 // default. Kept modest so the residency bars stay legible within the card's fixed height.
 const SPECIES_PHENOLOGY_LIMIT = 12;
@@ -745,8 +871,8 @@ export const CHART_REGISTRY: ChartDef[] = [
     emptyHintKey: 'analytics.advanced.charts.ridgeline.noDataHint',
     component: SpeciesRidgeline,
     fetch: fetchSpeciesDistribution,
-    // The endpoint is always top-N by volume; supports.species lets the patterns tab's species
-    // auto-select run, and the chart notes that it shows the top N regardless of selection.
+    // Always a view of the user's species selection (empty selection shows the card's empty state, so
+    // this only ever renders selected species).
     mapProps: (data, _params, ctx) => ({
       series: (data as SpeciesDistributionDatum[]).map(d => ({
         scientificName: d.scientificName,
@@ -754,7 +880,6 @@ export const CHART_REGISTRY: ChartDef[] = [
         density: d.density,
         total: d.total,
       })),
-      noteKey: 'analytics.advanced.charts.ridgeline.note',
     }),
     size: 'full',
     supports: { species: true, source: false },
@@ -771,10 +896,9 @@ export const CHART_REGISTRY: ChartDef[] = [
     emptyHintKey: 'analytics.advanced.charts.succession.noDataHint',
     component: AcousticSuccessionChart,
     fetch: fetchAcousticSuccession,
-    // The endpoint is always top-N by volume; like the sibling ridgeline, supports.species lets the
-    // patterns tab's species auto-select run, and the chart's note states it shows the top N
-    // regardless of selection. The fetch result is the raw row array, so the default array-length
-    // count (the band count) drives the not-enough-data gate.
+    // Always a view of the user's species selection (empty selection shows the card's empty state, so
+    // this only ever renders selected species). The fetch result is the raw row array, so the default
+    // array-length count (the band count) drives the not-enough-data gate.
     mapProps: (data, _params, ctx) => ({
       series: (data as SuccessionDatum[]).map(d => ({
         scientificName: d.scientificName,
@@ -782,7 +906,6 @@ export const CHART_REGISTRY: ChartDef[] = [
         counts: d.counts,
         total: d.total,
       })),
-      noteKey: 'analytics.advanced.charts.succession.note',
     }),
     size: 'full',
     supports: { species: true, source: false },
@@ -810,7 +933,7 @@ export const CHART_REGISTRY: ChartDef[] = [
   },
   {
     id: 'nocturnal-clock',
-    group: 'patterns',
+    group: 'nocturnal',
     titleKey: 'analytics.advanced.charts.nocturnal.title',
     descKey: 'analytics.advanced.charts.nocturnal.description',
     emptyKey: 'analytics.advanced.charts.nocturnal.noData',
@@ -880,6 +1003,24 @@ export const CHART_REGISTRY: ChartDef[] = [
     supports: { species: true, source: false },
   },
   {
+    id: 'year-over-year',
+    group: 'trends',
+    titleKey: 'analytics.advanced.charts.yearOverYear.title',
+    descKey: 'analytics.advanced.charts.yearOverYear.description',
+    emptyKey: 'analytics.advanced.charts.yearOverYear.noData',
+    emptyHintKey: 'analytics.advanced.charts.yearOverYear.noDataHint',
+    component: YearOverYearChart,
+    fetch: fetchYearOverYear,
+    // Object payload (year labels + a points array spanning the whole year-to-date), so the default
+    // array-length count would always look like plenty of data. The meaningful count is how many
+    // detections actually accumulated in either year; below 2 the chart is a trivial flat step, so
+    // ChartCard shows the not-enough-data state. All-species, so neither filter applies.
+    countDataPoints: data => peakCumulative(data as YearOverYearData),
+    size: 'full',
+    supports: { species: false, source: false },
+    minDataPoints: 2,
+  },
+  {
     id: 'species-diversity',
     group: 'biodiversity',
     titleKey: 'analytics.advanced.charts.diversity.title',
@@ -929,12 +1070,10 @@ export const CHART_REGISTRY: ChartDef[] = [
     // (the species count) drives the not-enough-data gate; a one-bar Gantt is not a comparison.
     mapProps: (data, _params, ctx) => ({
       data: {
-        rows: (data as PhenologyDatum[]).map(
-          (d): PhenologyRow => ({
-            ...d,
-            commonName: ctx.speciesNames.get(d.scientificName) ?? d.scientificName,
-          })
-        ),
+        rows: (data as PhenologyDatum[]).map((d): PhenologyRow => ({
+          ...d,
+          commonName: ctx.speciesNames.get(d.scientificName) ?? d.scientificName,
+        })),
       } as PhenologyData,
     }),
     size: 'full',

@@ -14,6 +14,16 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+// forwardWaitTimeout is the upper bound for an end-to-end dispatcher forward to
+// reach a test provider. The real path is sub-millisecond, but it crosses four
+// goroutine hops (broadcast, dispatch loop, dispatch, dispatchEnhanced) with no
+// time-based wait on the success path, so this budget exists only to absorb
+// goroutine scheduling stalls under full-suite `go test -race` CPU contention.
+// A generous ceiling keeps the test deterministic without slowing a healthy
+// run: the select wakes instantly on arrival and only reaches the timeout if
+// forwarding is genuinely broken.
+const forwardWaitTimeout = 5 * time.Second
+
 // fakeProvider implements PushProvider for testing
 type fakeProvider struct {
 	name      string
@@ -63,19 +73,29 @@ func newFakeProvider(name string, enabled bool, types ...Type) *fakeProvider {
 }
 
 // installIsolatedService installs svc as the process-global notification service
-// for the duration of the test and restores the previous instance on cleanup.
-// Tests that exercise the dispatcher end to end need their own service because
-// dispatcher.start subscribes to the global singleton (via GetService), yet
-// SetServiceForTesting only sets that singleton when it is nil and never resets
-// it. Without isolation such tests share one service, cross-deliver each other's
+// for the duration of the test, then restores the previous instance and stops svc
+// on cleanup. Tests that exercise the dispatcher end to end need their own service
+// because dispatcher.start subscribes to the global singleton (via GetService).
+// Without isolation such tests share one service, cross-deliver each other's
 // notifications, and accumulate rate-limiter state across runs. Callers must not
 // run in parallel: they mutate the global singleton.
+//
+// Cleanups run in LIFO order, so the pointer is restored before svc is stopped:
+// this closes any window where a concurrent GetService caller could observe a
+// service that is shutting down. The caller owns svc's lifecycle, which is why
+// the previous instance is only swapped back (never stopped) on restore.
 func installIsolatedService(t *testing.T, svc *Service) {
 	t.Helper()
+	// Register svc.Stop first so it runs last (after the pointer is restored),
+	// and so the dispatcher goroutines this test created are torn down rather
+	// than relying on the package goleak gate to tolerate them.
+	t.Cleanup(svc.Stop)
+
 	mu.Lock()
 	prev := instance
 	instance = svc
 	mu.Unlock()
+	// Registered after svc.Stop, so this restore runs first (LIFO).
 	t.Cleanup(func() {
 		mu.Lock()
 		instance = prev
@@ -115,11 +135,16 @@ func TestPushDispatcher_ForwardsNotification(t *testing.T) {
 	_, err = svc.Create(TypeInfo, PriorityLow, "Hello", "World")
 	require.NoError(t, err, "create notification failed")
 
+	// Wait on the observable result (the forwarded notification) rather than a
+	// tight fixed deadline. The select wakes the instant the notification
+	// arrives; the generous timeout only acts as a ceiling for scheduling
+	// stalls under CI load, so a slow run no longer fails while a genuinely
+	// broken dispatcher still fails fast at the ceiling.
 	select {
 	case n := <-fp.recvCh:
 		assert.Equal(t, "Hello", n.Title)
 		assert.Equal(t, "World", n.Message)
-	case <-time.After(1 * time.Second):
+	case <-time.After(forwardWaitTimeout):
 		require.Fail(t, "timeout waiting for provider to receive notification")
 	}
 }

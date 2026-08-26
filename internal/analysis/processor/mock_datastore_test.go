@@ -15,6 +15,7 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/diskmanager"
 	"gorm.io/gorm"
 )
 
@@ -154,7 +155,7 @@ func (m *ActionMockDatastore) GetAllNotes() ([]datastore.Note, error) {
 func (m *ActionMockDatastore) GetTopBirdsData(_ context.Context, _ string, _ float64, _ int) ([]datastore.Note, error) {
 	return nil, nil
 }
-func (m *ActionMockDatastore) GetBatchHourlyOccurrences(_ context.Context, _ string, _ []string, _ float64) (map[string][24]int, error) {
+func (m *ActionMockDatastore) GetBatchHourlyOccurrences(_ context.Context, _, _ string, _ []string, _ float64) (map[string][24]int, error) {
 	return make(map[string][24]int), nil
 }
 func (m *ActionMockDatastore) SpeciesDetections(_, _, _ string, _ int, _ bool, _, _ int) ([]datastore.Note, error) {
@@ -264,6 +265,9 @@ func (m *ActionMockDatastore) GetLockedNotesClipPaths() ([]string, error) {
 func (m *ActionMockDatastore) ClearNoteClipPathsByNames(_ []string) (int64, error) {
 	return 0, nil
 }
+func (m *ActionMockDatastore) GetNoteClipReferences(_ uint, _ int) ([]diskmanager.ClipReference, error) {
+	return nil, nil
+}
 func (m *ActionMockDatastore) CountHourlyDetections(_, _ string, _ int) (int64, error) {
 	return 0, nil
 }
@@ -294,7 +298,7 @@ func (m *ActionMockDatastore) GetSpeciesDiversityData(_ context.Context, _, _ st
 func (m *ActionMockDatastore) GetActivityHeatmap(_ context.Context, _, _, _ string) (datastore.ActivityHeatmapData, error) {
 	return datastore.ActivityHeatmapData{}, nil
 }
-func (m *ActionMockDatastore) GetHourlyDistributionBySpecies(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesHourlyDistribution, error) {
+func (m *ActionMockDatastore) GetHourlyDistributionBySpecies(_ context.Context, _, _ string, _ []string, _ int) ([]datastore.SpeciesHourlyDistribution, error) {
 	return []datastore.SpeciesHourlyDistribution{}, nil
 }
 func (m *ActionMockDatastore) GetDailyActivityOnset(_ context.Context, _, _, _ string) ([]datastore.DailyActivityOnset, error) {
@@ -307,10 +311,16 @@ func (m *ActionMockDatastore) GetConfidenceHistogram(_ context.Context, _, _, _ 
 func (m *ActionMockDatastore) GetSpeciesAccumulation(_ context.Context, _, _ string) ([]datastore.SpeciesAccumulationPoint, error) {
 	return []datastore.SpeciesAccumulationPoint{}, nil
 }
+func (m *ActionMockDatastore) GetAudioSources(_ context.Context, _, _ string) ([]datastore.AudioSourceSummary, error) {
+	return []datastore.AudioSourceSummary{}, nil
+}
+func (m *ActionMockDatastore) GetYearOverYear(_ context.Context, _ string) (datastore.YearOverYearResult, error) {
+	return datastore.YearOverYearResult{Points: []datastore.YearOverYearPoint{}}, nil
+}
 func (m *ActionMockDatastore) GetSpeciesPhenology(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesPhenologyPoint, error) {
 	return []datastore.SpeciesPhenologyPoint{}, nil
 }
-func (m *ActionMockDatastore) GetAcousticSuccession(_ context.Context, _, _ string, _ int) ([]datastore.SpeciesHourlyCounts, error) {
+func (m *ActionMockDatastore) GetAcousticSuccession(_ context.Context, _, _ string, _ []string, _ int) ([]datastore.SpeciesHourlyCounts, error) {
 	return []datastore.SpeciesHourlyCounts{}, nil
 }
 func (m *ActionMockDatastore) SearchDetections(_ *datastore.SearchFilters) ([]datastore.DetectionRecord, int, error) {
@@ -319,7 +329,7 @@ func (m *ActionMockDatastore) SearchDetections(_ *datastore.SearchFilters) ([]da
 func (m *ActionMockDatastore) SaveDynamicThreshold(_ *datastore.DynamicThreshold) error {
 	return nil
 }
-func (m *ActionMockDatastore) GetDynamicThreshold(_, _ string) (*datastore.DynamicThreshold, error) {
+func (m *ActionMockDatastore) GetDynamicThreshold(_ string) (*datastore.DynamicThreshold, error) {
 	// Returns ErrNoteReviewNotFound as a generic "not found" sentinel.
 	// This stub method is not exercised by action execution tests.
 	return nil, datastore.ErrNoteReviewNotFound
