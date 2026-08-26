@@ -17,7 +17,7 @@
   import { resolveNoveltyCategory, noveltyCategoryColorVar } from '../../utils/noveltyCategory';
   import { computeAxisTicks, tickPositionCss } from '../../utils/hourAxis';
   import { Star, CalendarDays, Leaf, ChevronUp, ChevronDown } from '@lucide/svelte';
-  import HourlyMiniChart from './HourlyMiniChart.svelte';
+  import HourlyMiniChart, { BAR_STRIDE } from './HourlyMiniChart.svelte';
   import SpeciesDetailCard from './SpeciesDetailCard.svelte';
 
   interface Props {
@@ -109,6 +109,13 @@
     });
   }
 
+  // Chart column tracks the chart's actual rendered width (BAR_STRIDE px/bar,
+  // from HourlyMiniChart), so through most of the day the leftover space goes to
+  // the species name instead of sitting empty beside a shorter-than-24h chart.
+  // The trade is deliberate: the grid re-lays-out once an hour as the day grows,
+  // in exchange for the name column being at its widest for most of the day.
+  const chartColWidthPx = $derived((maxHour + 1) * BAR_STRIDE);
+
   // Gates the SSE row-flash animation for users who prefer reduced motion.
   const prefersReducedMotion =
     typeof window !== 'undefined'
@@ -166,6 +173,7 @@
   bind:this={tableEl}
   class="mobile-summary-table w-full"
   aria-label="Species detected on {selectedDate}"
+  style:--col-chart-w="{chartColWidthPx}px"
 >
   <!-- Active-sort indicator for a header button -->
   {#snippet sortGlyph(key: MobileSortKey)}
@@ -383,18 +391,12 @@
        target-size floor. */
     --row-h: 1.75rem;
 
-    /* Name:chart share of the flexible width. The chart used to be a fixed px track
-       sized from (maxHour + 1) × BAR_STRIDE, so every column reflowed once an hour
-       on "today" and the chart was squeezed to ~44 px right through the morning.
-       Splitting the free space by ratio instead keeps the layout stable all day and
-       lets the SVG stretch into whatever it gets. Portrait weights the species name
-       at 2:1 — there is only ~230 px to share, and a readable name beats a wider
-       sparkline; landscape relaxes to the golden ratio, where both fit. */
-    --col-name-fr: 2fr;
-
-    /* Floor on the chart so it never collapses to an unreadable sliver on a very
-       narrow phone; the name ellipsis-truncates instead. */
-    --col-chart-fr: minmax(3.25rem, 1fr);
+    /* Portrait gives the chart exactly the width it draws (--col-chart-w, bound
+       inline from chartColWidthPx) and hands every remaining pixel to the species
+       name, so names are at their least truncated for most of the day. Landscape
+       has width to spare and splits it at the golden ratio instead. */
+    --col-name-fr: 1fr;
+    --col-chart-fr: var(--col-chart-w);
   }
 
   /* Curtain above the column names while the header is pinned */
@@ -696,16 +698,8 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    justify-self: stretch;
     border-radius: 0.25rem;
     padding: 0.125rem 0;
-  }
-
-  /* The SVG carries preserveAspectRatio="none", so stretching it to the track's
-     width just widens the bars — the hour positions (and therefore the header's
-     tick alignment, which is computed in percentages) are unchanged. */
-  .col-chart :global(svg) {
-    width: 100%;
   }
 
   /* Subtle hint below the species list */
@@ -732,6 +726,18 @@
       /* Landscape has room for both a full name and a wide chart, so relax the
          portrait 2:1 weighting back to the golden ratio. */
       --col-name-fr: 1.618fr;
+    }
+
+    /* The chart track is flexible here, not the px width portrait uses; let the
+       cell fill it and the SVG stretch. preserveAspectRatio="none" means that only
+       widens the bars — hour positions, and so the header's percentage-positioned
+       ticks, are unchanged. */
+    .col-chart {
+      justify-self: stretch;
+    }
+
+    .col-chart :global(svg) {
+      width: 100%;
     }
 
     /* The scientific name takes back the line the abundance bar uses in portrait. */

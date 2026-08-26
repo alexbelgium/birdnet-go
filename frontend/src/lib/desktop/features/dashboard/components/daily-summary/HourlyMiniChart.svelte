@@ -1,8 +1,8 @@
 <script module lang="ts">
-  // Bar geometry is part of the chart's contract. The SVG is stretched to
-  // whatever width its column gives it, so these no longer set anyone's layout —
-  // but hourAxis.ts derives its bar-centre fraction (BAR_WIDTH/2 / BAR_STRIDE)
-  // from them, which is what keeps the axis ticks over the bars they label.
+  // Bar geometry is part of the chart's contract: the mobile summary table sizes
+  // its chart column at BAR_STRIDE px per hour, and hourAxis.ts derives its
+  // bar-centre fraction (BAR_WIDTH/2 / BAR_STRIDE) from these — which is what
+  // keeps the axis ticks over the bars they label.
   export const BAR_WIDTH = 3;
   export const BAR_STRIDE = 4; // bar width + gap
 </script>

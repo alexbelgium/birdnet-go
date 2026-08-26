@@ -13,26 +13,31 @@ describe('computeAxisTicks', () => {
   });
 
   it('drops a trailing candidate that would collide with the last hour', () => {
-    // The axis is ~80px wide whatever it holds: "12" and "14" overlapped.
+    // "12" and "14" are two hours = 8px apart; a two-digit label is ~10px.
     expect(computeAxisTicks(14)).toEqual([0, 6, 14]);
     expect(computeAxisTicks(13)).toEqual([0, 6, 13]);
     expect(computeAxisTicks(7)).toEqual([0, 7]);
+    expect(computeAxisTicks(8)).toEqual([0, 8]);
+    expect(computeAxisTicks(9)).toEqual([0, 9]);
+    expect(computeAxisTicks(15)).toEqual([0, 6, 15]);
     expect(computeAxisTicks(19)).toEqual([0, 6, 12, 19]);
-    expect(computeAxisTicks(22)).toEqual([0, 6, 12, 22]);
   });
 
   it('keeps a trailing candidate that clears the last hour', () => {
     expect(computeAxisTicks(10)).toEqual([0, 6, 10]);
     expect(computeAxisTicks(16)).toEqual([0, 6, 12, 16]);
+    expect(computeAxisTicks(22)).toEqual([0, 6, 12, 18, 22]);
   });
 
-  it('measures separation against the axis, not in hours', () => {
-    // 6 -> 9 is only three hours, but on a ten-bar axis that is 30% of the width,
-    // so the tick is legible and survives. The same three hours at the end of a
-    // full day would be 12% of the axis and would be dropped.
-    expect(computeAxisTicks(9)).toEqual([0, 6, 9]);
-    expect(computeAxisTicks(8)).toEqual([0, 6, 8]);
-    expect(computeAxisTicks(21)).toEqual([0, 6, 12, 21]);
+  it('leaves every hour at least MIN_TICK_SPACING_HOURS between its last ticks', () => {
+    // The chart is BAR_STRIDE(4)px per hour, so this is a pixel guarantee: no
+    // pair of labels on any axis 06:00 and later ends up closer than 16px.
+    for (let maxHour = 6; maxHour <= 23; maxHour++) {
+      const ticks = computeAxisTicks(maxHour);
+      for (let i = 1; i < ticks.length; i++) {
+        expect(ticks[i] - ticks[i - 1]).toBeGreaterThanOrEqual(4);
+      }
+    }
   });
 
   it('never drops the origin tick', () => {

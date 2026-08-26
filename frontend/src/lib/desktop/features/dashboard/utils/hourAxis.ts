@@ -13,17 +13,15 @@ const BAR_CENTRE_FRACTION = 0.375;
 const CANDIDATE_TICKS = [0, 6, 12, 18] as const;
 
 /**
- * Minimum gap between the last two ticks, as a fraction of the axis.
+ * Minimum gap between the last two ticks, in hours.
  *
- * Deliberately a fraction, not a number of hours: the axis is a fixed ~80 px
- * wide however many bars it holds, so an hour is ~3 px on a full day but ~8 px
- * at 09:00. A fixed hour threshold would either let labels collide late in the
- * day (13:00 drew "12" and "13" on top of each other) or throw away a perfectly
- * legible tick in the morning.
- *
- * A two-digit label is ~10 px of an ~80 px axis, i.e. ~12%; 18% leaves a gutter.
+ * Hours rather than a fraction of the axis, because the chart column is sized at
+ * BAR_STRIDE px per hour: the axis grows with the day, so an hour is always 4 px
+ * wide and an hour count converts straight to pixels. Four hours is 16 px, which
+ * clears a two-digit label (~10 px). Without this, computeAxisTicks appended
+ * maxHour unconditionally and drew "12" and "14" on top of each other at 14:00.
  */
-const MIN_TICK_SEPARATION = 0.18;
+const MIN_TICK_SPACING_HOURS = 4;
 
 /**
  * Adaptive axis ticks for a 0..maxHour chart: the fixed candidates that fall
@@ -37,7 +35,7 @@ export function computeAxisTicks(maxHour: number): number[] {
   const base = CANDIDATE_TICKS.filter(h => h <= maxHour);
   const last = base[base.length - 1];
   if (last === maxHour) return base;
-  if (base.length > 1 && (maxHour - last) / (maxHour + 1) < MIN_TICK_SEPARATION) {
+  if (base.length > 1 && maxHour - last < MIN_TICK_SPACING_HOURS) {
     return [...base.slice(0, -1), maxHour];
   }
   return [...base, maxHour];
