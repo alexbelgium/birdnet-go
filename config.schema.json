@@ -2453,6 +2453,13 @@
           "type": "array",
           "description": "Always exclude these species"
         },
+        "confirmed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Species manually verified as genuine occurrences (analytics-only flag)"
+        },
         "config": {
           "oneOf": [
             {

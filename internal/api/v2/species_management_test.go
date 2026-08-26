@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tphakala/birdnet-go/internal/api/v2/detections"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
 )
@@ -48,10 +49,10 @@ func TestDeleteSpeciesDetections(t *testing.T) {
 		mockDS.On("Get", "2").Return(datastore.Note{ID: 2, Locked: true}, nil)
 		controller.DS = &speciesManagerMock{MockInterface: mockDS, noteIDs: []string{"1", "2"}}
 
-		rec := doDeleteSpecies(t, e, controller, DeleteSpeciesRequest{ScientificName: "Turdus migratorius"})
+		rec := doDeleteSpecies(t, e, controller, detections.DeleteSpeciesRequest{ScientificName: "Turdus migratorius"})
 		assert.Equal(t, http.StatusOK, rec.Code)
 
-		var result DeleteSpeciesResult
+		var result detections.DeleteSpeciesResult
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
 		assert.Equal(t, "Turdus migratorius", result.ScientificName)
 		assert.Equal(t, 1, result.Deleted)
@@ -62,7 +63,7 @@ func TestDeleteSpeciesDetections(t *testing.T) {
 		e, mockDS, controller := setupTestEnvironment(t)
 		controller.DS = &speciesManagerMock{MockInterface: mockDS}
 
-		rec := doDeleteSpecies(t, e, controller, DeleteSpeciesRequest{ScientificName: "   "})
+		rec := doDeleteSpecies(t, e, controller, detections.DeleteSpeciesRequest{ScientificName: "   "})
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
@@ -70,7 +71,7 @@ func TestDeleteSpeciesDetections(t *testing.T) {
 		e, mockDS, controller := setupTestEnvironment(t)
 		controller.DS = &speciesManagerMock{MockInterface: mockDS, noteIDs: []string{}}
 
-		rec := doDeleteSpecies(t, e, controller, DeleteSpeciesRequest{ScientificName: "Ghost bird"})
+		rec := doDeleteSpecies(t, e, controller, detections.DeleteSpeciesRequest{ScientificName: "Ghost bird"})
 		assert.Equal(t, http.StatusNotFound, rec.Code)
 	})
 
@@ -78,7 +79,7 @@ func TestDeleteSpeciesDetections(t *testing.T) {
 		e, _, controller := setupTestEnvironment(t)
 		// controller.DS is the plain MockInterface, which does not implement SpeciesManager.
 
-		rec := doDeleteSpecies(t, e, controller, DeleteSpeciesRequest{ScientificName: "Turdus migratorius"})
+		rec := doDeleteSpecies(t, e, controller, detections.DeleteSpeciesRequest{ScientificName: "Turdus migratorius"})
 		assert.Equal(t, http.StatusNotImplemented, rec.Code)
 	})
 }
@@ -96,7 +97,7 @@ func TestGetSpeciesReviewStats(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/analytics/species/review-stats", http.NoBody)
 		rec := httptest.NewRecorder()
-		require.NoError(t, controller.GetSpeciesReviewStats(e.NewContext(req, rec)))
+		require.NoError(t, controller.analytics.GetSpeciesReviewStats(e.NewContext(req, rec)))
 		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var stats []datastore.SpeciesReviewStats
@@ -113,13 +114,13 @@ func TestGetSpeciesReviewStats(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/analytics/species/review-stats", http.NoBody)
 		rec := httptest.NewRecorder()
-		require.NoError(t, controller.GetSpeciesReviewStats(e.NewContext(req, rec)))
+		require.NoError(t, controller.analytics.GetSpeciesReviewStats(e.NewContext(req, rec)))
 		assert.Equal(t, http.StatusNotImplemented, rec.Code)
 	})
 }
 
 // doDeleteSpecies issues a species-delete request and returns the recorder.
-func doDeleteSpecies(t *testing.T, e *echo.Echo, controller *Controller, body DeleteSpeciesRequest) *httptest.ResponseRecorder {
+func doDeleteSpecies(t *testing.T, e *echo.Echo, controller *Controller, body detections.DeleteSpeciesRequest) *httptest.ResponseRecorder {
 	t.Helper()
 	bodyBytes, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -127,6 +128,6 @@ func doDeleteSpecies(t *testing.T, e *echo.Echo, controller *Controller, body De
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/detections/species/delete", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	require.NoError(t, controller.DeleteSpeciesDetections(e.NewContext(req, rec)))
+	require.NoError(t, controller.detections.DeleteSpeciesDetections(e.NewContext(req, rec)))
 	return rec
 }

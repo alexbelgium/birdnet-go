@@ -8,7 +8,6 @@
   import { getStoredValue, setStoredValue } from '$lib/utils/storage';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
-  import { handleBirdImageError } from '$lib/desktop/components/ui/image-utils';
   import { onMount, onDestroy } from 'svelte';
   import SortableHeader from '$lib/desktop/components/ui/SortableHeader.svelte';
   import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
