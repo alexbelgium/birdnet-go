@@ -100,6 +100,26 @@ export function formatDetectionCount(n: number): string {
   return `${Math.round(n / 1000)}k`;
 }
 
+/**
+ * Hour (0..maxHour) with this species' highest detection count, or null when the
+ * day is empty. Ties resolve to the earliest hour. Used to put the mini chart's
+ * headline fact into the row's accessible label — the chart itself is
+ * aria-hidden, so without this a screen reader gets no timing information.
+ */
+export function computePeakHour(hourlyCounts: number[], maxHour: number): number | null {
+  let peakHour: number | null = null;
+  let peakCount = 0;
+  const last = Math.min(maxHour, hourlyCounts.length - 1);
+  for (let hour = 0; hour <= last; hour++) {
+    const count = safeArrayAccess(hourlyCounts, hour, 0) ?? 0;
+    if (count > peakCount) {
+      peakCount = count;
+      peakHour = hour;
+    }
+  }
+  return peakHour;
+}
+
 export interface OverviewStats {
   total: number;
   lastHour: number;

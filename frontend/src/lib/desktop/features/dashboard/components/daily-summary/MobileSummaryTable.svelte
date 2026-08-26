@@ -8,12 +8,16 @@
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
-  import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
+  import {
+    computeConfidenceColor,
+    computePeakHour,
+    formatDetectionCount,
+  } from '../../utils/dailySummaryStats';
   import { getSpeciesBadgeColor, getSpeciesInitials } from '../../utils/speciesBadge';
   import { resolveNoveltyCategory, noveltyCategoryColorVar } from '../../utils/noveltyCategory';
   import { computeAxisTicks, tickPositionCss } from '../../utils/hourAxis';
-  import { Star, ChevronUp, ChevronDown } from '@lucide/svelte';
-  import HourlyMiniChart, { BAR_STRIDE } from './HourlyMiniChart.svelte';
+  import { Star, CalendarDays, Leaf, ChevronUp, ChevronDown } from '@lucide/svelte';
+  import HourlyMiniChart from './HourlyMiniChart.svelte';
   import SpeciesDetailCard from './SpeciesDetailCard.svelte';
 
   interface Props {
@@ -26,8 +30,6 @@
     /** Last hour (inclusive) to render in charts — today's current hour, else 23.
         Owned by DailySummaryCard, which keeps it ticking across hour changes. */
     maxHour: number;
-    /** Rows shown before the "Show all" expander; 0 disables the cap. */
-    limit?: number;
     /** Current sort column + direction (owned/persisted by DailySummaryCard). */
     sortKey?: MobileSortKey;
     sortDir?: MobileSortDir;
@@ -45,24 +47,30 @@
     showThumbnails,
     selectedDate,
     maxHour,
-    limit = 0,
     sortKey = 'count',
     sortDir = 'desc',
     onSortChange,
     getHourWeather,
   }: Props = $props();
 
-  // "Show all" expander: cap the list to `limit` rows on busy days (each row
-  // carries an SVG chart) so the page doesn't scroll forever to reach the content
-  // below. No data is hidden silently — the button states the full count.
-  let showAll = $state(false);
-  // Collapse back to the capped view whenever the day changes.
-  $effect(() => {
-    void selectedDate;
-    showAll = false;
-  });
-  const isTruncated = $derived(limit > 0 && data.length > limit);
-  const visibleRows = $derived(showAll || !isTruncated ? data : data.slice(0, limit));
+  // Largest count of the day — the scale for the per-row abundance bar. Rows are
+  // normalised against the day's busiest species, so the bars stay comparable
+  // regardless of which column the table is sorted by.
+  const maxCount = $derived(data.reduce((m, d) => Math.max(m, d.count), 0));
+
+  /** "peak at 07:00" for a row, or '' when the day has no detections to peak at.
+      The mini chart is aria-hidden, so this is the only way its headline fact —
+      when the species was most active — reaches a screen reader. */
+  function peakHourLabel(item: DailySpeciesSummary): string {
+    const hour = computePeakHour(item.hourly_counts, maxHour);
+    return hour === null ? '' : `, peak at ${String(hour).padStart(2, '0')}:00`;
+  }
+
+  /** Abundance-bar width for a row, as a CSS percentage of the name column. */
+  function abundanceWidth(count: number): string {
+    if (maxCount <= 0) return '0%';
+    return `${Math.max(0, Math.min(100, (count / maxCount) * 100)).toFixed(1)}%`;
+  }
 
   // Hour-scale ticks drawn in the pinned header so every row's chart is readable
   // at a glance (the per-row charts carry no axis of their own).
@@ -77,7 +85,13 @@
   }
 
   // Per-row expansion state — scientific name of the expanded row, or null.
+  // Collapsed whenever the day changes: a card left open across a day swipe
+  // would silently re-point at a different day's numbers.
   let expandedSpecies: string | null = $state(null);
+  $effect(() => {
+    void selectedDate;
+    expandedSpecies = null;
+  });
 
   // Root element, used to restore focus to a row after its card collapses.
   let tableEl = $state<HTMLDivElement>();
@@ -94,11 +108,6 @@
       tableEl?.querySelector<HTMLElement>(`[data-species-row="${escaped}"]`)?.focus();
     });
   }
-
-  // Chart column tracks the chart's actual rendered width (BAR_STRIDE px/bar,
-  // from HourlyMiniChart) so leftover space goes to the species name instead of
-  // sitting empty next to a shorter-than-24h chart.
-  const chartColWidthPx = $derived((maxHour + 1) * BAR_STRIDE);
 
   // Gates the SSE row-flash animation for users who prefer reduced motion.
   const prefersReducedMotion =
@@ -157,7 +166,6 @@
   bind:this={tableEl}
   class="mobile-summary-table w-full"
   aria-label="Species detected on {selectedDate}"
-  style:--col-chart-w="{chartColWidthPx}px"
 >
   <!-- Active-sort indicator for a header button -->
   {#snippet sortGlyph(key: MobileSortKey)}
@@ -189,7 +197,7 @@
       onclick={() => onSortChange?.('conf')}
       aria-label={sortLabel('conf', 'confidence')}
     >
-      {@render sortGlyph('conf')}Conf.
+      Conf.{@render sortGlyph('conf')}
     </button>
     <button
       type="button"
@@ -198,10 +206,11 @@
       onclick={() => onSortChange?.('count')}
       aria-label={sortLabel('count', 'detection count')}
     >
-      {@render sortGlyph('count')}Cnt
+      Cnt{@render sortGlyph('count')}
     </button>
     <!-- Chart column: the hour-scale axis IS the header; active-sort state tints
-         the ticks (a chevron would overlap the right-edge tick in this narrow column). -->
+         the ticks (a chevron would overlap the right-edge tick). The underline
+         drawn on .is-active is what actually marks the sorted column. -->
     <button
       type="button"
       class="col-header-chart col-header-btn"
@@ -225,7 +234,7 @@
     </button>
   </div>
 
-  {#each visibleRows as item (item.scientific_name)}
+  {#each data as item (item.scientific_name)}
     {@const displayName = localizeSpeciesName(item.scientific_name, item.common_name)}
     {@const pct = Math.round(Math.max(0, Math.min(1, item.max_confidence ?? 0)) * 100)}
     {@const isExpanded = expandedSpecies === item.scientific_name}
@@ -245,26 +254,21 @@
         {getHourWeather}
       />
     {:else}
-      <!-- Compact row — tap → expand into detail card -->
-      <div
+      <!-- Compact row — tap → expand into detail card. A real <button>, so Enter/
+           Space, touch, and assistive tech come from the platform rather than a
+           hand-rolled keydown handler. -->
+      <button
+        type="button"
         class="mobile-summary-row"
         class:row-updated={((item.hourlyUpdated?.length ?? 0) > 0 ||
           item.countIncreased === true) &&
           !prefersReducedMotion}
-        role="button"
-        tabindex="0"
         data-species-row={item.scientific_name}
         aria-label="{displayName}: {pct}% confidence, {formatDetectionCount(
           item.count
-        )} detections. Tap to expand."
+        )} detections{peakHourLabel(item)}. Tap to expand."
         onclick={() => {
           expandedSpecies = item.scientific_name;
-        }}
-        onkeydown={(e: KeyboardEvent) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            expandedSpecies = item.scientific_name;
-          }
         }}
       >
         <!-- Thumbnail or initials badge — portrait hides at default, shown in landscape -->
@@ -311,7 +315,7 @@
                 style:color={noveltyCategoryColorVar('year')}
                 title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
               >
-                📅
+                <CalendarDays class="size-3" />
               </span>
             {:else if novelty === 'season'}
               <span
@@ -319,11 +323,18 @@
                 style:color={noveltyCategoryColorVar('season')}
                 title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
               >
-                🌿
+                <Leaf class="size-3" />
               </span>
             {/if}
           </div>
           <span class="col-scientific-name">{item.scientific_name}</span>
+          <!-- Abundance bar: this row's share of the day's busiest species. Keeps
+               relative magnitude readable when a name/confidence sort scrambles
+               the count order. Hidden in landscape, where the scientific name
+               occupies this line. -->
+          <span class="col-abundance" aria-hidden="true">
+            <span class="col-abundance-fill" style:width={abundanceWidth(item.count)}></span>
+          </span>
         </div>
 
         <!-- Max confidence, color-coded -->
@@ -343,7 +354,7 @@
         <div class="col-chart" aria-hidden="true">
           <HourlyMiniChart {item} {sunriseHour} {sunsetHour} {maxHour} />
         </div>
-      </div>
+      </button>
     {/if}
   {/each}
 
@@ -351,13 +362,6 @@
     <div class="py-8 text-center text-sm text-[var(--color-base-content)]/60">
       No species detected
     </div>
-  {/if}
-
-  {#if isTruncated}
-    <!-- Visible expander (not a hint): the list is capped, so state the full count -->
-    <button type="button" class="show-all-btn" onclick={() => (showAll = !showAll)}>
-      {showAll ? 'Show fewer' : `Show all ${data.length} species`}
-    </button>
   {/if}
 
   {#if data.length > 0}
@@ -370,12 +374,27 @@
   .mobile-summary-table {
     --thumb-w: 1.5rem;
     --thumb-h: 1.25rem;
-    --col-conf-w: 2.5rem;
-    --col-count-w: 2.25rem;
+    --col-conf-w: 2rem;
+    --col-count-w: 1.75rem;
 
-    /* --col-chart-w is bound inline to the chart's actual rendered width (px), so the
-       column never reserves more space than the chart needs — the name column gets
-       whatever is left over. */
+    /* Row height. Fixed rather than content-derived because it is also the
+       intrinsic size the off-screen rows are measured at — see
+       .mobile-summary-row. ≥ 28px also keeps every row clear of the WCAG 2.5.8
+       target-size floor. */
+    --row-h: 1.75rem;
+
+    /* Name:chart share of the flexible width. The chart used to be a fixed px track
+       sized from (maxHour + 1) × BAR_STRIDE, so every column reflowed once an hour
+       on "today" and the chart was squeezed to ~44 px right through the morning.
+       Splitting the free space by ratio instead keeps the layout stable all day and
+       lets the SVG stretch into whatever it gets. Portrait weights the species name
+       at 2:1 — there is only ~230 px to share, and a readable name beats a wider
+       sparkline; landscape relaxes to the golden ratio, where both fit. */
+    --col-name-fr: 2fr;
+
+    /* Floor on the chart so it never collapses to an unreadable sliver on a very
+       narrow phone; the name ellipsis-truncates instead. */
+    --col-chart-fr: minmax(3.25rem, 1fr);
   }
 
   /* Curtain above the column names while the header is pinned */
@@ -397,11 +416,11 @@
 
   .mobile-summary-header {
     display: grid;
-    grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
-        --col-chart-w
-      );
+    grid-template-columns:
+      var(--thumb-w) var(--col-name-fr) var(--col-conf-w) var(--col-count-w)
+      var(--col-chart-fr);
     align-items: center;
-    gap: 0.125rem;
+    gap: 0.25rem;
     padding: 0 0.125rem 0.375rem;
     margin-bottom: 0.125rem;
     border-bottom: 1px solid var(--color-base-200);
@@ -450,9 +469,13 @@
     border-radius: 0.25rem;
   }
 
-  /* Active-sort column reads darker than the resting headers. */
+  /* Active-sort column reads darker than the resting headers, and carries an
+     underline. The chevron alone was ambiguous: the header cells sit a couple of
+     pixels apart, so a glyph at a column edge reads as belonging to its neighbour.
+     The underline spans the column, so the sorted column is never in doubt. */
   .col-header-btn.is-active {
     color: var(--color-base-content);
+    box-shadow: inset 0 -2px 0 var(--color-primary);
   }
 
   .col-header-species {
@@ -505,39 +528,31 @@
     color: var(--color-base-content);
   }
 
-  /* Full-width expander shown when the list is capped */
-  .show-all-btn {
-    appearance: none;
-    display: block;
-    width: 100%;
-    margin-top: 0.25rem;
-    padding: 0.5rem;
-    background: none;
-    border: none;
-    border-top: 1px solid var(--color-base-200);
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--color-primary);
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-
-  .show-all-btn:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: -2px;
-    border-radius: 0.375rem;
-  }
-
   .mobile-summary-row {
     display: grid;
-    grid-template-columns: var(--thumb-w) 1fr var(--col-conf-w) var(--col-count-w) var(
-        --col-chart-w
-      );
+    grid-template-columns:
+      var(--thumb-w) var(--col-name-fr) var(--col-conf-w) var(--col-count-w)
+      var(--col-chart-fr);
     align-items: center;
-    gap: 0.125rem;
+    gap: 0.25rem;
+
+    /* No vertical padding on purpose — see contain-intrinsic-size below. */
     padding: 0 0.125rem;
-    min-height: 1.25rem;
+    min-height: var(--row-h);
     border-radius: 0.375rem;
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-base-content) 7%, transparent);
+    font: inherit;
+
+    /* The full species list is rendered — no "show all" cap — so skip layout and
+       paint for the rows that are off screen.
+       contain-intrinsic-size sizes the CONTENT box, so it matches a skipped row's
+       real height only while the row has no vertical padding and its content fits
+       inside --row-h. Get that wrong and every skipped row is mis-measured,
+       shifting .mobile-summary-table's offsetHeight — which is exactly what the
+       header-pin $effect clamps against, so the pinned header stops in the wrong
+       place. Both values read --row-h so they cannot drift apart. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto var(--row-h);
     color: var(--color-base-content);
     cursor: pointer;
     border: none;
@@ -551,7 +566,11 @@
 
   /* Brief pulse when SSE delivers a new detection for this species.
      DashboardPage clears hourlyUpdated/countIncreased after ~2.2 s, which
-     removes the class again. */
+     removes the class again. Best-effort by design: a row several screens down
+     can run its whole pulse before the user reaches it. That is a property of
+     the row being off screen, not of the content-visibility above — the
+     animation is timeline-driven either way, so a row scrolled into view
+     mid-pulse paints from wherever the timeline has got to. */
   .mobile-summary-row.row-updated {
     animation: row-flash 2s ease-out;
   }
@@ -566,9 +585,11 @@
     }
   }
 
+  /* Inset offset on purpose: content-visibility above implies paint containment,
+     which clips an outline drawn outside the row's box. */
   .mobile-summary-row:focus-visible {
     outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
+    outline-offset: -2px;
   }
 
   .mobile-thumb-col {
@@ -637,6 +658,23 @@
     line-height: 1;
   }
 
+  .col-abundance {
+    display: block;
+    width: 100%;
+    height: 2px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--color-base-content) 8%, transparent);
+    overflow: hidden;
+  }
+
+  .col-abundance-fill {
+    display: block;
+    height: 100%;
+    min-width: 2px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  }
+
   .col-scientific-name {
     display: none;
     font-size: 0.625rem;
@@ -658,8 +696,16 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    justify-self: stretch;
     border-radius: 0.25rem;
     padding: 0.125rem 0;
+  }
+
+  /* The SVG carries preserveAspectRatio="none", so stretching it to the track's
+     width just widens the bars — the hour positions (and therefore the header's
+     tick alignment, which is computed in percentages) are unchanged. */
+  .col-chart :global(svg) {
+    width: 100%;
   }
 
   /* Subtle hint below the species list */
@@ -677,24 +723,20 @@
     .mobile-summary-table {
       --thumb-w: 2rem;
       --thumb-h: 1.5rem;
+
+      /* Landscape stacks the scientific name under the common name, so the row
+         needs a second line of height — and the intrinsic size has to grow with
+         it, or every off-screen row is measured a line short. */
+      --row-h: 2.25rem;
+
+      /* Landscape has room for both a full name and a wide chart, so relax the
+         portrait 2:1 weighting back to the golden ratio. */
+      --col-name-fr: 1.618fr;
     }
 
-    /* Name capped at the golden ratio; graph fills the remaining flex space.
-       name:chart = 1.618:1 → name ≈ 61.8% of the flexible width (conf/count are
-       fixed tracks, so name is strictly < 61.8% of the *total* width → "at most"). */
-    .mobile-summary-header,
-    .mobile-summary-row {
-      grid-template-columns: var(--thumb-w) 1.618fr var(--col-conf-w) var(--col-count-w) 1fr;
-    }
-
-    /* The chart track is now flexible; let the cell fill it and the SVG stretch.
-       `.col-chart` otherwise has justify-self:end (shrinks to content). */
-    .col-chart {
-      justify-self: stretch;
-    }
-
-    .col-chart :global(svg) {
-      width: 100%;
+    /* The scientific name takes back the line the abundance bar uses in portrait. */
+    .col-abundance {
+      display: none;
     }
 
     .col-scientific-name {
