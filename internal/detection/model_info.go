@@ -7,6 +7,12 @@ const (
 	DefaultModelName    = "BirdNET"
 	DefaultModelVersion = "2.4"
 	DefaultModelVariant = "default"
+
+	// CustomModelVariant marks a user-supplied classifier. It is the only variant
+	// that means "custom": classifier.ToDetectionModelInfo sets it for a non-stock
+	// CustomPath, while other non-default variants describe provenance rather than
+	// authorship (imports.go stores "import" for BirdNET-Pi imports).
+	CustomModelVariant = "custom"
 )
 
 // ModelInfo describes the AI model used for detection.
@@ -30,6 +36,13 @@ func (m ModelInfo) WithDefaults() ModelInfo {
 		m.Variant = DefaultModelVariant
 	}
 	return m
+}
+
+// IsCustom reports whether the detection came from a user-supplied classifier
+// rather than a stock model. Callers must not infer this from "variant is not
+// default": imported and other provenance variants are stock models too.
+func (m ModelInfo) IsCustom() bool {
+	return m.Variant == CustomModelVariant
 }
 
 // DefaultModelInfo returns the default BirdNET model info.

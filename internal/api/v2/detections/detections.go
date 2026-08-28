@@ -755,7 +755,7 @@ func (c *Handler) noteToDetectionResponse(note *datastore.Note, includeWeather b
 		detection.Model = &ModelInfo{
 			Name:    note.Model.Name,
 			Version: note.Model.Version,
-			Custom:  note.Model.Variant != detectionPkg.DefaultModelVariant,
+			Custom:  note.Model.IsCustom(),
 		}
 	}
 

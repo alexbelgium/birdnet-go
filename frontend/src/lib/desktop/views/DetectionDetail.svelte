@@ -689,9 +689,11 @@
 
       <!-- Model -->
       {#if det.model}
+        <!-- Version is rendered verbatim: the registry supplies "2.4" for BirdNET but
+             "V2" for Perch, and imports carry "birdnet-pi", so prepending "v" is wrong. -->
         {@const modelLabel =
           det.model.name +
-          (det.model.version ? ` v${det.model.version}` : '') +
+          (det.model.version ? ` ${det.model.version}` : '') +
           (det.model.custom ? ' (custom)' : '')}
         <div class="meta-section meta-model-row" aria-label="Model: {modelLabel}">
           <Cpu class="w-3.5 h-3.5" />
