@@ -828,6 +828,12 @@ func (ds *Datastore) Save(note *datastore.Note, results []datastore.Results) err
 	// downstream actions (MQTT, SSE) publish detectionId=0 (GitHub #2453).
 	note.ID = det.ID
 
+	// Persist the cross-model consensus breakdown outside the transaction and
+	// best-effort, matching how the dual-write path treats it: the contributions
+	// are display metadata, and losing a whole detection because one of them
+	// failed to write would be the worse outcome.
+	ds.saveModelContributions(ctx, det.ID, note.ModelContributions)
+
 	return nil
 }
 
@@ -865,6 +871,56 @@ func (ds *Datastore) Delete(id string) error {
 	return ds.detection.Delete(ctx, noteID)
 }
 
+// saveModelContributions resolves each contributing model to an ai_models row and
+// stores the per-model breakdown for a detection. Failures are logged, never
+// returned: the detection itself is already committed by the time this runs.
+func (ds *Datastore) saveModelContributions(ctx context.Context, detectionID uint, contribs []detection.ResultModelContrib) {
+	// The processor records a contribution even when only one model fired
+	// (processor.go creates one for every pending detection), and the read path
+	// discards single-entry sets. Writing them would cost a GetOrCreate plus a
+	// delete+insert transaction on every single save for data nothing reads.
+	if len(contribs) < 2 || ds.model == nil {
+		return
+	}
+
+	rows := make([]*entities.DetectionModelContribution, 0, len(contribs))
+	seen := make(map[uint]struct{}, len(contribs))
+	for i := range contribs {
+		info := contribs[i].Model
+		if info.Name == "" {
+			continue
+		}
+		model, err := ds.model.GetOrCreate(ctx, info.Name, info.Version, info.Variant,
+			detection.ResolveModelType(info.Name, info.Version), info.ClassifierPath)
+		if err != nil {
+			if ds.log != nil {
+				ds.log.Warn("model contribution resolution failed, skipping",
+					logger.String("model", info.Name), logger.Error(err))
+			}
+			continue
+		}
+		// The unique index on (detection_id, model_id) rejects duplicates, and two
+		// distinct ModelInfo values can resolve to the same row, so dedupe here.
+		if _, dup := seen[model.ID]; dup {
+			continue
+		}
+		seen[model.ID] = struct{}{}
+		rows = append(rows, &entities.DetectionModelContribution{
+			ModelID:       model.ID,
+			HitCount:      contribs[i].HitCount,
+			MaxConfidence: contribs[i].MaxConfidence,
+		})
+	}
+
+	if len(rows) == 0 {
+		return
+	}
+	if err := ds.detection.SaveModelContributions(ctx, detectionID, rows); err != nil && ds.log != nil {
+		ds.log.Warn("failed to save model contributions",
+			logger.Uint64("detection_id", uint64(detectionID)), logger.Error(err))
+	}
+}
+
 // Get retrieves a note by ID.
 func (ds *Datastore) Get(id string) (datastore.Note, error) {
 	ctx := context.Background()
@@ -876,6 +932,16 @@ func (ds *Datastore) Get(id string) (datastore.Note, error) {
 	det, err := ds.detection.GetWithRelations(ctx, noteID)
 	if err != nil {
 		return datastore.Note{}, err
+	}
+
+	// Detail-only: loaded here rather than in GetWithRelations so the list path
+	// and the dual-write reader, neither of which consumes contributions, do not
+	// pay for the two extra queries. A failure degrades to the primary model.
+	if contribs, cErr := ds.detection.GetModelContributions(ctx, noteID); cErr == nil {
+		det.ModelContributions = contribs
+	} else if ds.log != nil {
+		ds.log.Warn("failed to load model contributions",
+			logger.Uint64("detection_id", uint64(noteID)), logger.Error(cErr))
 	}
 
 	return ds.detectionToNote(det), nil
@@ -1003,16 +1069,56 @@ func (ds *Datastore) detectionToNote(det *entities.Detection) datastore.Note {
 	// (from the batch-loaded ai_models relation) so API handlers can read it
 	// directly instead of issuing a per-detection lookup (avoids N+1 on lists).
 	if det.Model != nil {
-		note.Model = detection.ModelInfo{
-			Name:           det.Model.Name,
-			Version:        det.Model.Version,
-			Variant:        det.Model.Variant,
-			ClassifierPath: det.Model.ClassifierPath,
-			ModelType:      string(det.Model.ModelType),
+		note.Model = modelInfoFromEntity(det.Model)
+	}
+
+	note.ModelContributions = contributionsToNote(det)
+
+	return note
+}
+
+// modelInfoFromEntity converts a stored ai_models row to the domain ModelInfo.
+func modelInfoFromEntity(m *entities.AIModel) detection.ModelInfo {
+	return detection.ModelInfo{
+		Name:           m.Name,
+		Version:        m.Version,
+		Variant:        m.Variant,
+		ClassifierPath: m.ClassifierPath,
+		ModelType:      string(m.ModelType),
+	}
+}
+
+// contributionsToNote orders the loaded cross-model contributions for display:
+// the detection's own model first (it is the one whose confidence the UI shows),
+// then the rest in the repository's model_id order. Deduping against det.ModelID
+// is exact because both sides are the same ai_models foreign key.
+// Returns nil when contributions were not loaded (list reads) or when only the
+// primary model contributed, so callers fall back to the single-model display.
+func contributionsToNote(det *entities.Detection) []detection.ResultModelContrib {
+	// Discard unusable rows BEFORE applying the "two or more" rule, so a set that
+	// only looks multi-model because of an unresolved row still falls back to the
+	// single-model display rather than reporting one contribution as if it were many.
+	var primary, rest []detection.ResultModelContrib
+	for _, c := range det.ModelContributions {
+		if c == nil || c.Model == nil {
+			continue
+		}
+		entry := detection.ResultModelContrib{
+			Model:         modelInfoFromEntity(c.Model),
+			HitCount:      c.HitCount,
+			MaxConfidence: c.MaxConfidence,
+		}
+		if c.ModelID == det.ModelID {
+			primary = append(primary, entry)
+		} else {
+			rest = append(rest, entry)
 		}
 	}
 
-	return note
+	if len(primary)+len(rest) < 2 {
+		return nil
+	}
+	return append(primary, rest...)
 }
 
 // detectionsToNotes converts multiple detections to notes.

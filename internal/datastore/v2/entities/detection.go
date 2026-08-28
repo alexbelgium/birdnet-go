@@ -49,4 +49,7 @@ type Detection struct {
 	Review   *DetectionReview    `gorm:"-"`
 	Lock     *DetectionLock      `gorm:"-"`
 	Comments []*DetectionComment `gorm:"-"`
+	// ModelContributions is loaded only on the single-detection read path
+	// (GetModelContributions); list reads leave it nil to avoid an N+1.
+	ModelContributions []*DetectionModelContribution `gorm:"-"`
 }

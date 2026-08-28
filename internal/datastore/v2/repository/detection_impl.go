@@ -1222,6 +1222,53 @@ func (r *detectionRepository) SaveModelContributions(ctx context.Context, detect
 	}, r.metrics)
 }
 
+// GetModelContributions retrieves the per-model contributions for a detection.
+// Models are resolved with a single batched IN query rather than a GORM preload,
+// matching loadRelationsForDetections: the v2_ table prefix scheme makes Preload
+// unusable. Contributions whose model row is missing are skipped rather than
+// returned with an empty Model, so callers never render a nameless model.
+func (r *detectionRepository) GetModelContributions(ctx context.Context, detectionID uint) ([]*entities.DetectionModelContribution, error) {
+	var contribs []*entities.DetectionModelContribution
+	if err := r.db.WithContext(ctx).Table(r.modelContributionsTable()).
+		Where("detection_id = ?", detectionID).
+		Order("model_id ASC").
+		Find(&contribs).Error; err != nil {
+		return nil, err
+	}
+	if len(contribs) == 0 {
+		return nil, nil
+	}
+
+	modelIDs := make([]uint, 0, len(contribs))
+	seen := make(map[uint]struct{}, len(contribs))
+	for _, c := range contribs {
+		if _, dup := seen[c.ModelID]; dup {
+			continue
+		}
+		seen[c.ModelID] = struct{}{}
+		modelIDs = append(modelIDs, c.ModelID)
+	}
+
+	var models []*entities.AIModel
+	if err := r.db.WithContext(ctx).Table(r.modelsTable()).
+		Where("id IN ?", modelIDs).Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("failed to load contribution models: %w", err)
+	}
+	byID := make(map[uint]*entities.AIModel, len(models))
+	for _, m := range models {
+		byID[m.ID] = m
+	}
+
+	resolved := contribs[:0]
+	for _, c := range contribs {
+		if m, ok := byID[c.ModelID]; ok {
+			c.Model = m
+			resolved = append(resolved, c)
+		}
+	}
+	return resolved, nil
+}
+
 // SavePredictionsBatch stores predictions for multiple detections efficiently.
 // Uses ON CONFLICT DO NOTHING for idempotent migration support.
 func (r *detectionRepository) SavePredictionsBatch(ctx context.Context, preds []*entities.DetectionPrediction) error {

@@ -30,6 +30,11 @@ type Note struct {
 	// historical detections saved through that path.
 	Source      AudioSource         `gorm:"-"`
 	Model       detection.ModelInfo `gorm:"-"` // Runtime only: model that produced this detection
+	// ModelContributions is runtime only: every model that fired on this detection,
+	// primary first, from cross-model consensus. Written on Save (best-effort, see
+	// v2only.Datastore.Save) and rehydrated only on the single-detection read path.
+	// Empty on list reads and on the legacy datastore, exactly like Source above.
+	ModelContributions []detection.ResultModelContrib `gorm:"-"`
 	BeginTime   time.Time
 	EndTime     time.Time
 	SpeciesCode string

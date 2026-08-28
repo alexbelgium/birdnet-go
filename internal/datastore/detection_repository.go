@@ -4,7 +4,9 @@ package datastore
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tphakala/birdnet-go/internal/datastore/mapper"
@@ -364,7 +366,29 @@ func NoteFromResult(result *detection.Result) Note {
 		Locked:     result.Locked,
 		Model:      result.Model,
 		RawLabel:   result.RawLabel,
+
+		ModelContributions: modelContributionsFromResult(result.ModelContributions),
 	}
+}
+
+// modelContributionsFromResult flattens the domain's model-keyed contribution map
+// into the slice the datastore persists. Sorted by model name/version so the write
+// order is deterministic rather than following Go's randomized map iteration.
+func modelContributionsFromResult(contribs map[string]detection.ResultModelContrib) []detection.ResultModelContrib {
+	if len(contribs) == 0 {
+		return nil
+	}
+	out := make([]detection.ResultModelContrib, 0, len(contribs))
+	for _, c := range contribs {
+		out = append(out, c)
+	}
+	slices.SortFunc(out, func(a, b detection.ResultModelContrib) int {
+		if n := strings.Compare(a.Model.Name, b.Model.Name); n != 0 {
+			return n
+		}
+		return strings.Compare(a.Model.Version, b.Model.Version)
+	})
+	return out
 }
 
 // AdditionalResultsToDatastoreResults converts a slice of detection.AdditionalResult

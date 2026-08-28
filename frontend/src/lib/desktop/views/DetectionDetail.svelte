@@ -687,15 +687,15 @@
         </div>
       {/if}
 
-      <!-- Model -->
-      {#if det.model}
-        <!-- Version is rendered verbatim: the registry supplies "2.4" for BirdNET but
-             "V2" for Perch, and imports carry "birdnet-pi", so prepending "v" is wrong. -->
-        {@const modelLabel =
-          det.model.name +
-          (det.model.version ? ` ${det.model.version}` : '') +
-          (det.model.custom ? ' (custom)' : '')}
-        <div class="meta-section meta-model-row" aria-label="Model: {modelLabel}">
+      <!-- Models -->
+      {#if det.models?.length}
+        <!-- Versions are rendered verbatim: the registry supplies "2.4" for BirdNET but
+             "V2" for Perch, and imports carry "birdnet-pi", so prepending "v" is wrong.
+             More than one entry means several classifiers fired on the same detection. -->
+        {@const modelLabel = det.models
+          .map(m => m.name + (m.version ? ` ${m.version}` : '') + (m.custom ? ' (custom)' : ''))
+          .join(' \u00b7 ')}
+        <div class="meta-section meta-model-row" aria-label="Models: {modelLabel}">
           <Cpu class="w-3.5 h-3.5" />
           <span>{modelLabel}</span>
         </div>

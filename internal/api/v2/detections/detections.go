@@ -155,7 +155,7 @@ type DetectionResponse struct {
 	Confidence         float64           `json:"confidence"`
 	ClipName           string            `json:"clipName,omitempty"`  // Audio clip filename (basename only, no path); empty when no clip exists
 	ModelType          string            `json:"modelType,omitempty"` // AI model type (e.g. "bird", "bat"); drives the spectrogram frequency range
-	Model              *ModelInfo        `json:"model,omitempty"`     // AI model that produced the detection
+	Models             []ModelInfo       `json:"models,omitempty"`    // AI model(s) that produced the detection, primary first
 	Verified           string            `json:"verified"`
 	Locked             bool              `json:"locked"`
 	Unlikely           bool              `json:"unlikely,omitempty"`
@@ -180,7 +180,7 @@ type SourceInfo struct {
 	DisplayName string `json:"displayName,omitempty"`
 }
 
-// ModelInfo describes the AI model that produced a detection.
+// ModelInfo describes an AI model that produced a detection.
 type ModelInfo struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
@@ -747,23 +747,50 @@ func (c *Handler) noteToDetectionResponse(note *datastore.Note, includeWeather b
 		detection.ModelType = defaultModelType
 	}
 
-	// Model name/version come from the same preloaded relation as ModelType, so
-	// exposing them costs no extra query. Legacy datastores never rehydrate the
-	// relation, leaving the name empty; omit the field there rather than
-	// inventing a default the detection may not have used.
-	if note.Model.Name != "" {
-		detection.Model = &ModelInfo{
-			Name:    note.Model.Name,
-			Version: note.Model.Version,
-			Custom:  note.Model.IsCustom(),
-		}
-	}
+	// Model names come from the same preloaded relation as ModelType, so exposing
+	// them costs no extra query. ModelContributions is populated only on the
+	// single-detection read path and only when more than one model fired, so lists
+	// fall back to the primary model alone. Legacy datastores rehydrate neither,
+	// leaving the field empty rather than inventing a model the detection may not
+	// have used.
+	detection.Models = modelInfosFromNote(note)
 
 	if includeWeather {
 		c.populateWeatherData(&detection, note, weatherCache)
 	}
 
 	return detection
+}
+
+// modelInfosFromNote lists the models credited with a detection, primary first.
+// The primary is always included even if the stored contributions somehow omit it:
+// the confidence shown beside this list belongs to that model, so listing only the
+// secondary models would attribute the score to the wrong classifier.
+func modelInfosFromNote(note *datastore.Note) []ModelInfo {
+	primary := newModelInfo(note.Model)
+
+	models := make([]ModelInfo, 0, len(note.ModelContributions)+1)
+	if primary.Name != "" {
+		models = append(models, primary)
+	}
+	for i := range note.ModelContributions {
+		if m := newModelInfo(note.ModelContributions[i].Model); m.Name != "" && m != primary {
+			models = append(models, m)
+		}
+	}
+
+	if len(models) == 0 {
+		return nil
+	}
+	return models
+}
+
+func newModelInfo(info detectionPkg.ModelInfo) ModelInfo {
+	return ModelInfo{
+		Name:    info.Name,
+		Version: info.Version,
+		Custom:  info.IsCustom(),
+	}
 }
 
 // applySpeciesTrackingMetadata adds species tracking info to detection response.

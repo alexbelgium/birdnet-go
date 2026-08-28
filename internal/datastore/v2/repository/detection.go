@@ -160,6 +160,10 @@ type DetectionRepository interface {
 	// SaveModelContributions stores per-model contribution data for a detection.
 	SaveModelContributions(ctx context.Context, detectionID uint, contribs []*entities.DetectionModelContribution) error
 
+	// GetModelContributions retrieves the per-model contributions for a detection,
+	// with each contribution's Model relation resolved.
+	GetModelContributions(ctx context.Context, detectionID uint) ([]*entities.DetectionModelContribution, error)
+
 	// === Reviews ===
 
 	// SaveReview creates or updates a review for a detection.

@@ -30,7 +30,7 @@ export interface Detection {
   commonName: string;
   confidence: number;
   modelType?: string; // AI model type (e.g. 'bird', 'bat'); drives the spectrogram frequency range
-  model?: ModelInfo | null; // AI model that produced the detection; absent on legacy datastores
+  models?: ModelInfo[]; // AI model(s) that produced the detection, primary first; absent on legacy datastores
   verified: 'correct' | 'false_positive' | 'unverified';
   locked: boolean;
   unlikely?: boolean;
