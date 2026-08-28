@@ -33,6 +33,7 @@
     Download,
     Camera,
     Clock,
+    Cpu,
     History,
     StickyNote,
     Sun,
@@ -686,6 +687,18 @@
         </div>
       {/if}
 
+      <!-- Model -->
+      {#if det.model}
+        {@const modelLabel =
+          det.model.name +
+          (det.model.version ? ` v${det.model.version}` : '') +
+          (det.model.custom ? ' (custom)' : '')}
+        <div class="meta-section meta-model-row" aria-label="Model: {modelLabel}">
+          <Cpu class="w-3.5 h-3.5" />
+          <span>{modelLabel}</span>
+        </div>
+      {/if}
+
       <!-- Download -->
       {#if det.clipName}
         <div class="meta-section">
@@ -1155,16 +1168,21 @@
     letter-spacing: -0.01em;
   }
 
-  /* Time + time-of-day badge - inline, secondary */
-  .meta-time-row {
+  /* Time + time-of-day badge, and the model row - inline, secondary */
+  .meta-time-row,
+  .meta-model-row {
     display: flex;
     align-items: center;
     gap: 0.375rem;
-    margin-top: 0.25rem;
     font-size: 0.9375rem;
     font-weight: 500;
     color: var(--color-base-content);
     opacity: 0.7;
+  }
+
+  /* Only the time row sits under the date and needs the offset */
+  .meta-time-row {
+    margin-top: 0.25rem;
   }
 
   .meta-time-row .time-of-day-badge {
