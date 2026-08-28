@@ -712,26 +712,35 @@
     padding: 0.625rem 0 0.125rem;
   }
 
-  /* ─── Landscape: larger thumbnail + scientific name, name capped at φ ─── */
-  @media (orientation: landscape) {
+  /* ─── Wide (any landscape, or ≥640px portrait): larger thumbnail + scientific
+         name, name capped at φ ───
+     The width clause is additive: landscape behaves exactly as it always did, and
+     a tablet held in portrait now qualifies too. Without it a ~700px tablet got
+     the phone layout stretched across it — 24px thumbnails, no scientific name,
+     and ~300px of dead gap beside the name. Phones are under 640px in portrait,
+     so nothing changes for them. */
+  @media (orientation: landscape), (min-width: 640px) {
     .mobile-summary-table {
       --thumb-w: 2rem;
       --thumb-h: 1.5rem;
 
-      /* Landscape stacks the scientific name under the common name, so the row
-         needs a second line of height — and the intrinsic size has to grow with
-         it, or every off-screen row is measured a line short. */
+      /* The scientific name stacks under the common name here, so the row needs a
+         second line of height — and the intrinsic size has to grow with it, or
+         every off-screen row is measured a line short. */
       --row-h: 2.25rem;
 
-      /* Landscape has room for both a full name and a wide chart, so relax the
-         portrait 2:1 weighting back to the golden ratio. */
+      /* There is width for both a full name and a wide chart, so split the free
+         space at the golden ratio rather than sizing the chart in px. Both tracks
+         must be set: leaving --col-chart-fr at the portrait px width pins the
+         chart to 96px and dumps every spare pixel into the name column as dead
+         gap — very visible on a ~700px tablet. */
       --col-name-fr: 1.618fr;
+      --col-chart-fr: 1fr;
     }
 
-    /* The chart track is flexible here, not the px width portrait uses; let the
-       cell fill it and the SVG stretch. preserveAspectRatio="none" means that only
-       widens the bars — hour positions, and so the header's percentage-positioned
-       ticks, are unchanged. */
+    /* The chart track is flexible here, so let the cell fill it and the SVG
+       stretch. preserveAspectRatio="none" means that only widens the bars — hour
+       positions, and so the header's percentage-positioned ticks, are unchanged. */
     .col-chart {
       justify-self: stretch;
     }

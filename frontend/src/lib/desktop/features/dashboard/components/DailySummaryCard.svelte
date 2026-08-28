@@ -764,11 +764,19 @@ Responsive Breakpoints:
       : false
   );
 
-  // Viewport-aware rendering. On mobile (<768px) only the compact
-  // MobileSummaryTable is rendered; the desktop heatmap DOM is skipped
-  // entirely rather than hidden with CSS. Initialized synchronously so the
-  // very first render is already correct (no flash of desktop DOM on phones).
-  const MOBILE_VIEWPORT_QUERY = '(max-width: 767px)';
+  // Viewport-aware rendering: where this matches, only the compact
+  // MobileSummaryTable is rendered and the desktop heatmap DOM is skipped
+  // entirely rather than hidden with CSS. Initialized synchronously so the very
+  // first render is already correct (no flash of desktop DOM).
+  //
+  // Phones at any orientation, plus tablets held in portrait. The heatmap is
+  // `min-w-[900px]`, and a tablet in portrait simply cannot give it that: an
+  // iPad Pro 11" at 834px leaves the grid 760px, and even a 12.9" at 1024px
+  // leaves only 654px once the nav rail appears. The grid then becomes a
+  // horizontally scrolling strip inside the card — measured as scrolling at
+  // every iPad portrait size. The compact table is the better answer there.
+  const MOBILE_VIEWPORT_QUERY =
+    '(max-width: 767px), (max-width: 1024px) and (orientation: portrait)';
   let isMobileViewport = $state(
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia(MOBILE_VIEWPORT_QUERY).matches
@@ -1646,8 +1654,9 @@ Responsive Breakpoints:
      Responsive Grid Display
      ======================================================================== */
 
-  /* Tablet (768-1023px): show bi-hourly. Below 768px the desktop grid is not
-     rendered at all — MobileSummaryTable takes over. */
+  /* Tablet landscape (768-1023px): show bi-hourly. Phones, and tablets in
+     portrait, do not render the desktop grid at all — MobileSummaryTable takes
+     over (see MOBILE_VIEWPORT_QUERY). */
   @media (min-width: 768px) and (max-width: 1023px) {
     .hourly-grid {
       display: none;
