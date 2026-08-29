@@ -190,7 +190,13 @@ export function createServerSpectrumFallback(hooks: ServerSpectrumHooks): Server
         if (!bins) return;
 
         if (entry.spectrumSampleRate) sampleRate = entry.spectrumSampleRate;
-        columns.push({ bins, time: entry.spectrumTime ?? 0 });
+
+        // The server holds the newest column on the level entry until a send
+        // carries it, so the same column can arrive on consecutive updates.
+        const time = entry.spectrumTime ?? 0;
+        if (columns.at(-1)?.time === time) return;
+
+        columns.push({ bins, time });
         columns = trimSpectrumQueue(columns, QUEUE_SECONDS, QUEUE_MAX_COLUMNS);
 
         // Either there is no analyser to compare against, or the server can see
@@ -240,7 +246,8 @@ export function createServerSpectrumFallback(hooks: ServerSpectrumHooks): Server
       hooks.playheadWallClock(),
       render,
       Date.now(),
-      STALL_TIMEOUT
+      STALL_TIMEOUT,
+      QUEUE_SECONDS
     );
     render = step.state;
 

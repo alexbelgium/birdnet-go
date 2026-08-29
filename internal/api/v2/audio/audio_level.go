@@ -521,6 +521,7 @@ func (c *Handler) updateAudioLevel(
 	if c.isSourceInactive(audioData.Source, now, lastUpdateTime, lastNonZeroTime) {
 		audioData.Level = 0
 	}
+	carryPendingSpectrum(audioData, levels[audioData.Source])
 	levels[audioData.Source] = *audioData
 }
 

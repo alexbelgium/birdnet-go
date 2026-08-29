@@ -134,3 +134,59 @@ func TestAudioLevelSSEDataSpectrumWireFormat(t *testing.T) {
 		assert.InDelta(t, 1750000000.5, entry.SpectrumTime, 0.001)
 	})
 }
+
+// TestCarryPendingSpectrum covers the regression that made the whole fallback
+// useless: a column is produced at most every 50ms while frames arrive far more
+// often, so the spectrum-less updates in between used to erase the pending
+// column before the independently phased SSE rate limiter sent it.
+func TestCarryPendingSpectrum(t *testing.T) {
+	t.Parallel()
+
+	column := audiocore.AudioLevelData{
+		Source:             "src-1",
+		Spectrum:           []byte{7, 8, 9},
+		SpectrumSampleRate: 48000,
+		SpectrumTime:       1750000000,
+	}
+
+	t.Run("a spectrum-less frame inherits the pending column", func(t *testing.T) {
+		t.Parallel()
+		incoming := audiocore.AudioLevelData{Source: "src-1", Level: 12}
+		carryPendingSpectrum(&incoming, column)
+		assert.Equal(t, []byte{7, 8, 9}, incoming.Spectrum)
+		assert.Equal(t, 48000, incoming.SpectrumSampleRate)
+		assert.InDelta(t, 1750000000, incoming.SpectrumTime, 0.001)
+		assert.Equal(t, 12, incoming.Level, "the incoming level still wins")
+	})
+
+	t.Run("a fresh column replaces the pending one", func(t *testing.T) {
+		t.Parallel()
+		incoming := audiocore.AudioLevelData{
+			Source:       "src-1",
+			Spectrum:     []byte{1, 2, 3},
+			SpectrumTime: 1750000001,
+		}
+		carryPendingSpectrum(&incoming, column)
+		assert.Equal(t, []byte{1, 2, 3}, incoming.Spectrum)
+		assert.InDelta(t, 1750000001, incoming.SpectrumTime, 0.001)
+	})
+
+	t.Run("nothing to carry leaves the frame alone", func(t *testing.T) {
+		t.Parallel()
+		incoming := audiocore.AudioLevelData{Source: "src-1"}
+		carryPendingSpectrum(&incoming, audiocore.AudioLevelData{Source: "src-1"})
+		assert.Nil(t, incoming.Spectrum)
+	})
+
+	t.Run("a client that did not opt in never accumulates a column", func(t *testing.T) {
+		t.Parallel()
+		// filterSpectrum runs first and empties both sides, so the carry-forward
+		// cannot reintroduce data the client did not ask for.
+		incoming := column
+		filterSpectrum(&incoming, "")
+		previous := column
+		filterSpectrum(&previous, "")
+		carryPendingSpectrum(&incoming, previous)
+		assert.Nil(t, incoming.Spectrum)
+	})
+}
