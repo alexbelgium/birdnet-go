@@ -111,11 +111,12 @@ describe('selectSpectrumColumn', () => {
 
 describe('nextSpectrumRender', () => {
   const STALL = 1500;
+  const ALIGN = 30;
   const fresh: SpectrumRenderState = { renderedTime: 0, advancedAt: 1000, unaligned: false };
 
   it('renders the column the playhead has reached', () => {
     const queue = [column(100), column(101), column(102)];
-    const step = nextSpectrumRender(queue, 101, fresh, 1000, STALL);
+    const step = nextSpectrumRender(queue, 101, fresh, 1000, STALL, ALIGN);
     expect(step).toMatchObject({ index: 1, blank: false });
     expect(step.state).toMatchObject({ renderedTime: 101, advancedAt: 1000, unaligned: false });
   });
@@ -123,7 +124,7 @@ describe('nextSpectrumRender', () => {
   it('holds without re-rendering while the playhead sits on the same column', () => {
     const queue = [column(100), column(101)];
     const shown: SpectrumRenderState = { renderedTime: 101, advancedAt: 1000, unaligned: false };
-    expect(nextSpectrumRender(queue, 101.2, shown, 1400, STALL)).toMatchObject({
+    expect(nextSpectrumRender(queue, 101.2, shown, 1400, STALL, ALIGN)).toMatchObject({
       index: -1,
       blank: false,
       state: shown,
@@ -133,7 +134,7 @@ describe('nextSpectrumRender', () => {
   it('blanks the waterfall when no new column arrives before the stall timeout', () => {
     const queue = [column(100), column(101)];
     const shown: SpectrumRenderState = { renderedTime: 101, advancedAt: 1000, unaligned: false };
-    const step = nextSpectrumRender(queue, 101.2, shown, 1000 + STALL + 1, STALL);
+    const step = nextSpectrumRender(queue, 101.2, shown, 1000 + STALL + 1, STALL, ALIGN);
     expect(step).toMatchObject({ index: -1, blank: true });
     expect(step.state.renderedTime).toBe(0);
   });
@@ -141,13 +142,13 @@ describe('nextSpectrumRender', () => {
   it('blanks only once, not on every tick after the stall', () => {
     const queue = [column(100)];
     const blanked: SpectrumRenderState = { renderedTime: 0, advancedAt: 1000, unaligned: false };
-    expect(nextSpectrumRender(queue, 100.5, blanked, 9000, STALL).blank).toBe(false);
+    expect(nextSpectrumRender(queue, 100.5, blanked, 9000, STALL, ALIGN).blank).toBe(false);
   });
 
   it('recovers as soon as a newer column becomes due', () => {
     const queue = [column(100), column(105)];
     const blanked: SpectrumRenderState = { renderedTime: 0, advancedAt: 1000, unaligned: false };
-    expect(nextSpectrumRender(queue, 105, blanked, 9000, STALL)).toMatchObject({
+    expect(nextSpectrumRender(queue, 105, blanked, 9000, STALL, ALIGN)).toMatchObject({
       index: 1,
       blank: false,
     });
@@ -155,22 +156,35 @@ describe('nextSpectrumRender', () => {
 
   it('blanks when the stream stops delivering columns entirely', () => {
     const shown: SpectrumRenderState = { renderedTime: 101, advancedAt: 1000, unaligned: false };
-    expect(nextSpectrumRender([], 200, shown, 1000 + STALL + 1, STALL)).toMatchObject({
+    expect(nextSpectrumRender([], 200, shown, 1000 + STALL + 1, STALL, ALIGN)).toMatchObject({
       index: -1,
       blank: true,
     });
   });
 
-  it('waits, then abandons alignment when the playhead never reaches the queue', () => {
-    // Browser clock behind the server: every queued column looks like the future.
-    const queue = [column(500), column(501)];
-    expect(nextSpectrumRender(queue, 100, fresh, 1200, STALL)).toMatchObject({
-      index: -1,
-      blank: false,
-      state: { unaligned: false },
-    });
+  it('waits through normal HLS lag instead of abandoning alignment', () => {
+    // The queue holds freshly captured audio; playback is 6s behind the live
+    // edge, so nothing is due yet. That is not a fault and must not give up,
+    // however long the stall timeout has elapsed.
+    const queue = [column(1000), column(1001)];
+    const step = nextSpectrumRender(queue, 995, fresh, 1000 + STALL * 10, STALL, ALIGN);
+    expect(step).toMatchObject({ index: -1, blank: false });
+    expect(step.state.unaligned).toBe(false);
+  });
 
-    const step = nextSpectrumRender(queue, 100, fresh, 1000 + STALL + 1, STALL);
+  it('abandons alignment when nothing becomes due for a whole window', () => {
+    // Playback paused and the stream stalled at the same time: the gap stays
+    // inside the window, so only elapsed time can break the deadlock.
+    const queue = [column(1000), column(1001)];
+    const step = nextSpectrumRender(queue, 995, fresh, 1000 + ALIGN * 1000 + 1, STALL, ALIGN);
+    expect(step).toMatchObject({ index: 1, blank: false });
+    expect(step.state.unaligned).toBe(true);
+  });
+
+  it('abandons alignment when the playhead is further behind than the queue can cover', () => {
+    // Browser clock 60s behind the server: no HLS buffer explains this.
+    const queue = [column(1000), column(1001)];
+    const step = nextSpectrumRender(queue, 940, fresh, 1000, STALL, ALIGN);
     expect(step).toMatchObject({ index: 1, blank: false });
     expect(step.state.unaligned).toBe(true);
   });
@@ -178,13 +192,13 @@ describe('nextSpectrumRender', () => {
   it('keeps rendering the newest column once alignment is abandoned', () => {
     const queue = [column(500), column(501), column(502)];
     const unaligned: SpectrumRenderState = { renderedTime: 501, advancedAt: 1000, unaligned: true };
-    expect(nextSpectrumRender(queue, 0, unaligned, 1000, STALL)).toMatchObject({ index: 2 });
+    expect(nextSpectrumRender(queue, 0, unaligned, 1000, STALL, ALIGN)).toMatchObject({ index: 2 });
   });
 
   it('replays history when the playhead jumps backwards', () => {
     const queue = [column(100), column(101), column(102)];
     const shown: SpectrumRenderState = { renderedTime: 102, advancedAt: 1000, unaligned: false };
-    expect(nextSpectrumRender(queue, 100, shown, 1000, STALL)).toMatchObject({ index: 0 });
+    expect(nextSpectrumRender(queue, 100, shown, 1000, STALL, ALIGN)).toMatchObject({ index: 0 });
   });
 
   it('advances one column per tick as the playhead runs forward', () => {
@@ -192,7 +206,7 @@ describe('nextSpectrumRender', () => {
     let state = fresh;
     const seen: number[] = [];
     for (const playhead of [100, 101, 102]) {
-      const step = nextSpectrumRender(queue, playhead, state, 1000, STALL);
+      const step = nextSpectrumRender(queue, playhead, state, 1000, STALL, ALIGN);
       state = step.state;
       seen.push(step.index);
     }

@@ -47,3 +47,21 @@ func withoutSpectrum(data audiocore.AudioLevelData) audiocore.AudioLevelData { /
 	data.SpectrumTime = 0
 	return data
 }
+
+// carryPendingSpectrum keeps the newest column alive until a send actually
+// carries it.
+//
+// A column is produced at most every 50ms, but frames arrive far more often —
+// a sound card callback is a few milliseconds, and an FFmpeg pipe read returns
+// whatever bytes are available. Every frame in between publishes an
+// AudioLevelData with no spectrum, and the SSE rate limiter runs on its own
+// clock, so without this the send lands on a spectrum-less update far more
+// often than not and the client sees no columns at all.
+func carryPendingSpectrum(incoming *audiocore.AudioLevelData, previous audiocore.AudioLevelData) {
+	if incoming.Spectrum != nil || previous.Spectrum == nil {
+		return
+	}
+	incoming.Spectrum = previous.Spectrum
+	incoming.SpectrumSampleRate = previous.SpectrumSampleRate
+	incoming.SpectrumTime = previous.SpectrumTime
+}

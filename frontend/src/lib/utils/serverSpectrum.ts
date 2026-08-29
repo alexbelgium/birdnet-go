@@ -113,8 +113,9 @@ export interface SpectrumRenderStep {
  * - the buffer is blanked when no *new* column has been shown for
  *   `stallTimeoutMs`, so a dropped stream reads as silence instead of smearing
  *   one frozen column across the canvas;
- * - if the playhead never reaches the queue at all — a browser and server whose
- *   clocks disagree, which the seekable-range playhead estimate cannot detect —
+ * - if the playhead is further behind the queue than `alignmentWindowSeconds`
+ *   — more than any HLS buffer explains, so a browser and server whose clocks
+ *   disagree, which the seekable-range playhead estimate cannot detect —
  *   alignment is abandoned rather than leaving the user with a blank waterfall
  *   forever. That is the pre-alignment behaviour, and it is still far better
  *   than the blank canvas this whole fallback exists to fix.
@@ -124,7 +125,8 @@ export function nextSpectrumRender(
   playhead: number,
   state: SpectrumRenderState,
   now: number,
-  stallTimeoutMs: number
+  stallTimeoutMs: number,
+  alignmentWindowSeconds: number
 ): SpectrumRenderStep {
   const stalled = now - state.advancedAt > stallTimeoutMs;
   const hold = (): SpectrumRenderStep =>
@@ -137,8 +139,26 @@ export function nextSpectrumRender(
   const index = selectSpectrumColumn(queue, state.unaligned ? 0 : playhead);
 
   if (index < 0) {
-    if (!stalled) return { index: -1, blank: false, state };
     const newest = queue.length - 1;
+    // eslint-disable-next-line security/detect-object-injection -- newest is the queue's last index
+    const behind = queue[newest].time - playhead;
+
+    // The playhead has not reached the oldest queued column yet. Right after
+    // the fallback starts that is simply true and not a fault: the queue holds
+    // freshly captured audio while playback is several seconds behind the live
+    // edge, so the first columns are genuinely not due yet. Waiting is correct
+    // — but not forever: a playhead that stops advancing while the stream also
+    // stalls would otherwise wait out the session, so the same window doubles
+    // as an escape hatch on elapsed time.
+    const waited = now - state.advancedAt > alignmentWindowSeconds * 1000;
+    if (behind <= alignmentWindowSeconds && !waited) {
+      return { index: -1, blank: false, state };
+    }
+
+    // Either further behind than the queue can ever cover — no HLS buffer
+    // explains that, a browser clock disagreeing with the server's does — or
+    // nothing became due for a whole window. Give up on alignment rather than
+    // leaving the waterfall blank forever.
     return {
       index: newest,
       blank: false,
