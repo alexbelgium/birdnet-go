@@ -124,6 +124,7 @@ var goldenRoutes = []string{
 	"GET /api/v2/species/taxonomy",
 	"GET /api/v2/spectrogram/:id",
 	"GET /api/v2/spectrogram/:id/status",
+	"GET /api/v2/spectrogram/live",
 	"GET /api/v2/sse/status",
 	"GET /api/v2/streams/audio-level",
 	"GET /api/v2/streams/health",

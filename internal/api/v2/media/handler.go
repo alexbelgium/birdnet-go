@@ -50,6 +50,7 @@ type Handler struct {
 	// spectrogramGenerator renders spectrogram images from audio clips via the
 	// media SecureFS sandbox. Built in New from the shared SecureFS.
 	spectrogramGenerator *spectrogram.Generator
+	liveSpectrogram      *liveSpectrogramService
 
 	// externalMediaEnv and externalMediaProbe are injectable dependencies for the
 	// GET /api/v2/system/external-media endpoint. Both default to the real
@@ -101,6 +102,7 @@ func New(core *apicore.Core) *Handler {
 	// Spectrogram generator (needs the media SecureFS). The construction-time
 	// settings snapshot from the shared core matches the monolith's behavior.
 	h.spectrogramGenerator = spectrogram.NewGenerator(core.Settings.Load(), core.SFS, getSpectrogramLogger())
+	h.liveSpectrogram = newLiveSpectrogramService(core)
 
 	return h
 }

@@ -21,6 +21,7 @@ Props:
   import { handleBirdImageError } from '$lib/desktop/components/ui/image-utils';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { settingsStore } from '$lib/stores/settings';
+  import LiveSpectrogramImage from './LiveSpectrogramImage.svelte';
 
   interface Props {
     detections: PendingDetection[];
@@ -161,6 +162,7 @@ Props:
   </div>
 
   <!-- Card Content -->
+  <LiveSpectrogramImage refreshKey={detections} />
   {#if hasDisplayDetections}
     <div class="flex flex-wrap gap-3 p-4">
       {#each displayDetections as detection (`${detection.source}_${detection.scientificName}`)}
