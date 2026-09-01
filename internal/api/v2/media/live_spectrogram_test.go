@@ -2,10 +2,12 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -29,7 +31,9 @@ func sinePCM(sampleRate int, duration time.Duration) []byte {
 	return pcm
 }
 
-func newLiveSpectrogramTestService(capture liveCaptureBuffer, render func([]byte, int) ([]byte, error)) *liveSpectrogramService {
+var fakeLiveSpectrogramPNG = []byte("\x89PNG\r\n\x1a\n")
+
+func newLiveSpectrogramTestService(capture liveCaptureBuffer, run func(context.Context, string, []string, []byte) error) *liveSpectrogramService {
 	return &liveSpectrogramService{
 		entries: make(map[string]*liveSpectrogramCacheEntry),
 		lookup: func(source string) (liveCaptureBuffer, error) {
@@ -39,9 +43,14 @@ func newLiveSpectrogramTestService(capture liveCaptureBuffer, render func([]byte
 			return capture, nil
 		},
 		sources: func() []string { return []string{"test-source"} },
-		render:  render,
+		soxPath: func() string { return "/configured/sox" },
+		run:     run,
 		overlap: func() float64 { return 0 },
 	}
+}
+
+func fakeLiveSpectrogramRunner(_ context.Context, _ string, args []string, _ []byte) error {
+	return os.WriteFile(args[len(args)-1], fakeLiveSpectrogramPNG, 0o600)
 }
 
 type fakeLiveCapture struct {
@@ -90,7 +99,7 @@ func TestServeLiveSpectrogram(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := &Handler{liveSpectrogram: newLiveSpectrogramTestService(tc.capture, renderLiveSpectrogramPNG)}
+			handler := &Handler{liveSpectrogram: newLiveSpectrogramTestService(tc.capture, fakeLiveSpectrogramRunner)}
 			e := echo.New()
 			req := httptest.NewRequest(http.MethodGet, "/api/v2/spectrogram/live?source="+tc.source, http.NoBody)
 			rec := httptest.NewRecorder()
@@ -113,14 +122,14 @@ func TestLiveSpectrogramCacheRendersSequenceOnce(t *testing.T) {
 	capture := &fakeLiveCapture{sampleRate: sampleRate, total: int64(len(pcm)), written: len(pcm), pcm: pcm}
 
 	var renders atomic.Int32
-	service := newLiveSpectrogramTestService(capture, func(pcm []byte, rate int) ([]byte, error) {
+	service := newLiveSpectrogramTestService(capture, func(_ context.Context, _ string, args []string, _ []byte) error {
 		renders.Add(1)
-		return renderLiveSpectrogramPNG(pcm, rate)
+		return os.WriteFile(args[len(args)-1], fakeLiveSpectrogramPNG, 0o600)
 	})
 
-	first, status := service.image("test-source")
+	first, status := service.image(t.Context(), "test-source")
 	require.Equal(t, http.StatusOK, status)
-	second, status := service.image("test-source")
+	second, status := service.image(t.Context(), "test-source")
 	require.Equal(t, http.StatusOK, status)
 	assert.Equal(t, int32(1), renders.Load())
 	assert.Equal(t, first, second)
@@ -134,14 +143,14 @@ func TestLiveSpectrogramConcurrentRequestsRenderOnce(t *testing.T) {
 	pcm := sinePCM(sampleRate, liveSpectrogramDuration)
 	capture := &fakeLiveCapture{sampleRate: sampleRate, total: int64(len(pcm)), written: len(pcm), pcm: pcm}
 	var renders atomic.Int32
-	service := newLiveSpectrogramTestService(capture, func(pcm []byte, rate int) ([]byte, error) {
+	service := newLiveSpectrogramTestService(capture, func(_ context.Context, _ string, args []string, _ []byte) error {
 		renders.Add(1)
-		return renderLiveSpectrogramPNG(pcm, rate)
+		return os.WriteFile(args[len(args)-1], fakeLiveSpectrogramPNG, 0o600)
 	})
 	statuses := make(chan int, waiters)
 	for range waiters {
 		go func() {
-			_, status := service.image("test-source")
+			_, status := service.image(t.Context(), "test-source")
 			statuses <- status
 		}()
 	}
@@ -149,6 +158,50 @@ func TestLiveSpectrogramConcurrentRequestsRenderOnce(t *testing.T) {
 		assert.Equal(t, http.StatusOK, <-statuses)
 	}
 	assert.Equal(t, int32(1), renders.Load())
+}
+
+func TestLiveSpectrogramSoxArguments(t *testing.T) {
+	const sampleRate = 8000
+	pcm := sinePCM(sampleRate, liveSpectrogramDuration)
+	capture := &fakeLiveCapture{sampleRate: sampleRate, total: int64(len(pcm)), written: len(pcm), pcm: pcm}
+	var gotBinary string
+	var gotArgs []string
+	var gotPCM []byte
+	service := newLiveSpectrogramTestService(capture, func(_ context.Context, binary string, args []string, stdin []byte) error {
+		gotBinary = binary
+		gotArgs = append([]string(nil), args...)
+		gotPCM = append([]byte(nil), stdin...)
+		return os.WriteFile(args[len(args)-1], fakeLiveSpectrogramPNG, 0o600)
+	})
+
+	_, status := service.image(t.Context(), "test-source")
+
+	require.Equal(t, http.StatusOK, status)
+	require.NotEmpty(t, gotArgs)
+	outputPath := gotArgs[len(gotArgs)-1]
+	assert.Equal(t, "/configured/sox", gotBinary)
+	assert.Equal(t, []string{
+		"-V1", "-t", "raw", "-r", "8000", "-e", "signed", "-b", "16", "-c", "1", "-",
+		"-n", "remix", "1", "rate", "24k", "spectrogram", "-c", "", "-o", outputPath,
+	}, gotArgs)
+	assert.Equal(t, pcm, gotPCM)
+}
+
+func TestLiveSpectrogramUnavailableWithoutSoxPath(t *testing.T) {
+	var runs atomic.Int32
+	service := newLiveSpectrogramTestService(nil, func(_ context.Context, _ string, _ []string, _ []byte) error {
+		runs.Add(1)
+		return nil
+	})
+	service.soxPath = func() string { return "" }
+	handler := &Handler{liveSpectrogram: service}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, LiveSpectrogramPath, http.NoBody)
+	rec := httptest.NewRecorder()
+
+	require.NoError(t, handler.ServeLiveSpectrogram(e.NewContext(req, rec)))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Zero(t, runs.Load())
 }
 
 func TestLiveSpectrogramAuthRequiresAuthenticationWhenLiveAudioIsPrivate(t *testing.T) {
@@ -205,16 +258,4 @@ func TestLiveSpectrogramAuthAllowsAnonymousWhenLiveAudioIsPublic(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.False(t, authCalled, "auth middleware must not run when live audio is public")
-}
-
-func BenchmarkRenderLiveSpectrogramPNG(b *testing.B) {
-	pcm := sinePCM(48000, 3*time.Second)
-	b.ReportAllocs()
-	b.SetBytes(int64(len(pcm)))
-	b.ResetTimer()
-	for range b.N {
-		if _, err := renderLiveSpectrogramPNG(pcm, 48000); err != nil {
-			b.Fatal(err)
-		}
-	}
 }

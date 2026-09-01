@@ -44,7 +44,7 @@
     <img
       src={visibleSrc}
       alt="Live audio spectrogram"
-      class="aspect-[10/3] w-full rounded-lg border border-[var(--color-base-200)] bg-[var(--color-base-200)] object-cover"
+      class="h-auto w-full rounded-lg border border-[var(--color-base-200)] bg-[var(--color-base-200)]"
     />
   </div>
 {/if}

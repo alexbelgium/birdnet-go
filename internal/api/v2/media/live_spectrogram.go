@@ -2,14 +2,16 @@ package media
 
 import (
 	"bytes"
-	"encoding/binary"
+	"context"
 	stderrors "errors"
-	"image"
-	"image/color"
-	"image/png"
 	"math"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -25,20 +27,9 @@ const LiveSpectrogramPath = "/spectrogram/live"
 
 const (
 	liveSpectrogramDuration = 3 * time.Second
-	liveSpectrogramWidth    = 640
-	liveSpectrogramHeight   = 192
-	liveSpectrogramFFTSize  = 1024
-	liveSpectrogramMaxHz    = 12000
+	liveSpectrogramTimeout  = 5 * time.Second
 	pcmBytesPerSample       = 2
 )
-
-var liveSpectrogramHannWindow = func() []float64 {
-	window := make([]float64, liveSpectrogramFFTSize)
-	for i := range window {
-		window[i] = 0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(liveSpectrogramFFTSize-1))
-	}
-	return window
-}()
 
 type liveCaptureBuffer interface {
 	ReadSegment(startTime, endTime time.Time) ([]byte, error)
@@ -60,7 +51,8 @@ type liveSpectrogramService struct {
 	entries map[string]*liveSpectrogramCacheEntry
 	lookup  func(string) (liveCaptureBuffer, error)
 	sources func() []string
-	render  func([]byte, int) ([]byte, error)
+	soxPath func() string
+	run     func(context.Context, string, []string, []byte) error
 	overlap func() float64
 }
 
@@ -87,7 +79,8 @@ func newLiveSpectrogramService(core *apicore.Core) *liveSpectrogramService {
 			sort.Strings(ids)
 			return ids
 		},
-		render:  renderLiveSpectrogramPNG,
+		soxPath: func() string { return core.CurrentSettings().Realtime.Audio.SoxPath },
+		run:     runLiveSpectrogramCommand,
 		overlap: func() float64 { return core.CurrentSettings().BirdNET.Overlap },
 	}
 }
@@ -105,7 +98,11 @@ func (s *liveSpectrogramService) entry(source string) *liveSpectrogramCacheEntry
 	return entry
 }
 
-func (s *liveSpectrogramService) image(source string) ([]byte, int) {
+func (s *liveSpectrogramService) image(ctx context.Context, source string) ([]byte, int) {
+	soxPath := s.soxPath()
+	if soxPath == "" {
+		return nil, http.StatusServiceUnavailable
+	}
 	if source == "" {
 		sources := s.sources()
 		if len(sources) == 0 {
@@ -139,7 +136,7 @@ func (s *liveSpectrogramService) image(source string) ([]byte, int) {
 	if !ok {
 		return nil, http.StatusServiceUnavailable
 	}
-	data, err := s.render(pcm, sampleRate)
+	data, err := s.render(ctx, soxPath, pcm, sampleRate)
 	if err != nil {
 		return nil, http.StatusServiceUnavailable
 	}
@@ -182,7 +179,7 @@ func liveSpectrogramChunk(capture liveCaptureBuffer, sequence, stepBytes int64) 
 // ServeLiveSpectrogram returns a PNG rendering of the newest capture-buffer audio.
 func (c *Handler) ServeLiveSpectrogram(ctx echo.Context) error {
 	ctx.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	data, status := c.liveSpectrogram.image(ctx.QueryParam("source"))
+	data, status := c.liveSpectrogram.image(ctx.Request().Context(), ctx.QueryParam("source"))
 	if status != http.StatusOK {
 		return ctx.NoContent(status)
 	}
@@ -202,90 +199,37 @@ func (c *Handler) liveSpectrogramAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-func renderLiveSpectrogramPNG(pcm []byte, sampleRate int) ([]byte, error) {
-	samples := make([]float64, len(pcm)/pcmBytesPerSample)
-	for i := range samples {
-		samples[i] = float64(int16(binary.LittleEndian.Uint16(pcm[i*2:]))) / 32768
-	}
-
-	img := image.NewRGBA(image.Rect(0, 0, liveSpectrogramWidth, liveSpectrogramHeight))
-	window := make([]complex128, liveSpectrogramFFTSize)
-	magnitudes := make([]float64, liveSpectrogramWidth*liveSpectrogramHeight)
-	peakDB := -120.0
-	maxStart := len(samples) - liveSpectrogramFFTSize
-	maxFrequency := min(float64(liveSpectrogramMaxHz), float64(sampleRate)/2)
-	topBin := int(maxFrequency * liveSpectrogramFFTSize / float64(sampleRate))
-
-	for x := range liveSpectrogramWidth {
-		start := 0
-		if liveSpectrogramWidth > 1 {
-			start = x * maxStart / (liveSpectrogramWidth - 1)
-		}
-		for i := range liveSpectrogramFFTSize {
-			window[i] = complex(samples[start+i]*liveSpectrogramHannWindow[i], 0)
-		}
-		fft(window)
-		for y := range liveSpectrogramHeight {
-			bin := y * topBin / (liveSpectrogramHeight - 1)
-			value := window[bin]
-			magnitudeSquared := real(value)*real(value) + imag(value)*imag(value)
-			db := 10 * math.Log10(magnitudeSquared+1e-24)
-			magnitudes[x*liveSpectrogramHeight+y] = db
-			peakDB = max(peakDB, db)
-		}
-	}
-
-	for x := range liveSpectrogramWidth {
-		for y := range liveSpectrogramHeight {
-			db := magnitudes[x*liveSpectrogramHeight+y]
-			intensity := clamp((db-(peakDB-75))/75, 0, 1)
-			img.SetRGBA(x, liveSpectrogramHeight-1-y, liveSpectrogramColor(intensity))
-		}
-	}
-
-	var out bytes.Buffer
-	err := png.Encode(&out, img)
-	return out.Bytes(), err
-}
-
-func fft(values []complex128) {
-	n := len(values)
-	for i, j := 1, 0; i < n; i++ {
-		bit := n >> 1
-		for ; j&bit != 0; bit >>= 1 {
-			j ^= bit
-		}
-		j ^= bit
-		if i < j {
-			values[i], values[j] = values[j], values[i]
-		}
-	}
-	for length := 2; length <= n; length <<= 1 {
-		angle := -2 * math.Pi / float64(length)
-		root := complex(math.Cos(angle), math.Sin(angle))
-		for start := 0; start < n; start += length {
-			factor := complex(1, 0)
-			for offset := 0; offset < length/2; offset++ {
-				even := values[start+offset]
-				odd := values[start+offset+length/2] * factor
-				values[start+offset] = even + odd
-				values[start+offset+length/2] = even - odd
-				factor *= root
-			}
-		}
-	}
-}
-
 func clamp(value, low, high float64) float64 {
 	return min(max(value, low), high)
 }
 
-func liveSpectrogramColor(value float64) color.RGBA {
-	// Dark navy through cyan to warm yellow, with a restrained low-noise floor.
-	if value < 0.5 {
-		t := value * 2
-		return color.RGBA{R: uint8(8 + 10*t), G: uint8(18 + 150*t), B: uint8(32 + 170*t), A: 255}
+func (s *liveSpectrogramService) render(ctx context.Context, soxPath string, pcm []byte, sampleRate int) ([]byte, error) {
+	tempDir, err := os.MkdirTemp("", "birdnet-go-live-spectrogram-*")
+	if err != nil {
+		return nil, err
 	}
-	t := (value - 0.5) * 2
-	return color.RGBA{R: uint8(18 + 237*t), G: uint8(168 + 75*t), B: uint8(202 - 154*t), A: 255}
+	defer os.RemoveAll(tempDir)
+
+	outputPath := filepath.Join(tempDir, "spectrogram.png")
+	args := []string{
+		"-V1", "-t", "raw", "-r", strconv.Itoa(sampleRate), "-e", "signed", "-b", "16", "-c", "1", "-",
+		"-n", "remix", "1", "rate", "24k", "spectrogram", "-c", "", "-o", outputPath,
+	}
+	renderCtx, cancel := context.WithTimeout(ctx, liveSpectrogramTimeout)
+	defer cancel()
+	if err := s.run(renderCtx, soxPath, args, pcm); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(outputPath)
+}
+
+func runLiveSpectrogramCommand(ctx context.Context, binary string, args []string, pcm []byte) error {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, binary, args...) //nolint:gosec // binary is the startup-validated configured SoX path
+	} else {
+		cmd = exec.CommandContext(ctx, "nice", append([]string{"-n", "19", binary}, args...)...) //nolint:gosec // binary is the startup-validated configured SoX path
+	}
+	cmd.Stdin = bytes.NewReader(pcm)
+	return cmd.Run()
 }
