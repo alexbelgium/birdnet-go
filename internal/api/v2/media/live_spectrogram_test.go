@@ -178,6 +178,35 @@ func TestLiveSpectrogramAuthRequiresAuthenticationWhenLiveAudioIsPrivate(t *test
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
+// The public-access carve-out must actually let anonymous requests through:
+// PublicAccess.LiveAudio is what an operator sets to publish live audio, and if
+// liveSpectrogramAuth still invoked AuthMiddleware here the card would silently
+// never load for the very users the setting is meant to serve.
+func TestLiveSpectrogramAuthAllowsAnonymousWhenLiveAudioIsPublic(t *testing.T) {
+	core := apitest.NewCore(t, apitest.WithSettingsFunc(func(settings *conf.Settings) {
+		settings.Security.BasicAuth.Enabled = true
+		settings.Security.PublicAccess.LiveAudio = true
+	}))
+	authCalled := false
+	core.AuthMiddleware = func(_ echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error {
+			authCalled = true
+			return ctx.NoContent(http.StatusUnauthorized)
+		}
+	}
+	handler := &Handler{Core: core}
+	e := echo.New()
+	e.GET(LiveSpectrogramPath, func(ctx echo.Context) error {
+		return ctx.NoContent(http.StatusOK)
+	}, handler.liveSpectrogramAuth)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, LiveSpectrogramPath, http.NoBody))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, authCalled, "auth middleware must not run when live audio is public")
+}
+
 func BenchmarkRenderLiveSpectrogramPNG(b *testing.B) {
 	pcm := sinePCM(48000, 3*time.Second)
 	b.ReportAllocs()

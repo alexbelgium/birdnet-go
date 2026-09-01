@@ -17,6 +17,12 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 )
 
+// LiveSpectrogramPath is the route pattern, relative to the v2 API group, for
+// the live spectrogram PNG. It is exported so the facade's isPrivateModeExempt
+// allow-list composes the same constant used at the registration site below and
+// cannot drift from it, mirroring how the audio domain exports its HLS paths.
+const LiveSpectrogramPath = "/spectrogram/live"
+
 const (
 	liveSpectrogramDuration = 3 * time.Second
 	liveSpectrogramWidth    = 640

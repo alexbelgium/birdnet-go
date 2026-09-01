@@ -1,7 +1,7 @@
 <script lang="ts">
   import { buildAppUrl } from '$lib/utils/urlHelpers';
 
-  let { refreshKey }: { refreshKey: unknown } = $props();
+  let { refreshKey, source }: { refreshKey: unknown; source?: string } = $props();
 
   let visibleSrc = $state<string>();
   let failures = $state(0);
@@ -13,7 +13,11 @@
     if (document.hidden) return;
 
     const requestGeneration = ++generation;
-    const nextSrc = `${endpoint}?_=${requestGeneration}`;
+    // Pin the image to the source the displayed detections came from; without it
+    // the server falls back to its first sorted source, which on a multi-source
+    // install can be unrelated to the species chips shown beside it.
+    const sourceParam = source ? `source=${encodeURIComponent(source)}&` : '';
+    const nextSrc = `${endpoint}?${sourceParam}_=${requestGeneration}`;
     const preload = new window.Image();
     preload.onload = () => {
       if (requestGeneration !== generation) return;
@@ -29,6 +33,7 @@
 
   $effect(() => {
     void refreshKey;
+    void source;
     loadNext();
     return () => generation++;
   });

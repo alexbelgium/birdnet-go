@@ -304,7 +304,7 @@ func (c *Handler) RegisterRoutes(g *echo.Group) {
 	// Original filename-based routes (keep for backward compatibility if needed, but ensure they use SFS)
 	g.GET("/media/audio/:filename", c.ServeAudioClip)
 	g.GET("/media/spectrogram/:filename", c.ServeSpectrogram)
-	g.GET("/spectrogram/live", c.ServeLiveSpectrogram, c.liveSpectrogramAuth)
+	g.GET(LiveSpectrogramPath, c.ServeLiveSpectrogram, c.liveSpectrogramAuth)
 
 	// Bird image endpoints
 	g.GET("/media/species-image", c.GetSpeciesImage)

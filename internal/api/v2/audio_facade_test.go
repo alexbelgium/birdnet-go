@@ -16,6 +16,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/app"
 	audioapi "github.com/tphakala/birdnet-go/internal/api/v2/audio"
 	authapi "github.com/tphakala/birdnet-go/internal/api/v2/auth"
+	mediaapi "github.com/tphakala/birdnet-go/internal/api/v2/media"
 )
 
 // TestIsPrivateModeExempt verifies the (method, route) allow-list that
@@ -42,6 +43,7 @@ func TestIsPrivateModeExempt(t *testing.T) {
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSStatusPath},
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSTokenGroupPath + audioapi.HLSPlaylistPath},
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSTokenGroupPath + audioapi.HLSContentPath},
+		{http.MethodGet, apiV2Prefix + mediaapi.LiveSpectrogramPath},
 	}
 	for _, tt := range exempt {
 		t.Run("exempt/"+tt.method+"_"+tt.path, func(t *testing.T) {
@@ -70,6 +72,7 @@ func TestIsPrivateModeExempt(t *testing.T) {
 		{http.MethodGet, apiV2Prefix + authapi.AuthGroupPath + authapi.AuthLoginPath}, // login is POST-only
 		{http.MethodPost, apiV2Prefix + app.AppConfigEndpoint},                        // config is GET-only
 		{http.MethodDelete, apiV2Prefix + app.AppConfigEndpoint},
+		{http.MethodPost, apiV2Prefix + mediaapi.LiveSpectrogramPath}, // live spectrogram is GET-only
 	}
 	for _, tt := range notExempt {
 		t.Run("not_exempt/"+tt.method+"_"+tt.path, func(t *testing.T) {
@@ -116,6 +119,9 @@ func TestPrivateModeExemptPathsAreRegisteredRoutes(t *testing.T) {
 	hlsTokenGroup.GET(audioapi.HLSPlaylistPath, noop)
 	hlsTokenGroup.GET(audioapi.HLSContentPath, noop)
 
+	// Live spectrogram PNG (mirrors the media domain's RegisterRoutes).
+	g.GET(mediaapi.LiveSpectrogramPath, noop)
+
 	key := func(method, path string) string { return method + " " + path }
 
 	// Expected exempt set, with paths composed from the same constants the
@@ -129,6 +135,7 @@ func TestPrivateModeExemptPathsAreRegisteredRoutes(t *testing.T) {
 		key(http.MethodGet, apiV2Prefix+audioapi.HLSGroupPath+audioapi.HLSStatusPath):                              true,
 		key(http.MethodGet, apiV2Prefix+audioapi.HLSGroupPath+audioapi.HLSTokenGroupPath+audioapi.HLSPlaylistPath): true,
 		key(http.MethodGet, apiV2Prefix+audioapi.HLSGroupPath+audioapi.HLSTokenGroupPath+audioapi.HLSContentPath):  true,
+		key(http.MethodGet, apiV2Prefix+mediaapi.LiveSpectrogramPath):                                              true,
 	}
 
 	registered := make(map[string]bool)

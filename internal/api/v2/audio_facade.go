@@ -9,6 +9,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/app"
 	audioapi "github.com/tphakala/birdnet-go/internal/api/v2/audio"
 	authapi "github.com/tphakala/birdnet-go/internal/api/v2/auth"
+	mediaapi "github.com/tphakala/birdnet-go/internal/api/v2/media"
 	"github.com/tphakala/birdnet-go/internal/audiocore"
 )
 
@@ -30,8 +31,9 @@ func (c *Controller) isClientAuthenticated(ctx echo.Context) bool {
 //
 //  1. Bootstrap and auth flow paths so the frontend can fetch /app/config and
 //     complete a login (including OAuth callback) from an unauthenticated state.
-//  2. Live audio (HLS) paths that already have their own publicLiveAudioAuth
-//     middleware. Letting them through privateModeAuth preserves the
+//  2. Live audio paths (the HLS routes, and the live spectrogram PNG) that
+//     already carry their own public-live-audio middleware. Letting them
+//     through privateModeAuth preserves the
 //     PublicAccess.LiveAudio carve-out: when LiveAudio is enabled the route stays
 //     public, when it is disabled the per-route middleware applies authMiddleware
 //     as before.
@@ -63,6 +65,8 @@ func isPrivateModeExempt(method, path string) bool {
 	case method == http.MethodGet && path == hlsTokenBase+audioapi.HLSPlaylistPath:
 		return true
 	case method == http.MethodGet && path == hlsTokenBase+audioapi.HLSContentPath:
+		return true
+	case method == http.MethodGet && path == apiV2Prefix+mediaapi.LiveSpectrogramPath:
 		return true
 	}
 	return false

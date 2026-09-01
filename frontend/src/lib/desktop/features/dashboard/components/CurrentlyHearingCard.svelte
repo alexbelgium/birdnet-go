@@ -162,7 +162,7 @@ Props:
   </div>
 
   <!-- Card Content -->
-  <LiveSpectrogramImage refreshKey={detections} />
+  <LiveSpectrogramImage refreshKey={detections} source={displayDetections[0]?.sourceID} />
   {#if hasDisplayDetections}
     <div class="flex flex-wrap gap-3 p-4">
       {#each displayDetections as detection (`${detection.source}_${detection.scientificName}`)}
