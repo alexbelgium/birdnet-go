@@ -199,7 +199,7 @@ func TestLiveSpectrogramSoxArguments(t *testing.T) {
 	assert.Equal(t, []string{
 		"-V1", "-t", "raw", "-r", "8000", "-e", "signed", "-b", "16", "-c", "1", "-",
 		"-n", "remix", "1", "rate", "24000", "spectrogram",
-		"-x", "1026", "-y", "513", "-d", "3", "-z", conf.SpectrogramDynamicRangeExtended,
+		"-x", "514", "-y", "257", "-d", "3", "-z", conf.SpectrogramDynamicRangeExtended,
 		"-o", outputPath, "-r", "-m", "-w", "dolph",
 	}, gotArgs)
 	assert.Equal(t, pcm, gotPCM)

@@ -29,8 +29,13 @@ const LiveSpectrogramPath = "/spectrogram/live"
 
 const (
 	liveSpectrogramDuration = 3 * time.Second
-	liveSpectrogramTimeout  = 5 * time.Second
-	pcmBytesPerSample       = 2
+	// liveSpectrogramWidth matches the width the detections UI requests
+	// (AudioPlayer's default size=md), so the live card carries the same
+	// pixel budget per refresh as a saved-detection spectrogram. Height is
+	// derived from it, keeping the 2:1 ratio the detection player renders at.
+	liveSpectrogramWidth   = apicore.SpectrogramSizeMd
+	liveSpectrogramTimeout = 5 * time.Second
+	pcmBytesPerSample      = 2
 )
 
 type liveCaptureBuffer interface {
@@ -218,7 +223,7 @@ func (s *liveSpectrogramService) render(ctx context.Context, soxPath string, pcm
 	args := []string{
 		"-V1", "-t", "raw", "-r", strconv.Itoa(sampleRate), "-e", "signed", "-b", "16", "-c", "1", "-",
 		"-n", "remix", "1", "rate", "24000", "spectrogram",
-		"-x", strconv.Itoa(apicore.SpectrogramSizeLg), "-y", strconv.Itoa(spectrogram.SoxFriendlyHeight(apicore.SpectrogramSizeLg)),
+		"-x", strconv.Itoa(liveSpectrogramWidth), "-y", strconv.Itoa(spectrogram.SoxFriendlyHeight(liveSpectrogramWidth)),
 		"-d", strconv.Itoa(int(liveSpectrogramDuration.Seconds())),
 		"-z", spectrogram.SoxDynamicRange(settings), "-o", outputPath, "-r",
 	}
