@@ -42,15 +42,25 @@ func newLiveSpectrogramTestService(capture liveCaptureBuffer, run func(context.C
 			}
 			return capture, nil
 		},
-		sources: func() []string { return []string{"test-source"} },
-		soxPath: func() string { return "/configured/sox" },
-		run:     run,
-		overlap: func() float64 { return 0 },
+		sources:  func() []string { return []string{"test-source"} },
+		soxPath:  func() string { return "/configured/sox" },
+		run:      run,
+		overlap:  func() float64 { return 0 },
+		settings: func() *conf.Settings { return &conf.Settings{} },
 	}
 }
 
 func fakeLiveSpectrogramRunner(_ context.Context, _ string, args []string, _ []byte) error {
-	return os.WriteFile(args[len(args)-1], fakeLiveSpectrogramPNG, 0o600)
+	return os.WriteFile(soxOutputPath(args), fakeLiveSpectrogramPNG, 0o600)
+}
+
+func soxOutputPath(args []string) string {
+	for i, arg := range args {
+		if arg == "-o" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 type fakeLiveCapture struct {
@@ -124,7 +134,7 @@ func TestLiveSpectrogramCacheRendersSequenceOnce(t *testing.T) {
 	var renders atomic.Int32
 	service := newLiveSpectrogramTestService(capture, func(_ context.Context, _ string, args []string, _ []byte) error {
 		renders.Add(1)
-		return os.WriteFile(args[len(args)-1], fakeLiveSpectrogramPNG, 0o600)
+		return os.WriteFile(soxOutputPath(args), fakeLiveSpectrogramPNG, 0o600)
 	})
 
 	first, status := service.image(t.Context(), "test-source")
@@ -145,7 +155,7 @@ func TestLiveSpectrogramConcurrentRequestsRenderOnce(t *testing.T) {
 	var renders atomic.Int32
 	service := newLiveSpectrogramTestService(capture, func(_ context.Context, _ string, args []string, _ []byte) error {
 		renders.Add(1)
-		return os.WriteFile(args[len(args)-1], fakeLiveSpectrogramPNG, 0o600)
+		return os.WriteFile(soxOutputPath(args), fakeLiveSpectrogramPNG, 0o600)
 	})
 	statuses := make(chan int, waiters)
 	for range waiters {
@@ -171,18 +181,26 @@ func TestLiveSpectrogramSoxArguments(t *testing.T) {
 		gotBinary = binary
 		gotArgs = append([]string(nil), args...)
 		gotPCM = append([]byte(nil), stdin...)
-		return os.WriteFile(args[len(args)-1], fakeLiveSpectrogramPNG, 0o600)
+		return os.WriteFile(soxOutputPath(args), fakeLiveSpectrogramPNG, 0o600)
 	})
+	service.settings = func() *conf.Settings {
+		settings := &conf.Settings{}
+		settings.Realtime.Dashboard.Spectrogram.Style = conf.SpectrogramStyleScientificDark
+		settings.Realtime.Dashboard.Spectrogram.DynamicRange = conf.SpectrogramDynamicRangeExtended
+		return settings
+	}
 
 	_, status := service.image(t.Context(), "test-source")
 
 	require.Equal(t, http.StatusOK, status)
 	require.NotEmpty(t, gotArgs)
-	outputPath := gotArgs[len(gotArgs)-1]
+	outputPath := soxOutputPath(gotArgs)
 	assert.Equal(t, "/configured/sox", gotBinary)
 	assert.Equal(t, []string{
 		"-V1", "-t", "raw", "-r", "8000", "-e", "signed", "-b", "16", "-c", "1", "-",
-		"-n", "remix", "1", "rate", "24k", "spectrogram", "-c", "", "-o", outputPath,
+		"-n", "remix", "1", "rate", "24000", "spectrogram",
+		"-x", "1026", "-y", "513", "-d", "3", "-z", conf.SpectrogramDynamicRangeExtended,
+		"-o", outputPath, "-r", "-m", "-w", "dolph",
 	}, gotArgs)
 	assert.Equal(t, pcm, gotPCM)
 }

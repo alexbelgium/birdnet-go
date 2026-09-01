@@ -17,6 +17,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
+	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/spectrogram"
 )
 
 // LiveSpectrogramPath is the route pattern, relative to the v2 API group, for
@@ -47,13 +49,14 @@ type liveSpectrogramCacheEntry struct {
 }
 
 type liveSpectrogramService struct {
-	mu      sync.Mutex
-	entries map[string]*liveSpectrogramCacheEntry
-	lookup  func(string) (liveCaptureBuffer, error)
-	sources func() []string
-	soxPath func() string
-	run     func(context.Context, string, []string, []byte) error
-	overlap func() float64
+	mu       sync.Mutex
+	entries  map[string]*liveSpectrogramCacheEntry
+	lookup   func(string) (liveCaptureBuffer, error)
+	sources  func() []string
+	soxPath  func() string
+	run      func(context.Context, string, []string, []byte) error
+	overlap  func() float64
+	settings func() *conf.Settings
 }
 
 func newLiveSpectrogramService(core *apicore.Core) *liveSpectrogramService {
@@ -79,9 +82,10 @@ func newLiveSpectrogramService(core *apicore.Core) *liveSpectrogramService {
 			sort.Strings(ids)
 			return ids
 		},
-		soxPath: func() string { return core.CurrentSettings().Realtime.Audio.SoxPath },
-		run:     runLiveSpectrogramCommand,
-		overlap: func() float64 { return core.CurrentSettings().BirdNET.Overlap },
+		soxPath:  func() string { return core.CurrentSettings().Realtime.Audio.SoxPath },
+		run:      runLiveSpectrogramCommand,
+		overlap:  func() float64 { return core.CurrentSettings().BirdNET.Overlap },
+		settings: core.CurrentSettings,
 	}
 }
 
@@ -136,7 +140,7 @@ func (s *liveSpectrogramService) image(ctx context.Context, source string) ([]by
 	if !ok {
 		return nil, http.StatusServiceUnavailable
 	}
-	data, err := s.render(ctx, soxPath, pcm, sampleRate)
+	data, err := s.render(ctx, soxPath, pcm, sampleRate, s.settings())
 	if err != nil {
 		return nil, http.StatusServiceUnavailable
 	}
@@ -203,7 +207,7 @@ func clamp(value, low, high float64) float64 {
 	return min(max(value, low), high)
 }
 
-func (s *liveSpectrogramService) render(ctx context.Context, soxPath string, pcm []byte, sampleRate int) ([]byte, error) {
+func (s *liveSpectrogramService) render(ctx context.Context, soxPath string, pcm []byte, sampleRate int, settings *conf.Settings) ([]byte, error) {
 	tempDir, err := os.MkdirTemp("", "birdnet-go-live-spectrogram-*")
 	if err != nil {
 		return nil, err
@@ -213,8 +217,12 @@ func (s *liveSpectrogramService) render(ctx context.Context, soxPath string, pcm
 	outputPath := filepath.Join(tempDir, "spectrogram.png")
 	args := []string{
 		"-V1", "-t", "raw", "-r", strconv.Itoa(sampleRate), "-e", "signed", "-b", "16", "-c", "1", "-",
-		"-n", "remix", "1", "rate", "24k", "spectrogram", "-c", "", "-o", outputPath,
+		"-n", "remix", "1", "rate", "24000", "spectrogram",
+		"-x", strconv.Itoa(apicore.SpectrogramSizeLg), "-y", strconv.Itoa(spectrogram.SoxFriendlyHeight(apicore.SpectrogramSizeLg)),
+		"-d", strconv.Itoa(int(liveSpectrogramDuration.Seconds())),
+		"-z", spectrogram.SoxDynamicRange(settings), "-o", outputPath, "-r",
 	}
+	args = append(args, spectrogram.SoxStyleArgs(settings.Realtime.Dashboard.Spectrogram.Style)...)
 	renderCtx, cancel := context.WithTimeout(ctx, liveSpectrogramTimeout)
 	defer cancel()
 	if err := s.run(renderCtx, soxPath, args, pcm); err != nil {

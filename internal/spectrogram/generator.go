@@ -161,6 +161,18 @@ func getStyleArgs(style string) []string {
 	}
 }
 
+// SoxFriendlyHeight returns the Sox -y height that pairs with the given -x
+// width on the fast FFT path. Exported so callers rendering their own Sox
+// spectrograms size them the same way the detection pipeline does.
+func SoxFriendlyHeight(width int) int {
+	return fftFriendlyHeight(width)
+}
+
+// SoxStyleArgs returns the Sox arguments for the configured spectrogram style.
+func SoxStyleArgs(style string) []string {
+	return getStyleArgs(style)
+}
+
 // getFFmpegColorMode returns the FFmpeg showspectrumpic color parameter value
 // for the given style preset. This ensures the FFmpeg fallback produces a
 // spectrogram visually consistent with the Sox primary path, preventing
@@ -244,6 +256,12 @@ func (g *Generator) currentSettings() *conf.Settings {
 // The settings snapshot is threaded in from the public entry point so the
 // whole generation sees a consistent view.
 func (g *Generator) getDynamicRange(settings *conf.Settings) string {
+	return soxDynamicRange(settings)
+}
+
+// soxDynamicRange holds the actual validation. It is receiver-free so callers
+// outside a Generator (see SoxDynamicRange) do not have to fabricate one.
+func soxDynamicRange(settings *conf.Settings) string {
 	dr := settings.Realtime.Dashboard.Spectrogram.DynamicRange
 	if dr == "" {
 		return defaultDynamicRange
@@ -257,6 +275,11 @@ func (g *Generator) getDynamicRange(settings *conf.Settings) string {
 	default:
 		return defaultDynamicRange
 	}
+}
+
+// SoxDynamicRange returns the validated Sox dynamic range for the settings.
+func SoxDynamicRange(settings *conf.Settings) string {
+	return soxDynamicRange(settings)
 }
 
 // GenerateFromFile creates a spectrogram from an audio file path.

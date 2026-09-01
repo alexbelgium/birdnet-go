@@ -8,6 +8,8 @@
   let generation = 0;
 
   const endpoint = buildAppUrl('/api/v2/spectrogram/live');
+  const BIRD_NYQUIST_KHZ = 12;
+  const BIRD_TICKS_KHZ = [12, 10, 8, 6, 5, 4, 3, 2, 1];
 
   function loadNext(): void {
     if (document.hidden) return;
@@ -41,10 +43,54 @@
 
 {#if visibleSrc && failures < 2}
   <div class="px-4 pt-4">
-    <img
-      src={visibleSrc}
-      alt="Live audio spectrogram"
-      class="h-auto w-full rounded-lg border border-[var(--color-base-200)] bg-[var(--color-base-200)]"
-    />
+    <div
+      class="spectrogram-image relative w-full overflow-hidden rounded-lg border border-[var(--color-base-200)] bg-[var(--color-base-200)]"
+    >
+      <img src={visibleSrc} alt="Live audio spectrogram" class="h-full w-full object-fill" />
+      {#each BIRD_TICKS_KHZ as freq (freq)}
+        <span
+          class="freq-label"
+          style:bottom="{(freq / BIRD_NYQUIST_KHZ) * 100}%"
+          aria-hidden="true">{freq}k</span
+        >
+        <div
+          class="freq-line"
+          style:bottom="{(freq / BIRD_NYQUIST_KHZ) * 100}%"
+          aria-hidden="true"
+        ></div>
+      {/each}
+    </div>
   </div>
 {/if}
+
+<style>
+  .spectrogram-image {
+    aspect-ratio: 2 / 1;
+  }
+
+  .freq-label {
+    position: absolute;
+    left: 4px;
+    transform: translateY(50%);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: rgb(255 255 255 / 0.75);
+    text-shadow:
+      0 0 3px rgb(0 0 0 / 1),
+      0 0 6px rgb(0 0 0 / 0.8),
+      1px 1px 2px rgb(0 0 0 / 0.9);
+    line-height: 1;
+    pointer-events: none;
+    z-index: 3;
+  }
+
+  .freq-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgb(255 255 255 / 0.12);
+    pointer-events: none;
+    z-index: 3;
+  }
+</style>
