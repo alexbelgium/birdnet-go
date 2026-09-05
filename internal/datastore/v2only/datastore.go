@@ -2720,6 +2720,97 @@ func (ds *Datastore) GetSpeciesSummaryData(ctx context.Context, startDate, endDa
 	return result, nil
 }
 
+// speciesReviewStatsTimeout bounds the per-species review aggregation so a very large
+// database cannot hang the request (mirrors the legacy datastore's 30s bound).
+const speciesReviewStatsTimeout = 30 * time.Second
+
+// Ensure the v2 datastore satisfies the species management capability used by the
+// species management UI (per-species review stats and bulk deletion).
+var _ datastore.SpeciesManager = (*Datastore)(nil)
+
+// GetSpeciesReviewStats returns per-species detection totals and manual review
+// (confirmed/rejected) counts, including species whose detections were all rejected. It
+// implements datastore.SpeciesManager for the v2 schema. Common names are resolved from
+// the name maps because the v2 labels table stores only scientific names.
+func (ds *Datastore) GetSpeciesReviewStats(ctx context.Context) ([]datastore.SpeciesReviewStats, error) {
+	// Bound the aggregation so a very large database cannot hang the request.
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, speciesReviewStatsTimeout)
+	defer cancel()
+
+	v2Data, err := ds.detection.GetSpeciesReviewStats(ctxWithTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge rows that resolve to the same scientific name after label normalisation.
+	// v2 databases may contain both clean ("Turdus merula") and legacy concatenated
+	// ("Turdus merula_Eurasian Blackbird") labels; ExtractScientificName strips the
+	// suffix so both map to the same species — without merging they would appear as
+	// two separate rows with partial counts in the manage view.
+	type merged struct {
+		commonName          string
+		total, verified, rejected int
+	}
+	byName := make(map[string]*merged, len(v2Data))
+	for _, d := range v2Data {
+		sciName := detection.ExtractScientificName(d.ScientificName)
+		if m, ok := byName[sciName]; ok {
+			m.total += int(d.Total)
+			m.verified += int(d.Verified)
+			m.rejected += int(d.Rejected)
+		} else {
+			byName[sciName] = &merged{
+				commonName: ds.resolveCommonName(sciName),
+				total:      int(d.Total),
+				verified:   int(d.Verified),
+				rejected:   int(d.Rejected),
+			}
+		}
+	}
+	result := make([]datastore.SpeciesReviewStats, 0, len(byName))
+	for sciName, m := range byName {
+		result = append(result, datastore.SpeciesReviewStats{
+			ScientificName: sciName,
+			CommonName:     m.commonName,
+			Total:          m.total,
+			Verified:       m.verified,
+			Rejected:       m.rejected,
+		})
+	}
+	return result, nil
+}
+
+// speciesNoteIDsTimeout bounds the label + detection ID enumeration so a very
+// large species cannot hang the request handler indefinitely.
+const speciesNoteIDsTimeout = 30 * time.Second
+
+// GetSpeciesNoteIDs returns the IDs (as strings) of every detection for the given
+// scientific name across all model-specific label variants. It implements
+// datastore.SpeciesManager; the string IDs plug directly into the per-ID delete pipeline.
+func (ds *Datastore) GetSpeciesNoteIDs(scientificName string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), speciesNoteIDsTimeout)
+	defer cancel()
+
+	labelIDs, err := ds.label.GetLabelIDsByScientificName(ctx, scientificName)
+	if err != nil {
+		return nil, err
+	}
+	if len(labelIDs) == 0 {
+		return []string{}, nil
+	}
+
+	ids, err := ds.detection.GetDetectionIDsByLabelIDs(ctx, labelIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, strconv.FormatUint(uint64(id), 10))
+	}
+	return result, nil
+}
+
 // GetHourlyAnalyticsData retrieves hourly analytics data for a specific date and species.
 func (ds *Datastore) GetHourlyAnalyticsData(ctx context.Context, date, species string) ([]datastore.HourlyAnalyticsData, error) {
 	start, end, err := ds.parseDateRange(date, date)

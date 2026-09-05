@@ -1621,6 +1621,55 @@ func (r *detectionRepository) GetSpeciesSummary(ctx context.Context, start, end 
 	return results, err
 }
 
+// GetSpeciesReviewStats returns per-species detection totals and manual review counts
+// across all detections and all time. It mirrors GetSpeciesSummary's label/review joins
+// but does NOT exclude false positives and aggregates confirmed/rejected counts instead
+// of confidence statistics. Grouping is by the stored scientific name (one row per label
+// identifier), matching GetSpeciesSummary; the caller resolves common names and extracts
+// any legacy concatenated names.
+func (r *detectionRepository) GetSpeciesReviewStats(ctx context.Context) ([]SpeciesReviewStatsData, error) {
+	var results []SpeciesReviewStatsData
+
+	detTable := r.tableName()
+	labTable := r.labelsTable()
+	revTable := r.reviewsTable()
+
+	// detection_reviews.detection_id is unique, so the LEFT JOIN yields at most one review
+	// row per detection and COUNT(*) counts each detection exactly once. The CASE
+	// expressions evaluate to 0 (never NULL) for unreviewed detections, so the SUMs stay
+	// numeric.
+	err := r.db.WithContext(ctx).Table(detTable).
+		Select(fmt.Sprintf(`
+			%s.scientific_name AS scientific_name,
+			COUNT(*) AS total,
+			SUM(CASE WHEN %s.verified = ? THEN 1 ELSE 0 END) AS verified,
+			SUM(CASE WHEN %s.verified = ? THEN 1 ELSE 0 END) AS rejected
+		`, labTable, revTable, revTable),
+			string(entities.VerificationCorrect), string(entities.VerificationFalsePositive)).
+		Joins(fmt.Sprintf("JOIN %s ON %s.id = %s.label_id", labTable, labTable, detTable)).
+		Joins(fmt.Sprintf("LEFT JOIN %s ON %s.id = %s.detection_id", revTable, detTable, revTable)).
+		Group(fmt.Sprintf("%s.scientific_name", labTable)).
+		Order("total DESC").
+		Scan(&results).Error
+
+	return results, err
+}
+
+// GetDetectionIDsByLabelIDs returns the IDs of every detection whose label_id is in
+// labelIDs. It returns an empty slice when labelIDs is empty.
+func (r *detectionRepository) GetDetectionIDsByLabelIDs(ctx context.Context, labelIDs []uint) ([]uint, error) {
+	if len(labelIDs) == 0 {
+		return []uint{}, nil
+	}
+
+	var ids []uint
+	err := r.db.WithContext(ctx).Table(r.tableName()).
+		Where("label_id IN ?", labelIDs).
+		Pluck("id", &ids).Error
+
+	return ids, err
+}
+
 // buildAnalyticsBaseQuery creates a base query with JOIN and WHERE clauses for analytics.
 // This helper reduces duplication between analytics query methods.
 func (r *detectionRepository) buildAnalyticsBaseQuery(ctx context.Context, start, end int64, labelID, modelID *uint) *gorm.DB {

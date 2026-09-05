@@ -157,6 +157,11 @@ func (c *Handler) RegisterDetectionRoutes(g *echo.Group) {
 	detectionGroup.POST("/:id/lock", c.LockDetection)
 	detectionGroup.POST("/ignore", c.IgnoreSpecies)
 	detectionGroup.GET("/ignored", c.GetExcludedSpecies)
+	detectionGroup.POST("/include", c.IncludeSpecies)
+	detectionGroup.GET("/included", c.GetIncludedSpecies)
+	detectionGroup.POST("/confirm", c.ConfirmSpecies)
+	detectionGroup.GET("/confirmed", c.GetConfirmedSpecies)
+	detectionGroup.POST("/species/delete", c.DeleteSpeciesDetections)
 
 	// Batch operation endpoints
 	batchGroup := detectionGroup.Group("/batch")

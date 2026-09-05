@@ -1,5 +1,6 @@
 bin/birdnet-go
 bin/birdnet-go.exe
+/package-lock.json
 assets/tailwind.css
 log/
 clips/

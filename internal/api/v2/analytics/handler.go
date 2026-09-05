@@ -78,7 +78,8 @@ func (c *Handler) RegisterAnalyticsRoutes(g *echo.Group) {
 	speciesGroup.GET("/daily", c.GetDailySpeciesSummary)
 	speciesGroup.GET("/daily/batch", c.GetBatchDailySpeciesSummary) // Batch daily summaries endpoint
 	speciesGroup.GET("/summary", c.GetSpeciesSummary)
-	speciesGroup.GET("/detections/new", c.GetNewSpeciesDetections) // Renamed endpoint
+	speciesGroup.GET("/review-stats", c.GetSpeciesReviewStats, c.AuthMiddleware) // Per-species confirmed/rejected counts (management view)
+	speciesGroup.GET("/detections/new", c.GetNewSpeciesDetections)               // Renamed endpoint
 	speciesGroup.GET("/thumbnails", c.GetSpeciesThumbnails)        // Batch thumbnail endpoint
 	speciesGroup.GET("/diversity", c.GetSpeciesDiversity)          // Species diversity over time
 	speciesGroup.GET("/accumulation", c.GetSpeciesAccumulation)    // Species accumulation curve (biodiversity collector's curve)

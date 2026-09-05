@@ -18,19 +18,33 @@
 
   interface Props {
     species: SpeciesData;
+    onclick?: (_species: SpeciesData) => void;
     className?: string;
   }
 
-  let { species, className = '' }: Props = $props();
+  let { species, onclick, className = '' }: Props = $props();
 
   function formatPercentage(value: number): string {
     return (value * 100).toFixed(1) + '%';
   }
 
   let displayName = $derived(localizeSpeciesName(species.scientific_name, species.common_name));
+
+  function handleClick() {
+    onclick?.(species);
+  }
 </script>
 
-<div class={cn('card bg-[var(--color-base-200)]', className)}>
+<button
+  type="button"
+  disabled={!onclick}
+  onclick={onclick ? handleClick : undefined}
+  class={cn(
+    'card bg-[var(--color-base-200)] text-left w-full',
+    onclick ? 'hover:shadow-lg transition-shadow cursor-pointer' : 'cursor-default',
+    className
+  )}
+>
   <figure class="px-4 pt-4">
     <div class="rounded-xl w-full aspect-[4/3] overflow-hidden bg-[var(--color-base-300)]">
       {#if species.thumbnail_url}
@@ -71,4 +85,4 @@
       {/if}
     </div>
   </div>
-</div>
+</button>

@@ -679,6 +679,25 @@ func (c *Handler) GetSpeciesSummary(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, response)
 }
 
+// GetSpeciesReviewStats handles GET /api/v2/analytics/species/review-stats.
+// It returns per-species detection totals and manual review (confirmed/rejected) counts,
+// including species whose detections were all rejected. These power the species
+// management view's confirmed/rejected column and the delete confirmation count.
+func (c *Handler) GetSpeciesReviewStats(ctx echo.Context) error {
+	manager, ok := c.DS.(datastore.SpeciesManager)
+	if !ok {
+		return c.HandleError(ctx, fmt.Errorf("species management not supported by datastore"),
+			"Species management is not available for this database", http.StatusNotImplemented)
+	}
+
+	stats, err := manager.GetSpeciesReviewStats(ctx.Request().Context())
+	if err != nil {
+		return c.HandleError(ctx, err, "Failed to get species review stats", http.StatusInternalServerError)
+	}
+
+	return ctx.JSON(http.StatusOK, stats)
+}
+
 // fetchSpeciesSummaryData fetches species summary data with timing
 func (c *Handler) fetchSpeciesSummaryData(ctx echo.Context, startDate, endDate string) ([]datastore.SpeciesSummaryData, time.Duration, error) {
 	dbStart := time.Now()

@@ -328,11 +328,15 @@ func (r *labelRepository) GetByScientificName(ctx context.Context, name string) 
 }
 
 // GetLabelIDsByScientificName retrieves label IDs for a scientific name across all models.
+// Also matches labels stored in the legacy "ScientificName_CommonName" format so that
+// lookups against a clean scientific name still find pre-migration entries.
 func (r *labelRepository) GetLabelIDsByScientificName(ctx context.Context, name string) ([]uint, error) {
 	var ids []uint
+	// SUBSTR check avoids LIKE wildcard ambiguity: compare the first len(name)+1
+	// characters to "name_" to catch legacy-format labels without false positives.
 	err := r.db.WithContext(ctx).Table(r.tableName()).
 		Select("id").
-		Where("scientific_name = ?", name).
+		Where("scientific_name = ? OR SUBSTR(scientific_name, 1, ?) = ?", name, len(name)+1, name+"_").
 		Pluck("id", &ids).Error
 	return ids, err
 }

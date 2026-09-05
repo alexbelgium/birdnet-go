@@ -21,9 +21,10 @@
     species: SpeciesData | null;
     isOpen: boolean;
     onClose?: () => void;
+    onNavigate?: () => void;
   }
 
-  let { species, isOpen, onClose }: Props = $props();
+  let { species, isOpen, onClose, onNavigate }: Props = $props();
 
   // Cache species data so content persists during the Modal close animation.
   // Updated when a new species is provided, retained when species becomes null
@@ -87,39 +88,48 @@
 
   {#snippet children()}
     {#if displaySpecies}
-      {#if displaySpecies.thumbnail_url}
-        <div class="w-full aspect-[4/3] rounded-xl overflow-hidden bg-[var(--color-base-300)]">
-          <img
-            src={displaySpecies.thumbnail_url}
-            alt={displayName}
-            class="w-full h-full object-cover"
-            onerror={handleBirdImageError}
-          />
-        </div>
-      {/if}
+      <button
+        type="button"
+        class="w-full text-left {onNavigate
+          ? 'cursor-pointer rounded-lg hover:bg-[var(--color-base-200)]/50 transition-colors -mx-2 px-2'
+          : 'cursor-default'}"
+        onclick={onNavigate}
+        disabled={!onNavigate}
+      >
+        {#if displaySpecies.thumbnail_url}
+          <div class="w-full aspect-[4/3] rounded-xl overflow-hidden bg-[var(--color-base-300)]">
+            <img
+              src={displaySpecies.thumbnail_url}
+              alt={displayName}
+              class="w-full h-full object-cover"
+              onerror={handleBirdImageError}
+            />
+          </div>
+        {/if}
 
-      <div class="grid grid-cols-2 gap-3 text-sm mt-3">
-        <div class="flex justify-between bg-[var(--color-base-200)] rounded px-3 py-2">
-          <span class="opacity-70">{t('analytics.species.card.detections')}</span>
-          <span class="font-semibold">{displaySpecies.count}</span>
-        </div>
-        <div class="flex justify-between bg-[var(--color-base-200)] rounded px-3 py-2">
-          <span class="opacity-70">{t('analytics.species.card.confidence')}</span>
-          <span class="font-semibold">{formatPercentage(displaySpecies.avg_confidence)}</span>
-        </div>
-        {#if displaySpecies.first_heard}
+        <div class="grid grid-cols-2 gap-3 text-sm mt-3">
           <div class="flex justify-between bg-[var(--color-base-200)] rounded px-3 py-2">
-            <span class="opacity-70">{t('analytics.species.headers.firstDetected')}</span>
-            <span class="font-semibold">{formatDate(displaySpecies.first_heard)}</span>
+            <span class="opacity-70">{t('analytics.species.card.detections')}</span>
+            <span class="font-semibold">{displaySpecies.count}</span>
           </div>
-        {/if}
-        {#if displaySpecies.last_heard}
           <div class="flex justify-between bg-[var(--color-base-200)] rounded px-3 py-2">
-            <span class="opacity-70">{t('analytics.species.headers.lastDetected')}</span>
-            <span class="font-semibold">{formatDate(displaySpecies.last_heard)}</span>
+            <span class="opacity-70">{t('analytics.species.card.confidence')}</span>
+            <span class="font-semibold">{formatPercentage(displaySpecies.avg_confidence)}</span>
           </div>
-        {/if}
-      </div>
+          {#if displaySpecies.first_heard}
+            <div class="flex justify-between bg-[var(--color-base-200)] rounded px-3 py-2">
+              <span class="opacity-70">{t('analytics.species.headers.firstDetected')}</span>
+              <span class="font-semibold">{formatDate(displaySpecies.first_heard)}</span>
+            </div>
+          {/if}
+          {#if displaySpecies.last_heard}
+            <div class="flex justify-between bg-[var(--color-base-200)] rounded px-3 py-2">
+              <span class="opacity-70">{t('analytics.species.headers.lastDetected')}</span>
+              <span class="font-semibold">{formatDate(displaySpecies.last_heard)}</span>
+            </div>
+          {/if}
+        </div>
+      </button>
     {/if}
   {/snippet}
 

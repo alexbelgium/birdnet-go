@@ -114,8 +114,13 @@ func TestNeedsAdvancedRouting(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "species on species queryType does NOT trigger (handled natively)",
+			name:     "species queryType without date triggers advanced (all-dates view needs SearchNotesAdvanced)",
 			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "Turdus merula"},
+			expected: true,
+		},
+		{
+			name:     "species queryType with date does not trigger (handled natively by getSpeciesDetections)",
+			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "Turdus merula", Date: "2025-06-01"},
 			expected: false,
 		},
 
@@ -180,8 +185,13 @@ func TestNeedsAdvancedRouting(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "hour on species queryType does NOT trigger (handled natively)",
+			name:     "hour on species queryType without date triggers advanced (all-dates view)",
 			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "Turdus merula", Hour: "14"},
+			expected: true,
+		},
+		{
+			name:     "hour on species queryType with date does not trigger (handled natively)",
+			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "Turdus merula", Date: "2025-06-01", Hour: "14"},
 			expected: false,
 		},
 	}

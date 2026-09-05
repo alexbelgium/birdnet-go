@@ -94,8 +94,7 @@ func TestGetSpeciesSummary_ExcludesFalsePositives(t *testing.T) {
 		"Blue Jay count should be 2")
 
 	// Verify Cardinal is NOT in results
-	// nolint:misspell // Cardinalis is a scientific name, not a misspelling
-	cardinalData := findSpeciesInResponse(response, "Cardinalis cardinalis")
+	cardinalData := findSpeciesInResponse(response, "Cardinalis cardinalis") //nolint:misspell // Scientific genus name
 	assert.Nil(t, cardinalData,
 		"Northern Cardinal should NOT be in results (all detections are false_positives)")
 
