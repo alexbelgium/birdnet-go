@@ -155,6 +155,7 @@ type DetectionResponse struct {
 	Confidence         float64           `json:"confidence"`
 	ClipName           string            `json:"clipName,omitempty"`  // Audio clip filename (basename only, no path); empty when no clip exists
 	ModelType          string            `json:"modelType,omitempty"` // AI model type (e.g. "bird", "bat"); drives the spectrogram frequency range
+	Model              *ModelInfo        `json:"model,omitempty"`     // AI model that produced the detection
 	Verified           string            `json:"verified"`
 	Locked             bool              `json:"locked"`
 	Unlikely           bool              `json:"unlikely,omitempty"`
@@ -177,6 +178,13 @@ type SourceInfo struct {
 	ID          string `json:"id"`
 	Type        string `json:"type,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
+}
+
+// ModelInfo describes the AI model that produced a detection.
+type ModelInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Custom  bool   `json:"custom"`
 }
 
 // WeatherInfo represents weather data for a detection
@@ -737,6 +745,18 @@ func (c *Handler) noteToDetectionResponse(note *datastore.Note, includeWeather b
 	detection.ModelType = note.Model.ModelType
 	if detection.ModelType == "" {
 		detection.ModelType = defaultModelType
+	}
+
+	// Model name/version come from the same preloaded relation as ModelType, so
+	// exposing them costs no extra query. Legacy datastores never rehydrate the
+	// relation, leaving the name empty; omit the field there rather than
+	// inventing a default the detection may not have used.
+	if note.Model.Name != "" {
+		detection.Model = &ModelInfo{
+			Name:    note.Model.Name,
+			Version: note.Model.Version,
+			Custom:  note.Model.IsCustom(),
+		}
 	}
 
 	if includeWeather {
