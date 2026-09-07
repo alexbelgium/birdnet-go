@@ -13,14 +13,32 @@ const BAR_CENTRE_FRACTION = 0.375;
 const CANDIDATE_TICKS = [0, 6, 12, 18] as const;
 
 /**
+ * Minimum gap between the last two ticks, in hours.
+ *
+ * Hours rather than a fraction of the axis, because the chart column is sized at
+ * BAR_STRIDE px per hour: the axis grows with the day, so an hour is always 4 px
+ * wide and an hour count converts straight to pixels. Four hours is 16 px, which
+ * clears a two-digit label (~10 px). Without this, computeAxisTicks appended
+ * maxHour unconditionally and drew "12" and "14" on top of each other at 14:00.
+ */
+const MIN_TICK_SPACING_HOURS = 4;
+
+/**
  * Adaptive axis ticks for a 0..maxHour chart: the fixed candidates that fall
  * within range, plus maxHour itself so the axis always ends at the last bar.
  * Naturally thins out for short "today" charts (e.g. maxHour=3 → [0, 3]).
+ *
+ * A trailing candidate too close to maxHour is dropped rather than drawn, unless
+ * it is the only one left — the origin tick always survives.
  */
 export function computeAxisTicks(maxHour: number): number[] {
   const base = CANDIDATE_TICKS.filter(h => h <= maxHour);
   const last = base[base.length - 1];
-  return last !== maxHour ? [...base, maxHour] : base;
+  if (last === maxHour) return base;
+  if (base.length > 1 && maxHour - last < MIN_TICK_SPACING_HOURS) {
+    return [...base.slice(0, -1), maxHour];
+  }
+  return [...base, maxHour];
 }
 
 /**

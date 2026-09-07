@@ -1,7 +1,11 @@
 <script lang="ts">
   import type { DailySpeciesSummary } from '$lib/types/detection.types';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
-  import { computeConfidenceColor, formatDetectionCount } from '../../utils/dailySummaryStats';
+  import {
+    computeConfidenceColor,
+    computePeakHour,
+    formatDetectionCount,
+  } from '../../utils/dailySummaryStats';
   import {
     X,
     ExternalLink,
@@ -87,14 +91,9 @@
   // History modal (multi-day detection trend) open state.
   let showHistory = $state(false);
 
-  // Peak hour: hour with the highest detection count in 0..maxHour.
-  const peakHour = $derived.by(() => {
-    const counts = item.hourly_counts.slice(0, maxHour + 1);
-    const maxVal = Math.max(...counts);
-    if (maxVal === 0) return null;
-    const idx = counts.indexOf(maxVal);
-    return idx >= 0 ? idx : null;
-  });
+  // Peak hour: hour with the highest detection count in 0..maxHour. Shared with
+  // MobileSummaryTable, which puts the same fact in each row's accessible label.
+  const peakHour = $derived(computePeakHour(item.hourly_counts, maxHour));
 
   // Weather at the peak hour (mobile only; undefined otherwise) — answers
   // "what were conditions when this bird was most active" with near-zero pixels.
@@ -392,8 +391,13 @@
     gap: 0.15rem;
   }
 
+  /* The action pills are flex-shrink: 0, so on a phone they took the whole row
+     and squeezed the species name down to an ellipsis ("Com…"). Below 768px the
+     name gets a line of its own and the pills wrap beneath it; the desktop
+     override further down puts them back on one line. */
   .card-name-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.3rem;
     min-width: 0;
@@ -408,7 +412,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
-    flex: 1;
+    flex: 1 1 100%;
     line-height: 1.25;
   }
 
@@ -700,8 +704,17 @@
       height: 3.75rem;
     }
 
+    /* Desktop has the width for the name and the pills on one line. Pinning
+       nowrap here keeps the desktop computed style exactly as it was before the
+       mobile wrap was introduced, so a long localized name ellipsizes (as it
+       always did) instead of ever pushing the pills onto a second row. */
+    .card-name-row {
+      flex-wrap: nowrap;
+    }
+
     .card-name {
       font-size: 1rem;
+      flex: 1 1 auto;
     }
 
     .card-sci {

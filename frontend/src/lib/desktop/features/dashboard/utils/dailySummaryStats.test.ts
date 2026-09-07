@@ -6,6 +6,7 @@ import {
   buildEbirdUrl,
   computeConfidenceColor,
   computeOverviewStats,
+  computePeakHour,
   formatDetectionCount,
   isValidEbirdCode,
 } from './dailySummaryStats';
@@ -226,5 +227,32 @@ describe('computeConfidenceColor', () => {
 
   it('returns a valid hsl string', () => {
     expect(computeConfidenceColor(75)).toMatch(/^hsl\(\d+, \d+%, \d+%\)$/);
+  });
+});
+
+describe('computePeakHour', () => {
+  it('returns the hour with the highest count', () => {
+    const hourly = [0, 0, 3, 9, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    expect(computePeakHour(hourly, 23)).toBe(3);
+  });
+
+  it('resolves ties to the earliest hour', () => {
+    const hourly = [0, 5, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    expect(computePeakHour(hourly, 23)).toBe(1);
+  });
+
+  it('ignores hours past maxHour', () => {
+    // The real peak is at 20:00, but on "today" at 06:00 only 0..6 are rendered.
+    const hourly = [0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 99, 0, 0, 0];
+    expect(computePeakHour(hourly, 6)).toBe(4);
+  });
+
+  it('returns null when nothing was detected in range', () => {
+    expect(computePeakHour(new Array(24).fill(0), 23)).toBeNull();
+    expect(computePeakHour([], 23)).toBeNull();
+  });
+
+  it('does not read past the end of a short array', () => {
+    expect(computePeakHour([0, 0, 7], 23)).toBe(2);
   });
 });
