@@ -3,6 +3,7 @@ package classifier
 import (
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -102,20 +103,43 @@ func openVINOPlanFor(backendPref, devicePref, modelID, libraryPath string, outpu
 // (2026-06-18), f16 collapses on realistic low-SNR audio (max confidence error
 // ~0.8, wrong top-1, confidences fall to ~0) while a loud single-species clip
 // survives by luck; f32 is bit-exact with ORT (~6e-6) and still ~4.6x faster than
-// ORT CPU. CPU f16 (incl. ARM A76) and Perch v2 f16-GPU are unaffected, so the
-// BirdNET-v2.4 override is scoped to its GPU path. Do NOT widen it to f16 without
-// re-running the inference/openvino_parity_functional_test.go soundscape parity check.
+// ORT CPU. CPU f16 (incl. ARM A76) is unaffected, so the override is scoped to
+// the GPU path. Do NOT widen it to f16 without re-running the
+// inference/openvino_parity_functional_test.go soundscape parity check.
 //
-// The bat embedding model is the exception that is forced to f32 on EVERY device:
+// Perch v2 is likewise forced to f32 on the GPU. Its f16-GPU path was validated
+// on an Iris Xe iGPU, but on an Intel Arc A380 (dGPU) the f16 kernel returns
+// all-NaN logits for every window, which the pipeline then promoted to bogus
+// detections. The plan carries only the device class ("GPU"), not the adapter,
+// so the override necessarily covers every Intel GPU; f32 costs some throughput
+// on adapters where f16 worked, but stays well within real time. Do NOT relax it
+// to f16 without validating on a discrete Arc part.
+//
+// The bat embedding model is forced to f32 on EVERY device:
 // its embedding head overflows at f16 on genuine f16 hardware (the A76 CPU's f16 NEON
 // and the Intel iGPU), corrupting the raw embedding the bat classifier consumes and
 // flipping detections. Unlike BirdNET v2.4 this is not GPU-only. Do NOT relax it to
 // f16 without re-running the bat embedding parity check.
+//
+// BirdNET v3.0 is likewise forced to f32 on EVERY device. Its EfficientNetV2-S
+// backbone is numerically unstable at f16 wherever genuine f16 kernels run (the Intel
+// GPU always, and the A76 CPU's native f16), independent of the model file's weight
+// precision. On fp16-weight regional tiles, f16 execution overflows to NaN (Sentry
+// BIRDNET-GO-2H6: the 800-class north-america-east tile, "non-finite score (index 0
+// of 800)", backend=OpenVINO precision=FP16); the in-graph sigmoid cannot rescue a
+// NaN, so every window is dropped. On fp32-weight tiles f16 stays finite but silently
+// inflates the scores: measured against an f32 reference on identical input, the max
+// post-sigmoid confidence error was ~0.28 on the A76 CPU and ~0.29 on an Iris Xe iGPU
+// (both far past the 0.15 divergence tolerance), with index 0 the worst (~25-30x). f32
+// restores parity (~1e-4). Forced on the CPU too, not GPU-only, because the A76
+// native-f16 path is affected as well. Do NOT relax it to f16 without re-running
+// inference/openvino_parity_functional_test.go on a genuine f16 device (the Intel GPU
+// and the A76 CPU) with an fp16-weight regional tile.
 func openVINOPrecisionFor(modelID, device string) string {
-	if modelID == RegistryIDBat {
+	if modelID == RegistryIDBat || modelID == RegistryIDBirdNETV3 {
 		return inference.OVPrecisionF32
 	}
-	if device == inference.OVDeviceGPU && modelID == DefaultModelVersion {
+	if device == inference.OVDeviceGPU && (modelID == DefaultModelVersion || modelID == RegistryIDPerchV2) {
 		return inference.OVPrecisionF32
 	}
 	return ""
@@ -155,7 +179,20 @@ func openVINOGPUAvailable(libraryPath string) bool {
 		}
 		return false
 	}
-	return inference.OpenVINOHasDevice(inference.OVDeviceGPU)
+	// Enumerate devices in a short-lived child process rather than in-process:
+	// ov_core_get_available_devices walks the vendor driver stack, and a fault
+	// there aborts the process before Go can recover (glibc heap-corruption
+	// SIGABRT during cgo, issue #4236 - a systemd crash-loop on the first GPU
+	// enablement). A crashing probe child degrades to the ordinary ORT
+	// fallback instead. The probe result is cached per process, so this costs
+	// one child run per library path.
+	devices, err := inference.OpenVINOProbeDevices(libraryPath)
+	if err != nil {
+		GetLogger().Warn("OpenVINO device probe failed; treating GPU as unavailable",
+			logger.Error(err))
+		return false
+	}
+	return slices.Contains(devices, inference.OVDeviceGPU)
 }
 
 // isLibraryAbsent reports whether err indicates the OpenVINO shared library is
@@ -237,9 +274,9 @@ func openVINOPrecisionLabel(precision string) string {
 // openVINOEffectivePrecision maps an OpenVINO INFERENCE_PRECISION_HINT to the
 // effective runtime precision label shown on the inference status card, using the
 // shared Quantization vocabulary ("FP16"/"FP32"). An empty hint means the backend
-// default, which is f16 (see openVINOPrecisionFor), so it maps to FP16; the only
-// explicit override currently emitted is OVPrecisionF32 (BirdNET v2.4 on the GPU),
-// which maps to FP32.
+// default, which is f16 (see openVINOPrecisionFor), so it maps to FP16; the
+// explicit override OVPrecisionF32 (BirdNET v2.4 and Perch v2 on the GPU, the bat
+// embedding model and BirdNET v3.0 on every device) maps to FP32.
 func openVINOEffectivePrecision(precisionHint string) string {
 	if precisionHint == inference.OVPrecisionF32 {
 		return string(QuantizationFP32)
