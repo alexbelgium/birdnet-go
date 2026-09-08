@@ -3,14 +3,19 @@ package reanalyze
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/datastore"
+	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
+	bnerrors "github.com/tphakala/birdnet-go/internal/errors"
 )
 
 // spec3s is a BirdNET-v2.4-shaped model spec: 48 kHz, 3-second windows.
@@ -205,4 +210,37 @@ func TestReanalyzePrediction_MaxConfidence(t *testing.T) {
 
 	empty := ReanalyzePrediction{ByModel: map[string]float32{}}
 	assert.Zero(t, empty.MaxConfidence(), "a prediction no model scored ranks last, not panics")
+}
+
+func TestIsDetectionNotFoundErr_CoversAllThreeDatastoreShapes(t *testing.T) {
+	t.Parallel()
+
+	// The legacy DataStore.Get path returns a CategoryNotFound enhanced error
+	// that does NOT wrap gorm.ErrRecordNotFound. Matching only the sentinels
+	// turns a legacy 404 into a 500, which tells the operator their detection is
+	// gone when the real answer is "that id does not exist".
+	legacyNotFound := bnerrors.Newf("note not found: 42").
+		Component("datastore").
+		Category(bnerrors.CategoryNotFound).
+		Build()
+
+	assert.True(t, isDetectionNotFoundErr(legacyNotFound), "legacy enhanced not-found")
+	assert.True(t, isDetectionNotFoundErr(repository.ErrDetectionNotFound), "v2 repository sentinel")
+	assert.True(t, isDetectionNotFoundErr(gorm.ErrRecordNotFound), "bare GORM miss")
+	assert.True(t, isDetectionNotFoundErr(fmt.Errorf("wrapped: %w", gorm.ErrRecordNotFound)), "wrapped")
+
+	// A transient database failure is emphatically NOT a 404.
+	assert.False(t, isDetectionNotFoundErr(errors.New("database is locked")))
+	assert.False(t, isDetectionNotFoundErr(nil))
+}
+
+func TestIsClipNotFoundErr_IncludesDetectionAndClipCases(t *testing.T) {
+	t.Parallel()
+
+	// A missing clip and a missing parent detection both mean "there is nothing
+	// to reanalyze", so both are 404 — but only the second is "Detection not found".
+	assert.True(t, isClipNotFoundErr(os.ErrNotExist))
+	assert.True(t, isClipNotFoundErr(repository.ErrNoClipPath))
+	assert.True(t, isClipNotFoundErr(repository.ErrDetectionNotFound))
+	assert.False(t, isClipNotFoundErr(errors.New("permission denied")))
 }

@@ -436,7 +436,7 @@ func applyLocalizedCommonNames(bn *classifier.Orchestrator, preds []ReanalyzePre
 func (c *Handler) resolveClipPath(ctx echo.Context, idStr string) (absPath, relPath string, err error) {
 	clipPath, err := c.DS.GetNoteClipPath(idStr)
 	switch {
-	case stderrors.Is(err, repository.ErrDetectionNotFound), stderrors.Is(err, gorm.ErrRecordNotFound):
+	case err != nil && isDetectionNotFoundErr(err):
 		return "", "", c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
 	case err != nil && isClipNotFoundErr(err):
 		return "", "", c.HandleError(ctx, err,
@@ -461,13 +461,24 @@ func (c *Handler) resolveClipPath(ctx echo.Context, idStr string) (absPath, relP
 	return filepath.Join(c.SFS.BaseDir(), rel), rel, nil
 }
 
-// isClipNotFoundErr reports whether err means the clip or its parent detection
-// does not exist. Same sentinel set the media domain checks; duplicated here (four
-// lines) rather than exported from media, which would make this package depend on
-// a sibling domain and break the api/v2 acyclic-import rule.
-func isClipNotFoundErr(err error) bool {
-	return stderrors.Is(err, os.ErrNotExist) ||
+// isDetectionNotFoundErr reports whether err means the detection row itself does
+// not exist, across the three shapes the datastore layer produces for it: the v2
+// repository sentinel, a bare GORM miss, and the legacy DataStore.Get path, which
+// returns a CategoryNotFound enhanced error that does NOT wrap
+// gorm.ErrRecordNotFound — checking only the sentinels turns a legacy 404 into a
+// 500.
+func isDetectionNotFoundErr(err error) bool {
+	return stderrors.Is(err, repository.ErrDetectionNotFound) ||
 		stderrors.Is(err, gorm.ErrRecordNotFound) ||
-		stderrors.Is(err, repository.ErrDetectionNotFound) ||
+		errors.IsNotFound(err)
+}
+
+// isClipNotFoundErr reports whether err means the clip OR its parent detection
+// does not exist. Same sentinel set the media domain checks; duplicated here
+// rather than exported from media, because importing a sibling domain would
+// break the api/v2 acyclic-import rule that apicore's import guard enforces.
+func isClipNotFoundErr(err error) bool {
+	return isDetectionNotFoundErr(err) ||
+		stderrors.Is(err, os.ErrNotExist) ||
 		stderrors.Is(err, repository.ErrNoClipPath)
 }

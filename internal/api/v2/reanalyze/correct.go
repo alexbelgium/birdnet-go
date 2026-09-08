@@ -129,7 +129,10 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	// paths. The authoritative lock guard runs inside the write itself, atomically.
 	existing, err := c.DS.Get(idStr)
 	if err != nil {
-		if isClipNotFoundErr(err) {
+		// Distinguish "no such detection" from "the fetch itself failed". A
+		// transient database error reported as 404 tells the operator their
+		// detection is gone, which is both wrong and alarming.
+		if isDetectionNotFoundErr(err) {
 			return c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
 		}
 		return c.HandleError(ctx, err, "Failed to fetch detection", http.StatusInternalServerError)
