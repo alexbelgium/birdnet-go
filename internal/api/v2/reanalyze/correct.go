@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -146,24 +147,8 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	if err != nil {
 		return c.HandleError(ctx, err, "Classifier not available", http.StatusServiceUnavailable)
 	}
-	resolvedID := req.ModelID
-	if registryID, ok := classifier.ResolveConfigModelID(req.ModelID); ok {
-		resolvedID = registryID
-	}
-	// Index-based scan so the large classifier.ModelInfo is copied once, for the
-	// entry we actually keep, rather than on every iteration.
-	var (
-		chosen      classifier.ModelInfo
-		modelExists bool
-	)
-	infos := bn.ModelInfos()
-	for i := range infos {
-		if infos[i].ID == resolvedID {
-			chosen = infos[i]
-			modelExists = true
-			break
-		}
-	}
+	resolvedID := resolveModelID(req.ModelID)
+	chosen, modelExists := lookupLoadedModel(bn.ModelInfos(), resolvedID)
 	if !modelExists || chosen.DetectionName == "" || chosen.DetectionVersion == "" {
 		return c.HandleError(ctx, fmt.Errorf("model %q is not loaded", req.ModelID),
 			"Specified model is not loaded; cannot apply correction", http.StatusBadRequest)
@@ -174,6 +159,19 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	if chosen.Spec.RawSampleRate != 0 {
 		return c.HandleError(ctx, fmt.Errorf("model %q is ultrasonic-only", req.ModelID),
 			"Specified model is not applicable to this detection's audio; cannot apply correction",
+			http.StatusBadRequest)
+	}
+
+	// Gate the species against the loaded classifiers' combined vocabulary. This
+	// is the only thing standing between a typo'd scientificName and permanent
+	// data damage: the legacy path writes the string straight onto the note, and
+	// on v2 the label GetOrCreate would mint a junk label row that then shows up
+	// in every species list forever. AllLabels is the unfiltered union across all
+	// loaded models, so anything the reanalysis grid could have offered passes.
+	if !speciesKnownToLoadedModels(bn, req.ScientificName) {
+		return c.HandleError(ctx,
+			fmt.Errorf("species %q is not in any loaded model's vocabulary", req.ScientificName),
+			"No loaded classifier knows that species; check the spelling of the scientific name",
 			http.StatusBadRequest)
 	}
 
@@ -432,4 +430,30 @@ func (c *Handler) writeSpeciesCorrectionV2(
 			return nil
 		})
 	}, nil)
+}
+
+// speciesKnownToLoadedModels reports whether scientificName appears in the union
+// of every loaded classifier's label set. Comparison is case-insensitive on the
+// scientific half of each raw label ("Ficedula hypoleuca_Pied Flycatcher"), which
+// is the form the reanalyze response returns to the client.
+//
+// The union is rebuilt per call rather than cached. Corrections are a manual,
+// human-paced action on a handful of detections, and a cache here would have to
+// be invalidated on every model load/unload/reload — a standing correctness
+// hazard bought for an endpoint nobody calls in a loop.
+func speciesKnownToLoadedModels(bn *classifier.Orchestrator, scientificName string) bool {
+	want := strings.ToLower(strings.TrimSpace(scientificName))
+	if want == "" {
+		return false
+	}
+	for _, label := range bn.AllLabels() {
+		scientific, _ := classifier.SplitSpeciesName(label)
+		if scientific == "" {
+			scientific = label
+		}
+		if strings.EqualFold(strings.TrimSpace(scientific), want) {
+			return true
+		}
+	}
+	return false
 }
