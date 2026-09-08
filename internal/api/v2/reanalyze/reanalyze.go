@@ -416,7 +416,7 @@ func reanalyzeSamples(
 	modelID string,
 	spec classifier.ModelSpec,
 	samples []float32,
-) (map[string]float32, int, error) {
+) (best map[string]float32, windowCount int, err error) {
 	if len(samples) == 0 {
 		return nil, 0, errors.Newf("no audio samples to analyze").
 			Component(errComponent).
@@ -450,8 +450,7 @@ func reanalyzeSamples(
 		stride = clipLen
 	}
 
-	best := make(map[string]float32)
-	windowCount := 0
+	best = make(map[string]float32)
 	runWindow := func(offset int) error {
 		// Stop as soon as the client goes away. PredictModel blocks on a
 		// non-cancellable process-wide mutex, so ctx is not observed inside a
