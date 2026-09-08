@@ -70,11 +70,19 @@ export interface CorrectSpeciesResult {
  * That distinction is the whole point: a marker-and-null design loses the result
  * when the user closes and reopens the modal while a request is still running —
  * the reopened modal gets null, stops its spinner, and sits empty forever
- * because the original response is discarded as superseded. Sharing the promise
- * is safe here because reanalysis is a read-only, argument-independent query for
- * a given detection.
+ * because the original response is discarded as superseded.
+ *
+ * The key includes the requested model set, not just the detection id. Sharing a
+ * promise is only sound between callers that asked the same question, and
+ * `modelIds` changes the answer — keying on the id alone would hand a caller
+ * asking for one model the result of a run over all of them.
  */
-const inFlightReanalyze = new Map<number, Promise<ReanalyzeResult>>();
+const inFlightReanalyze = new Map<string, Promise<ReanalyzeResult>>();
+
+/** Cache key for an in-flight reanalysis: the detection plus the exact model set. */
+function reanalyzeKey(detectionId: number, modelIds?: string[]): string {
+  return `${detectionId}:${(modelIds ?? []).join(',')}`;
+}
 
 /**
  * In-flight corrections, as a plain marker set. Corrections are NOT shareable
@@ -108,7 +116,8 @@ export function reanalyzeDetection(
   detectionId: number,
   modelIds?: string[]
 ): Promise<ReanalyzeResult> {
-  const existing = inFlightReanalyze.get(detectionId);
+  const key = reanalyzeKey(detectionId, modelIds);
+  const existing = inFlightReanalyze.get(key);
   if (existing) return existing;
 
   const request = fetchWithCSRF<ReanalyzeResult>(`/api/v2/detections/${detectionId}/reanalyze`, {
@@ -126,10 +135,10 @@ export function reanalyzeDetection(
       throw err;
     })
     .finally(() => {
-      inFlightReanalyze.delete(detectionId);
+      inFlightReanalyze.delete(key);
     });
 
-  inFlightReanalyze.set(detectionId, request);
+  inFlightReanalyze.set(key, request);
   return request;
 }
 

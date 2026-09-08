@@ -14,9 +14,9 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -166,13 +166,12 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	}
 
 	// The clip lookup is also the existence check: GetNoteClipPath returns
-	// ErrDetectionNotFound for an unknown id, which openClip maps to a 404. A
-	// separate DS.Get would be a second round trip proving the same thing.
-	clipFile, relClipPath, err := c.openClip(ctx, idStr)
+	// ErrDetectionNotFound for an unknown id, which resolveClipPath maps to a 404.
+	// A separate DS.Get would be a second round trip proving the same thing.
+	absClipPath, relClipPath, err := c.resolveClipPath(ctx, idStr)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = clipFile.Close() }()
 
 	bn, err := c.GetBirdNETInstance()
 	if err != nil {
@@ -211,14 +210,8 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	clipDurationSec := 0.0
 
 	for sampleRate, models := range bySampleRate {
-		// ffmpeg consumes the whole reader per decode, so rewind before each
-		// sample rate. Seeking the already-open handle keeps every filesystem
-		// access inside the SecureFS sandbox — reopening by path would not.
-		if _, err := clipFile.Seek(0, io.SeekStart); err != nil {
-			return c.HandleError(ctx, err, "Failed to read audio clip", http.StatusInternalServerError)
-		}
 		samples, err := decodeClipMonoPCM16(
-			ctx.Request().Context(), ffmpegPath, clipFile, sampleRate, decodeMaxDurationSec)
+			ctx.Request().Context(), ffmpegPath, absClipPath, sampleRate, decodeMaxDurationSec)
 		if err != nil {
 			c.LogAPIRequest(ctx, logger.LogLevelError, "Failed to decode clip for reanalysis",
 				logger.String("detection_id", idStr),
@@ -562,55 +555,51 @@ func applyLocalizedCommonNames(bn *classifier.Orchestrator, preds []ReanalyzePre
 	}
 }
 
-// openClip looks up the detection's saved clip and opens it THROUGH SecureFS,
-// returning the open handle and the normalized relative path (for logging). On
-// failure it returns an already-formed echo error response, so callers `return err`.
+// resolveClipPath looks up the detection's saved clip and maps it onto the media
+// SecureFS root, returning (absolute path, normalized relative path). On failure
+// it returns an already-formed echo error response, so callers `return err`.
 //
-// Opening rather than resolving to an absolute path is the point: SecureFS wraps
-// os.Root, which refuses to follow a symlink out of the media root. A path handed
-// to an external process leaves that enforcement behind, so a symlink planted in
-// the clips directory would be followed by ffmpeg. The caller pipes this handle
-// to ffmpeg's stdin instead.
+// The absolute path is handed to ffmpeg, matching the four call sites in the
+// media domain that build filepath.Join(c.SFS.BaseDir(), normalizedPath) for
+// spectrogram generation. SecureFS validates the path text but cannot sandbox an
+// external process, so a symlink inside the media root is followed here exactly
+// as it is there — a codebase-wide property, not one this endpoint introduces.
+// Reading through SecureFS and piping to ffmpeg's stdin would close that gap for
+// this one endpoint, but ffmpeg's pipe protocol is non-seekable and cannot decode
+// a full-length AAC clip (trailing moov), so it trades a real feature regression
+// for a divergence from how every sibling handler already works.
 //
 // The normalization mirrors the media domain's normalizeAndValidatePathWithLogger,
 // which is unexported there. Recomposing it from the exported
 // apicore.NormalizeClipPath keeps this package's upstream footprint at zero;
 // importing a sibling domain would break the api/v2 acyclic-import rule that
 // apicore's import guard enforces.
-func (c *Handler) openClip(ctx echo.Context, idStr string) (clip *os.File, relPath string, err error) {
+func (c *Handler) resolveClipPath(ctx echo.Context, idStr string) (absPath, relPath string, err error) {
 	clipPath, err := c.DS.GetNoteClipPath(idStr)
 	switch {
 	case err != nil && isDetectionNotFoundErr(err):
-		return nil, "", c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
+		return "", "", c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
 	case err != nil && isClipNotFoundErr(err):
-		return nil, "", c.HandleError(ctx, err,
+		return "", "", c.HandleError(ctx, err,
 			"No audio clip available for this detection", http.StatusNotFound)
 	case err != nil:
-		return nil, "", c.HandleError(ctx, err,
+		return "", "", c.HandleError(ctx, err,
 			"Failed to look up clip path", http.StatusInternalServerError)
 	case clipPath == "":
-		return nil, "", c.HandleError(ctx, fmt.Errorf("clip path empty"),
+		return "", "", c.HandleError(ctx, fmt.Errorf("clip path empty"),
 			"No audio clip available for this detection", http.StatusNotFound)
 	}
 
 	normalized := apicore.NormalizeClipPath(clipPath, c.CurrentSettings().Realtime.Audio.Export.Path)
 	if normalized == "" {
-		return nil, "", c.HandleError(ctx, fmt.Errorf("empty normalized clip path"),
+		return "", "", c.HandleError(ctx, fmt.Errorf("empty normalized clip path"),
 			"Invalid clip path", http.StatusBadRequest)
 	}
 	rel, err := c.SFS.ValidateRelativePath(normalized)
 	if err != nil {
-		return nil, "", c.HandleError(ctx, err, "Invalid clip path", http.StatusBadRequest)
+		return "", "", c.HandleError(ctx, err, "Invalid clip path", http.StatusBadRequest)
 	}
-	f, err := c.SFS.Open(rel)
-	if err != nil {
-		if isClipNotFoundErr(err) {
-			return nil, "", c.HandleError(ctx, err,
-				"No audio clip available for this detection", http.StatusNotFound)
-		}
-		return nil, "", c.HandleError(ctx, err, "Failed to open audio clip", http.StatusInternalServerError)
-	}
-	return f, rel, nil
+	return filepath.Join(c.SFS.BaseDir(), rel), rel, nil
 }
 
 // isDetectionNotFoundErr reports whether err means the detection row itself does
