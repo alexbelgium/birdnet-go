@@ -124,13 +124,15 @@ func TestApplyLegacyCorrection_ConfirmingTheExistingSpeciesStillRecordsTheReview
 	t.Parallel()
 
 	// Confirming the species a detection already has is a normal action: the
-	// original species is usually the top row of the reanalysis grid. MySQL
-	// reports zero affected rows for an update that changes nothing, so inferring
-	// "locked" from a zero-row update would tell the operator to unlock a
-	// detection that was never locked — and would skip the review they asked for.
+	// original species is usually the top row of the reanalysis grid.
+	//
+	// NOTE: on SQLite this goes through the ordinary RowsAffected == 1 path,
+	// because SQLite counts MATCHED rows. It does not reach the zero-row
+	// disambiguation — that is MySQL-only behaviour, covered directly by
+	// TestClassifyZeroRowUpdate_* below. This test exists to prove the outcome
+	// (the review is recorded) rather than the mechanism.
 	db := newLegacySchemaDB(t)
 	note := seedNote(t, db)
-	// Make the write a genuine no-op by pre-setting every column it touches.
 	require.NoError(t, db.Model(&datastore.Note{}).Where("id = ?", note.ID).
 		Updates(map[string]any{"raw_scientific_name": ""}).Error)
 
@@ -142,6 +144,30 @@ func TestApplyLegacyCorrection_ConfirmingTheExistingSpeciesStillRecordsTheReview
 	var review datastore.NoteReview
 	require.NoError(t, db.Where("note_id = ?", note.ID).First(&review).Error)
 	assert.Equal(t, "correct", review.Verified)
+}
+
+func TestClassifyZeroRowUpdate_DistinguishesAllThreeCauses(t *testing.T) {
+	t.Parallel()
+
+	// MySQL reports zero affected rows both for "the guard excluded this row" and
+	// for "the row matched and nothing changed". Collapsing the two tells an
+	// operator confirming an existing species to go unlock a detection that was
+	// never locked. SQLite cannot reproduce the third case at all (it counts
+	// matched rows), so this drives the classifier directly.
+	db := newLegacySchemaDB(t)
+
+	unlocked := seedNote(t, db)
+	locked := seedNote(t, db)
+	require.NoError(t, db.Create(&datastore.NoteLock{NoteID: locked.ID}).Error)
+
+	// Present and unlocked => the update was a no-op; carry on and save the review.
+	require.NoError(t, classifyZeroRowUpdate(db, unlocked.ID))
+
+	// Present but locked => 409.
+	require.ErrorIs(t, classifyZeroRowUpdate(db, locked.ID), errDetectionLocked)
+
+	// Absent => 404, not 409.
+	require.ErrorIs(t, classifyZeroRowUpdate(db, 987654), repository.ErrDetectionNotFound)
 }
 
 func TestApplyLegacyCorrection_LeavesOtherDetectionsAlone(t *testing.T) {

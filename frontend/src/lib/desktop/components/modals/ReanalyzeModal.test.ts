@@ -138,6 +138,44 @@ describe('ReanalyzeModal', () => {
     expect(correctDetectionSpecies).not.toHaveBeenCalled();
   });
 
+  it('survives a close and reopen while a correction is still in flight', async () => {
+    // The open/close effect clears pendingCorrection and can swap detectionId.
+    // Without snapshotting the payload and guarding on a sequence id, the catch
+    // block dereferences a null pendingCorrection — masking the real error — and
+    // onClose/onCorrected fire against whatever detection is showing now.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    let failCorrection!: (e: unknown) => void;
+    correctDetectionSpecies.mockReturnValue(
+      new Promise((_, reject) => {
+        failCorrection = reject;
+      })
+    );
+    const onClose = vi.fn();
+    const onCorrected = vi.fn();
+
+    const { rerender } = render(ReanalyzeModal, {
+      props: { isOpen: true, detectionId: 7, onClose, onCorrected },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    await user.click(
+      screen.getByLabelText('Use Pied Flycatcher as the species for this detection')
+    );
+    await user.click(screen.getByRole('button', { name: /Apply correction/ }));
+    await waitFor(() => expect(correctDetectionSpecies).toHaveBeenCalledTimes(1));
+
+    // Close and reopen for a DIFFERENT detection while the correction is pending.
+    await rerender({ isOpen: false, detectionId: 7, onClose, onCorrected });
+    await rerender({ isOpen: true, detectionId: 99, onClose, onCorrected });
+
+    failCorrection(new Error('boom'));
+    await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalledWith(99));
+
+    // The superseded failure must not leak into the reopened modal.
+    expect(onCorrected).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('surfaces a reanalysis failure instead of an empty grid', async () => {
     reanalyzeDetection.mockRejectedValue(new Error('Inference failed'));
 

@@ -323,25 +323,8 @@ func applyLegacyCorrection(tx *gorm.DB, noteID uint, scientific, common, species
 	}
 
 	if result.RowsAffected == 0 {
-		// Zero rows has THREE causes, and they must not be collapsed. The note is
-		// gone (404); the note is locked, so the NOT EXISTS guard excluded it
-		// (409); or MySQL matched the row and changed nothing because every value
-		// was already what we are writing — which happens when an operator
-		// confirms the species a detection already has. Reporting that last case
-		// as "locked" tells them to unlock a detection that was never locked.
-		var noteCount int64
-		if err := tx.Model(&datastore.Note{}).Where("id = ?", noteID).Count(&noteCount).Error; err != nil {
-			return fmt.Errorf("check note existence: %w", err)
-		}
-		if noteCount == 0 {
-			return repository.ErrDetectionNotFound
-		}
-		var lockCount int64
-		if err := tx.Model(&datastore.NoteLock{}).Where("note_id = ?", noteID).Count(&lockCount).Error; err != nil {
-			return fmt.Errorf("check note lock: %w", err)
-		}
-		if lockCount > 0 {
-			return errDetectionLocked
+		if err := classifyZeroRowUpdate(tx, noteID); err != nil {
+			return err
 		}
 		// No-op update on an unlocked row: the species is already what was asked
 		// for. Fall through and still record the review — marking it verified is
@@ -357,6 +340,36 @@ func applyLegacyCorrection(tx *gorm.DB, noteID uint, scientific, common, species
 		Assign(datastore.NoteReview{Verified: verificationCorrect, UpdatedAt: time.Now()}).
 		FirstOrCreate(review).Error; err != nil {
 		return fmt.Errorf("upsert note review: %w", err)
+	}
+	return nil
+}
+
+// classifyZeroRowUpdate decides what a zero-row species UPDATE actually meant.
+// It has THREE causes that must not be collapsed: the note is gone
+// (ErrDetectionNotFound -> 404); the note is locked, so the UPDATE's NOT EXISTS
+// guard excluded it (errDetectionLocked -> 409); or the row matched and nothing
+// changed, which MySQL also reports as zero rows and which happens whenever an
+// operator confirms the species a detection already has. Only the last returns
+// nil, meaning "carry on and record the review".
+//
+// Split out because the third case is unreachable through SQLite, which counts
+// matched rather than changed rows — so a test driving applyLegacyCorrection on
+// SQLite can never enter this branch, and deleting it would leave such a test
+// green. Calling it directly is the only way to cover all three.
+func classifyZeroRowUpdate(tx *gorm.DB, noteID uint) error {
+	var noteCount int64
+	if err := tx.Model(&datastore.Note{}).Where("id = ?", noteID).Count(&noteCount).Error; err != nil {
+		return fmt.Errorf("check note existence: %w", err)
+	}
+	if noteCount == 0 {
+		return repository.ErrDetectionNotFound
+	}
+	var lockCount int64
+	if err := tx.Model(&datastore.NoteLock{}).Where("note_id = ?", noteID).Count(&lockCount).Error; err != nil {
+		return fmt.Errorf("check note lock: %w", err)
+	}
+	if lockCount > 0 {
+		return errDetectionLocked
 	}
 	return nil
 }

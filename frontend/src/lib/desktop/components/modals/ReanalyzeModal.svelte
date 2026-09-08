@@ -79,6 +79,7 @@
       result = null;
       errorMessage = null;
       pendingCorrection = null;
+      isCorrecting = false;
       runReanalysis();
     });
   });
@@ -143,13 +144,22 @@
         'No model scored this species, so there is nothing to attribute the correction to.';
       return;
     }
+    // Snapshot everything this call depends on BEFORE awaiting, and claim a
+    // sequence id. The open/close effect clears pendingCorrection and swaps
+    // detectionId, so a close-and-reopen mid-flight would otherwise leave the
+    // catch block dereferencing a null pendingCorrection — masking the real
+    // error — and fire onClose/onCorrected against a different detection.
+    const mySeq = ++requestSeq;
+    const target = detectionId;
+    const scientificName = pendingCorrection.scientificName;
     isCorrecting = true;
     try {
-      const applied = await correctDetectionSpecies(detectionId, {
-        scientificName: pendingCorrection.scientificName,
+      const applied = await correctDetectionSpecies(target, {
+        scientificName,
         modelId: choice.modelId,
         confidence: choice.confidence,
       });
+      if (mySeq !== requestSeq) return; // modal moved on; the correction still applied server-side
       if (applied === null) {
         onClose(); // duplicate in flight; the original call owns the outcome
         return;
@@ -160,14 +170,15 @@
       onClose();
       onCorrected?.();
     } catch (err) {
-      errorMessage = err instanceof Error ? err.message : String(err);
       logger.error('Correction failed', err, {
         component: 'ReanalyzeModal',
-        detectionId,
-        scientific: pendingCorrection.scientificName,
+        detectionId: target,
+        scientific: scientificName,
       });
+      if (mySeq !== requestSeq) return;
+      errorMessage = err instanceof Error ? err.message : String(err);
     } finally {
-      isCorrecting = false;
+      if (mySeq === requestSeq) isCorrecting = false;
     }
   }
 

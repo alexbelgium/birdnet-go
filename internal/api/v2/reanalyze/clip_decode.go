@@ -36,20 +36,25 @@ func decodeByteCap(targetSampleRate, maxDurationSec int) int {
 // and returns it as the float32-normalised sample stream
 // Orchestrator.PredictModel expects.
 //
-// The clip arrives as an io.Reader piped to ffmpeg's stdin, NOT as a path. That
-// is deliberate: the caller opens it through SecureFS, whose os.Root sandbox
-// refuses a symlink escaping the media root. Handing ffmpeg a plain absolute
-// path instead would hand the enforcement to a process os.Root cannot constrain,
-// so a symlink planted in the clips directory would be followed. Piping keeps
-// the only filesystem access inside the sandbox.
+// clipPath is an absolute path under the media root, resolved by the caller
+// through apicore.NormalizeClipPath + SecureFS.ValidateRelativePath. It is passed
+// to ffmpeg as a path rather than piped to its stdin, matching the four existing
+// call sites in the media domain that hand
+// filepath.Join(c.SFS.BaseDir(), normalizedPath) to ffmpeg/sox for spectrogram
+// generation.
+//
+// Piping was tried and reverted: ffmpeg's pipe protocol is non-seekable, and the
+// AAC clips this project writes carry a trailing moov atom (see
+// internal/audiocore/aac/encode.go — the muxer is not fast-started), so a
+// full-length .m4a decodes to zero bytes with "partial file". A short one fits
+// ffmpeg's probe buffer and works, which is exactly how that regression hides.
 //
 // maxDurationSec caps the input duration handed to ffmpeg (-t), which bounds both
 // decode time and output size. A derived byte cap is enforced on the captured
 // buffer as well, in case ffmpeg ignores -t for a container it cannot seek.
 func decodeClipMonoPCM16(
 	ctx context.Context,
-	ffmpegPath string,
-	clip io.Reader,
+	ffmpegPath, clipPath string,
 	targetSampleRate, maxDurationSec int,
 ) ([]float32, error) {
 	// Wrap the caller's context in a cancelable child so we can kill ffmpeg
@@ -83,7 +88,8 @@ func decodeClipMonoPCM16(
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
-		"-i", "pipe:0",
+		"-nostdin",
+		"-i", clipPath,
 		"-ac", "1",
 		"-ar", strconv.Itoa(targetSampleRate),
 		"-f", "s16le",
@@ -92,11 +98,10 @@ func decodeClipMonoPCM16(
 	}
 
 	//nolint:gosec // G204: ffmpegPath comes from the admin-controlled
-	// Settings.Realtime.Audio.FfmpegPath, validated at startup. Every other
-	// argument is a literal or an integer formatted here; the clip itself never
-	// appears in the command line at all, it arrives on stdin.
+	// Settings.Realtime.Audio.FfmpegPath, validated at startup, and clipPath is
+	// derived from the authenticated detection record through
+	// SecureFS.ValidateRelativePath. Neither is freeform user input.
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
-	cmd.Stdin = clip
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
@@ -123,7 +128,11 @@ func decodeClipMonoPCM16(
 	byteCap := decodeByteCap(targetSampleRate, maxDurationSec)
 	pcm, readErr := io.ReadAll(io.LimitReader(stdout, int64(byteCap)+1))
 	exceededCap := len(pcm) > byteCap
-	if exceededCap {
+	// Kill ffmpeg before Wait whenever we stopped reading early — on the cap, and
+	// equally on a read error. Either way ffmpeg may still be writing, and Wait
+	// would then block on a full stdout pipe until the request context expires,
+	// holding the single reanalysis slot for the whole timeout.
+	if exceededCap || readErr != nil {
 		cancel()
 	}
 	waitErr := cmd.Wait()
@@ -135,18 +144,20 @@ func decodeClipMonoPCM16(
 			Category(errors.CategoryValidation).
 			Context("byte_cap", byteCap).
 			Build()
+	case readErr != nil:
+		// Checked before waitErr: cancelling above makes Wait report a killed
+		// process, which would otherwise mask the read failure that caused it.
+		return nil, errors.New(readErr).
+			Component(errComponent).
+			Category(errors.CategoryAudio).
+			Context("operation", "ffmpeg_read_stdout").
+			Build()
 	case waitErr != nil:
 		return nil, errors.New(waitErr).
 			Component(errComponent).
 			Category(errors.CategoryAudio).
 			Context("operation", "ffmpeg_decode").
 			Context("ffmpeg_stderr", stderrBuf.String()).
-			Build()
-	case readErr != nil:
-		return nil, errors.New(readErr).
-			Component(errComponent).
-			Category(errors.CategoryAudio).
-			Context("operation", "ffmpeg_read_stdout").
 			Build()
 	case len(pcm) == 0:
 		return nil, errors.Newf("ffmpeg produced no PCM output").

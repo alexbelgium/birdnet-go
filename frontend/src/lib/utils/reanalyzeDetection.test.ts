@@ -65,6 +65,20 @@ describe('reanalyzeDetection', () => {
     expect(fetchWithCSRF).toHaveBeenCalledTimes(3);
   });
 
+  it('does not share an in-flight result between different model selections', async () => {
+    // The dedupe key is the detection plus the exact model set. Sharing a promise
+    // is only sound between callers that asked the same question, and modelIds
+    // changes the answer — a caller asking for one model must not be handed the
+    // result of a run over all of them.
+    fetchWithCSRF.mockReturnValue(new Promise(() => {})); // never settles
+
+    void reanalyzeDetection(42);
+    void reanalyzeDetection(42, ['Perch_V2']);
+    void reanalyzeDetection(42, ['Perch_V2']); // same question: joins the second
+
+    expect(fetchWithCSRF).toHaveBeenCalledTimes(2);
+  });
+
   it('releases the in-flight slot when the request fails', async () => {
     fetchWithCSRF.mockRejectedValueOnce(new Error('boom'));
     await expect(reanalyzeDetection(99)).rejects.toThrow('boom');
