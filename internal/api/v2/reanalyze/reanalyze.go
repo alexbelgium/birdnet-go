@@ -14,12 +14,15 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -85,6 +88,16 @@ type ReanalyzePrediction struct {
 	ScientificName string             `json:"scientificName"`
 	CommonName     string             `json:"commonName,omitempty"`
 	ByModel        map[string]float32 `json:"byModel"`
+
+	// Correctable reports whether this row may be applied as a species
+	// correction. False for the non-species sound classes Perch also emits
+	// ("power_tool", "engine idling"), which the shared SplitSpeciesName splits
+	// into a scientific/common pair like any other label — so "power_tool"
+	// arrives here looking exactly like a species named "power". Without this
+	// flag the UI offers "Use this" on it and the correction relabels a bird as
+	// a sound class, creating a junk v2 label row in the process. Computed
+	// server-side so the UI and the endpoint's own gate cannot drift apart.
+	Correctable bool `json:"correctable"`
 }
 
 // MaxConfidence returns the highest confidence any model produced for this
@@ -155,10 +168,11 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	// The clip lookup is also the existence check: GetNoteClipPath returns
 	// ErrDetectionNotFound for an unknown id, which resolveClipPath maps to a 404.
 	// A separate DS.Get would be a second round trip proving the same thing.
-	absClipPath, relClipPath, err := c.resolveClipPath(ctx, idStr)
+	clipFile, relClipPath, err := c.openClip(ctx, idStr)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = clipFile.Close() }()
 
 	bn, err := c.GetBirdNETInstance()
 	if err != nil {
@@ -197,8 +211,14 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	clipDurationSec := 0.0
 
 	for sampleRate, models := range bySampleRate {
+		// ffmpeg consumes the whole reader per decode, so rewind before each
+		// sample rate. Seeking the already-open handle keeps every filesystem
+		// access inside the SecureFS sandbox — reopening by path would not.
+		if _, err := clipFile.Seek(0, io.SeekStart); err != nil {
+			return c.HandleError(ctx, err, "Failed to read audio clip", http.StatusInternalServerError)
+		}
 		samples, err := decodeClipMonoPCM16(
-			ctx.Request().Context(), ffmpegPath, absClipPath, sampleRate, decodeMaxDurationSec)
+			ctx.Request().Context(), ffmpegPath, clipFile, sampleRate, decodeMaxDurationSec)
 		if err != nil {
 			c.LogAPIRequest(ctx, logger.LogLevelError, "Failed to decode clip for reanalysis",
 				logger.String("detection_id", idStr),
@@ -252,6 +272,7 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 			ScientificName: a.scientific,
 			CommonName:     a.common,
 			ByModel:        a.byModel,
+			Correctable:    isBinomialScientificName(a.scientific),
 		})
 	}
 	// Fill in a locale-specific common name for anything only a bare-scientific
@@ -358,6 +379,9 @@ func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []stri
 			if !ok {
 				return nil, fmt.Errorf("model %q is not loaded; enable it in Settings -> Models first", raw)
 			}
+			if !isStandardAudioModel(info.Spec) {
+				return nil, fmt.Errorf("model %q cannot analyze a saved clip: it expects raw ultrasonic audio that recorded clips do not contain", raw)
+			}
 			seen[resolvedID] = struct{}{}
 			out = append(out, loadedModel{id: resolvedID, name: info.Name, spec: info.Spec})
 		}
@@ -368,12 +392,43 @@ func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []stri
 	// iteration just to read three fields.
 	var out []loadedModel
 	for i := range infos {
-		if infos[i].Spec.RawSampleRate != 0 || infos[i].Spec.SampleRate <= 0 {
+		if !isStandardAudioModel(infos[i].Spec) {
 			continue
 		}
 		out = append(out, loadedModel{id: infos[i].ID, name: infos[i].Name, spec: infos[i].Spec})
 	}
 	return out, nil
+}
+
+// isStandardAudioModel reports whether a model can say anything meaningful about
+// a saved detection clip. A non-zero RawSampleRate means the model expects raw
+// ultrasonic audio (the bat classifier wants 256 kHz); saved clips are recorded
+// at standard rates and carry no ultrasonic content, so resampling one up and
+// running the model over it produces confident-looking nonsense. Rejected for
+// the default set AND for an explicit request, because a number that means
+// nothing is worse to show a user than an error saying so.
+func isStandardAudioModel(spec classifier.ModelSpec) bool {
+	return spec.RawSampleRate == 0 && spec.SampleRate > 0
+}
+
+// isBinomialScientificName reports whether s looks like a Latin binomial:
+// exactly two space-separated words, the first capitalised and the second not.
+// This is the same rule classifier.isBinomialName applies, reimplemented here
+// because that one is unexported.
+//
+// It is what separates a real species from the sound classes Perch also emits.
+// SplitSpeciesName has no notion of the difference — it splits "power_tool" into
+// ("power", "tool") exactly as it splits a BirdNET label — so the shape of the
+// scientific half is the only signal available.
+func isBinomialScientificName(s string) bool {
+	words := strings.Fields(s)
+	if len(words) != 2 {
+		return false
+	}
+	first, _ := utf8.DecodeRuneInString(words[0])
+	second, _ := utf8.DecodeRuneInString(words[1])
+	return first != utf8.RuneError && second != utf8.RuneError &&
+		unicode.IsUpper(first) && unicode.IsLower(second)
 }
 
 // lookupLoadedModel returns the model with the given registry ID, or ok=false
@@ -507,40 +562,55 @@ func applyLocalizedCommonNames(bn *classifier.Orchestrator, preds []ReanalyzePre
 	}
 }
 
-// resolveClipPath looks up the detection's saved clip and maps it onto the media
-// SecureFS root, returning (absolute path, normalized relative path). On failure
-// it returns an already-formed echo error response, so callers `return err`.
+// openClip looks up the detection's saved clip and opens it THROUGH SecureFS,
+// returning the open handle and the normalized relative path (for logging). On
+// failure it returns an already-formed echo error response, so callers `return err`.
 //
-// This mirrors the media domain's normalizeAndValidatePathWithLogger, which is
-// unexported there. Recomposing it from the exported apicore.NormalizeClipPath +
-// SFS.ValidateRelativePath is cheaper than exporting a helper out of the media
-// domain, and keeps this package's upstream footprint at zero.
-func (c *Handler) resolveClipPath(ctx echo.Context, idStr string) (absPath, relPath string, err error) {
+// Opening rather than resolving to an absolute path is the point: SecureFS wraps
+// os.Root, which refuses to follow a symlink out of the media root. A path handed
+// to an external process leaves that enforcement behind, so a symlink planted in
+// the clips directory would be followed by ffmpeg. The caller pipes this handle
+// to ffmpeg's stdin instead.
+//
+// The normalization mirrors the media domain's normalizeAndValidatePathWithLogger,
+// which is unexported there. Recomposing it from the exported
+// apicore.NormalizeClipPath keeps this package's upstream footprint at zero;
+// importing a sibling domain would break the api/v2 acyclic-import rule that
+// apicore's import guard enforces.
+func (c *Handler) openClip(ctx echo.Context, idStr string) (clip *os.File, relPath string, err error) {
 	clipPath, err := c.DS.GetNoteClipPath(idStr)
 	switch {
 	case err != nil && isDetectionNotFoundErr(err):
-		return "", "", c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
+		return nil, "", c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
 	case err != nil && isClipNotFoundErr(err):
-		return "", "", c.HandleError(ctx, err,
+		return nil, "", c.HandleError(ctx, err,
 			"No audio clip available for this detection", http.StatusNotFound)
 	case err != nil:
-		return "", "", c.HandleError(ctx, err,
+		return nil, "", c.HandleError(ctx, err,
 			"Failed to look up clip path", http.StatusInternalServerError)
 	case clipPath == "":
-		return "", "", c.HandleError(ctx, fmt.Errorf("clip path empty"),
+		return nil, "", c.HandleError(ctx, fmt.Errorf("clip path empty"),
 			"No audio clip available for this detection", http.StatusNotFound)
 	}
 
 	normalized := apicore.NormalizeClipPath(clipPath, c.CurrentSettings().Realtime.Audio.Export.Path)
 	if normalized == "" {
-		return "", "", c.HandleError(ctx, fmt.Errorf("empty normalized clip path"),
+		return nil, "", c.HandleError(ctx, fmt.Errorf("empty normalized clip path"),
 			"Invalid clip path", http.StatusBadRequest)
 	}
 	rel, err := c.SFS.ValidateRelativePath(normalized)
 	if err != nil {
-		return "", "", c.HandleError(ctx, err, "Invalid clip path", http.StatusBadRequest)
+		return nil, "", c.HandleError(ctx, err, "Invalid clip path", http.StatusBadRequest)
 	}
-	return filepath.Join(c.SFS.BaseDir(), rel), rel, nil
+	f, err := c.SFS.Open(rel)
+	if err != nil {
+		if isClipNotFoundErr(err) {
+			return nil, "", c.HandleError(ctx, err,
+				"No audio clip available for this detection", http.StatusNotFound)
+		}
+		return nil, "", c.HandleError(ctx, err, "Failed to open audio clip", http.StatusInternalServerError)
+	}
+	return f, rel, nil
 }
 
 // isDetectionNotFoundErr reports whether err means the detection row itself does

@@ -191,18 +191,37 @@ func TestSelectModelsForReanalysis_ExplicitListDedupesAndErrorsOnUnloaded(t *tes
 	assert.Contains(t, err.Error(), "Perch_V2")
 }
 
-func TestSelectModelsForReanalysis_ExplicitListAcceptsUltrasonicWhenAsked(t *testing.T) {
+func TestSelectModelsForReanalysis_RejectsUltrasonicEvenWhenExplicitlyAsked(t *testing.T) {
 	t.Parallel()
 
-	// The RawSampleRate filter is a DEFAULT, not a hard ban: an explicit request
-	// for a loaded model is honoured. (The correction endpoint refuses to
-	// attribute a correction to one; reanalysis merely shows its scores.)
+	// The RawSampleRate filter is a hard rule, not just a default. A saved clip
+	// carries no ultrasonic content, so resampling it up to 256 kHz and running
+	// the bat model produces confident-looking nonsense — worse to show a user
+	// than an error explaining why the model cannot answer.
 	infos := []classifier.ModelInfo{
 		{ID: "Bat_V1", Name: "Bat", Spec: classifier.ModelSpec{SampleRate: 256000, ClipLength: time.Second, RawSampleRate: 256000}},
 	}
-	got, err := selectModelsForReanalysis(infos, []string{"Bat_V1"})
-	require.NoError(t, err)
-	require.Len(t, got, 1)
+	_, err := selectModelsForReanalysis(infos, []string{"Bat_V1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ultrasonic")
+}
+
+func TestIsBinomialScientificName_SeparatesSpeciesFromSoundClasses(t *testing.T) {
+	t.Parallel()
+
+	// Real species: two words, capitalised genus, lowercase epithet.
+	assert.True(t, isBinomialScientificName("Ficedula hypoleuca"))
+	assert.True(t, isBinomialScientificName("Aegithalos caudatus"))
+
+	// Perch sound classes. SplitSpeciesName turns "power_tool" into
+	// ("power", "tool"), so the scientific half looks like a name until its
+	// shape is checked — and a correction to a species called "power" would
+	// create a junk label row.
+	assert.False(t, isBinomialScientificName("power"))
+	assert.False(t, isBinomialScientificName("engine idling nearby"))
+	assert.False(t, isBinomialScientificName(""))
+	assert.False(t, isBinomialScientificName("Ficedula"))
+	assert.False(t, isBinomialScientificName("Ficedula Hypoleuca"))
 }
 
 func TestReanalyzePrediction_MaxConfidence(t *testing.T) {

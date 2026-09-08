@@ -14,23 +14,42 @@ import (
 	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
-// maxDecodeBytes caps the PCM byte buffer read back from ffmpeg to keep memory
-// bounded under hostile input. At 48 kHz mono 16-bit this is ~62 seconds of
-// audio — comfortably longer than the longest detection clip a default-configured
-// BirdNET-Go install saves, and longer than decodeMaxDurationSec allows anyway.
-const maxDecodeBytes = 6 * 1024 * 1024
+// bytesPerDecodedSample is the width of one mono s16le sample ffmpeg writes.
+const bytesPerDecodedSample = 2
 
-// decodeClipMonoPCM16 invokes ffmpeg to decode the clip at clipPath into raw
-// signed 16-bit little-endian PCM, downmixed to mono and resampled to
-// targetSampleRate, and returns it as the float32-normalised sample stream
+// decodeByteCap returns the ceiling on the PCM buffer read back from ffmpeg for
+// one decode. It is derived from the two parameters that actually determine the
+// output size rather than fixed, because a fixed cap silently becomes wrong at a
+// rate nobody had in mind when it was chosen: 6 MiB is ~62 s at 48 kHz but only
+// ~12 s at 256 kHz, so an ultrasonic-rate decode would always trip it and fail
+// with a byte-cap error that says nothing about the real cause.
+//
+// The doubling is slack for ffmpeg's resampler, which can emit a few frames more
+// than the nominal duration; the cap is a backstop against ffmpeg ignoring -t,
+// not a precise length check.
+func decodeByteCap(targetSampleRate, maxDurationSec int) int {
+	return targetSampleRate * maxDurationSec * bytesPerDecodedSample * 2
+}
+
+// decodeClipMonoPCM16 invokes ffmpeg to decode the audio in clip into raw signed
+// 16-bit little-endian PCM, downmixed to mono and resampled to targetSampleRate,
+// and returns it as the float32-normalised sample stream
 // Orchestrator.PredictModel expects.
 //
+// The clip arrives as an io.Reader piped to ffmpeg's stdin, NOT as a path. That
+// is deliberate: the caller opens it through SecureFS, whose os.Root sandbox
+// refuses a symlink escaping the media root. Handing ffmpeg a plain absolute
+// path instead would hand the enforcement to a process os.Root cannot constrain,
+// so a symlink planted in the clips directory would be followed. Piping keeps
+// the only filesystem access inside the sandbox.
+//
 // maxDurationSec caps the input duration handed to ffmpeg (-t), which bounds both
-// decode time and output size. maxDecodeBytes is enforced on the captured buffer
-// as well, in case ffmpeg ignores -t for a container it cannot seek.
+// decode time and output size. A derived byte cap is enforced on the captured
+// buffer as well, in case ffmpeg ignores -t for a container it cannot seek.
 func decodeClipMonoPCM16(
 	ctx context.Context,
-	ffmpegPath, clipPath string,
+	ffmpegPath string,
+	clip io.Reader,
 	targetSampleRate, maxDurationSec int,
 ) ([]float32, error) {
 	// Wrap the caller's context in a cancelable child so we can kill ffmpeg
@@ -64,8 +83,7 @@ func decodeClipMonoPCM16(
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
-		"-nostdin",
-		"-i", clipPath,
+		"-i", "pipe:0",
 		"-ac", "1",
 		"-ar", strconv.Itoa(targetSampleRate),
 		"-f", "s16le",
@@ -74,10 +92,11 @@ func decodeClipMonoPCM16(
 	}
 
 	//nolint:gosec // G204: ffmpegPath comes from the admin-controlled
-	// Settings.Realtime.Audio.FfmpegPath (validated at startup), and clipPath is
-	// derived from the authenticated detection record and passed through
-	// SecureFS.ValidateRelativePath — neither is freeform user input.
+	// Settings.Realtime.Audio.FfmpegPath, validated at startup. Every other
+	// argument is a literal or an integer formatted here; the clip itself never
+	// appears in the command line at all, it arrives on stdin.
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd.Stdin = clip
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
@@ -101,8 +120,9 @@ func decodeClipMonoPCM16(
 	// Read one byte past the cap so "exceeded" is distinguishable from "exactly
 	// hit". On exceed, cancel before Wait so ffmpeg dies instead of blocking on
 	// a full pipe.
-	pcm, readErr := io.ReadAll(io.LimitReader(stdout, maxDecodeBytes+1))
-	exceededCap := len(pcm) > maxDecodeBytes
+	byteCap := decodeByteCap(targetSampleRate, maxDurationSec)
+	pcm, readErr := io.ReadAll(io.LimitReader(stdout, int64(byteCap)+1))
+	exceededCap := len(pcm) > byteCap
 	if exceededCap {
 		cancel()
 	}
@@ -113,7 +133,7 @@ func decodeClipMonoPCM16(
 		return nil, errors.Newf("clip decode exceeded byte cap").
 			Component(errComponent).
 			Category(errors.CategoryValidation).
-			Context("byte_cap", maxDecodeBytes).
+			Context("byte_cap", byteCap).
 			Build()
 	case waitErr != nil:
 		return nil, errors.New(waitErr).

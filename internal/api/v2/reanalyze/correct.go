@@ -168,6 +168,18 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	// on v2 the label GetOrCreate would mint a junk label row that then shows up
 	// in every species list forever. AllLabels is the unfiltered union across all
 	// loaded models, so anything the reanalysis grid could have offered passes.
+	// The binomial check comes first and is the one that stops a sound class.
+	// "power_tool" splits to ("power", "tool") just like a species label, so it
+	// is present in AllLabels and would sail through the vocabulary check below;
+	// only its shape gives it away. Without this, an operator (or a direct API
+	// call) can relabel a bird detection as a species called "power" and mint a
+	// junk v2 label row for it.
+	if !isBinomialScientificName(req.ScientificName) {
+		return c.HandleError(ctx,
+			fmt.Errorf("scientificName %q is not a Latin binomial", req.ScientificName),
+			"That prediction is a sound class, not a species; it cannot be applied as a correction",
+			http.StatusBadRequest)
+	}
 	if !speciesKnownToLoadedModels(bn, req.ScientificName) {
 		return c.HandleError(ctx,
 			fmt.Errorf("species %q is not in any loaded model's vocabulary", req.ScientificName),
