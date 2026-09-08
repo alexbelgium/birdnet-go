@@ -148,6 +148,8 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | POST   | `/detections/batch/review`    | `BatchReviewDetections`  | ✅   | Bulk set verification status                                                                                               |
 | POST   | `/detections/batch/lock`      | `BatchLockDetections`    | ✅   | Bulk lock or unlock detections                                                                                             |
 | POST   | `/detections/batch/resolve`   | `BatchResolveDetections` | ✅   | Resolve query params to detection IDs                                                                                      |
+| POST   | `/detections/:id/reanalyze`   | `ReanalyzeDetection`    | ✅   | Re-run every loaded classifier over the saved clip; read-only (`reanalyze/`) |
+| POST   | `/detections/:id/correct-species` | `CorrectDetectionSpecies` | ✅ | Apply a reanalysis result as the detection's species and mark it verified (`reanalyze/`) |
 
 ### Integrations (`integrations/integrations.go`)
 

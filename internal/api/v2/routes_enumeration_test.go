@@ -53,6 +53,7 @@ var routeParamPattern = regexp.MustCompile(`:[A-Za-z_]+`)
 //
 // When you add an initializer to initRoutes, add one of its routes here.
 var criticalRoutes = []string{
+	"POST /api/v2/detections/:id/correct-species",
 	"GET /api/v2/health",
 	"GET /api/v2/ping",
 	"GET /api/v2/app/config",
