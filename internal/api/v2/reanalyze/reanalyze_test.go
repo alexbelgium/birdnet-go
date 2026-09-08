@@ -17,6 +17,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/datastore"
+	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	bnerrors "github.com/tphakala/birdnet-go/internal/errors"
 )
@@ -383,18 +384,28 @@ func TestReanalyzeDetection_ReleasesTheSlotOnAnErrorPath(t *testing.T) {
 	core := apitest.NewCore(t)
 	h := New(core)
 
+	// The failure has to happen AFTER the slot is claimed for this to test
+	// anything. Id parsing and body binding both run before the claim, so a
+	// malformed request would return without ever touching the slot and this
+	// test would pass even with the release deleted. Fail the clip lookup
+	// instead, which is the first step inside the claimed region.
+	ds, ok := core.DS.(*mocks.MockInterface)
+	require.True(t, ok, "apitest core is expected to carry a mock datastore")
+	ds.EXPECT().GetNoteClipPath("1").Return("", errors.New("database is unavailable")).Once()
+
 	rec := httptest.NewRecorder()
 	ctx := core.Echo.NewContext(httptest.NewRequest(http.MethodPost, "/", http.NoBody), rec)
 	ctx.SetParamNames("id")
-	ctx.SetParamValues("not-a-number")
+	ctx.SetParamValues("1")
 	require.NoError(t, h.ReanalyzeDetection(ctx))
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 
-	// The slot must be free again: a request that failed validation must not
-	// wedge the endpoint shut for the lifetime of the process.
+	// The slot must be free again: one failed request must not wedge the
+	// endpoint shut for the lifetime of the process.
 	select {
 	case reanalysisSlot <- struct{}{}:
 		<-reanalysisSlot
 	default:
-		t.Fatal("reanalysis slot was not released after an early-return error path")
+		t.Fatal("reanalysis slot was not released after an error inside the claimed region")
 	}
 }
