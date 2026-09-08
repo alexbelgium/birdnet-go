@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event';
 const reanalyzeDetection = vi.fn();
 const correctDetectionSpecies = vi.fn();
 const toastSuccess = vi.fn();
+const setDetectionVerification = vi.fn();
+const fetchWithCSRF = vi.fn();
 
 vi.mock('$lib/utils/reanalyzeDetection', () => ({
   reanalyzeDetection: (...args: unknown[]) => reanalyzeDetection(...args),
@@ -13,6 +15,14 @@ vi.mock('$lib/utils/reanalyzeDetection', () => ({
 
 vi.mock('$lib/stores/toast', () => ({
   toastActions: { success: (...args: unknown[]) => toastSuccess(...args) },
+}));
+
+vi.mock('$lib/utils/reviewDetection', () => ({
+  setDetectionVerification: (...args: unknown[]) => setDetectionVerification(...args),
+}));
+
+vi.mock('$lib/utils/api', () => ({
+  fetchWithCSRF: (...args: unknown[]) => fetchWithCSRF(...args),
 }));
 
 import ReanalyzeModal from './ReanalyzeModal.svelte';
@@ -50,6 +60,8 @@ describe('ReanalyzeModal', () => {
     reanalyzeDetection.mockReset();
     correctDetectionSpecies.mockReset();
     toastSuccess.mockReset();
+    setDetectionVerification.mockReset();
+    fetchWithCSRF.mockReset();
   });
 
   afterEach(() => {
@@ -243,5 +255,100 @@ describe('ReanalyzeModal', () => {
 
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
     expect(screen.queryByText('Running inference…')).not.toBeInTheDocument();
+  });
+
+  it('offers the three review verdicts once results are in', async () => {
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detectionId: 7, onClose: vi.fn(), onDeleted: vi.fn() },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    expect(
+      screen.getByRole('button', { name: 'Mark this detection as confirmed' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Mark this detection as a false positive' })
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete this detection' })).toBeInTheDocument();
+  });
+
+  it('hides the verdicts once a correction row is selected', async () => {
+    // The pending correction is the action on screen; three competing verdicts
+    // beside it invite a mis-click on an irreversible button.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detectionId: 7, onClose: vi.fn(), onDeleted: vi.fn() },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    await user.click(
+      screen.getByLabelText('Use Pied Flycatcher as the species for this detection')
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Mark this detection as confirmed' })
+      ).not.toBeInTheDocument()
+    );
+    expect(screen.queryByRole('button', { name: 'Delete this detection' })).not.toBeInTheDocument();
+    // ...and the correction confirmation is what is on screen instead.
+    expect(screen.getByText('Change this detection to Pied Flycatcher?')).toBeInTheDocument();
+  });
+
+  it('applies a review verdict through the shared helper and closes', async () => {
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    setDetectionVerification.mockResolvedValue(true);
+    const onClose = vi.fn();
+    const onCorrected = vi.fn();
+
+    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose, onCorrected } });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    await user.click(
+      screen.getByRole('button', { name: 'Mark this detection as a false positive' })
+    );
+
+    // The same helper the detections list and search views use, so the request
+    // shape and dedupe behaviour stay identical across the app.
+    await waitFor(() => expect(setDetectionVerification).toHaveBeenCalledWith(7, 'false_positive'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCorrected).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires a second click before deleting, then calls onDeleted', async () => {
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    fetchWithCSRF.mockResolvedValue({});
+    const onDeleted = vi.fn();
+
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detectionId: 7, onClose: vi.fn(), onDeleted },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Delete this detection' }));
+    // Irreversible: the first click must only arm the confirmation.
+    expect(fetchWithCSRF).not.toHaveBeenCalled();
+    expect(screen.getByText('Delete this detection?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Delete permanently/ }));
+
+    await waitFor(() => expect(fetchWithCSRF).toHaveBeenCalledTimes(1));
+    expect(fetchWithCSRF).toHaveBeenCalledWith('/api/v2/detections/7', { method: 'DELETE' });
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+  });
+
+  it('omits Delete when the parent cannot handle the aftermath', async () => {
+    // Deleting leaves the parent showing a detail page for a record that no
+    // longer exists, so the action is only offered when the parent can navigate
+    // away from it.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    expect(screen.queryByRole('button', { name: 'Delete this detection' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Mark this detection as confirmed' })
+    ).toBeInTheDocument();
   });
 });

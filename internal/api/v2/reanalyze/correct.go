@@ -230,6 +230,22 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	// review and lock handlers do.
 	c.DetectionCache.Flush()
 
+	// Record what changed in the detection's notes, so the correction leaves an
+	// audit trail next to the detection rather than only in the server log. Done
+	// AFTER the write: the correction has already committed, so a failure here is
+	// logged and swallowed rather than reported as a failed correction the user
+	// would then retry.
+	if note := correctionNote(&existing, req.ScientificName, commonName, &chosen, req.Confidence); note != "" {
+		if c.Repo == nil {
+			c.LogAPIRequest(ctx, logger.LogLevelWarn, "Correction note not recorded: no detection repository",
+				logger.String("detection_id", idStr))
+		} else if err := c.Repo.AddComment(ctx.Request().Context(), idStr, note); err != nil {
+			c.LogAPIRequest(ctx, logger.LogLevelWarn, "Correction applied but the note could not be saved",
+				logger.String("detection_id", idStr),
+				logger.Error(err))
+		}
+	}
+
 	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Species correction applied",
 		logger.String("detection_id", idStr),
 		logger.String("model_id", resolvedID),
@@ -518,4 +534,52 @@ func speciesKnownToLoadedModels(bn *classifier.Orchestrator, scientificName stri
 		}
 	}
 	return false
+}
+
+// correctionNote renders the one-line audit entry appended to a detection's notes
+// when a correction changes something. It returns "" when nothing changed — an
+// operator confirming the species a detection already has still records a review,
+// but adding a note saying "changed from X to X" would be noise.
+//
+// The model comparison is skipped when the detection carries no model info:
+// the legacy notes schema has no model column (datastore.Note.Model is
+// gorm:"-", populated only on the v2 read path), so on a legacy install "the
+// previous model" is genuinely unknown and must not be guessed at.
+func correctionNote(existing *datastore.Note, scientific, common string, model *classifier.ModelInfo, confidence float64) string {
+	speciesChanged := !strings.EqualFold(strings.TrimSpace(existing.ScientificName), strings.TrimSpace(scientific))
+	modelKnown := existing.Model.Name != ""
+	modelChanged := modelKnown &&
+		(existing.Model.Name != model.DetectionName || existing.Model.Version != model.DetectionVersion)
+
+	if !speciesChanged && !modelChanged {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("Reanalysis: ")
+	switch {
+	case speciesChanged:
+		fmt.Fprintf(&b, "species changed from %s to %s",
+			formatSpecies(existing.ScientificName, existing.CommonName),
+			formatSpecies(scientific, common))
+	default:
+		fmt.Fprintf(&b, "species confirmed as %s", formatSpecies(scientific, common))
+	}
+	if modelChanged {
+		fmt.Fprintf(&b, "; model changed from %s %s to %s",
+			existing.Model.Name, existing.Model.Version, model.Name)
+	} else {
+		fmt.Fprintf(&b, "; attributed to %s", model.Name)
+	}
+	fmt.Fprintf(&b, " at %.1f%% confidence (was %.1f%%).", confidence*100, existing.Confidence*100)
+	return b.String()
+}
+
+// formatSpecies renders a species as "Scientific (Common)", or just the
+// scientific name when no common name is known.
+func formatSpecies(scientific, common string) string {
+	if common == "" || strings.EqualFold(common, scientific) {
+		return scientific
+	}
+	return scientific + " (" + common + ")"
 }
