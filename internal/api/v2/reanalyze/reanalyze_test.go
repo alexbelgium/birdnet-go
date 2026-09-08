@@ -1,0 +1,208 @@
+package reanalyze
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tphakala/birdnet-go/internal/classifier"
+	"github.com/tphakala/birdnet-go/internal/datastore"
+)
+
+// spec3s is a BirdNET-v2.4-shaped model spec: 48 kHz, 3-second windows.
+var spec3s = classifier.ModelSpec{SampleRate: 48000, ClipLength: 3 * time.Second}
+
+// stubPredict returns a predict function that answers every window with the
+// supplied per-window result sets, in order, and records how many windows it saw.
+func stubPredict(perWindow [][]datastore.Results, calls *int) predictModelFn {
+	return func(_ context.Context, _ string, _ [][]float32) ([]datastore.Results, error) {
+		i := *calls
+		*calls++
+		if i < len(perWindow) {
+			return perWindow[i], nil
+		}
+		return nil, nil
+	}
+}
+
+func TestReanalyzeSamples_KeepsMaxConfidenceAcrossWindows(t *testing.T) {
+	t.Parallel()
+
+	// 3 s windows at 50% overlap over 6 s of audio => offsets 0, 1.5, 3 s.
+	samples := make([]float32, 48000*6)
+	calls := 0
+	predict := stubPredict([][]datastore.Results{
+		{{Species: "Ficedula hypoleuca_Pied Flycatcher", Confidence: 0.40}},
+		{{Species: "Ficedula hypoleuca_Pied Flycatcher", Confidence: 0.91}},
+		{{Species: "Ficedula hypoleuca_Pied Flycatcher", Confidence: 0.55}},
+	}, &calls)
+
+	scores, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, samples)
+	require.NoError(t, err)
+	assert.Equal(t, 3, windows, "6s of audio at 3s/50%% overlap yields three whole windows")
+	assert.Equal(t, 3, calls)
+	// The peak, not the first or the last, survives aggregation.
+	assert.InDelta(t, 0.91, float64(scores["Ficedula hypoleuca_Pied Flycatcher"]), 1e-6)
+}
+
+func TestReanalyzeSamples_PadsShortClipToOneWindow(t *testing.T) {
+	t.Parallel()
+
+	// One second of audio is shorter than a 3 s window: without padding the loop
+	// body never runs and the endpoint silently reports zero predictions.
+	samples := make([]float32, 48000)
+	calls := 0
+	predict := stubPredict([][]datastore.Results{
+		{{Species: "Parus major_Great Tit", Confidence: 0.7}},
+	}, &calls)
+
+	scores, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, samples)
+	require.NoError(t, err)
+	assert.Equal(t, 1, windows)
+	assert.InDelta(t, 0.7, float64(scores["Parus major_Great Tit"]), 1e-6)
+}
+
+func TestReanalyzeSamples_PropagatesPredictError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("model closed")
+	predict := func(_ context.Context, _ string, _ [][]float32) ([]datastore.Results, error) {
+		return nil, wantErr
+	}
+
+	_, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*6))
+	require.ErrorIs(t, err, wantErr, "an inference failure must fail the request, not yield partial results")
+	assert.Equal(t, 0, windows)
+}
+
+func TestReanalyzeSamples_RejectsEmptySamples(t *testing.T) {
+	t.Parallel()
+
+	predict := func(_ context.Context, _ string, _ [][]float32) ([]datastore.Results, error) {
+		t.Fatal("predict must not be called for an empty sample stream")
+		return nil, nil
+	}
+	_, _, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, nil)
+	require.Error(t, err)
+}
+
+func TestReanalyzeSamples_RejectsZeroClipLength(t *testing.T) {
+	t.Parallel()
+
+	predict := func(_ context.Context, _ string, _ [][]float32) ([]datastore.Results, error) {
+		t.Fatal("predict must not be called for a degenerate model spec")
+		return nil, nil
+	}
+	_, _, err := reanalyzeSamples(context.Background(), predict, "Broken",
+		classifier.ModelSpec{SampleRate: 48000, ClipLength: 0}, make([]float32, 48000))
+	require.Error(t, err)
+}
+
+func TestReanalyzeSamples_StopsOnCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	// Cancel after the first window; the walk must stop rather than burn
+	// inference on the remaining windows of an abandoned request.
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	predict := func(_ context.Context, _ string, _ [][]float32) ([]datastore.Results, error) {
+		calls++
+		cancel()
+		return []datastore.Results{{Species: "Parus major", Confidence: 0.5}}, nil
+	}
+
+	_, windows, err := reanalyzeSamples(ctx, predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*30))
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, calls, "only the in-flight window should run after cancellation")
+	assert.Equal(t, 1, windows)
+}
+
+func TestReanalyzeSamples_DoesNotTruncatePerModel(t *testing.T) {
+	t.Parallel()
+
+	// Top-N truncation is the multi-model aggregator's job. A single model's
+	// result set must come back whole, or a species that only one model sees
+	// would be dropped before the grid is assembled.
+	var many []datastore.Results
+	for i := range 25 {
+		many = append(many, datastore.Results{
+			Species:    string(rune('A'+i)) + "_species",
+			Confidence: float32(i) / 100,
+		})
+	}
+	calls := 0
+	predict := stubPredict([][]datastore.Results{many}, &calls)
+
+	scores, _, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*3))
+	require.NoError(t, err)
+	assert.Len(t, scores, 25)
+}
+
+func TestSelectModelsForReanalysis_DefaultSkipsUltrasonicModels(t *testing.T) {
+	t.Parallel()
+
+	infos := []classifier.ModelInfo{
+		{ID: "BirdNET_V2.4", Name: "BirdNET v2.4", Spec: spec3s},
+		{ID: "Perch_V2", Name: "Perch v2", Spec: classifier.ModelSpec{SampleRate: 32000, ClipLength: 5 * time.Second}},
+		// Bat: expects raw 256 kHz audio that saved detection clips never carry.
+		{ID: "Bat_V1", Name: "Bat", Spec: classifier.ModelSpec{SampleRate: 256000, ClipLength: time.Second, RawSampleRate: 256000}},
+		// Degenerate spec: no usable sample rate to decode at.
+		{ID: "Broken", Name: "Broken", Spec: classifier.ModelSpec{SampleRate: 0, ClipLength: time.Second}},
+	}
+
+	got, err := selectModelsForReanalysis(infos, nil)
+	require.NoError(t, err)
+
+	ids := make([]string, 0, len(got))
+	for _, m := range got {
+		ids = append(ids, m.id)
+	}
+	assert.ElementsMatch(t, []string{"BirdNET_V2.4", "Perch_V2"}, ids)
+}
+
+func TestSelectModelsForReanalysis_ExplicitListDedupesAndErrorsOnUnloaded(t *testing.T) {
+	t.Parallel()
+
+	infos := []classifier.ModelInfo{{ID: "BirdNET_V2.4", Name: "BirdNET v2.4", Spec: spec3s}}
+
+	// "birdnet" is the config alias for "BirdNET_V2.4"; asking for both forms must
+	// schedule the model once, not twice.
+	got, err := selectModelsForReanalysis(infos, []string{"birdnet", "BirdNET_V2.4"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "BirdNET_V2.4", got[0].id)
+
+	// An unloaded model is an error, not a silent drop: the caller asked for
+	// something specific and must learn it was not honoured.
+	_, err = selectModelsForReanalysis(infos, []string{"Perch_V2"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Perch_V2")
+}
+
+func TestSelectModelsForReanalysis_ExplicitListAcceptsUltrasonicWhenAsked(t *testing.T) {
+	t.Parallel()
+
+	// The RawSampleRate filter is a DEFAULT, not a hard ban: an explicit request
+	// for a loaded model is honoured. (The correction endpoint refuses to
+	// attribute a correction to one; reanalysis merely shows its scores.)
+	infos := []classifier.ModelInfo{
+		{ID: "Bat_V1", Name: "Bat", Spec: classifier.ModelSpec{SampleRate: 256000, ClipLength: time.Second, RawSampleRate: 256000}},
+	}
+	got, err := selectModelsForReanalysis(infos, []string{"Bat_V1"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+}
+
+func TestReanalyzePrediction_MaxConfidence(t *testing.T) {
+	t.Parallel()
+
+	p := ReanalyzePrediction{ByModel: map[string]float32{"BirdNET_V2.4": 0.30, "Perch_V2": 0.86}}
+	assert.InDelta(t, 0.86, float64(p.MaxConfidence()), 1e-6)
+
+	empty := ReanalyzePrediction{ByModel: map[string]float32{}}
+	assert.Zero(t, empty.MaxConfidence(), "a prediction no model scored ranks last, not panics")
+}

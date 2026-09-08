@@ -29,8 +29,10 @@
   import { loggers } from '$lib/utils/logger';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import SourceBadge from '$lib/desktop/features/dashboard/components/SourceBadge.svelte';
+  import ReanalyzeModal from '$lib/desktop/components/modals/ReanalyzeModal.svelte';
   import {
     Download,
+    Sparkles,
     Camera,
     Clock,
     History,
@@ -105,6 +107,9 @@
   // Use the existing auth store pattern (same as DesktopSidebar)
   let canReview = $derived($hasReviewPermission);
   let clipExtractionEnabled = $derived($isAuthenticated);
+
+  // Reanalyze modal — opened from the metadata bar's "Reanalyze" button.
+  let reanalyzeOpen = $state(false);
   let detection = $state<Detection | null>(null);
   let speciesInfo = $state<SpeciesInfo | null>(null);
   let taxonomyInfo = $state<TaxonomyInfo | null>(null);
@@ -700,6 +705,23 @@
           </a>
         </div>
       {/if}
+
+      <!-- Reanalyze with every loaded model. Gated on the same clipName the
+           Download button is gated on: with no clip on disk there is nothing to
+           re-run inference over. -->
+      {#if det.clipName && $isAuthenticated}
+        <div class="meta-section">
+          <button
+            type="button"
+            class="meta-download"
+            onclick={() => (reanalyzeOpen = true)}
+            aria-label={`Reanalyze this ${displayName} clip with every loaded model`}
+          >
+            <Sparkles class="w-4 h-4" />
+            <span>Reanalyze</span>
+          </button>
+        </div>
+      {/if}
     </div>
   </section>
 {/snippet}
@@ -1014,6 +1036,17 @@
     </section>
   {/if}
 </main>
+
+<!-- Reanalyze + correction. Mounted outside <main> so the modal's backdrop is not
+     clipped by the detail layout. onCorrected re-runs the same fetch the initial
+     load uses, so every derived widget (rarity, history, taxonomy, weather)
+     refreshes with the new species. -->
+<ReanalyzeModal
+  isOpen={reanalyzeOpen}
+  detectionId={detection ? detection.id : null}
+  onClose={() => (reanalyzeOpen = false)}
+  onCorrected={() => fetchDetection()}
+/>
 
 <style>
   /* ===========================================
