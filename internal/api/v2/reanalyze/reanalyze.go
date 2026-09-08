@@ -294,19 +294,16 @@ func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []stri
 		out := make([]loadedModel, 0, len(requestedIDs))
 		seen := make(map[string]struct{}, len(requestedIDs))
 		for _, raw := range requestedIDs {
-			resolvedID := raw
-			if registryID, ok := classifier.ResolveConfigModelID(raw); ok {
-				resolvedID = registryID
-			}
+			resolvedID := resolveModelID(raw)
 			if _, dup := seen[resolvedID]; dup {
 				continue
 			}
-			spec, name, ok := lookupLoadedModel(infos, resolvedID)
+			info, ok := lookupLoadedModel(infos, resolvedID)
 			if !ok {
 				return nil, fmt.Errorf("model %q is not loaded; enable it in Settings -> Models first", raw)
 			}
 			seen[resolvedID] = struct{}{}
-			out = append(out, loadedModel{id: resolvedID, name: name, spec: spec})
+			out = append(out, loadedModel{id: resolvedID, name: info.Name, spec: info.Spec})
 		}
 		return out, nil
 	}
@@ -323,15 +320,26 @@ func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []stri
 	return out, nil
 }
 
-// lookupLoadedModel returns the spec and display name of the model with the given
-// registry ID, or ok=false when it is not in the supplied set.
-func lookupLoadedModel(infos []classifier.ModelInfo, modelID string) (spec classifier.ModelSpec, name string, ok bool) {
+// lookupLoadedModel returns the model with the given registry ID, or ok=false
+// when it is not in the supplied set. Indexed loop so the (large)
+// classifier.ModelInfo is copied exactly once, for the entry actually returned.
+func lookupLoadedModel(infos []classifier.ModelInfo, modelID string) (info classifier.ModelInfo, ok bool) {
 	for i := range infos {
 		if infos[i].ID == modelID {
-			return infos[i].Spec, infos[i].Name, true
+			return infos[i], true
 		}
 	}
-	return classifier.ModelSpec{}, "", false
+	return classifier.ModelInfo{}, false
+}
+
+// resolveModelID maps a user-facing config alias ("birdnet", "perch_v2") onto the
+// orchestrator registry ID ("BirdNET_V2.4", "Perch_V2"), passing through anything
+// that is already a registry ID. Both endpoints accept either spelling.
+func resolveModelID(raw string) string {
+	if registryID, ok := classifier.ResolveConfigModelID(raw); ok {
+		return registryID
+	}
+	return raw
 }
 
 // predictModelFn is the subset of *classifier.Orchestrator that reanalyzeSamples
