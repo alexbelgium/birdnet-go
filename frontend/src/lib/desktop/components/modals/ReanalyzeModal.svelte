@@ -26,8 +26,10 @@
     type ReanalyzePrediction,
   } from '$lib/utils/reanalyzeDetection';
   import { toastActions } from '$lib/stores/toast';
+  import { fetchWithCSRF } from '$lib/utils/api';
+  import { setDetectionVerification } from '$lib/utils/reviewDetection';
   import { loggers } from '$lib/utils/logger';
-  import { Sparkles, AlertCircle, Check } from '@lucide/svelte';
+  import { Sparkles, AlertCircle, Check, ThumbsDown, Trash2 } from '@lucide/svelte';
 
   interface Props {
     isOpen: boolean;
@@ -39,9 +41,16 @@
      * reflects the new label without a page reload. Optional.
      */
     onCorrected?: () => void;
+    /**
+     * Called after the detection is deleted. The parent must navigate away — the
+     * detection the modal was opened from no longer exists. Optional; when
+     * omitted the delete button is not offered, because leaving the user on a
+     * detail page for a deleted record is worse than not offering the action.
+     */
+    onDeleted?: () => void;
   }
 
-  let { isOpen = false, detectionId = null, onClose, onCorrected }: Props = $props();
+  let { isOpen = false, detectionId = null, onClose, onCorrected, onDeleted }: Props = $props();
 
   const logger = loggers.ui;
 
@@ -64,6 +73,16 @@
   let pendingCorrection = $state<ReanalyzePrediction | null>(null);
   let isCorrecting = $state(false);
 
+  // Verdict shortcuts shown when no correction row is selected: the same three
+  // actions the Review tab offers, so an operator who looked at the grid and
+  // decided the original call was right (or wrong, or junk) does not have to
+  // close the modal and go find them. They call the same endpoints the rest of
+  // the app uses — setDetectionVerification for the two review verdicts, and
+  // DELETE /api/v2/detections/:id for the delete.
+  let isVerdictPending = $state(false);
+  // Delete is two-step for the same reason "Use this" is: it is irreversible.
+  let confirmingDelete = $state(false);
+
   /**
    * Auto-run on every open, so results reflect any model the user enabled while
    * the modal was closed.
@@ -80,6 +99,8 @@
       errorMessage = null;
       pendingCorrection = null;
       isCorrecting = false;
+      isVerdictPending = false;
+      confirmingDelete = false;
       runReanalysis();
     });
   });
@@ -182,6 +203,45 @@
     }
   }
 
+  /**
+   * Apply a review verdict to the detection as-is (no species change). Delegates
+   * to the shared helper the detections list and search views use, so the request
+   * shape, the in-flight dedupe and the toasts stay identical across the app.
+   */
+  async function applyVerdict(verified: 'correct' | 'false_positive') {
+    if (!detectionId || isVerdictPending) return;
+    const target = detectionId;
+    const mySeq = requestSeq;
+    isVerdictPending = true;
+    try {
+      if (await setDetectionVerification(target, verified)) {
+        if (mySeq !== requestSeq) return; // modal moved on; the verdict still applied
+        onClose();
+        onCorrected?.();
+      }
+    } finally {
+      if (mySeq === requestSeq) isVerdictPending = false;
+    }
+  }
+
+  async function confirmDelete() {
+    if (!detectionId || isVerdictPending) return;
+    const target = detectionId;
+    isVerdictPending = true;
+    try {
+      await fetchWithCSRF(`/api/v2/detections/${target}`, { method: 'DELETE' });
+      toastActions.success('Detection deleted.');
+      onClose();
+      onDeleted?.();
+    } catch (err) {
+      errorMessage = err instanceof Error ? err.message : String(err);
+      logger.error('Delete failed', err, { component: 'ReanalyzeModal', detectionId: target });
+    } finally {
+      isVerdictPending = false;
+      confirmingDelete = false;
+    }
+  }
+
   function formatConfidencePercent(c: number): string {
     return `${(c * 100).toFixed(1)}%`;
   }
@@ -237,8 +297,13 @@
               <thead>
                 <tr>
                   <th class="text-left">Species</th>
+                  <!-- Model names wrap onto a second line rather than running
+                       into the neighbouring column. whitespace-nowrap made a long
+                       name overflow its cell and overlap the next header; a wrap
+                       plus a floor on the column width keeps each name inside its
+                       own column and the header row readable. -->
                   {#each result.modelsRun as m (m.id)}
-                    <th class="text-right whitespace-nowrap" title={m.name}>{m.name}</th>
+                    <th class="model-col text-right align-bottom" title={m.name}>{m.name}</th>
                   {/each}
                   <th></th>
                 </tr>
@@ -300,6 +365,75 @@
       </div>
     {/if}
 
+    <!-- Verdict shortcuts. Shown only while no correction row is selected: once
+         the user has picked a species the pending correction is the action on
+         screen, and offering three competing verdicts beside it invites a
+         mis-click. Mirrors the Review tab's actions. -->
+    {#if result && !isRunning && !pendingCorrection}
+      {#if confirmingDelete}
+        <div class="rounded-md border border-error/40 bg-error/10 p-3 text-sm">
+          <div class="mb-2 font-medium">Delete this detection?</div>
+          <p class="mb-3 text-base-content/70">
+            The detection and its audio clip are removed permanently. This cannot be undone.
+          </p>
+          <div class="flex justify-end gap-2">
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost"
+              onclick={() => (confirmingDelete = false)}
+              disabled={isVerdictPending}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-error"
+              onclick={confirmDelete}
+              disabled={isVerdictPending}
+            >
+              <Trash2 class="h-3.5 w-3.5" />
+              {isVerdictPending ? 'Deleting…' : 'Delete permanently'}
+            </button>
+          </div>
+        </div>
+      {:else}
+        <div class="flex flex-wrap justify-end gap-2 border-t border-base-300 pt-3">
+          <button
+            type="button"
+            class="btn btn-xs btn-ghost"
+            onclick={() => applyVerdict('correct')}
+            disabled={isVerdictPending}
+            aria-label="Mark this detection as confirmed"
+          >
+            <Check class="h-3.5 w-3.5" />
+            Confirmed
+          </button>
+          <button
+            type="button"
+            class="btn btn-xs btn-ghost"
+            onclick={() => applyVerdict('false_positive')}
+            disabled={isVerdictPending}
+            aria-label="Mark this detection as a false positive"
+          >
+            <ThumbsDown class="h-3.5 w-3.5" />
+            False positive
+          </button>
+          {#if onDeleted}
+            <button
+              type="button"
+              class="btn btn-xs btn-ghost text-error"
+              onclick={() => (confirmingDelete = true)}
+              disabled={isVerdictPending}
+              aria-label="Delete this detection"
+            >
+              <Trash2 class="h-3.5 w-3.5" />
+              Delete
+            </button>
+          {/if}
+        </div>
+      {/if}
+    {/if}
+
     <!-- Inline confirmation. Appears below the table once a row is chosen; the
          second click is what makes an accidental correction hard. -->
     {#if pendingCorrection}
@@ -335,3 +469,15 @@
     {/if}
   </div>
 </Modal>
+
+<style>
+  /* Model header cells wrap instead of overflowing into the next column. The
+     min-width stops a long single word from squeezing the column to nothing and
+     the max-width stops one long name from starving the species column. */
+  .model-col {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 5.5rem;
+    max-width: 9rem;
+  }
+</style>

@@ -27,6 +27,7 @@
   import { hasReviewPermission, isAuthenticated } from '$lib/utils/auth';
   import { formatLocalDateTime } from '$lib/utils/date';
   import { buildAppUrl, getCurrentPathWithQuery } from '$lib/utils/urlHelpers';
+  import { navigation } from '$lib/stores/navigation.svelte';
   import { loggers } from '$lib/utils/logger';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import SourceBadge from '$lib/desktop/features/dashboard/components/SourceBadge.svelte';
@@ -1068,6 +1069,7 @@
   detectionId={detection ? detection.id : null}
   onClose={() => (reanalyzeOpen = false)}
   onCorrected={() => fetchDetection()}
+  onDeleted={() => navigation.navigate('/ui/detections')}
 />
 
 <style>
