@@ -166,8 +166,8 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	}
 
 	// The clip lookup is also the existence check: GetNoteClipPath returns
-	// ErrDetectionNotFound for an unknown id, which resolveClipPath maps to a 404.
-	// A separate DS.Get would be a second round trip proving the same thing.
+	// ErrDetectionNotFound for an unknown id, which openClip maps to a 404. A
+	// separate DS.Get would be a second round trip proving the same thing.
 	clipFile, relClipPath, err := c.openClip(ctx, idStr)
 	if err != nil {
 		return err
