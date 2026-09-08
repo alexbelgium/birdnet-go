@@ -1,7 +1,6 @@
 package reanalyze
 
 import (
-	"context"
 	"encoding/binary"
 	"math"
 	"os"
@@ -18,7 +17,7 @@ func TestDecodeClipMonoPCM16_RejectsEmptyFfmpegPath(t *testing.T) {
 
 	// An install with no ffmpeg configured must fail with a clear configuration
 	// error, not exec an empty path and surface a confusing ENOENT.
-	_, err := decodeClipMonoPCM16(context.Background(), "", "/tmp/whatever.wav", 48000, 60)
+	_, err := decodeClipMonoPCM16(t.Context(), "", "/tmp/whatever.wav", 48000, 60)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ffmpeg path not configured")
 }
@@ -26,10 +25,10 @@ func TestDecodeClipMonoPCM16_RejectsEmptyFfmpegPath(t *testing.T) {
 func TestDecodeClipMonoPCM16_RejectsInvalidParameters(t *testing.T) {
 	t.Parallel()
 
-	_, err := decodeClipMonoPCM16(context.Background(), "ffmpeg", "clip.wav", 0, 60)
+	_, err := decodeClipMonoPCM16(t.Context(), "ffmpeg", "clip.wav", 0, 60)
 	require.Error(t, err, "a zero sample rate would make the window math divide by zero")
 
-	_, err = decodeClipMonoPCM16(context.Background(), "ffmpeg", "clip.wav", 48000, 0)
+	_, err = decodeClipMonoPCM16(t.Context(), "ffmpeg", "clip.wav", 48000, 0)
 	require.Error(t, err, "a zero duration cap would remove the bound on decode cost")
 }
 
@@ -77,7 +76,7 @@ func TestDecodeClipMonoPCM16_Roundtrip(t *testing.T) {
 
 	// Decode at a DIFFERENT rate than the source so the resample path is
 	// exercised, not just a passthrough copy.
-	samples, err := decodeClipMonoPCM16(context.Background(), ffmpegPath, clip, 32000, 60)
+	samples, err := decodeClipMonoPCM16(t.Context(), ffmpegPath, clip, 32000, 60)
 	require.NoError(t, err)
 
 	// 2 s at 32 kHz. ffmpeg's resampler can differ by a few frames at the edges,
@@ -101,7 +100,7 @@ func TestDecodeClipMonoPCM16_MissingFileIsAnError(t *testing.T) {
 		t.Skip("ffmpeg not in PATH; skipping missing-file decode")
 	}
 
-	_, err = decodeClipMonoPCM16(context.Background(), ffmpegPath,
+	_, err = decodeClipMonoPCM16(t.Context(), ffmpegPath,
 		filepath.Join(t.TempDir(), "does-not-exist.wav"), 48000, 60)
 	require.Error(t, err)
 }
@@ -119,7 +118,7 @@ func TestDecodeClipMonoPCM16_HonorsDurationCap(t *testing.T) {
 
 	// -t 2 must truncate a 10 s clip to ~2 s of samples; without the cap an
 	// oversized clip would decide how much inference the request costs.
-	samples, err := decodeClipMonoPCM16(context.Background(), ffmpegPath, clip, 48000, 2)
+	samples, err := decodeClipMonoPCM16(t.Context(), ffmpegPath, clip, 48000, 2)
 	require.NoError(t, err)
 	assert.InDelta(t, 96000, len(samples), 4096)
 }

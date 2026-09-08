@@ -49,7 +49,7 @@ func TestReanalyzeSamples_KeepsMaxConfidenceAcrossWindows(t *testing.T) {
 		{{Species: "Ficedula hypoleuca_Pied Flycatcher", Confidence: 0.55}},
 	}, &calls)
 
-	scores, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, samples)
+	scores, windows, err := reanalyzeSamples(t.Context(), predict, "BirdNET_V2.4", spec3s, samples)
 	require.NoError(t, err)
 	assert.Equal(t, 3, windows, "6s of audio at 3s/50%% overlap yields three whole windows")
 	assert.Equal(t, 3, calls)
@@ -68,7 +68,7 @@ func TestReanalyzeSamples_PadsShortClipToOneWindow(t *testing.T) {
 		{{Species: "Parus major_Great Tit", Confidence: 0.7}},
 	}, &calls)
 
-	scores, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, samples)
+	scores, windows, err := reanalyzeSamples(t.Context(), predict, "BirdNET_V2.4", spec3s, samples)
 	require.NoError(t, err)
 	assert.Equal(t, 1, windows)
 	assert.InDelta(t, 0.7, float64(scores["Parus major_Great Tit"]), 1e-6)
@@ -82,7 +82,7 @@ func TestReanalyzeSamples_PropagatesPredictError(t *testing.T) {
 		return nil, wantErr
 	}
 
-	_, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*6))
+	_, windows, err := reanalyzeSamples(t.Context(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*6))
 	require.ErrorIs(t, err, wantErr, "an inference failure must fail the request, not yield partial results")
 	assert.Equal(t, 0, windows)
 }
@@ -94,7 +94,7 @@ func TestReanalyzeSamples_RejectsEmptySamples(t *testing.T) {
 		t.Fatal("predict must not be called for an empty sample stream")
 		return nil, nil
 	}
-	_, _, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, nil)
+	_, _, err := reanalyzeSamples(t.Context(), predict, "BirdNET_V2.4", spec3s, nil)
 	require.Error(t, err)
 }
 
@@ -105,7 +105,7 @@ func TestReanalyzeSamples_RejectsZeroClipLength(t *testing.T) {
 		t.Fatal("predict must not be called for a degenerate model spec")
 		return nil, nil
 	}
-	_, _, err := reanalyzeSamples(context.Background(), predict, "Broken",
+	_, _, err := reanalyzeSamples(t.Context(), predict, "Broken",
 		classifier.ModelSpec{SampleRate: 48000, ClipLength: 0}, make([]float32, 48000))
 	require.Error(t, err)
 }
@@ -115,7 +115,7 @@ func TestReanalyzeSamples_StopsOnCanceledContext(t *testing.T) {
 
 	// Cancel after the first window; the walk must stop rather than burn
 	// inference on the remaining windows of an abandoned request.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	calls := 0
 	predict := func(_ context.Context, _ string, _ [][]float32) ([]datastore.Results, error) {
 		calls++
@@ -135,7 +135,7 @@ func TestReanalyzeSamples_DoesNotTruncatePerModel(t *testing.T) {
 	// Top-N truncation is the multi-model aggregator's job. A single model's
 	// result set must come back whole, or a species that only one model sees
 	// would be dropped before the grid is assembled.
-	var many []datastore.Results
+	many := make([]datastore.Results, 0, 25)
 	for i := range 25 {
 		many = append(many, datastore.Results{
 			Species:    string(rune('A'+i)) + "_species",
@@ -145,7 +145,7 @@ func TestReanalyzeSamples_DoesNotTruncatePerModel(t *testing.T) {
 	calls := 0
 	predict := stubPredict([][]datastore.Results{many}, &calls)
 
-	scores, _, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*3))
+	scores, _, err := reanalyzeSamples(t.Context(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*3))
 	require.NoError(t, err)
 	assert.Len(t, scores, 25)
 }
@@ -317,7 +317,7 @@ func TestReanalyzeSamples_AnalyzesTheTrailingPartialWindow(t *testing.T) {
 		return []datastore.Results{{Species: "Ficedula hypoleuca_Pied Flycatcher", Confidence: 0.95}}, nil
 	}
 
-	scores, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, samples)
+	scores, windows, err := reanalyzeSamples(t.Context(), predict, "BirdNET_V2.4", spec3s, samples)
 	require.NoError(t, err)
 	assert.Equal(t, 2, windows, "one strided window plus one anchored at the clip's end")
 	assert.Contains(t, scores, "Ficedula hypoleuca_Pied Flycatcher")
@@ -332,7 +332,7 @@ func TestReanalyzeSamples_NoExtraWindowWhenTheClipAlignsToTheStride(t *testing.T
 	// inference cost for nothing.
 	calls := 0
 	predict := stubPredict(nil, &calls)
-	_, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*6))
+	_, windows, err := reanalyzeSamples(t.Context(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*6))
 	require.NoError(t, err)
 	assert.Equal(t, 3, windows)
 	assert.Equal(t, 3, calls)
