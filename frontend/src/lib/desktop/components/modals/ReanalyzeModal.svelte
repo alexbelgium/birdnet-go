@@ -91,9 +91,11 @@
     isRunning = true;
     errorMessage = null;
     try {
+      // If a request for this detection is already running (the user closed and
+      // reopened the modal), the client hands back that same promise, so this
+      // call resolves with its result rather than with nothing.
       const res = await reanalyzeDetection(detectionId);
       if (mySeq !== requestSeq) return; // superseded; discard
-      if (res === null) return; // helper dropped a duplicate; the original call populates result
       result = res;
     } catch (err) {
       if (mySeq !== requestSeq) return;
@@ -231,14 +233,20 @@
                 </tr>
               </thead>
               <tbody>
-                {#each result.predictions as pred (pred.scientificName)}
+                {#each result.predictions as pred (pred.scientificName || pred.commonName)}
                   <tr>
                     <td class="text-sm">
+                      <!-- Either half can be absent: a bare-scientific model row
+                           has no common name, and a non-binomial sound class has
+                           no scientific name. Render only what is actually there
+                           rather than an empty second line. -->
                       {#if pred.commonName}
                         <div class="font-medium">{pred.commonName}</div>
-                        <div class="font-mono text-xs italic text-base-content/60">
-                          {pred.scientificName}
-                        </div>
+                        {#if pred.scientificName}
+                          <div class="font-mono text-xs italic text-base-content/60">
+                            {pred.scientificName}
+                          </div>
+                        {/if}
                       {:else}
                         <div class="font-mono">{pred.scientificName}</div>
                       {/if}
@@ -254,16 +262,22 @@
                       </td>
                     {/each}
                     <td class="text-right">
-                      <button
-                        type="button"
-                        class="btn btn-xs btn-ghost"
-                        onclick={() => startCorrection(pred)}
-                        disabled={isCorrecting}
-                        aria-label={`Use ${pred.commonName || pred.scientificName} as the species for this detection`}
-                      >
-                        <Check class="h-3.5 w-3.5" />
-                        Use this
-                      </button>
+                      <!-- A correction is keyed on the scientific name, so a row
+                           without one (a sound class, not a species) cannot be
+                           applied. Omit the button rather than offering one that
+                           can only fail. -->
+                      {#if pred.scientificName}
+                        <button
+                          type="button"
+                          class="btn btn-xs btn-ghost"
+                          onclick={() => startCorrection(pred)}
+                          disabled={isCorrecting}
+                          aria-label={`Use ${pred.commonName || pred.scientificName} as the species for this detection`}
+                        >
+                          <Check class="h-3.5 w-3.5" />
+                          Use this
+                        </button>
+                      {/if}
                     </td>
                   </tr>
                 {/each}

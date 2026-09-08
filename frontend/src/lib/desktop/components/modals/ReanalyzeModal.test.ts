@@ -146,6 +146,25 @@ describe('ReanalyzeModal', () => {
     expect(screen.queryByText('Running inference…')).not.toBeInTheDocument();
   });
 
+  it('renders a sound class with no scientific name and offers no correction for it', async () => {
+    // Perch emits non-species sound classes. They have a common name and no
+    // scientific name, and a correction is keyed on the scientific name — so the
+    // row must render without an empty second line and without a button that
+    // could only fail.
+    reanalyzeDetection.mockResolvedValue({
+      ...twoModelResult,
+      predictions: [
+        { scientificName: '', commonName: 'engine idling nearby', byModel: { Perch_V2: 0.42 } },
+      ],
+    });
+
+    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+
+    await waitFor(() => expect(screen.getByText('engine idling nearby')).toBeInTheDocument());
+    expect(screen.getByText('42.0%')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Use .* as the species/ })).not.toBeInTheDocument();
+  });
+
   it('reports an empty result set rather than rendering a blank table', async () => {
     reanalyzeDetection.mockResolvedValue({ ...twoModelResult, predictions: [] });
 
@@ -158,14 +177,26 @@ describe('ReanalyzeModal', () => {
     );
   });
 
-  it('ignores a null result from the in-flight dedupe without sticking the spinner', async () => {
-    // The client helper returns null when a request for the same detection is
-    // already in flight. That must leave the modal idle, not spinning forever.
-    reanalyzeDetection.mockResolvedValue(null);
+  it('renders the result of a request that was already in flight when it reopened', async () => {
+    // Close-and-reopen: the client hands the second caller the SAME promise as
+    // the still-running first request, so the reopened modal must fill in from it
+    // rather than sitting empty with no request left to populate it.
+    let release!: (v: unknown) => void;
+    reanalyzeDetection.mockReturnValue(
+      new Promise(resolve => {
+        release = resolve;
+      })
+    );
 
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+    const { rerender } = render(ReanalyzeModal, {
+      props: { isOpen: true, detectionId: 7, onClose: vi.fn() },
+    });
+    await rerender({ isOpen: false, detectionId: 7, onClose: vi.fn() });
+    await rerender({ isOpen: true, detectionId: 7, onClose: vi.fn() });
 
-    await waitFor(() => expect(screen.queryByText('Running inference…')).not.toBeInTheDocument());
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    release(twoModelResult);
+
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+    expect(screen.queryByText('Running inference…')).not.toBeInTheDocument();
   });
 });

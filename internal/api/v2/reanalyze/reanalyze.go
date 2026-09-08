@@ -36,6 +36,19 @@ import (
 // package, so telemetry attributes reanalysis failures to one place.
 const errComponent = "api/v2/reanalyze"
 
+// reanalysisSlot admits exactly one reanalysis at a time, process-wide.
+//
+// Not a rate limit and not defensive padding: it matches the endpoint's
+// concurrency to the hardware's. classifier.Orchestrator serialises inference
+// across every model behind one mutex, so a second concurrent reanalysis cannot
+// run faster — it can only sit on a decoded PCM buffer (up to 6 MiB per sample
+// rate) and a queued goroutine while it waits, on hosts that are frequently a
+// Raspberry Pi also running the realtime pipeline. A non-blocking claim turns
+// that into an immediate 429 the caller can act on, instead of an invisible
+// queue. The frontend's own in-flight dedupe is per-tab and cannot substitute:
+// two browsers, or curl, bypass it entirely.
+var reanalysisSlot = make(chan struct{}, 1)
+
 const (
 	// decodeMaxDurationSec caps the input duration fed to ffmpeg per request.
 	// 60s comfortably covers the default extended capture buffer plus pre/post
@@ -127,6 +140,18 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 		return c.HandleError(ctx, err, "Invalid request body", http.StatusBadRequest)
 	}
 
+	// Claim the single reanalysis slot before doing any work. Released in the
+	// deferred receive, including on every error path below.
+	select {
+	case reanalysisSlot <- struct{}{}:
+		defer func() { <-reanalysisSlot }()
+	default:
+		return c.HandleError(ctx,
+			fmt.Errorf("a reanalysis is already running"),
+			"Another reanalysis is already running; try again when it finishes",
+			http.StatusTooManyRequests)
+	}
+
 	// The clip lookup is also the existence check: GetNoteClipPath returns
 	// ErrDetectionNotFound for an unknown id, which resolveClipPath maps to a 404.
 	// A separate DS.Get would be a second round trip proving the same thing.
@@ -161,10 +186,13 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 
 	ffmpegPath := c.CurrentSettings().Realtime.Audio.FfmpegPath
 
-	// Accumulator: raw model label -> per-model max confidence. Keying on the raw
-	// label until aggregation keeps duplicates across windows of one model
-	// merging correctly before SplitSpeciesName is applied.
-	byLabelModel := make(map[string]map[string]float32)
+	// Accumulator, keyed by SCIENTIFIC NAME rather than by raw model label. This
+	// is what makes the grid a comparison: BirdNET emits
+	// "Ficedula hypoleuca_Pied Flycatcher" while Perch emits bare
+	// "Ficedula hypoleuca", so keying on the raw label puts the two models'
+	// verdicts on the same bird in two separate rows that never line up — which
+	// is precisely the agreement the feature exists to show.
+	agg := make(map[string]*speciesAggregate)
 	modelInfos := make([]ReanalyzeModelInfo, 0, len(chosen))
 	clipDurationSec := 0.0
 
@@ -209,14 +237,7 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 				WindowCount: windowCount,
 			})
 			for label, conf := range scores {
-				perModel, ok := byLabelModel[label]
-				if !ok {
-					perModel = make(map[string]float32, len(chosen))
-					byLabelModel[label] = perModel
-				}
-				if existing, seen := perModel[m.id]; !seen || conf > existing {
-					perModel[m.id] = conf
-				}
+				addSpeciesScore(agg, label, m.id, conf, len(chosen))
 			}
 		}
 	}
@@ -225,24 +246,16 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	// rate, so the order models are appended in is not stable across requests.
 	sort.Slice(modelInfos, func(i, j int) bool { return modelInfos[i].ID < modelInfos[j].ID })
 
-	// SplitSpeciesName is applied here so the frontend gets common name primary +
-	// scientific secondary, and the resolver fills locale-specific common names
-	// for bare-scientific labels (Perch v2's output shape).
-	predictions := make([]ReanalyzePrediction, 0, len(byLabelModel))
-	for label, perModel := range byLabelModel {
-		scientific, common := classifier.SplitSpeciesName(label)
-		if scientific == "" {
-			// SplitSpeciesName could not parse a scientific name out of the raw
-			// label. Keep the label visible rather than emitting a blank row.
-			scientific = label
-			common = ""
-		}
+	predictions := make([]ReanalyzePrediction, 0, len(agg))
+	for _, a := range agg {
 		predictions = append(predictions, ReanalyzePrediction{
-			ScientificName: scientific,
-			CommonName:     common,
-			ByModel:        perModel,
+			ScientificName: a.scientific,
+			CommonName:     a.common,
+			ByModel:        a.byModel,
 		})
 	}
+	// Fill in a locale-specific common name for anything only a bare-scientific
+	// model scored (Perch v2's output shape), so every row reads the same way.
 	applyLocalizedCommonNames(bn, predictions, c.CurrentLocale())
 
 	sort.Slice(predictions, func(i, j int) bool {
@@ -263,6 +276,49 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 		ModelsRun:       modelInfos,
 		Predictions:     predictions,
 	})
+}
+
+// speciesAggregate collects every model's verdict on one species across the whole
+// clip: the best confidence each model produced, plus the best names seen for it.
+type speciesAggregate struct {
+	scientific string
+	common     string
+	byModel    map[string]float32
+}
+
+// addSpeciesScore folds one model's score for one raw label into the aggregate,
+// merging on the scientific name so different label spellings for the same bird
+// land in one row. modelHint sizes the per-species map to the number of models
+// being run, which is its final size in the common case.
+func addSpeciesScore(agg map[string]*speciesAggregate, rawLabel, modelID string, conf float32, modelHint int) {
+	// SplitSpeciesName is the same splitter the realtime display path uses, so a
+	// label renders here exactly as it does everywhere else in the UI. It returns
+	// an empty scientific name for a multi-word non-binomial label, putting the
+	// whole thing in common; key on whichever half is populated so such a row
+	// still merges with itself across windows and models instead of collapsing
+	// every one of them onto the "" key.
+	scientific, common := classifier.SplitSpeciesName(rawLabel)
+	key := scientific
+	if key == "" {
+		key = common
+	}
+	if key == "" {
+		key = rawLabel
+	}
+
+	a, ok := agg[key]
+	if !ok {
+		a = &speciesAggregate{scientific: scientific, byModel: make(map[string]float32, modelHint)}
+		agg[key] = a
+	}
+	// First model to supply a common name wins; a model that emits bare
+	// scientific names must not blank out a name another model already gave.
+	if a.common == "" {
+		a.common = common
+	}
+	if existing, seen := a.byModel[modelID]; !seen || conf > existing {
+		a.byModel[modelID] = conf
+	}
 }
 
 // loadedModel carries the registry ID, display name, and spec of a model that is
@@ -396,24 +452,43 @@ func reanalyzeSamples(
 
 	best := make(map[string]float32)
 	windowCount := 0
-	for offset := 0; offset+clipLen <= len(samples); offset += stride {
+	runWindow := func(offset int) error {
 		// Stop as soon as the client goes away. PredictModel blocks on a
 		// non-cancellable process-wide mutex, so ctx is not observed inside a
 		// single window; checking between windows bounds the wasted inference on
 		// an abandoned request to one window instead of the whole clip.
 		if err := ctx.Err(); err != nil {
-			return nil, windowCount, err
+			return err
 		}
-		window := samples[offset : offset+clipLen]
-		results, err := predict(ctx, modelID, [][]float32{window})
+		results, err := predict(ctx, modelID, [][]float32{samples[offset : offset+clipLen]})
 		if err != nil {
-			return nil, windowCount, err
+			return err
 		}
 		windowCount++
 		for _, r := range results {
 			if existing, ok := best[r.Species]; !ok || r.Confidence > existing {
 				best[r.Species] = r.Confidence
 			}
+		}
+		return nil
+	}
+
+	covered := 0
+	for offset := 0; offset+clipLen <= len(samples); offset += stride {
+		if err := runWindow(offset); err != nil {
+			return nil, windowCount, err
+		}
+		covered = offset + clipLen
+	}
+	// The strided walk leaves a tail unanalyzed whenever the clip length is not a
+	// whole number of strides past one window — a 4 s clip through a 3 s model
+	// runs only offset 0, so its final second is never looked at. Close that with
+	// one window anchored at the END of the clip. It overlaps the previous window,
+	// which costs nothing: aggregation is max-per-species, so a double look can
+	// only confirm a score, never inflate one.
+	if covered < len(samples) {
+		if err := runWindow(len(samples) - clipLen); err != nil {
+			return nil, windowCount, err
 		}
 	}
 	return best, windowCount, nil

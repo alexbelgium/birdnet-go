@@ -55,7 +55,26 @@ export interface CorrectSpeciesResult {
   verified: string;
 }
 
-const inFlightReanalyze = new Set<number>();
+/**
+ * In-flight reanalyses, keyed by detection id, holding the PROMISE rather than
+ * just a marker. A second caller for the same detection joins the running
+ * request instead of being told "no".
+ *
+ * That distinction is the whole point: a marker-and-null design loses the result
+ * when the user closes and reopens the modal while a request is still running —
+ * the reopened modal gets null, stops its spinner, and sits empty forever
+ * because the original response is discarded as superseded. Sharing the promise
+ * is safe here because reanalysis is a read-only, argument-independent query for
+ * a given detection.
+ */
+const inFlightReanalyze = new Map<number, Promise<ReanalyzeResult>>();
+
+/**
+ * In-flight corrections, as a plain marker set. Corrections are NOT shareable
+ * the way reanalyses are: two requests for the same detection may assert
+ * different species, so handing the second caller the first one's result would
+ * report a correction that never happened. Duplicates are dropped instead.
+ */
 const inFlightCorrection = new Set<number>();
 
 /**
@@ -72,33 +91,39 @@ const REANALYZE_TIMEOUT_MS = 120_000;
  * compatible classifier by default; pass `modelIds` to restrict. The server does
  * not persist anything returned here — callers display it transiently.
  *
- * Duplicate requests for the same detection are dropped while one is in flight,
- * so a double-click cannot spend inference twice. Returns `null` in that case.
+ * A second call for a detection that is already being reanalyzed joins the
+ * running request and resolves with the same result, so a double-click (or a
+ * close-and-reopen of the modal) never spends inference twice and never loses
+ * the answer. The server enforces its own single-slot admission control on top;
+ * this only keeps one client from racing itself.
  */
-export async function reanalyzeDetection(
+export function reanalyzeDetection(
   detectionId: number,
   modelIds?: string[]
-): Promise<ReanalyzeResult | null> {
-  if (inFlightReanalyze.has(detectionId)) return null;
+): Promise<ReanalyzeResult> {
+  const existing = inFlightReanalyze.get(detectionId);
+  if (existing) return existing;
 
-  inFlightReanalyze.add(detectionId);
-  try {
-    return await fetchWithCSRF<ReanalyzeResult>(`/api/v2/detections/${detectionId}/reanalyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ modelIds: modelIds ?? [] }),
-      timeout: REANALYZE_TIMEOUT_MS,
+  const request = fetchWithCSRF<ReanalyzeResult>(`/api/v2/detections/${detectionId}/reanalyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelIds: modelIds ?? [] }),
+    timeout: REANALYZE_TIMEOUT_MS,
+  })
+    .catch((err: unknown) => {
+      logger.error('Reanalyze request failed:', err, {
+        component: 'reanalyzeDetection',
+        detectionId,
+        modelIds,
+      });
+      throw err;
+    })
+    .finally(() => {
+      inFlightReanalyze.delete(detectionId);
     });
-  } catch (err) {
-    logger.error('Reanalyze request failed:', err, {
-      component: 'reanalyzeDetection',
-      detectionId,
-      modelIds,
-    });
-    throw err;
-  } finally {
-    inFlightReanalyze.delete(detectionId);
-  }
+
+  inFlightReanalyze.set(detectionId, request);
+  return request;
 }
 
 /**

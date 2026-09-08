@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
@@ -243,4 +246,136 @@ func TestIsClipNotFoundErr_IncludesDetectionAndClipCases(t *testing.T) {
 	assert.True(t, isClipNotFoundErr(repository.ErrNoClipPath))
 	assert.True(t, isClipNotFoundErr(repository.ErrDetectionNotFound))
 	assert.False(t, isClipNotFoundErr(errors.New("permission denied")))
+}
+
+func TestAddSpeciesScore_MergesDifferentLabelSpellingsForOneSpecies(t *testing.T) {
+	t.Parallel()
+
+	// This is the whole point of the grid. BirdNET emits
+	// "Ficedula hypoleuca_Pied Flycatcher"; Perch emits bare "Ficedula hypoleuca".
+	// Keyed on the raw label they become two rows and never line up, so the user
+	// can never see that both classifiers agree.
+	agg := make(map[string]*speciesAggregate)
+	addSpeciesScore(agg, "Ficedula hypoleuca_Pied Flycatcher", "BirdNET_V2.4", 0.998, 2)
+	addSpeciesScore(agg, "Ficedula hypoleuca", "Perch_V2", 0.869, 2)
+
+	require.Len(t, agg, 1, "both spellings must collapse into one species row")
+	a := agg["Ficedula hypoleuca"]
+	require.NotNil(t, a)
+	assert.Equal(t, "Ficedula hypoleuca", a.scientific)
+	// The model that supplied a common name wins; the bare-scientific model must
+	// not blank it out.
+	assert.Equal(t, "Pied Flycatcher", a.common)
+	assert.InDelta(t, 0.998, float64(a.byModel["BirdNET_V2.4"]), 1e-6)
+	assert.InDelta(t, 0.869, float64(a.byModel["Perch_V2"]), 1e-6)
+}
+
+func TestAddSpeciesScore_KeepsBestPerModelAndUnparseableLabels(t *testing.T) {
+	t.Parallel()
+
+	agg := make(map[string]*speciesAggregate)
+	// Same model, two windows: the peak survives.
+	addSpeciesScore(agg, "Parus major_Great Tit", "BirdNET_V2.4", 0.40, 1)
+	addSpeciesScore(agg, "Parus major_Great Tit", "BirdNET_V2.4", 0.91, 1)
+	assert.InDelta(t, 0.91, float64(agg["Parus major"].byModel["BirdNET_V2.4"]), 1e-6)
+
+	// An underscore-separated Perch sound class splits the same way it does
+	// everywhere else in the UI (SplitSpeciesName is the shared splitter), so the
+	// grid stays consistent with the detection views rather than inventing its own
+	// rendering for these labels.
+	addSpeciesScore(agg, "power_tool", "Perch_V2", 0.5, 1)
+	addSpeciesScore(agg, "power_tool", "Perch_V2", 0.7, 1)
+	require.Contains(t, agg, "power")
+	assert.InDelta(t, 0.7, float64(agg["power"].byModel["Perch_V2"]), 1e-6)
+
+	// A multi-word non-binomial label has no scientific half at all. It must key
+	// on its common name, not on "" — otherwise every such label in the clip
+	// collapses onto one row and their scores overwrite each other.
+	addSpeciesScore(agg, "engine idling nearby", "Perch_V2", 0.3, 1)
+	addSpeciesScore(agg, "distant human speech", "Perch_V2", 0.4, 1)
+	require.Contains(t, agg, "engine idling nearby")
+	require.Contains(t, agg, "distant human speech")
+	assert.NotContains(t, agg, "")
+	assert.Empty(t, agg["engine idling nearby"].scientific)
+	assert.Equal(t, "engine idling nearby", agg["engine idling nearby"].common)
+}
+
+func TestReanalyzeSamples_AnalyzesTheTrailingPartialWindow(t *testing.T) {
+	t.Parallel()
+
+	// 4 s of audio through a 3 s model at 1.5 s stride: the strided walk runs only
+	// offset 0 (offset 1.5 would need 4.5 s), so seconds 3-4 go unanalyzed. A bird
+	// calling only in that tail is exactly the case a second opinion is for.
+	samples := make([]float32, 48000*4)
+	var offsetsSeen int
+	predict := func(_ context.Context, _ string, window [][]float32) ([]datastore.Results, error) {
+		offsetsSeen++
+		if offsetsSeen == 1 {
+			return []datastore.Results{{Species: "Parus major_Great Tit", Confidence: 0.2}}, nil
+		}
+		// The end-anchored window is where the interesting call lives.
+		return []datastore.Results{{Species: "Ficedula hypoleuca_Pied Flycatcher", Confidence: 0.95}}, nil
+	}
+
+	scores, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, samples)
+	require.NoError(t, err)
+	assert.Equal(t, 2, windows, "one strided window plus one anchored at the clip's end")
+	assert.Contains(t, scores, "Ficedula hypoleuca_Pied Flycatcher")
+	assert.InDelta(t, 0.95, float64(scores["Ficedula hypoleuca_Pied Flycatcher"]), 1e-6)
+}
+
+func TestReanalyzeSamples_NoExtraWindowWhenTheClipAlignsToTheStride(t *testing.T) {
+	t.Parallel()
+
+	// 6 s at 3 s/1.5 s stride ends exactly on a window boundary, so the tail fix
+	// must not add a redundant fourth pass — that would be a third of the
+	// inference cost for nothing.
+	calls := 0
+	predict := stubPredict(nil, &calls)
+	_, windows, err := reanalyzeSamples(context.Background(), predict, "BirdNET_V2.4", spec3s, make([]float32, 48000*6))
+	require.NoError(t, err)
+	assert.Equal(t, 3, windows)
+	assert.Equal(t, 3, calls)
+}
+
+func TestReanalyzeDetection_RefusesWhenAnotherReanalysisHoldsTheSlot(t *testing.T) {
+	// Not parallel: it takes the process-wide admission slot.
+	core := apitest.NewCore(t)
+	h := New(core)
+
+	// Simulate a reanalysis already in progress.
+	reanalysisSlot <- struct{}{}
+	defer func() { <-reanalysisSlot }()
+
+	rec := httptest.NewRecorder()
+	ctx := core.Echo.NewContext(httptest.NewRequest(http.MethodPost, "/", http.NoBody), rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+
+	require.NoError(t, h.ReanalyzeDetection(ctx))
+	// 429, not a queued request: inference is globally serialised anyway, so a
+	// second concurrent run would only sit on a multi-MiB PCM buffer while it
+	// waits. The strict datastore mock also asserts no DB call happened.
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
+
+func TestReanalyzeDetection_ReleasesTheSlotOnAnErrorPath(t *testing.T) {
+	// Not parallel: it takes the process-wide admission slot.
+	core := apitest.NewCore(t)
+	h := New(core)
+
+	rec := httptest.NewRecorder()
+	ctx := core.Echo.NewContext(httptest.NewRequest(http.MethodPost, "/", http.NoBody), rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("not-a-number")
+	require.NoError(t, h.ReanalyzeDetection(ctx))
+
+	// The slot must be free again: a request that failed validation must not
+	// wedge the endpoint shut for the lifetime of the process.
+	select {
+	case reanalysisSlot <- struct{}{}:
+		<-reanalysisSlot
+	default:
+		t.Fatal("reanalysis slot was not released after an early-return error path")
+	}
 }
