@@ -283,48 +283,70 @@ func (c *Handler) writeSpeciesCorrectionLegacy(
 
 	return datastore.RetryOnLock(ctx, "reanalyze_correct_species_legacy", func() error {
 		return c.DS.Transaction(func(tx *gorm.DB) error {
-			locked := tx.Model(&datastore.NoteLock{}).Select("1").Where("note_id = ?", noteID)
-			result := tx.Model(&datastore.Note{}).
-				Where("id = ?", noteID).
-				Where("NOT EXISTS (?)", locked).
-				Updates(map[string]any{
-					"scientific_name": scientific,
-					"common_name":     common,
-					"species_code":    speciesCode,
-					"confidence":      confidence,
-					// The raw label belonged to the model's original call. Clearing
-					// it means "no alias was applied to this name", which is true of
-					// an operator-asserted scientific name.
-					"raw_scientific_name": "",
-				})
-			if result.Error != nil {
-				return fmt.Errorf("update note species: %w", result.Error)
-			}
-			if result.RowsAffected == 0 {
-				// Either the note is gone or it is locked. Distinguish so the
-				// operator gets 404 vs 409 rather than one ambiguous failure.
-				var count int64
-				if err := tx.Model(&datastore.Note{}).Where("id = ?", noteID).Count(&count).Error; err != nil {
-					return fmt.Errorf("check note existence: %w", err)
-				}
-				if count == 0 {
-					return repository.ErrDetectionNotFound
-				}
-				return errDetectionLocked
-			}
-
-			// Where+Assign+FirstOrCreate is dialect-safe (SELECT, then INSERT or
-			// UPDATE), so this upsert works on SQLite and MySQL without a
-			// hand-written ON CONFLICT clause.
-			review := &datastore.NoteReview{NoteID: noteID, Verified: verificationCorrect}
-			if err := tx.Where("note_id = ?", noteID).
-				Assign(datastore.NoteReview{Verified: verificationCorrect, UpdatedAt: time.Now()}).
-				FirstOrCreate(review).Error; err != nil {
-				return fmt.Errorf("upsert note review: %w", err)
-			}
-			return nil
+			return applyLegacyCorrection(tx, noteID, scientific, common, speciesCode, confidence)
 		})
 	}, nil)
+}
+
+// applyLegacyCorrection is the body of the legacy correction transaction, split
+// out as a free function over *gorm.DB so it can be exercised against a real
+// SQLite schema in tests rather than only through a running datastore.
+func applyLegacyCorrection(tx *gorm.DB, noteID uint, scientific, common, speciesCode string, confidence float64) error {
+	locked := tx.Model(&datastore.NoteLock{}).Select("1").Where("note_id = ?", noteID)
+	result := tx.Model(&datastore.Note{}).
+		Where("id = ?", noteID).
+		Where("NOT EXISTS (?)", locked).
+		Updates(map[string]any{
+			"scientific_name": scientific,
+			"common_name":     common,
+			"species_code":    speciesCode,
+			"confidence":      confidence,
+			// The raw label belonged to the model's original call. Clearing it
+			// means "no alias was applied to this name", which is true of an
+			// operator-asserted scientific name.
+			"raw_scientific_name": "",
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update note species: %w", result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		// Zero rows has THREE causes, and they must not be collapsed. The note is
+		// gone (404); the note is locked, so the NOT EXISTS guard excluded it
+		// (409); or MySQL matched the row and changed nothing because every value
+		// was already what we are writing — which happens when an operator
+		// confirms the species a detection already has. Reporting that last case
+		// as "locked" tells them to unlock a detection that was never locked.
+		var noteCount int64
+		if err := tx.Model(&datastore.Note{}).Where("id = ?", noteID).Count(&noteCount).Error; err != nil {
+			return fmt.Errorf("check note existence: %w", err)
+		}
+		if noteCount == 0 {
+			return repository.ErrDetectionNotFound
+		}
+		var lockCount int64
+		if err := tx.Model(&datastore.NoteLock{}).Where("note_id = ?", noteID).Count(&lockCount).Error; err != nil {
+			return fmt.Errorf("check note lock: %w", err)
+		}
+		if lockCount > 0 {
+			return errDetectionLocked
+		}
+		// No-op update on an unlocked row: the species is already what was asked
+		// for. Fall through and still record the review — marking it verified is
+		// the other half of what the operator requested.
+	}
+
+	// Where+Assign+FirstOrCreate is dialect-safe (SELECT, then INSERT or UPDATE),
+	// so this upsert works on SQLite and MySQL without a hand-written ON CONFLICT
+	// clause. Assign overwrites an existing row, so a detection previously marked
+	// false_positive becomes correct rather than keeping the stale verdict.
+	review := &datastore.NoteReview{NoteID: noteID, Verified: verificationCorrect}
+	if err := tx.Where("note_id = ?", noteID).
+		Assign(datastore.NoteReview{Verified: verificationCorrect, UpdatedAt: time.Now()}).
+		FirstOrCreate(review).Error; err != nil {
+		return fmt.Errorf("upsert note review: %w", err)
+	}
+	return nil
 }
 
 // writeSpeciesCorrectionV2 routes the correction through the v2 repositories: it
@@ -415,10 +437,25 @@ func (c *Handler) writeSpeciesCorrectionV2(
 				"model_id":   aiModel.ID,
 				"confidence": confidence,
 			}); err != nil {
-				if stderrors.Is(err, repository.ErrDetectionLocked) {
+				if !stderrors.Is(err, repository.ErrDetectionLocked) {
+					return fmt.Errorf("v2 detection update failed: %w", err)
+				}
+				// Update reports ErrDetectionLocked for ANY zero-row update on a
+				// row that exists — and MySQL reports zero rows for a no-op
+				// update too, which is what an operator confirming the species a
+				// detection already has produces. Confirm the lock before
+				// refusing, or that operator is told to unlock a detection that
+				// was never locked.
+				locked, lockErr := detRepo.IsLocked(ctx, noteID)
+				if lockErr != nil {
+					return fmt.Errorf("v2 lock check after zero-row update: %w", lockErr)
+				}
+				if locked {
 					return errDetectionLocked
 				}
-				return fmt.Errorf("v2 detection update failed: %w", err)
+				// Not locked: the detection already carries this species. Fall
+				// through to the review upsert, which is the other half of what
+				// was asked for.
 			}
 
 			if err := detRepo.SaveReview(ctx, &entities.DetectionReview{
