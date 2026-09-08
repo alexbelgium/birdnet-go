@@ -1,11 +1,11 @@
 package reanalyze
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,7 +17,7 @@ func TestDecodeClipMonoPCM16_RejectsEmptyFfmpegPath(t *testing.T) {
 
 	// An install with no ffmpeg configured must fail with a clear configuration
 	// error, not exec an empty path and surface a confusing ENOENT.
-	_, err := decodeClipMonoPCM16(t.Context(), "", "/tmp/whatever.wav", 48000, 60)
+	_, err := decodeClipMonoPCM16(t.Context(), "", bytes.NewReader(nil), 48000, 60)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ffmpeg path not configured")
 }
@@ -25,10 +25,10 @@ func TestDecodeClipMonoPCM16_RejectsEmptyFfmpegPath(t *testing.T) {
 func TestDecodeClipMonoPCM16_RejectsInvalidParameters(t *testing.T) {
 	t.Parallel()
 
-	_, err := decodeClipMonoPCM16(t.Context(), "ffmpeg", "clip.wav", 0, 60)
+	_, err := decodeClipMonoPCM16(t.Context(), "ffmpeg", bytes.NewReader(nil), 0, 60)
 	require.Error(t, err, "a zero sample rate would make the window math divide by zero")
 
-	_, err = decodeClipMonoPCM16(t.Context(), "ffmpeg", "clip.wav", 48000, 0)
+	_, err = decodeClipMonoPCM16(t.Context(), "ffmpeg", bytes.NewReader(nil), 48000, 0)
 	require.Error(t, err, "a zero duration cap would remove the bound on decode cost")
 }
 
@@ -37,7 +37,17 @@ func TestDecodeClipMonoPCM16_RejectsInvalidParameters(t *testing.T) {
 // rather than silence that would pass even if ffmpeg emitted nothing.
 func writeTestWAV(t *testing.T, path string, sampleRate, durationSec int) {
 	t.Helper()
+	require.NoError(t, os.WriteFile(path, testWAVBytes(sampleRate, durationSec), 0o600))
+}
 
+// openTestWAV returns a reader over a generated WAV, matching how the handler
+// feeds ffmpeg: a stream on stdin, never a path.
+func openTestWAV(t *testing.T, sampleRate, durationSec int) *bytes.Reader {
+	t.Helper()
+	return bytes.NewReader(testWAVBytes(sampleRate, durationSec))
+}
+
+func testWAVBytes(sampleRate, durationSec int) []byte {
 	numSamples := sampleRate * durationSec
 	dataBytes := numSamples * 2
 
@@ -60,7 +70,7 @@ func writeTestWAV(t *testing.T, path string, sampleRate, durationSec int) {
 		buf = binary.LittleEndian.AppendUint16(buf, uint16(int16(v*20000))) //nolint:gosec // deliberate two's-complement reinterpretation
 	}
 
-	require.NoError(t, os.WriteFile(path, buf, 0o600))
+	return buf
 }
 
 func TestDecodeClipMonoPCM16_Roundtrip(t *testing.T) {
@@ -71,8 +81,7 @@ func TestDecodeClipMonoPCM16_Roundtrip(t *testing.T) {
 		t.Skip("ffmpeg not in PATH; skipping decode roundtrip")
 	}
 
-	clip := filepath.Join(t.TempDir(), "clip.wav")
-	writeTestWAV(t, clip, 48000, 2)
+	clip := openTestWAV(t, 48000, 2)
 
 	// Decode at a DIFFERENT rate than the source so the resample path is
 	// exercised, not just a passthrough copy.
@@ -92,16 +101,18 @@ func TestDecodeClipMonoPCM16_Roundtrip(t *testing.T) {
 	assert.Greater(t, peak, float32(0.3), "decoded audio should carry the source sine, not silence")
 }
 
-func TestDecodeClipMonoPCM16_MissingFileIsAnError(t *testing.T) {
+func TestDecodeClipMonoPCM16_GarbageInputIsAnError(t *testing.T) {
 	t.Parallel()
 
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		t.Skip("ffmpeg not in PATH; skipping missing-file decode")
+		t.Skip("ffmpeg not in PATH; skipping garbage-input decode")
 	}
 
+	// Not audio: ffmpeg must fail and the error must carry its stderr, rather
+	// than the caller getting an empty sample stream that looks like silence.
 	_, err = decodeClipMonoPCM16(t.Context(), ffmpegPath,
-		filepath.Join(t.TempDir(), "does-not-exist.wav"), 48000, 60)
+		bytes.NewReader([]byte("this is not an audio file at all")), 48000, 60)
 	require.Error(t, err)
 }
 
@@ -113,8 +124,7 @@ func TestDecodeClipMonoPCM16_HonorsDurationCap(t *testing.T) {
 		t.Skip("ffmpeg not in PATH; skipping duration cap check")
 	}
 
-	clip := filepath.Join(t.TempDir(), "long.wav")
-	writeTestWAV(t, clip, 48000, 10)
+	clip := openTestWAV(t, 48000, 10)
 
 	// -t 2 must truncate a 10 s clip to ~2 s of samples; without the cap an
 	// oversized clip would decide how much inference the request costs.

@@ -27,6 +27,13 @@ export interface ReanalyzePrediction {
   scientificName: string;
   commonName?: string;
   byModel: Record<string, number>;
+  /**
+   * Whether this row may be applied as a species correction. False for the
+   * non-species sound classes Perch also emits ("power_tool" arrives looking
+   * like a species named "power"). Decided server-side so the button and the
+   * endpoint's own gate cannot drift apart.
+   */
+  correctable?: boolean;
 }
 
 /** Response shape of POST /api/v2/detections/:id/reanalyze. */

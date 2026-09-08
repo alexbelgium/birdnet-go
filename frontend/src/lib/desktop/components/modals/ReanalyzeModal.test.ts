@@ -29,6 +29,7 @@ const twoModelResult = {
       scientificName: 'Ficedula hypoleuca',
       commonName: 'Pied Flycatcher',
       byModel: { 'BirdNET_V2.4': 0.998, Perch_V2: 0.869 },
+      correctable: true,
     },
     {
       // Seen by one model only: the other column must render a placeholder
@@ -36,6 +37,7 @@ const twoModelResult = {
       scientificName: 'Aegithalos caudatus',
       commonName: 'Long-tailed Tit',
       byModel: { 'BirdNET_V2.4': 0.996 },
+      correctable: true,
     },
   ],
 };
@@ -146,21 +148,26 @@ describe('ReanalyzeModal', () => {
     expect(screen.queryByText('Running inference…')).not.toBeInTheDocument();
   });
 
-  it('renders a sound class with no scientific name and offers no correction for it', async () => {
-    // Perch emits non-species sound classes. They have a common name and no
-    // scientific name, and a correction is keyed on the scientific name — so the
-    // row must render without an empty second line and without a button that
-    // could only fail.
+  it('shows a sound class but offers no correction for it', async () => {
+    // Perch emits non-species sound classes alongside birds. The server marks
+    // them correctable:false, because "power_tool" splits into a scientific/
+    // common pair that looks exactly like a species named "power" — applying it
+    // would relabel a bird as a sound class and mint a junk label row.
     reanalyzeDetection.mockResolvedValue({
       ...twoModelResult,
       predictions: [
-        { scientificName: '', commonName: 'engine idling nearby', byModel: { Perch_V2: 0.42 } },
+        {
+          scientificName: 'power',
+          commonName: 'tool',
+          byModel: { Perch_V2: 0.42 },
+          correctable: false,
+        },
       ],
     });
 
     render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
 
-    await waitFor(() => expect(screen.getByText('engine idling nearby')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('tool')).toBeInTheDocument());
     expect(screen.getByText('42.0%')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Use .* as the species/ })).not.toBeInTheDocument();
   });

@@ -262,11 +262,12 @@
                       </td>
                     {/each}
                     <td class="text-right">
-                      <!-- A correction is keyed on the scientific name, so a row
-                           without one (a sound class, not a species) cannot be
-                           applied. Omit the button rather than offering one that
-                           can only fail. -->
-                      {#if pred.scientificName}
+                      <!-- Only rows the server marked correctable can be applied:
+                           a sound class is not a species, and a row with no
+                           scientific name has nothing to key a correction on.
+                           Omit the button rather than offering one that can only
+                           fail. -->
+                      {#if pred.correctable && pred.scientificName}
                         <button
                           type="button"
                           class="btn btn-xs btn-ghost"
