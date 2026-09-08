@@ -38,7 +38,7 @@ describe('reanalyzeDetection', () => {
     expect(JSON.parse(opts.body as string)).toEqual({ modelIds: ['Perch_V2'] });
   });
 
-  it('drops a duplicate request for the same detection while one is in flight', async () => {
+  it('joins a duplicate request for the same detection to the one in flight', async () => {
     let release!: (v: unknown) => void;
     fetchWithCSRF.mockReturnValue(
       new Promise(resolve => {
@@ -47,14 +47,17 @@ describe('reanalyzeDetection', () => {
     );
 
     const first = reanalyzeDetection(42);
-    // A double-click must not spend a second round of inference.
-    await expect(reanalyzeDetection(42)).resolves.toBeNull();
+    // A double-click, or a close-and-reopen of the modal, must not spend a second
+    // round of inference — and must not lose the answer either: the second caller
+    // gets the SAME result, not null.
+    const second = reanalyzeDetection(42);
     // A different detection is unrelated and must still go through.
     void reanalyzeDetection(43);
     expect(fetchWithCSRF).toHaveBeenCalledTimes(2);
 
     release({ predictions: [] });
-    await first;
+    await expect(first).resolves.toEqual({ predictions: [] });
+    await expect(second).resolves.toEqual({ predictions: [] });
 
     // Once settled, the same detection is requestable again.
     fetchWithCSRF.mockResolvedValue({ predictions: [] });
@@ -68,7 +71,7 @@ describe('reanalyzeDetection', () => {
 
     // A failure must not wedge the detection into a permanently "busy" state.
     fetchWithCSRF.mockResolvedValue({ predictions: [] });
-    await expect(reanalyzeDetection(99)).resolves.not.toBeNull();
+    await expect(reanalyzeDetection(99)).resolves.toEqual({ predictions: [] });
   });
 });
 
