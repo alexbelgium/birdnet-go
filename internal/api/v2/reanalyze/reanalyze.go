@@ -268,8 +268,10 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 			Correctable:    isBinomialScientificName(a.scientific),
 		})
 	}
-	// Fill in a locale-specific common name for anything only a bare-scientific
-	// model scored (Perch v2's output shape), so every row reads the same way.
+	// Resolve every scientific species through the configured locale. Model
+	// labels frequently bake in English common names, and keeping those names
+	// caused the same species to appear in English or the configured language
+	// depending on which classifier happened to supply the aggregate first.
 	applyLocalizedCommonNames(bn, predictions, c.CurrentLocale())
 
 	sort.Slice(predictions, func(i, j int) bool {
@@ -541,12 +543,13 @@ func reanalyzeSamples(
 	return best, windowCount, nil
 }
 
-// applyLocalizedCommonNames fills in CommonName via the orchestrator's resolver
-// chain in the configured locale. Predictions that already carry a model-supplied
-// common name keep it; only bare-scientific labels (Perch v2's shape) get resolved.
+// applyLocalizedCommonNames resolves every scientific species through the
+// orchestrator's name resolver in the configured locale. A model-supplied common
+// name is only a fallback: BirdNET labels embed English names, so preserving them
+// would make output language depend on which model supplied a row first.
 func applyLocalizedCommonNames(bn *classifier.Orchestrator, preds []ReanalyzePrediction, locale string) {
 	for i := range preds {
-		if preds[i].CommonName != "" || preds[i].ScientificName == "" {
+		if preds[i].ScientificName == "" {
 			continue
 		}
 		if name := bn.ResolveName(preds[i].ScientificName, locale); name != "" {
