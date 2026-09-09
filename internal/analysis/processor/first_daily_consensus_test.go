@@ -305,3 +305,89 @@ func TestDynamicThresholdKeyMatchesParseAndValidateSpecies(t *testing.T) {
 	assert.Equal(t, "parus major", dynamicThresholdKey("", consensusSpecies), "falls back to the scientific name")
 	assert.Empty(t, dynamicThresholdKey("", ""))
 }
+
+// TestShouldDiscardFirstDailyDetection_NilOrchestrator is a permanent regression
+// test for a nil p.Bn (a zero-value Processor, or any path reached before the
+// orchestrator is wired). classifier.Orchestrator.SpeciesSharedByBirdModels
+// guards a nil receiver before touching any field, so this must fail open rather
+// than panic.
+func TestShouldDiscardFirstDailyDetection_NilOrchestrator(t *testing.T) {
+	t.Parallel()
+
+	p := &Processor{} // p.Bn is nil
+	item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
+
+	assert.NotPanics(t, func() {
+		discard, _ := p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
+		assert.False(t, discard, "an unevaluable orchestrator must fail open")
+	})
+}
+
+// TestFirstDailySupportTTLExpires pins the bound on stale model-support verdicts:
+// a model reload or variant swap can replace a model's label set while keeping
+// its registry ID, which the cache key cannot see, so an entry must not be
+// trusted forever. storeSupportUntil seeds an already-expired entry directly,
+// standing in for firstDailySupportTTL's passage without a real wait.
+func TestFirstDailySupportTTLExpires(t *testing.T) {
+	t.Parallel()
+
+	var c firstDailyConsensus
+	key := firstDailySupportKey([]string{birdNETModel}, consensusSpecies)
+
+	c.storeSupportUntil(key, true, time.Now().Add(-time.Second))
+	_, cached := c.lookupSupport(key)
+	assert.False(t, cached, "an expired entry must not be served")
+
+	c.storeSupportUntil(key, true, time.Now().Add(time.Minute))
+	shared, cached := c.lookupSupport(key)
+	require.True(t, cached)
+	assert.True(t, shared)
+}
+
+// TestWarmFirstDailyAcceptance verifies the datastore-warming pass: it resolves
+// the "already accepted today" memo from p.pendingDetections under its own read
+// lock, so shouldDiscardFirstDailyDetection reaches the datastore at most once
+// even though it runs later, under flushPendingDetections's exclusive lock, for
+// a different PendingDetection value of the same species.
+func TestWarmFirstDailyAcceptance(t *testing.T) {
+	t.Parallel()
+
+	settings := newConsensusSettings()
+	p := &Processor{
+		Ds: expectSpeciesCount(t, &dbResult{count: 0}),
+		pendingDetections: map[string]PendingDetection{
+			"src1:parus major": *newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}),
+		},
+	}
+	markSpeciesShared(p, true)
+
+	p.warmFirstDailyAcceptance(settings)
+
+	// A later, distinct PendingDetection value for the same species must reuse the
+	// memo the warm pass populated rather than querying again — the mock's Once()
+	// on expectSpeciesCount enforces that.
+	discard, reason := p.shouldDiscardFirstDailyDetection(
+		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.7}), settings)
+
+	assert.True(t, discard)
+	assert.Equal(t, reasonFirstDailyConsensus, reason)
+}
+
+// TestWarmFirstDailyAcceptance_SkipsIneligibleDetections verifies the prewarm
+// pass shares shouldDiscardFirstDailyDetection's own eligibility checks, so it
+// never queries the datastore for a species this rule would never gate anyway.
+func TestWarmFirstDailyAcceptance_SkipsIneligibleDetections(t *testing.T) {
+	t.Parallel()
+
+	settings := newConsensusSettings()
+	p := &Processor{
+		Ds: mocks.NewMockInterface(t), // no CountSpeciesDetections expectation set
+		pendingDetections: map[string]PendingDetection{
+			"src1:pipistrellus pipistrellus": *newConsensusDetection(classifier.RegistryIDBat, "", map[string]float64{classifier.RegistryIDBat: 0.8}),
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		p.warmFirstDailyAcceptance(settings)
+	})
+}

@@ -18,9 +18,11 @@
 // unknown taxonomy, unreadable model metadata, a datastore error, or a species
 // the active models do not all share.
 //
-// The checks run cheapest-first, because this executes on the flush path while
-// p.pendingMutex is held: in-memory counts, then the per-day memo, then the
-// cached taxonomy and model-support lookups, and only then the datastore.
+// The checks run cheapest-first: in-memory counts, then the per-day memo, then
+// the cached taxonomy and model-support lookups, and only then the datastore.
+// The datastore lookup is additionally warmed from warmFirstDailyAcceptance
+// under a brief read lock before flushPendingDetections takes its exclusive
+// lock, so the common case never runs it there.
 package processor
 
 import (
@@ -45,10 +47,18 @@ const (
 	// and the /system/events/detections aggregation.
 	reasonFirstDailyConsensus = "first daily detection confirmed by only one model"
 
-	// firstDailySupportCacheCap bounds the model-support memo, which is not
-	// day-scoped. The key space is (active model set x species), so the cap only
-	// bites on a pathological config; clearing wholesale beats tracking ages.
+	// firstDailySupportCacheCap bounds the model-support memo. The key space is
+	// (active model set x species), so the cap only bites on a pathological
+	// config; clearing wholesale beats tracking per-entry ages.
 	firstDailySupportCacheCap = 4096
+
+	// firstDailySupportTTL bounds how long a model-support verdict is trusted.
+	// The key already changes when the active model SET changes, but a model
+	// reload or variant swap can replace a model's label set while keeping the
+	// same registry ID, which the key cannot see. Model reloads are a rare,
+	// deliberate action, so the TTL only needs to be short enough that such a
+	// change is picked up within one operator session, not on every lookup.
+	firstDailySupportTTL = 10 * time.Minute
 )
 
 // firstDailyConsensus is the small amount of state the rule keeps. The zero
@@ -76,11 +86,16 @@ type firstDailyConsensus struct {
 	checked map[string]bool
 
 	// support memoizes whether a species is shared by every relevant active bird
-	// model. The key carries the active model set, which is what actually
-	// invalidates the verdict, so this has no calendar semantics and survives the
-	// day roll — re-deriving it every midnight would reload every label set during
-	// the dawn chorus.
-	support map[string]bool
+	// model, each entry bounded by firstDailySupportTTL. The key carries the
+	// active model set, which is what usually invalidates the verdict, so this
+	// has no calendar semantics and survives the day roll — re-deriving it every
+	// midnight would reload every label set during the dawn chorus.
+	support map[string]supportEntry
+}
+
+type supportEntry struct {
+	shared    bool
+	expiresAt time.Time
 }
 
 // markAccepted records that a species has an accepted detection on day.
@@ -114,17 +129,26 @@ func (c *firstDailyConsensus) acceptedToday(day, species string) (accepted, sett
 func (c *firstDailyConsensus) lookupSupport(key string) (shared, cached bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	shared, cached = c.support[key]
-	return shared, cached
+	entry, ok := c.support[key]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return false, false
+	}
+	return entry.shared, true
 }
 
 func (c *firstDailyConsensus) storeSupport(key string, shared bool) {
+	c.storeSupportUntil(key, shared, time.Now().Add(firstDailySupportTTL))
+}
+
+// storeSupportUntil is storeSupport with an explicit expiry, so tests can seed an
+// already-stale entry without waiting out firstDailySupportTTL.
+func (c *firstDailyConsensus) storeSupportUntil(key string, shared bool, expiresAt time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.support == nil || len(c.support) >= firstDailySupportCacheCap {
-		c.support = make(map[string]bool)
+		c.support = make(map[string]supportEntry)
 	}
-	c.support[key] = shared
+	c.support[key] = supportEntry{shared: shared, expiresAt: expiresAt}
 }
 
 // rollLocked drops yesterday's per-day state. Caller holds c.mu.
@@ -136,6 +160,87 @@ func (c *firstDailyConsensus) rollLocked(day string) {
 	c.checked = nil
 }
 
+// firstDailyCandidate is item narrowed to what the gate and its prewarm pass
+// both need, so a candidate collected under a read lock outlives it safely.
+type firstDailyCandidate struct {
+	day            string
+	scientificName string
+}
+
+// firstDailyVerdict is what firstDailyGateApplies decided using only in-memory
+// state: whether the rule has nothing to say, already knows the answer from the
+// per-day memo, or must still ask the datastore.
+type firstDailyVerdict int
+
+const (
+	firstDailyNormal      firstDailyVerdict = iota // rule does not apply: accept as today
+	firstDailyKnownAbsent                          // memo already says "not accepted yet": discard
+	firstDailyNeedsCheck                           // memo has no answer yet: the datastore must be asked
+)
+
+// firstDailyGateApplies runs every check that does not touch the datastore and
+// classifies item accordingly.
+//
+// This is the single predicate both shouldDiscardFirstDailyDetection and
+// warmFirstDailyAcceptance use, so the two paths cannot silently diverge on
+// which detections the datastore lookup applies to.
+func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf.Settings) (firstDailyVerdict, firstDailyCandidate) {
+	if item == nil || settings == nil {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
+	result := &item.Detection.Result
+	scientificName := result.Species.ScientificName
+	if scientificName == "" || result.Timestamp.IsZero() {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
+	// Bats and the non-species sound classes keep today's behaviour untouched.
+	if !classifier.IsBirdCapableModel(item.BestModelID) || nonbird.IsNonSpeciesLabel(result.RawLabel) {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
+	// Already agreed on by enough models: nothing for this rule to decide. Checked
+	// first because it is a pure in-memory count and it is the common outcome for
+	// a genuine new species.
+	if p.countConfirmingModels(settings, item) >= firstDailyMinModels {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
+	// A dynamic threshold that actually lowered the bar is the operator asking for
+	// a more permissive gate on this species; do not override that with a stricter
+	// one.
+	if p.dynamicThresholdLowered(settings, item) {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
+	// Only the first accepted detection of the day is gated. The memo answers for
+	// every species already settled today — the steady state for the rest of the
+	// day — so it comes before the taxonomy and model-support lookups, and before
+	// the datastore is asked again.
+	day := result.Date()
+	candidate := firstDailyCandidate{day: day, scientificName: scientificName}
+	if accepted, settled := p.firstDaily.acceptedToday(day, scientificName); settled {
+		if accepted {
+			return firstDailyNormal, firstDailyCandidate{}
+		}
+		return firstDailyKnownAbsent, candidate
+	}
+
+	// Birds only. An unknown taxon is not evidence of a non-bird, so it fails open.
+	if isBird, known := classifier.IsBirdSpecies(scientificName); !known || !isBird {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
+	// Only meaningful when every relevant active bird model could have confirmed
+	// it. A species one model cannot predict could never reach two confirmations.
+	if !p.speciesSharedByActiveBirdModels(item.Source, scientificName) {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
+	return firstDailyNeedsCheck, candidate
+}
+
 // shouldDiscardFirstDailyDetection reports whether item is the first detection of
 // a bird species today with only one model behind it, and so should be held back
 // until a second model agrees.
@@ -144,72 +249,66 @@ func (c *firstDailyConsensus) rollLocked(day string) {
 // species is not marked accepted, so the next window in which two models do agree
 // is accepted normally, and single-model behaviour resumes from then on.
 func (p *Processor) shouldDiscardFirstDailyDetection(item *PendingDetection, settings *conf.Settings) (discard bool, reason string) {
-	if item == nil || settings == nil {
-		return false, ""
-	}
+	verdict, candidate := p.firstDailyGateApplies(item, settings)
 
-	result := &item.Detection.Result
-	scientificName := result.Species.ScientificName
-	if scientificName == "" || result.Timestamp.IsZero() {
+	switch verdict {
+	case firstDailyNormal:
 		return false, ""
-	}
-
-	// Bats and the non-species sound classes keep today's behaviour untouched.
-	if !classifier.IsBirdCapableModel(item.BestModelID) || nonbird.IsNonSpeciesLabel(result.RawLabel) {
-		return false, ""
-	}
-
-	// Already agreed on by enough models: nothing for this rule to decide. Checked
-	// first because it is a pure in-memory count and it is the common outcome for
-	// a genuine new species.
-	if p.countConfirmingModels(settings, item) >= firstDailyMinModels {
-		return false, ""
-	}
-
-	// A dynamic threshold that actually lowered the bar is the operator asking for
-	// a more permissive gate on this species; do not override that with a stricter
-	// one.
-	if p.dynamicThresholdLowered(settings, item) {
-		return false, ""
-	}
-
-	// Only the first accepted detection of the day is gated. The memo answers for
-	// every species already settled today — the steady state for the rest of the
-	// day — so it comes before the taxonomy, model-support and datastore lookups.
-	day := result.Date()
-	accepted, settled := p.firstDaily.acceptedToday(day, scientificName)
-	if settled && accepted {
-		return false, ""
-	}
-
-	// Birds only. An unknown taxon is not evidence of a non-bird, so it fails open.
-	if isBird, known := classifier.IsBirdSpecies(scientificName); !known || !isBird {
-		return false, ""
-	}
-
-	// Only meaningful when every relevant active bird model could have confirmed
-	// it. A species one model cannot predict could never reach two confirmations.
-	if !p.speciesSharedByActiveBirdModels(item.Source, scientificName) {
-		return false, ""
-	}
-
-	if !settled {
-		dbAccepted, ok := p.speciesAcceptedInDatastore(day, scientificName)
-		if !ok || dbAccepted {
+	case firstDailyKnownAbsent:
+		// Already resolved by the memo (typically by warmFirstDailyAcceptance,
+		// below): no datastore round trip needed to discard.
+	case firstDailyNeedsCheck:
+		// warmFirstDailyAcceptance resolves this from flushPendingDetections
+		// before its exclusive lock is taken, so the datastore is reached here
+		// only for a candidate that appeared after that pass ran this tick — the
+		// query stays off the ingestion-blocking path in the common case.
+		accepted, ok := p.speciesAcceptedInDatastore(candidate.day, candidate.scientificName)
+		if !ok || accepted {
 			return false, ""
 		}
 	}
 
 	GetLogger().Debug("first daily detection lacks a second model",
-		logger.String("species", result.Species.CommonName),
-		logger.String("scientific_name", scientificName),
+		logger.String("species", item.Detection.Result.Species.CommonName),
+		logger.String("scientific_name", candidate.scientificName),
 		logger.String("source", p.getDisplayNameForSource(item.Source)),
 		logger.String("best_model_id", item.BestModelID),
 		logger.Int("model_count", len(item.ModelContributions)),
-		logger.String("day", day),
+		logger.String("day", candidate.day),
 		logger.String("operation", "first_daily_consensus"))
 
 	return true, reasonFirstDailyConsensus
+}
+
+// warmFirstDailyAcceptance resolves "already accepted today" for every pending
+// detection the gate would otherwise need the datastore for, via queries run
+// after releasing a brief read lock on p.pendingDetections — so
+// flushPendingDetections's exclusive lock, held for the rest of the flush cycle,
+// never blocks on database I/O for this rule. It answers the same question
+// shouldDiscardFirstDailyDetection does at flush time, into the same memo, so a
+// slow query here only delays that memo warming, never a discard decision.
+//
+// A detection that appears after this pass runs and is due before the next one
+// still gets a correct answer, just resolved (rarely) under the exclusive lock
+// instead — this pass is a fast path, not a correctness requirement.
+func (p *Processor) warmFirstDailyAcceptance(settings *conf.Settings) {
+	if p.Ds == nil {
+		return
+	}
+
+	p.pendingMutex.RLock()
+	candidates := make([]firstDailyCandidate, 0, len(p.pendingDetections))
+	for mapKey := range p.pendingDetections {
+		item := p.pendingDetections[mapKey]
+		if verdict, candidate := p.firstDailyGateApplies(&item, settings); verdict == firstDailyNeedsCheck {
+			candidates = append(candidates, candidate)
+		}
+	}
+	p.pendingMutex.RUnlock()
+
+	for _, candidate := range candidates {
+		p.speciesAcceptedInDatastore(candidate.day, candidate.scientificName)
+	}
 }
 
 // noteAcceptedDetection records an approved detection so later detections of the
@@ -303,7 +402,7 @@ func (p *Processor) speciesSharedByActiveBirdModels(sourceID, scientificName str
 	shared, ok := p.Bn.SpeciesSharedByBirdModels(scientificName, modelIDs, firstDailyMinModels)
 	if !ok {
 		// Transient: a model mid-reload. Do not memoize it, or one bad moment would
-		// disable the rule for this species for the life of the process.
+		// disable the rule for this species until the TTL expires.
 		return false
 	}
 
@@ -330,20 +429,27 @@ func (p *Processor) sourceModelIDs(sourceID string) []string {
 
 // firstDailySupportKey builds the memo key. The model set is part of the key so
 // loading, unloading or reassigning a model re-derives the verdict instead of
-// serving a stale one; the IDs arrive sorted so the key is stable.
+// serving a stale one; the IDs arrive sorted so the key is stable. A model reload
+// that keeps its registry ID but swaps its label set is not visible in this key
+// and is instead bounded by firstDailySupportTTL.
 func firstDailySupportKey(modelIDs []string, scientificName string) string {
 	return strings.Join(modelIDs, ",") + "|" + scientificName
 }
 
 // speciesAcceptedInDatastore asks the datastore whether the species already has a
 // detection today, memoizing both answers so the question costs at most one query
-// per species per day.
+// per species per day. warmFirstDailyAcceptance is the intended caller in the
+// common case; shouldDiscardFirstDailyDetection falls back to calling it directly
+// only for a candidate the warm pass missed this tick.
 //
 // ok is false when the question cannot be answered, which the caller treats as
 // "accept the detection as it is today".
 func (p *Processor) speciesAcceptedInDatastore(day, scientificName string) (accepted, ok bool) {
 	if p.Ds == nil {
 		return false, false
+	}
+	if accepted, settled := p.firstDaily.acceptedToday(day, scientificName); settled {
+		return accepted, true
 	}
 
 	count, err := p.Ds.CountSpeciesDetections(scientificName, day, "", 0)
