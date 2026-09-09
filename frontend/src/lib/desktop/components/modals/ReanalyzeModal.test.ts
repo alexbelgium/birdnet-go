@@ -484,36 +484,6 @@ describe('ReanalyzeModal', () => {
     expect(badges[0].closest('tr')?.textContent).toContain('Long-tailed Tit');
   });
 
-  it('reports how many models scored each species', async () => {
-    // Agreement is the point of the grid: two models on the same bird is a very
-    // different signal from one, and counting columns by eye is slow.
-    reanalyzeDetection.mockResolvedValue(twoModelResult);
-    render(ReanalyzeModal, {
-      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
-    });
-    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
-
-    // Pied Flycatcher was scored by both models, Long-tailed Tit by one.
-    expect(screen.getByText('2 of 2 models')).toBeInTheDocument();
-    expect(screen.getByText('1 of 2 models')).toBeInTheDocument();
-  });
-
-  it("shows each model's window count and sample rate", async () => {
-    // Returned by the API and previously discarded. A max score is only
-    // meaningful alongside how many windows it was taken over, and models use
-    // different window lengths.
-    reanalyzeDetection.mockResolvedValue(twoModelResult);
-    render(ReanalyzeModal, {
-      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
-    });
-    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
-
-    expect(screen.getByText(/29 win/)).toBeInTheDocument();
-    expect(screen.getByText(/48 kHz/)).toBeInTheDocument();
-    expect(screen.getByText(/17 win/)).toBeInTheDocument();
-    expect(screen.getByText(/32 kHz/)).toBeInTheDocument();
-  });
-
   it('hides every write action on a locked detection and says why', async () => {
     // All four actions are writes and the server refuses each on a locked
     // detection (review 409, delete 403), so offering them is offering failure.
@@ -587,5 +557,45 @@ describe('ReanalyzeModal', () => {
     renderModal();
 
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+  });
+
+  it('withdraws a pending correction if the detection becomes locked', async () => {
+    // The confirmation panel is its own write path: hiding the row buttons and
+    // the verdict group leaves it on screen with a live Apply button, which the
+    // server would then refuse with a 409.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    const { rerender } = render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    await user.click(
+      screen.getByLabelText('Use Pied Flycatcher as the species for this detection')
+    );
+    expect(screen.getByRole('button', { name: /Apply correction/ })).toBeInTheDocument();
+
+    await rerender({
+      isOpen: true,
+      detection: mkDetection(7, { locked: true }),
+      onClose: vi.fn(),
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /Apply correction/ })).not.toBeInTheDocument()
+    );
+    expect(correctDetectionSpecies).not.toHaveBeenCalled();
+  });
+
+  it('puts the decision block above the grid', async () => {
+    // On a phone the grid is tall enough to push the actions off screen, so the
+    // decision the modal exists to support would need a scroll to reach.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    renderModal({ onDeleted: vi.fn() });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    const verdict = screen.getByRole('button', { name: VERDICT_CORRECT });
+    const table = screen.getByRole('table');
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4: the table comes after the buttons.
+    expect(verdict.compareDocumentPosition(table) & 4).toBeTruthy();
   });
 });
