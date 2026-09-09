@@ -2039,6 +2039,11 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 	baseOverlap := p.effectiveBaseOverlap(settings)
 	visThresholds := precomputeVisibilityThresholds(settings, baseOverlap)
 
+	// Resolve first-daily-consensus datastore lookups (see first_daily_consensus.go)
+	// under their own brief read lock, before the exclusive lock below is taken, so
+	// a slow query cannot stall detection ingestion for the flush cycle's duration.
+	p.warmFirstDailyAcceptance(settings)
+
 	var terminalNotifs []SSEPendingDetection
 	var broadcastSnapshot []SSEPendingDetection
 	// Privacy rollup events, handed off after pendingMutex is released.
