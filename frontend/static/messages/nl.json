@@ -730,6 +730,7 @@
         "markCorrect": "Juist",
         "markFalsePositive": "Onjuist",
         "review": "Herkenning beoordelen",
+        "reanalyze": "Herkenning opnieuw analyseren",
         "showSpecies": "Soort tonen",
         "ignoreSpecies": "Soort negeren",
         "lockDetection": "Herkenning vergrendelen",

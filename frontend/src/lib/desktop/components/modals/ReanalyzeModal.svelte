@@ -211,7 +211,7 @@
   async function applyVerdict(verified: 'correct' | 'false_positive') {
     if (!detectionId || isVerdictPending) return;
     const target = detectionId;
-    const mySeq = requestSeq;
+    const mySeq = ++requestSeq;
     isVerdictPending = true;
     try {
       if (await setDetectionVerification(target, verified)) {
@@ -226,19 +226,28 @@
 
   async function confirmDelete() {
     if (!detectionId || isVerdictPending) return;
+    // Same sequence guard the reanalysis and correction paths use, and it matters
+    // most here: onDeleted navigates away. Without it, closing and reopening the
+    // modal for another detection while a delete is in flight would navigate the
+    // user off the detection they are now looking at.
+    const mySeq = ++requestSeq;
     const target = detectionId;
     isVerdictPending = true;
     try {
       await fetchWithCSRF(`/api/v2/detections/${target}`, { method: 'DELETE' });
       toastActions.success('Detection deleted.');
+      if (mySeq !== requestSeq) return; // superseded; the delete still happened
       onClose();
       onDeleted?.();
     } catch (err) {
-      errorMessage = err instanceof Error ? err.message : String(err);
       logger.error('Delete failed', err, { component: 'ReanalyzeModal', detectionId: target });
+      if (mySeq !== requestSeq) return;
+      errorMessage = err instanceof Error ? err.message : String(err);
     } finally {
-      isVerdictPending = false;
-      confirmingDelete = false;
+      if (mySeq === requestSeq) {
+        isVerdictPending = false;
+        confirmingDelete = false;
+      }
     }
   }
 
@@ -297,13 +306,18 @@
               <thead>
                 <tr>
                   <th class="text-left">Species</th>
-                  <!-- Model names wrap onto a second line rather than running
-                       into the neighbouring column. whitespace-nowrap made a long
-                       name overflow its cell and overlap the next header; a wrap
-                       plus a floor on the column width keeps each name inside its
-                       own column and the header row readable. -->
+                  <!-- Model names wrap. They previously carried whitespace-nowrap,
+                       which forced the header row wider than the modal: measured at
+                       the modal's 768px width with three models, the table came out
+                       780px and the wrapper scrolled horizontally while the species
+                       column was squeezed to 92px. Letting the names wrap keeps the
+                       table at 768px with no scroll and gives the species column
+                       137px, for one extra line of header height.
+                       align-bottom keeps a one-line name on the same baseline as a
+                       wrapped one. No width clamps: min-width/max-width were tried
+                       and measured no better here, only 20px taller. -->
                   {#each result.modelsRun as m (m.id)}
-                    <th class="model-col text-right align-bottom" title={m.name}>{m.name}</th>
+                    <th class="text-right align-bottom" title={m.name}>{m.name}</th>
                   {/each}
                   <th></th>
                 </tr>
@@ -469,15 +483,3 @@
     {/if}
   </div>
 </Modal>
-
-<style>
-  /* Model header cells wrap instead of overflowing into the next column. The
-     min-width stops a long single word from squeezing the column to nothing and
-     the max-width stops one long name from starving the species column. */
-  .model-col {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    min-width: 5.5rem;
-    max-width: 9rem;
-  }
-</style>

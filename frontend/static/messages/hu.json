@@ -730,6 +730,7 @@
         "markCorrect": "Megjelölés helyesként",
         "markFalsePositive": "Megjelölés téves pozitívként",
         "review": "Detektálás áttekintése",
+        "reanalyze": "Észlelés újraelemzése",
         "showSpecies": "Faj megjelenítése",
         "ignoreSpecies": "Faj figyelmen kívül hagyása",
         "lockDetection": "Detektálás zárolása",

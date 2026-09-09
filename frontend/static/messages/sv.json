@@ -730,6 +730,7 @@
         "markCorrect": "Korrekt",
         "markFalsePositive": "Felaktig",
         "review": "Granska detektering",
+        "reanalyze": "Analysera detektionen igen",
         "showSpecies": "Visa art",
         "ignoreSpecies": "Ignorera art",
         "lockDetection": "Lås detektering",

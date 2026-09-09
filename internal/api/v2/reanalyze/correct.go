@@ -231,15 +231,23 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	c.DetectionCache.Flush()
 
 	// Record what changed in the detection's notes, so the correction leaves an
-	// audit trail next to the detection rather than only in the server log. Done
-	// AFTER the write: the correction has already committed, so a failure here is
-	// logged and swallowed rather than reported as a failed correction the user
-	// would then retry.
+	// audit trail next to the detection rather than only in the server log.
+	//
+	// Done AFTER the write, and deliberately best-effort: the correction has
+	// already committed, so failing the request here would report a failure for
+	// something that succeeded and invite the operator to retry it. The failure
+	// is logged instead.
+	//
+	// context.WithoutCancel matters. By this point the response is decided; if the
+	// client has already disconnected (or hit the 30 s default timeout after a
+	// slow correction) the request context is cancelled, and passing it straight
+	// through would skip the note precisely when a correction did land — the case
+	// where the audit trail is most needed.
 	if note := correctionNote(&existing, req.ScientificName, commonName, &chosen, req.Confidence); note != "" {
 		if c.Repo == nil {
 			c.LogAPIRequest(ctx, logger.LogLevelWarn, "Correction note not recorded: no detection repository",
 				logger.String("detection_id", idStr))
-		} else if err := c.Repo.AddComment(ctx.Request().Context(), idStr, note); err != nil {
+		} else if err := c.Repo.AddComment(context.WithoutCancel(ctx.Request().Context()), idStr, note); err != nil {
 			c.LogAPIRequest(ctx, logger.LogLevelWarn, "Correction applied but the note could not be saved",
 				logger.String("detection_id", idStr),
 				logger.Error(err))

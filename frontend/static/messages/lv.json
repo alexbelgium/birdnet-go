@@ -730,6 +730,7 @@
         "markCorrect": "Pareizs",
         "markFalsePositive": "Nepareizs",
         "review": "Pārskatīt atklāšanu",
+        "reanalyze": "Atkārtoti analizēt noteikšanu",
         "showSpecies": "Rādīt sugu",
         "ignoreSpecies": "Ignorēt sugu",
         "lockDetection": "Bloķēt atklāšanu",
