@@ -266,3 +266,43 @@ func TestFormatSpecies_OmitsARedundantCommonName(t *testing.T) {
 	assert.Equal(t, "Parus major", formatSpecies("Parus major", ""))
 	assert.Equal(t, "Parus major", formatSpecies("Parus major", "parus major"))
 }
+
+func TestCorrectionNote_TreatsAVariantSwapAsAModelChange(t *testing.T) {
+	t.Parallel()
+
+	// Variant is part of the persisted model identity, so re-attributing the same
+	// species from the stock model to a custom variant of the same name and
+	// version is a real change — and one the operator has no other record of.
+	existing := &datastore.Note{
+		ScientificName: "Parus major",
+		CommonName:     "Great Tit",
+		Confidence:     0.8,
+		Model:          detection.ModelInfo{Name: "BirdNET", Version: "2.4"},
+	}
+	custom := classifier.ModelInfo{
+		Name:             "BirdNET v2.4 (custom)",
+		DetectionName:    "BirdNET",
+		DetectionVersion: "2.4",
+		CustomPath:       "/models/mine.tflite",
+	}
+
+	got := correctionNote(existing, "Parus major", "Great Tit", &custom, 0.9)
+	require.NotEmpty(t, got, "a variant swap must still be recorded")
+	assert.Contains(t, got, "model changed from BirdNET 2.4")
+}
+
+func TestCorrectionNote_SameModelIdentityIsStillNoChange(t *testing.T) {
+	t.Parallel()
+
+	// The mirror of the above: an identical identity must not manufacture a note,
+	// or confirming an existing species would spam the detection's notes.
+	stock := classifier.ModelInfo{Name: "BirdNET v2.4", DetectionName: "BirdNET", DetectionVersion: "2.4"}
+	existing := &datastore.Note{
+		ScientificName: "Parus major",
+		CommonName:     "Great Tit",
+		Confidence:     0.8,
+		Model:          stock.ToDetectionModelInfo(),
+	}
+
+	assert.Empty(t, correctionNote(existing, "Parus major", "Great Tit", &stock, 0.8))
+}

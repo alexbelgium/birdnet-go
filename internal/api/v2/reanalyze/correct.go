@@ -47,6 +47,11 @@ import (
 // single condition to 409 without caring which schema answered.
 var errDetectionLocked = stderrors.New("detection is locked")
 
+// correctionNoteTimeout bounds the audit-note write. It runs on a context
+// detached from the request, so without its own deadline a stalled database
+// would hold the response open with nothing left to cancel it.
+const correctionNoteTimeout = 5 * time.Second
+
 const (
 	// verificationCorrect is the legacy NoteReview.Verified value meaning "the
 	// operator confirmed this species". It mirrors entities.VerificationCorrect
@@ -238,19 +243,27 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	// something that succeeded and invite the operator to retry it. The failure
 	// is logged instead.
 	//
-	// context.WithoutCancel matters. By this point the response is decided; if the
-	// client has already disconnected (or hit the 30 s default timeout after a
-	// slow correction) the request context is cancelled, and passing it straight
-	// through would skip the note precisely when a correction did land — the case
-	// where the audit trail is most needed.
+	// The context is detached from the request but given its own deadline.
+	// Detaching matters because by this point the response is decided: if the
+	// client has disconnected, or hit its timeout after a slow correction, the
+	// request context is already cancelled and passing it straight through would
+	// skip the note exactly when a correction did land — when the audit trail
+	// matters most. The deadline matters because this write is synchronous, ahead
+	// of ctx.JSON, so a detached context with no bound would let a stalled
+	// database hold the response and its goroutine open indefinitely.
 	if note := correctionNote(&existing, req.ScientificName, commonName, &chosen, req.Confidence); note != "" {
 		if c.Repo == nil {
 			c.LogAPIRequest(ctx, logger.LogLevelWarn, "Correction note not recorded: no detection repository",
 				logger.String("detection_id", idStr))
-		} else if err := c.Repo.AddComment(context.WithoutCancel(ctx.Request().Context()), idStr, note); err != nil {
-			c.LogAPIRequest(ctx, logger.LogLevelWarn, "Correction applied but the note could not be saved",
-				logger.String("detection_id", idStr),
-				logger.Error(err))
+		} else {
+			noteCtx, cancelNote := context.WithTimeout(
+				context.WithoutCancel(ctx.Request().Context()), correctionNoteTimeout)
+			if err := c.Repo.AddComment(noteCtx, idStr, note); err != nil {
+				c.LogAPIRequest(ctx, logger.LogLevelWarn, "Correction applied but the note could not be saved",
+					logger.String("detection_id", idStr),
+					logger.Error(err))
+			}
+			cancelNote()
 		}
 	}
 
@@ -556,8 +569,16 @@ func speciesKnownToLoadedModels(bn *classifier.Orchestrator, scientificName stri
 func correctionNote(existing *datastore.Note, scientific, common string, model *classifier.ModelInfo, confidence float64) string {
 	speciesChanged := !strings.EqualFold(strings.TrimSpace(existing.ScientificName), strings.TrimSpace(scientific))
 	modelKnown := existing.Model.Name != ""
+	// Compared through the same conversion the write path uses, so the note judges
+	// the identity that is actually persisted rather than a subset of it. Variant
+	// is part of that identity: swapping the stock model for a custom variant of
+	// the same name and version really does change the attribution (and possibly
+	// the classifier path) even when the species does not change.
+	target := model.ToDetectionModelInfo()
 	modelChanged := modelKnown &&
-		(existing.Model.Name != model.DetectionName || existing.Model.Version != model.DetectionVersion)
+		(existing.Model.Name != target.Name ||
+			existing.Model.Version != target.Version ||
+			existing.Model.Variant != target.Variant)
 
 	if !speciesChanged && !modelChanged {
 		return ""
@@ -574,8 +595,8 @@ func correctionNote(existing *datastore.Note, scientific, common string, model *
 		fmt.Fprintf(&b, "species confirmed as %s", formatSpecies(scientific, common))
 	}
 	if modelChanged {
-		fmt.Fprintf(&b, "; model changed from %s %s to %s",
-			existing.Model.Name, existing.Model.Version, model.Name)
+		fmt.Fprintf(&b, "; model changed from %s to %s",
+			formatModel(existing.Model.Name, existing.Model.Version, existing.Model.Variant), model.Name)
 	} else {
 		fmt.Fprintf(&b, "; attributed to %s", model.Name)
 	}
@@ -590,4 +611,15 @@ func formatSpecies(scientific, common string) string {
 		return scientific
 	}
 	return scientific + " (" + common + ")"
+}
+
+// formatModel renders a persisted model identity, including the variant when the
+// detection carries one, so an attribution change between two variants of the
+// same model reads as a change rather than as "X 2.4 to X 2.4".
+func formatModel(name, version, variant string) string {
+	out := strings.TrimSpace(name + " " + version)
+	if variant != "" {
+		out += " (" + variant + ")"
+	}
+	return out
 }

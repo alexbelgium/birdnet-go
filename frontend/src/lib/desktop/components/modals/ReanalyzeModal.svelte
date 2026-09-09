@@ -26,7 +26,6 @@
     type ReanalyzePrediction,
   } from '$lib/utils/reanalyzeDetection';
   import { t } from '$lib/i18n';
-  import { formatSampleRateLabel } from '$lib/utils/audio/sampleRate';
   import { normalizeForLookup } from '$lib/utils/speciesNames';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { toastActions } from '$lib/stores/toast';
@@ -284,9 +283,8 @@
    * markup contains no function calls at all: one O(rows x models) pass replaces
    * roughly thirty per-cell computations and the same number of cached signals.
    *
-   * `byModel` is enumerated exactly once per row to produce both the winning
-   * model and the agreement count, rather than an Object.entries scan for the
-   * winner and a separate Object.keys scan for the count.
+   * `byModel` is enumerated once per row to find the winning model — the one a
+   * correction would be attributed to, and so the one worth emphasising.
    */
   interface DecoratedCell {
     modelId: string;
@@ -314,8 +312,6 @@
      */
     displayName: string;
     isCurrent: boolean;
-    /** How many of the models that ran predicted this species at all. */
-    agreement: number;
     cells: DecoratedCell[];
   }
 
@@ -341,9 +337,7 @@
     return result.predictions.map(pred => {
       let bestModel = '';
       let bestConfidence = -1;
-      let agreement = 0;
       for (const [modelId, conf] of Object.entries(pred.byModel)) {
-        agreement++;
         if (conf > bestConfidence) {
           bestConfidence = conf;
           bestModel = modelId;
@@ -358,7 +352,6 @@
         key: pred.scientificName || pred.commonName || '',
         displayName: localizeSpeciesName(pred.scientificName, pred.commonName),
         isCurrent,
-        agreement,
         cells: models.map(m => {
           const confidence = pred.byModel[m.id];
           let delta: string | null = null;
@@ -406,145 +399,6 @@
       Runs every loaded classifier over the saved audio and shows what each one thinks. Nothing is
       saved unless you apply a correction below.
     </p>
-
-    {#if isRunning}
-      <div class="flex items-center gap-2 text-sm text-base-content/70">
-        <span class="loading loading-spinner loading-sm"></span>
-        <span>Running inference…</span>
-      </div>
-    {/if}
-
-    {#if errorMessage}
-      <div role="alert" class="alert alert-error text-sm">
-        <AlertCircle class="h-4 w-4" />
-        <span>{errorMessage}</span>
-      </div>
-    {/if}
-
-    {#if result && !isRunning}
-      <div class="space-y-2">
-        <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
-          <span>{summaryLine}</span>
-          {#if isLocked}
-            <span class="badge badge-status-warning gap-1">
-              <Lock class="h-3 w-3" />
-              {t('common.review.status.locked')}
-            </span>
-          {/if}
-        </div>
-
-        {#if result.predictions.length === 0}
-          <div class="text-sm italic text-base-content/70">
-            No species crossed any model's reporting threshold for this clip.
-          </div>
-        {:else}
-          <div class="overflow-x-auto">
-            <table class="table table-sm w-full">
-              <thead>
-                <tr>
-                  <th class="text-left">Species</th>
-                  <!-- Model names wrap. They previously carried whitespace-nowrap,
-                       which forced the header row wider than the modal: measured at
-                       the modal's 768px width with three models, the table came out
-                       780px and the wrapper scrolled horizontally while the species
-                       column was squeezed to 92px. Letting the names wrap keeps the
-                       table at 768px with no scroll and gives the species column
-                       137px, for one extra line of header height.
-                       align-bottom keeps a one-line name on the same baseline as a
-                       wrapped one. No width clamps: min-width/max-width were tried
-                       and measured no better here, only 20px taller. -->
-                  {#each result.modelsRun as m (m.id)}
-                    <th class="text-right align-bottom">
-                      <div>{m.name}</div>
-                      <!-- windowCount and sampleRate come back from the API and used
-                           to be discarded. The window count is what a max score was
-                           taken over, and models use different window lengths, so a
-                           bare percentage is misleading without it. -->
-                      <div class="text-[11px] font-normal text-base-content/60">
-                        {m.windowCount} win · {formatSampleRateLabel(m.sampleRate)}
-                      </div>
-                    </th>
-                  {/each}
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each decoratedRows as row (row.key)}
-                  <tr class:current-row={row.isCurrent}>
-                    <td class="text-sm">
-                      <!-- Either half can be absent: a bare-scientific model row
-                           has no common name, and a non-binomial sound class has
-                           no scientific name. Render only what is actually there
-                           rather than an empty second line. -->
-                      <div
-                        class={row.displayName !== row.pred.scientificName
-                          ? 'font-medium'
-                          : 'font-mono'}
-                      >
-                        {row.displayName}
-                        {#if row.isCurrent}
-                          <!-- The detection's existing call. Without this the
-                               operator has to remember what they came in with,
-                               since the detail page is behind the modal. -->
-                          <span class="badge badge-sm badge-status-info">current</span>
-                        {/if}
-                      </div>
-                      {#if row.pred.scientificName && row.displayName !== row.pred.scientificName}
-                        <div class="font-mono text-xs italic text-base-content/60">
-                          {row.pred.scientificName}
-                        </div>
-                      {/if}
-                      <div class="text-xs text-base-content/60">
-                        {row.agreement} of {result.modelsRun.length} models
-                      </div>
-                    </td>
-                    {#each row.cells as cell (cell.modelId)}
-                      <td class="text-right tabular-nums whitespace-nowrap">
-                        {#if cell.confidence !== undefined}
-                          <!-- The winning model is emphasised because it is the one
-                               a correction would be attributed to, and because
-                               "which model is most sure" is what the grid is read
-                               for. -->
-                          <span class={cell.colorClass} class:font-bold={cell.isBest}>
-                            {formatConfidencePercent(cell.confidence)}
-                          </span>
-                          {#if cell.delta}
-                            <div class="text-xs text-base-content/50">{cell.delta}</div>
-                          {/if}
-                        {:else}
-                          <span class="text-base-content/30" title="not predicted by this model"
-                            >—</span
-                          >
-                        {/if}
-                      </td>
-                    {/each}
-                    <td class="text-right">
-                      <!-- Only rows the server marked correctable can be applied:
-                           a sound class is not a species, and a row with no
-                           scientific name has nothing to key a correction on.
-                           Omit the button rather than offering one that can only
-                           fail. -->
-                      {#if row.pred.correctable && row.pred.scientificName && !isLocked}
-                        <button
-                          type="button"
-                          class="btn btn-xs btn-ghost"
-                          onclick={() => startCorrection(row.pred)}
-                          disabled={isCorrecting}
-                          aria-label={`Use ${row.displayName} as the species for this detection`}
-                        >
-                          <Check class="h-3.5 w-3.5" />
-                          Use this
-                        </button>
-                      {/if}
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
-      </div>
-    {/if}
 
     <!-- Verdict shortcuts. Shown only while no correction row is selected: once
          the user has picked a species the pending correction is the action on
@@ -640,11 +494,13 @@
 
     <!-- Inline confirmation. Appears below the table once a row is chosen; the
          second click is what makes an accidental correction hard. -->
-    {#if pendingCorrection}
+    {#if pendingCorrection && !isLocked}
       <div class="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
         <div class="mb-2 font-medium">
-          Change this detection to {pendingCorrection.commonName ||
-            pendingCorrection.scientificName}?
+          Change this detection to {localizeSpeciesName(
+            pendingCorrection.scientificName,
+            pendingCorrection.commonName
+          )}?
         </div>
         <p class="mb-3 text-base-content/70">
           The detection's species, attributed model and confidence are replaced, and it is marked as
@@ -669,6 +525,135 @@
             {isCorrecting ? 'Applying…' : 'Apply correction'}
           </button>
         </div>
+      </div>
+    {/if}
+
+    {#if isRunning}
+      <div class="flex items-center gap-2 text-sm text-base-content/70">
+        <span class="loading loading-spinner loading-sm"></span>
+        <span>Running inference…</span>
+      </div>
+    {/if}
+
+    {#if errorMessage}
+      <div role="alert" class="alert alert-error text-sm">
+        <AlertCircle class="h-4 w-4" />
+        <span>{errorMessage}</span>
+      </div>
+    {/if}
+
+    {#if result && !isRunning}
+      <div class="space-y-2">
+        <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
+          <span>{summaryLine}</span>
+          {#if isLocked}
+            <span class="badge badge-status-warning gap-1">
+              <Lock class="h-3 w-3" />
+              {t('common.review.status.locked')}
+            </span>
+          {/if}
+        </div>
+
+        {#if result.predictions.length === 0}
+          <div class="text-sm italic text-base-content/70">
+            No species crossed any model's reporting threshold for this clip.
+          </div>
+        {:else}
+          <div class="overflow-x-auto">
+            <table class="table table-sm w-full">
+              <thead>
+                <tr>
+                  <th class="text-left">Species</th>
+                  <!-- Model names wrap. They previously carried whitespace-nowrap,
+                       which forced the header row wider than the modal: measured at
+                       the modal's 768px width with three models, the table came out
+                       780px and the wrapper scrolled horizontally while the species
+                       column was squeezed to 92px. Letting the names wrap keeps the
+                       table at 768px with no scroll and gives the species column
+                       137px, for one extra line of header height.
+                       align-bottom keeps a one-line name on the same baseline as a
+                       wrapped one. No width clamps: min-width/max-width were tried
+                       and measured no better here, only 20px taller. -->
+                  {#each result.modelsRun as m (m.id)}
+                    <th class="text-right align-bottom">
+                      <div>{m.name}</div>
+                    </th>
+                  {/each}
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each decoratedRows as row (row.key)}
+                  <tr class:current-row={row.isCurrent}>
+                    <td class="text-sm">
+                      <!-- Either half can be absent: a bare-scientific model row
+                           has no common name, and a non-binomial sound class has
+                           no scientific name. Render only what is actually there
+                           rather than an empty second line. -->
+                      <div
+                        class={row.displayName !== row.pred.scientificName
+                          ? 'font-medium'
+                          : 'font-mono'}
+                      >
+                        {row.displayName}
+                        {#if row.isCurrent}
+                          <!-- The detection's existing call. Without this the
+                               operator has to remember what they came in with,
+                               since the detail page is behind the modal. -->
+                          <span class="badge badge-sm badge-status-info">current</span>
+                        {/if}
+                      </div>
+                      {#if row.pred.scientificName && row.displayName !== row.pred.scientificName}
+                        <div class="font-mono text-xs italic text-base-content/60">
+                          {row.pred.scientificName}
+                        </div>
+                      {/if}
+                    </td>
+                    {#each row.cells as cell (cell.modelId)}
+                      <td class="text-right tabular-nums whitespace-nowrap">
+                        {#if cell.confidence !== undefined}
+                          <!-- The winning model is emphasised because it is the one
+                               a correction would be attributed to, and because
+                               "which model is most sure" is what the grid is read
+                               for. -->
+                          <span class={cell.colorClass} class:font-bold={cell.isBest}>
+                            {formatConfidencePercent(cell.confidence)}
+                          </span>
+                          {#if cell.delta}
+                            <div class="text-xs text-base-content/50">{cell.delta}</div>
+                          {/if}
+                        {:else}
+                          <span class="text-base-content/30" title="not predicted by this model"
+                            >—</span
+                          >
+                        {/if}
+                      </td>
+                    {/each}
+                    <td class="text-right">
+                      <!-- Only rows the server marked correctable can be applied:
+                           a sound class is not a species, and a row with no
+                           scientific name has nothing to key a correction on.
+                           Omit the button rather than offering one that can only
+                           fail. -->
+                      {#if row.pred.correctable && row.pred.scientificName && !isLocked}
+                        <button
+                          type="button"
+                          class="btn btn-xs btn-ghost"
+                          onclick={() => startCorrection(row.pred)}
+                          disabled={isCorrecting}
+                          aria-label={`Use ${row.displayName} as the species for this detection`}
+                        >
+                          <Check class="h-3.5 w-3.5" />
+                          Use this
+                        </button>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
