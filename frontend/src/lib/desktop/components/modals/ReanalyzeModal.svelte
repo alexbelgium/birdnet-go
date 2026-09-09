@@ -28,6 +28,7 @@
   import { t } from '$lib/i18n';
   import { formatSampleRateLabel } from '$lib/utils/audio/sampleRate';
   import { normalizeForLookup } from '$lib/utils/speciesNames';
+  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { toastActions } from '$lib/stores/toast';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { setDetectionVerification } from '$lib/utils/reviewDetection';
@@ -212,7 +213,7 @@
         return;
       }
       toastActions.success(
-        `Detection corrected to ${applied.commonName || applied.scientificName}.`
+        `Detection corrected to ${localizeSpeciesName(applied.scientificName, applied.commonName)}.`
       );
       onClose();
       onCorrected?.();
@@ -301,6 +302,17 @@
   interface DecoratedRow {
     pred: ReanalyzePrediction;
     key: string;
+    /**
+     * The name to show. Models bake their own common name into the label, and
+     * BirdNET's is always English ("Ficedula hypoleuca_Pied Flycatcher") while
+     * Perch emits none at all — so displaying what the model returned gives a
+     * grid that is half English and half the configured language. Resolving from
+     * the scientific name through the app's own localizeSpeciesName (the same
+     * helper DetectionRow and DetectionDetail use) makes every row consistent,
+     * with the model's name kept only as the fallback for a species the locale
+     * map does not know.
+     */
+    displayName: string;
     isCurrent: boolean;
     /** How many of the models that ran predicted this species at all. */
     agreement: number;
@@ -344,6 +356,7 @@
       return {
         pred,
         key: pred.scientificName || pred.commonName || '',
+        displayName: localizeSpeciesName(pred.scientificName, pred.commonName),
         isCurrent,
         agreement,
         cells: models.map(m => {
@@ -463,8 +476,12 @@
                            has no common name, and a non-binomial sound class has
                            no scientific name. Render only what is actually there
                            rather than an empty second line. -->
-                      <div class={row.pred.commonName ? 'font-medium' : 'font-mono'}>
-                        {row.pred.commonName || row.pred.scientificName}
+                      <div
+                        class={row.displayName !== row.pred.scientificName
+                          ? 'font-medium'
+                          : 'font-mono'}
+                      >
+                        {row.displayName}
                         {#if row.isCurrent}
                           <!-- The detection's existing call. Without this the
                                operator has to remember what they came in with,
@@ -472,7 +489,7 @@
                           <span class="badge badge-sm badge-status-info">current</span>
                         {/if}
                       </div>
-                      {#if row.pred.commonName && row.pred.scientificName}
+                      {#if row.pred.scientificName && row.displayName !== row.pred.scientificName}
                         <div class="font-mono text-xs italic text-base-content/60">
                           {row.pred.scientificName}
                         </div>
@@ -513,7 +530,7 @@
                           class="btn btn-xs btn-ghost"
                           onclick={() => startCorrection(row.pred)}
                           disabled={isCorrecting}
-                          aria-label={`Use ${row.pred.commonName || row.pred.scientificName} as the species for this detection`}
+                          aria-label={`Use ${row.displayName} as the species for this detection`}
                         >
                           <Check class="h-3.5 w-3.5" />
                           Use this

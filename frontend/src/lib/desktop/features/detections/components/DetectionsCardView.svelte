@@ -11,6 +11,7 @@
 <script lang="ts">
   import DetectionCard from '$lib/desktop/features/dashboard/components/DetectionCard.svelte';
   import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
+  import ReanalyzeModal from '$lib/desktop/components/modals/ReanalyzeModal.svelte';
   import type { Detection } from '$lib/types/detection.types';
   import { isExcluded as isSpeciesExcluded, setExcluded } from '$lib/stores/excludedSpecies.svelte';
   import { useDetectionActions } from '../composables/useDetectionActions.svelte';
@@ -60,3 +61,20 @@
     onConfirm={actions.confirmModal}
   />
 {/if}
+
+<!-- Reanalysis runs in place: the action is on the row, so being navigated to the
+     detail page to read it would lose the list the operator is working through.
+     Mounted from the shared composable, the same way ConfirmModal is. -->
+<ReanalyzeModal
+  isOpen={actions.reanalyzeTarget !== null}
+  detection={actions.reanalyzeTarget}
+  onClose={() => actions.closeReanalyze()}
+  onCorrected={() => {
+    actions.closeReanalyze();
+    onRefresh?.();
+  }}
+  onDeleted={() => {
+    actions.closeReanalyze();
+    onRefresh?.();
+  }}
+/>
