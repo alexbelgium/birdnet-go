@@ -1084,7 +1084,7 @@
      refreshes with the new species. -->
 <ReanalyzeModal
   isOpen={reanalyzeOpen}
-  detectionId={detection ? detection.id : null}
+  {detection}
   onClose={() => (reanalyzeOpen = false)}
   onCorrected={() => fetchDetection()}
   onDeleted={() => navigation.navigate('/ui/detections')}

@@ -26,6 +26,30 @@ vi.mock('$lib/utils/api', () => ({
 }));
 
 import ReanalyzeModal from './ReanalyzeModal.svelte';
+import type { ComponentProps } from 'svelte';
+import type { Detection } from '$lib/types/detection.types';
+
+/**
+ * The modal takes the whole detection, not just an id: the grid marks the row
+ * matching the current species, and the lock/verified state drive which actions
+ * are offered.
+ */
+function mkDetection(id: number, over: Partial<Detection> = {}): Detection {
+  return {
+    id,
+    date: '2026-09-08',
+    time: '07:14:00',
+    beginTime: '',
+    endTime: '',
+    speciesCode: 'lottit1',
+    scientificName: 'Aegithalos caudatus',
+    commonName: 'Long-tailed Tit',
+    confidence: 0.996,
+    verified: 'unverified',
+    locked: false,
+    ...over,
+  };
+}
 
 const twoModelResult = {
   detectionId: 7,
@@ -52,6 +76,19 @@ const twoModelResult = {
   ],
 };
 
+/** Every test renders the same shape; only the overrides differ. */
+// The i18n mock in src/test/setup.ts echoes unknown keys, so the accessible name
+// of a localized button IS its key here. Asserting the key verifies the component
+// asks for the right string; i18n:check-usage separately proves the key resolves.
+const VERDICT_CORRECT = 'common.review.status.verifiedCorrect';
+const VERDICT_FALSE_POSITIVE = 'common.review.status.falsePositive';
+
+function renderModal(over: Partial<ComponentProps<typeof ReanalyzeModal>> = {}) {
+  return render(ReanalyzeModal, {
+    props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn(), ...over },
+  });
+}
+
 describe('ReanalyzeModal', () => {
   let user: ReturnType<typeof userEvent.setup>;
 
@@ -69,14 +106,18 @@ describe('ReanalyzeModal', () => {
   });
 
   it('does not run reanalysis while closed', () => {
-    render(ReanalyzeModal, { props: { isOpen: false, detectionId: 7, onClose: vi.fn() } });
+    render(ReanalyzeModal, {
+      props: { isOpen: false, detection: mkDetection(7), onClose: vi.fn() },
+    });
     expect(reanalyzeDetection).not.toHaveBeenCalled();
   });
 
   it('runs reanalysis exactly once on open and renders the per-model grid', async () => {
     reanalyzeDetection.mockResolvedValue(twoModelResult);
 
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
 
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
@@ -108,7 +149,9 @@ describe('ReanalyzeModal', () => {
     const onClose = vi.fn();
     const onCorrected = vi.fn();
 
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose, onCorrected } });
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose, onCorrected },
+    });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
     await user.click(
@@ -134,7 +177,9 @@ describe('ReanalyzeModal', () => {
 
   it('cancelling the confirmation writes nothing', async () => {
     reanalyzeDetection.mockResolvedValue(twoModelResult);
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
     await user.click(
@@ -166,7 +211,7 @@ describe('ReanalyzeModal', () => {
     const onCorrected = vi.fn();
 
     const { rerender } = render(ReanalyzeModal, {
-      props: { isOpen: true, detectionId: 7, onClose, onCorrected },
+      props: { isOpen: true, detection: mkDetection(7), onClose, onCorrected },
     });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
@@ -177,8 +222,8 @@ describe('ReanalyzeModal', () => {
     await waitFor(() => expect(correctDetectionSpecies).toHaveBeenCalledTimes(1));
 
     // Close and reopen for a DIFFERENT detection while the correction is pending.
-    await rerender({ isOpen: false, detectionId: 7, onClose, onCorrected });
-    await rerender({ isOpen: true, detectionId: 99, onClose, onCorrected });
+    await rerender({ isOpen: false, detection: mkDetection(7), onClose, onCorrected });
+    await rerender({ isOpen: true, detection: mkDetection(99), onClose, onCorrected });
 
     failCorrection(new Error('boom'));
     await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalledWith(99));
@@ -191,7 +236,9 @@ describe('ReanalyzeModal', () => {
   it('surfaces a reanalysis failure instead of an empty grid', async () => {
     reanalyzeDetection.mockRejectedValue(new Error('Inference failed'));
 
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Inference failed'));
     // The spinner must not survive the failure.
@@ -215,7 +262,9 @@ describe('ReanalyzeModal', () => {
       ],
     });
 
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
 
     await waitFor(() => expect(screen.getByText('tool')).toBeInTheDocument());
     expect(screen.getByText('42.0%')).toBeInTheDocument();
@@ -225,7 +274,9 @@ describe('ReanalyzeModal', () => {
   it('reports an empty result set rather than rendering a blank table', async () => {
     reanalyzeDetection.mockResolvedValue({ ...twoModelResult, predictions: [] });
 
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
 
     await waitFor(() =>
       expect(
@@ -246,10 +297,10 @@ describe('ReanalyzeModal', () => {
     );
 
     const { rerender } = render(ReanalyzeModal, {
-      props: { isOpen: true, detectionId: 7, onClose: vi.fn() },
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
     });
-    await rerender({ isOpen: false, detectionId: 7, onClose: vi.fn() });
-    await rerender({ isOpen: true, detectionId: 7, onClose: vi.fn() });
+    await rerender({ isOpen: false, detection: mkDetection(7), onClose: vi.fn() });
+    await rerender({ isOpen: true, detection: mkDetection(7), onClose: vi.fn() });
 
     release(twoModelResult);
 
@@ -260,16 +311,12 @@ describe('ReanalyzeModal', () => {
   it('offers the three review verdicts once results are in', async () => {
     reanalyzeDetection.mockResolvedValue(twoModelResult);
     render(ReanalyzeModal, {
-      props: { isOpen: true, detectionId: 7, onClose: vi.fn(), onDeleted: vi.fn() },
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn(), onDeleted: vi.fn() },
     });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
-    expect(
-      screen.getByRole('button', { name: 'Mark this detection as confirmed' })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Mark this detection as a false positive' })
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: VERDICT_CORRECT })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: VERDICT_FALSE_POSITIVE })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete this detection' })).toBeInTheDocument();
   });
 
@@ -278,7 +325,7 @@ describe('ReanalyzeModal', () => {
     // beside it invite a mis-click on an irreversible button.
     reanalyzeDetection.mockResolvedValue(twoModelResult);
     render(ReanalyzeModal, {
-      props: { isOpen: true, detectionId: 7, onClose: vi.fn(), onDeleted: vi.fn() },
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn(), onDeleted: vi.fn() },
     });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
@@ -287,9 +334,7 @@ describe('ReanalyzeModal', () => {
     );
 
     await waitFor(() =>
-      expect(
-        screen.queryByRole('button', { name: 'Mark this detection as confirmed' })
-      ).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: VERDICT_CORRECT })).not.toBeInTheDocument()
     );
     expect(screen.queryByRole('button', { name: 'Delete this detection' })).not.toBeInTheDocument();
     // ...and the correction confirmation is what is on screen instead.
@@ -302,12 +347,12 @@ describe('ReanalyzeModal', () => {
     const onClose = vi.fn();
     const onCorrected = vi.fn();
 
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose, onCorrected } });
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose, onCorrected },
+    });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
-    await user.click(
-      screen.getByRole('button', { name: 'Mark this detection as a false positive' })
-    );
+    await user.click(screen.getByRole('button', { name: VERDICT_FALSE_POSITIVE }));
 
     // The same helper the detections list and search views use, so the request
     // shape and dedupe behaviour stay identical across the app.
@@ -322,7 +367,7 @@ describe('ReanalyzeModal', () => {
     const onDeleted = vi.fn();
 
     render(ReanalyzeModal, {
-      props: { isOpen: true, detectionId: 7, onClose: vi.fn(), onDeleted },
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn(), onDeleted },
     });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
@@ -343,13 +388,13 @@ describe('ReanalyzeModal', () => {
     // longer exists, so the action is only offered when the parent can navigate
     // away from it.
     reanalyzeDetection.mockResolvedValue(twoModelResult);
-    render(ReanalyzeModal, { props: { isOpen: true, detectionId: 7, onClose: vi.fn() } });
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
     expect(screen.queryByRole('button', { name: 'Delete this detection' })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Mark this detection as confirmed' })
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: VERDICT_CORRECT })).toBeInTheDocument();
   });
 
   it('does not navigate away when a delete is superseded by a reopen', async () => {
@@ -367,7 +412,7 @@ describe('ReanalyzeModal', () => {
     const onDeleted = vi.fn();
 
     const { rerender } = render(ReanalyzeModal, {
-      props: { isOpen: true, detectionId: 7, onClose, onDeleted },
+      props: { isOpen: true, detection: mkDetection(7), onClose, onDeleted },
     });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
@@ -375,8 +420,8 @@ describe('ReanalyzeModal', () => {
     await user.click(screen.getByRole('button', { name: /Delete permanently/ }));
     await waitFor(() => expect(fetchWithCSRF).toHaveBeenCalledTimes(1));
 
-    await rerender({ isOpen: false, detectionId: 7, onClose, onDeleted });
-    await rerender({ isOpen: true, detectionId: 99, onClose, onDeleted });
+    await rerender({ isOpen: false, detection: mkDetection(7), onClose, onDeleted });
+    await rerender({ isOpen: true, detection: mkDetection(99), onClose, onDeleted });
 
     finishDelete({});
     await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalledWith(99));
@@ -396,19 +441,111 @@ describe('ReanalyzeModal', () => {
     const onCorrected = vi.fn();
 
     const { rerender } = render(ReanalyzeModal, {
-      props: { isOpen: true, detectionId: 7, onClose, onCorrected },
+      props: { isOpen: true, detection: mkDetection(7), onClose, onCorrected },
     });
     await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
 
-    await user.click(screen.getByRole('button', { name: 'Mark this detection as confirmed' }));
+    await user.click(screen.getByRole('button', { name: VERDICT_CORRECT }));
     await waitFor(() => expect(setDetectionVerification).toHaveBeenCalledTimes(1));
 
-    await rerender({ isOpen: false, detectionId: 7, onClose, onCorrected });
-    await rerender({ isOpen: true, detectionId: 99, onClose, onCorrected });
+    await rerender({ isOpen: false, detection: mkDetection(7), onClose, onCorrected });
+    await rerender({ isOpen: true, detection: mkDetection(99), onClose, onCorrected });
 
     finishVerdict(true);
     await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalledWith(99));
 
     expect(onCorrected).not.toHaveBeenCalled();
+  });
+
+  it("marks the row matching the detection's current species", async () => {
+    // The comparison baseline. The detail page is behind the modal, so without
+    // this the operator has to remember what they came in with to judge whether
+    // the models agree with the original call. The fixture's second prediction is
+    // the species mkDetection carries, so it is the row that must be marked.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    // Exactly one row is marked, and it is the matching species — not the
+    // top-scoring one, which is a different bird.
+    const badges = screen.getAllByText('current');
+    expect(badges).toHaveLength(1);
+    expect(badges[0].closest('tr')?.textContent).toContain('Long-tailed Tit');
+  });
+
+  it('reports how many models scored each species', async () => {
+    // Agreement is the point of the grid: two models on the same bird is a very
+    // different signal from one, and counting columns by eye is slow.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    // Pied Flycatcher was scored by both models, Long-tailed Tit by one.
+    expect(screen.getByText('2 of 2 models')).toBeInTheDocument();
+    expect(screen.getByText('1 of 2 models')).toBeInTheDocument();
+  });
+
+  it("shows each model's window count and sample rate", async () => {
+    // Returned by the API and previously discarded. A max score is only
+    // meaningful alongside how many windows it was taken over, and models use
+    // different window lengths.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    render(ReanalyzeModal, {
+      props: { isOpen: true, detection: mkDetection(7), onClose: vi.fn() },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    expect(screen.getByText(/29 win/)).toBeInTheDocument();
+    expect(screen.getByText(/48 kHz/)).toBeInTheDocument();
+    expect(screen.getByText(/17 win/)).toBeInTheDocument();
+    expect(screen.getByText(/32 kHz/)).toBeInTheDocument();
+  });
+
+  it('hides every write action on a locked detection and says why', async () => {
+    // All four actions are writes and the server refuses each on a locked
+    // detection (review 409, delete 403), so offering them is offering failure.
+    // The app hides rather than disables these (ui/ActionMenu.svelte), and the
+    // reason is stated so a missing control is not left to be guessed at.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    renderModal({ detection: mkDetection(7, { locked: true }), onDeleted: vi.fn() });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    expect(
+      screen.queryByLabelText('Use Pied Flycatcher as the species for this detection')
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: VERDICT_CORRECT })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete this detection' })).not.toBeInTheDocument();
+    expect(screen.getByText('common.review.form.detectionLocked')).toBeInTheDocument();
+
+    // The grid itself stays readable — reanalysis is read-only.
+    expect(screen.getByText('99.8%')).toBeInTheDocument();
+  });
+
+  it('marks the verdict the detection already carries', async () => {
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    render(ReanalyzeModal, {
+      props: {
+        isOpen: true,
+        detection: mkDetection(7, { verified: 'false_positive' }),
+        onClose: vi.fn(),
+      },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    // Without this the three shortcuts are context-free: nothing distinguishes an
+    // unverified detection from one already marked.
+    expect(screen.getByRole('button', { name: VERDICT_FALSE_POSITIVE })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    expect(screen.getByRole('button', { name: VERDICT_CORRECT })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
   });
 });
