@@ -306,7 +306,6 @@
       <button
         type="button"
         class="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-[var(--color-base-300)] disabled:opacity-50"
-        class:bg-success/10={detection?.verified === 'correct'}
         onclick={() => applyVerdict('correct')}
         disabled={isVerdictPending}
         aria-pressed={detection?.verified === 'correct'}
@@ -317,7 +316,6 @@
       <button
         type="button"
         class="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-[var(--color-base-300)] disabled:opacity-50"
-        class:bg-error/10={detection?.verified === 'false_positive'}
         onclick={() => applyVerdict('false_positive')}
         disabled={isVerdictPending}
         aria-pressed={detection?.verified === 'false_positive'}
