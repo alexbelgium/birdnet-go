@@ -17,6 +17,10 @@
 // Every uncertainty fails open (the detection is accepted as it is today):
 // unknown taxonomy, unreadable model metadata, a datastore error, or a species
 // the active models do not all share.
+//
+// The checks run cheapest-first, because this executes on the flush path while
+// p.pendingMutex is held: in-memory counts, then the per-day memo, then the
+// cached taxonomy and model-support lookups, and only then the datastore.
 package processor
 
 import (
@@ -41,14 +45,10 @@ const (
 	// and the /system/events/detections aggregation.
 	reasonFirstDailyConsensus = "first daily detection confirmed by only one model"
 
-	// firstDailySupportCacheCap bounds the model-support memo. The natural key
-	// space is (active model set x species seen today), so the cap only matters
-	// on a pathological config; clearing wholesale is cheaper than tracking ages.
+	// firstDailySupportCacheCap bounds the model-support memo, which is not
+	// day-scoped. The key space is (active model set x species), so the cap only
+	// bites on a pathological config; clearing wholesale beats tracking ages.
 	firstDailySupportCacheCap = 4096
-
-	// firstDailyDayFormat matches the date column the datastore stores and
-	// queries detections by.
-	firstDailyDayFormat = "2006-01-02"
 )
 
 // firstDailyConsensus is the small amount of state the rule keeps. The zero
@@ -57,91 +57,83 @@ const (
 type firstDailyConsensus struct {
 	mu sync.Mutex
 
-	// day is the calendar day accepted and support describe. Both are dropped
-	// when it rolls over.
+	// day is the calendar day checked describes; it is dropped on roll-over.
 	day string
 
-	// accepted memoizes species already confirmed for the day. The datastore is
-	// the source of truth, but persistence is asynchronous: a detection approved
-	// in this flush cycle is only enqueued, so the row is usually not visible to
-	// the very next cycle. Without this memo the second detection of a species
-	// would be gated again, which is precisely what the rule must not do.
-	accepted map[string]struct{}
+	// checked records whether a species already has an accepted detection today.
+	// Presence means the question has been settled for the day, the value is the
+	// answer.
+	//
+	// The datastore is the source of truth, but both answers are memoized. The
+	// positive is required for correctness: persistence is asynchronous, so a
+	// detection approved in this flush cycle is only enqueued and its row is
+	// usually invisible to the next cycle — without the memo the second detection
+	// of a species would be gated again, which is precisely what the rule must not
+	// do. The negative is required for cost: a species held back by this rule
+	// would otherwise re-query on every flush, forever. A negative can only turn
+	// positive when this process accepts a detection, and that path calls
+	// markAccepted.
+	checked map[string]bool
 
 	// support memoizes whether a species is shared by every relevant active bird
-	// model, keyed by the active model set so a topology change re-derives it.
+	// model. The key carries the active model set, which is what actually
+	// invalidates the verdict, so this has no calendar semantics and survives the
+	// day roll — re-deriving it every midnight would reload every label set during
+	// the dawn chorus.
 	support map[string]bool
 }
 
 // markAccepted records that a species has an accepted detection on day.
 func (c *firstDailyConsensus) markAccepted(day, species string) {
+	c.markChecked(day, species, true)
+}
+
+func (c *firstDailyConsensus) markChecked(day, species string, accepted bool) {
 	if day == "" || species == "" {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.rollLocked(day)
-	if c.accepted == nil {
-		c.accepted = make(map[string]struct{})
+	if c.checked == nil {
+		c.checked = make(map[string]bool)
 	}
-	c.accepted[species] = struct{}{}
+	c.checked[species] = accepted
 }
 
-// isAccepted reports whether markAccepted has seen this species today.
-func (c *firstDailyConsensus) isAccepted(day, species string) bool {
+// acceptedToday reports the memoized answer; settled is false when the species
+// has not been resolved for this day yet.
+func (c *firstDailyConsensus) acceptedToday(day, species string) (accepted, settled bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.rollLocked(day)
-	_, ok := c.accepted[species]
-	return ok
+	accepted, settled = c.checked[species]
+	return accepted, settled
 }
 
-// lookupSupport returns a memoized model-support verdict.
-func (c *firstDailyConsensus) lookupSupport(day, key string) (shared, cached bool) {
+func (c *firstDailyConsensus) lookupSupport(key string) (shared, cached bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rollLocked(day)
 	shared, cached = c.support[key]
 	return shared, cached
 }
 
-// storeSupport memoizes a model-support verdict.
-func (c *firstDailyConsensus) storeSupport(day, key string, shared bool) {
+func (c *firstDailyConsensus) storeSupport(key string, shared bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rollLocked(day)
-	if c.support == nil {
-		c.support = make(map[string]bool)
-	}
-	if len(c.support) >= firstDailySupportCacheCap {
+	if c.support == nil || len(c.support) >= firstDailySupportCacheCap {
 		c.support = make(map[string]bool)
 	}
 	c.support[key] = shared
 }
 
-// rollLocked drops yesterday's state. Caller holds c.mu.
+// rollLocked drops yesterday's per-day state. Caller holds c.mu.
 func (c *firstDailyConsensus) rollLocked(day string) {
 	if c.day == day {
 		return
 	}
 	c.day = day
-	c.accepted = nil
-	c.support = nil
-}
-
-// firstDailyDay returns the calendar day a pending detection belongs to, in the
-// same local-date form the datastore stores. A detection that starts before
-// midnight and flushes after it is classified by when it was heard, not by when
-// the flusher happened to reach it.
-func firstDailyDay(item *PendingDetection) string {
-	when := item.FirstDetected
-	if when.IsZero() {
-		when = item.CreatedAt
-	}
-	if when.IsZero() {
-		return ""
-	}
-	return when.Format(firstDailyDayFormat)
+	c.checked = nil
 }
 
 // shouldDiscardFirstDailyDetection reports whether item is the first detection of
@@ -158,27 +150,35 @@ func (p *Processor) shouldDiscardFirstDailyDetection(item *PendingDetection, set
 
 	result := &item.Detection.Result
 	scientificName := result.Species.ScientificName
-	commonName := result.Species.CommonName
-	if scientificName == "" {
+	if scientificName == "" || result.Timestamp.IsZero() {
 		return false, ""
 	}
 
 	// Bats and the non-species sound classes keep today's behaviour untouched.
-	if item.BestModelID == classifier.RegistryIDBat || nonbird.IsNonSpeciesLabel(result.RawLabel) {
+	if !classifier.IsBirdCapableModel(item.BestModelID) || nonbird.IsNonSpeciesLabel(result.RawLabel) {
 		return false, ""
 	}
 
 	// Already agreed on by enough models: nothing for this rule to decide. Checked
 	// first because it is a pure in-memory count and it is the common outcome for
 	// a genuine new species.
-	if p.countConfirmingModels(settings, item, commonName, scientificName) >= firstDailyMinModels {
+	if p.countConfirmingModels(settings, item) >= firstDailyMinModels {
 		return false, ""
 	}
 
 	// A dynamic threshold that actually lowered the bar is the operator asking for
 	// a more permissive gate on this species; do not override that with a stricter
 	// one.
-	if p.dynamicThresholdLowered(settings, item.BestModelID, commonName, scientificName) {
+	if p.dynamicThresholdLowered(settings, item) {
+		return false, ""
+	}
+
+	// Only the first accepted detection of the day is gated. The memo answers for
+	// every species already settled today — the steady state for the rest of the
+	// day — so it comes before the taxonomy, model-support and datastore lookups.
+	day := result.Date()
+	accepted, settled := p.firstDaily.acceptedToday(day, scientificName)
+	if settled && accepted {
 		return false, ""
 	}
 
@@ -187,24 +187,21 @@ func (p *Processor) shouldDiscardFirstDailyDetection(item *PendingDetection, set
 		return false, ""
 	}
 
-	day := firstDailyDay(item)
-	if day == "" {
-		return false, ""
-	}
-
 	// Only meaningful when every relevant active bird model could have confirmed
 	// it. A species one model cannot predict could never reach two confirmations.
-	if !p.speciesSharedByActiveBirdModels(day, item.Source, scientificName) {
+	if !p.speciesSharedByActiveBirdModels(item.Source, scientificName) {
 		return false, ""
 	}
 
-	// Only the first accepted detection of the day is gated.
-	if p.speciesAcceptedToday(day, scientificName) {
-		return false, ""
+	if !settled {
+		dbAccepted, ok := p.speciesAcceptedInDatastore(day, scientificName)
+		if !ok || dbAccepted {
+			return false, ""
+		}
 	}
 
 	GetLogger().Debug("first daily detection lacks a second model",
-		logger.String("species", commonName),
+		logger.String("species", result.Species.CommonName),
 		logger.String("scientific_name", scientificName),
 		logger.String("source", p.getDisplayNameForSource(item.Source)),
 		logger.String("best_model_id", item.BestModelID),
@@ -222,20 +219,25 @@ func (p *Processor) noteAcceptedDetection(item *PendingDetection) {
 	if item == nil {
 		return
 	}
-	p.firstDaily.markAccepted(firstDailyDay(item), item.Detection.Result.Species.ScientificName)
+	result := &item.Detection.Result
+	if result.Timestamp.IsZero() {
+		return
+	}
+	p.firstDaily.markAccepted(result.Date(), result.Species.ScientificName)
 }
 
 // countConfirmingModels counts the bird-capable models whose best score for this
 // species reached that model's normal (non-dynamic) threshold. The dynamically
 // adjusted threshold is deliberately not used: a model that only cleared a
 // lowered bar is not independent confirmation.
-func (p *Processor) countConfirmingModels(settings *conf.Settings, item *PendingDetection, commonName, scientificName string) int {
+func (p *Processor) countConfirmingModels(settings *conf.Settings, item *PendingDetection) int {
+	species := item.Detection.Result.Species
 	count := 0
 	for modelID, contrib := range item.ModelContributions {
-		if modelID == classifier.RegistryIDBat {
+		if !classifier.IsBirdCapableModel(modelID) {
 			continue
 		}
-		normal := p.getBaseConfidenceThreshold(settings, commonName, scientificName, modelID)
+		normal := p.getBaseConfidenceThreshold(settings, species.CommonName, species.ScientificName, modelID)
 		if float32(contrib.MaxConfidence) >= normal {
 			count++
 		}
@@ -245,65 +247,77 @@ func (p *Processor) countConfirmingModels(settings *conf.Settings, item *Pending
 
 // dynamicThresholdLowered reports whether dynamic thresholding is currently
 // holding this species below its normal threshold. It reads the same state
-// getAdjustedConfidenceThreshold applies, but without that function's
-// side effects (expiry reset and event recording), which must not be triggered
-// from a filtering decision.
-func (p *Processor) dynamicThresholdLowered(settings *conf.Settings, modelID, commonName, scientificName string) bool {
+// getAdjustedConfidenceThreshold applies, but without that function's side
+// effects (expiry reset and event recording), which must not be triggered from a
+// filtering decision.
+func (p *Processor) dynamicThresholdLowered(settings *conf.Settings, item *PendingDetection) bool {
 	if !settings.Realtime.DynamicThreshold.Enabled {
 		return false
 	}
+	species := item.Detection.Result.Species
 	// A custom per-species threshold opts out of dynamic adjustment entirely,
 	// matching shouldFilterDetection.
-	if config, exists := lookupSpeciesConfig(settings.Realtime.Species.Config, commonName, scientificName); exists && config.Threshold > 0 {
+	if config, exists := lookupSpeciesConfig(settings.Realtime.Species.Config, species.CommonName, species.ScientificName); exists && config.Threshold > 0 {
 		return false
 	}
 
-	key := strings.ToLower(commonName)
-	if key == "" {
-		key = strings.ToLower(scientificName)
-	}
+	key := dynamicThresholdKey(species.CommonName, species.ScientificName)
 
-	p.thresholdsMutex.RLock()
-	dt, exists := p.DynamicThresholds[key]
 	var level int
 	var timer time.Time
-	if exists && dt != nil {
+	p.thresholdsMutex.RLock()
+	if dt := p.DynamicThresholds[key]; dt != nil {
 		level, timer = dt.Level, dt.Timer
 	}
 	p.thresholdsMutex.RUnlock()
 
-	if !exists || level <= 0 || !time.Now().Before(timer) {
+	if level <= 0 || !time.Now().Before(timer) {
 		return false
 	}
 
-	base := float64(p.getBaseConfidenceThreshold(settings, commonName, scientificName, modelID))
+	base := float64(p.getBaseConfidenceThreshold(settings, species.CommonName, species.ScientificName, item.BestModelID))
 	return effectiveDynamicThreshold(base, level, settings.Realtime.DynamicThreshold.Min) < base
 }
 
-// speciesSharedByActiveBirdModels reports whether at least firstDailyMinModels
-// relevant bird models are active and every one of them can predict the species.
-func (p *Processor) speciesSharedByActiveBirdModels(day, sourceID, scientificName string) bool {
+// dynamicThresholdKey derives the DynamicThresholds map key for a species. The
+// map is written under this key by parseAndValidateSpecies via speciesLowercase,
+// so both must agree or lookups here silently miss.
+func dynamicThresholdKey(commonName, scientificName string) string {
+	key := strings.ToLower(commonName)
+	if key == "" {
+		key = strings.ToLower(scientificName)
+	}
+	return key
+}
+
+// speciesSharedByActiveBirdModels reports whether enough relevant bird models are
+// active and all of them can predict the species.
+func (p *Processor) speciesSharedByActiveBirdModels(sourceID, scientificName string) bool {
 	modelIDs := p.sourceModelIDs(sourceID)
 	cacheKey := firstDailySupportKey(modelIDs, scientificName)
 
-	if shared, cached := p.firstDaily.lookupSupport(day, cacheKey); cached {
+	if shared, cached := p.firstDaily.lookupSupport(cacheKey); cached {
 		return shared
 	}
 
-	relevant, supporting, ok := p.Bn.BirdModelSpeciesSupport(scientificName, modelIDs)
-	shared := ok && relevant >= firstDailyMinModels && supporting == relevant
+	shared, ok := p.Bn.SpeciesSharedByBirdModels(scientificName, modelIDs, firstDailyMinModels)
+	if !ok {
+		// Transient: a model mid-reload. Do not memoize it, or one bad moment would
+		// disable the rule for this species for the life of the process.
+		return false
+	}
 
-	p.firstDaily.storeSupport(day, cacheKey, shared)
+	p.firstDaily.storeSupport(cacheKey, shared)
 	return shared
 }
 
-// sourceModelIDs returns the models actually analysing sourceID, which is the set
-// that could realistically confirm a detection on it. A model loaded but not
-// assigned to this source never sees its audio.
+// sourceModelIDs returns the models actually analysing sourceID, sorted, which is
+// the set that could realistically confirm a detection on it. A model loaded but
+// not assigned to this source never sees its audio.
 //
-// Returns nil when the topology is unknown, which BirdModelSpeciesSupport reads
+// Returns nil when the topology is unknown, which SpeciesSharedByBirdModels reads
 // as "consider every loaded model".
-func (p *Processor) sourceModelIDs(sourceID string) map[string]struct{} {
+func (p *Processor) sourceModelIDs(sourceID string) []string {
 	if p.BufferMgr == nil || sourceID == "" {
 		return nil
 	}
@@ -311,38 +325,25 @@ func (p *Processor) sourceModelIDs(sourceID string) map[string]struct{} {
 	if len(buffers) == 0 {
 		return nil
 	}
-	ids := make(map[string]struct{}, len(buffers))
-	for modelID := range buffers {
-		ids[modelID] = struct{}{}
-	}
-	return ids
+	return slices.Sorted(maps.Keys(buffers))
 }
 
 // firstDailySupportKey builds the memo key. The model set is part of the key so
 // loading, unloading or reassigning a model re-derives the verdict instead of
-// serving a stale one.
-func firstDailySupportKey(modelIDs map[string]struct{}, scientificName string) string {
-	if len(modelIDs) == 0 {
-		return "*|" + scientificName
-	}
-	ids := slices.Collect(maps.Keys(modelIDs))
-	slices.Sort(ids)
-	return strings.Join(ids, ",") + "|" + scientificName
+// serving a stale one; the IDs arrive sorted so the key is stable.
+func firstDailySupportKey(modelIDs []string, scientificName string) string {
+	return strings.Join(modelIDs, ",") + "|" + scientificName
 }
 
-// speciesAcceptedToday reports whether the species already has an accepted
-// detection on day. The datastore is authoritative; the in-memory memo only
-// covers detections approved in this process that have not been persisted yet,
-// and spares the database a query per detection for the rest of the day.
+// speciesAcceptedInDatastore asks the datastore whether the species already has a
+// detection today, memoizing both answers so the question costs at most one query
+// per species per day.
 //
-// Any inability to answer returns true, so the rule is skipped and the detection
-// is accepted exactly as it is today.
-func (p *Processor) speciesAcceptedToday(day, scientificName string) bool {
-	if p.firstDaily.isAccepted(day, scientificName) {
-		return true
-	}
+// ok is false when the question cannot be answered, which the caller treats as
+// "accept the detection as it is today".
+func (p *Processor) speciesAcceptedInDatastore(day, scientificName string) (accepted, ok bool) {
 	if p.Ds == nil {
-		return true
+		return false, false
 	}
 
 	count, err := p.Ds.CountSpeciesDetections(scientificName, day, "", 0)
@@ -352,11 +353,10 @@ func (p *Processor) speciesAcceptedToday(day, scientificName string) bool {
 			logger.String("day", day),
 			logger.Error(err),
 			logger.String("operation", "first_daily_consensus"))
-		return true
+		return false, false
 	}
-	if count > 0 {
-		p.firstDaily.markAccepted(day, scientificName)
-		return true
-	}
-	return false
+
+	accepted = count > 0
+	p.firstDaily.markChecked(day, scientificName, accepted)
+	return accepted, true
 }
