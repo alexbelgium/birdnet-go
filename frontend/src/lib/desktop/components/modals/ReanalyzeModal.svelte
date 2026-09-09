@@ -25,15 +25,27 @@
     type ReanalyzeResult,
     type ReanalyzePrediction,
   } from '$lib/utils/reanalyzeDetection';
+  import { t } from '$lib/i18n';
+  import { formatSampleRateLabel } from '$lib/utils/audio/sampleRate';
+  import { normalizeForLookup } from '$lib/utils/speciesNames';
   import { toastActions } from '$lib/stores/toast';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { setDetectionVerification } from '$lib/utils/reviewDetection';
   import { loggers } from '$lib/utils/logger';
-  import { Sparkles, AlertCircle, Check, ThumbsDown, Trash2 } from '@lucide/svelte';
+  import { Sparkles, AlertCircle, Check, ThumbsDown, Trash2, Lock } from '@lucide/svelte';
+  import type { Detection } from '$lib/types/detection.types';
 
   interface Props {
     isOpen: boolean;
-    detectionId: number | null;
+    /**
+     * The detection under review. The modal needs more than its id: the current
+     * species is what every prediction is being compared AGAINST, and without it
+     * the grid cannot say whether the models agree with the original call — the
+     * question the whole feature exists to answer. The lock and verification
+     * state come along for free and let the actions reflect reality instead of
+     * failing server-side.
+     */
+    detection: Detection | null;
     onClose: () => void;
     /**
      * Called after a successful correction. The parent typically re-fetches the
@@ -50,7 +62,21 @@
     onDeleted?: () => void;
   }
 
-  let { isOpen = false, detectionId = null, onClose, onCorrected, onDeleted }: Props = $props();
+  let { isOpen = false, detection = null, onClose, onCorrected, onDeleted }: Props = $props();
+
+  const detectionId = $derived(detection?.id ?? null);
+  const isLocked = $derived(detection?.locked === true);
+
+  /**
+   * The species every prediction is compared against, normalized once rather
+   * than per row. normalizeForLookup is the codebase's canonical species-name
+   * normalization and mirrors the backend's: it folds to NFC before lowercasing,
+   * so a name submitted in NFD (composing keyboards on macOS) still matches
+   * instead of silently leaving the current row unmarked.
+   */
+  const currentSpeciesKey = $derived(
+    detection?.scientificName ? normalizeForLookup(detection.scientificName) : ''
+  );
 
   const logger = loggers.ui;
 
@@ -251,6 +277,96 @@
     }
   }
 
+  /**
+   * The grid, decorated once when a result arrives instead of recomputed per
+   * cell while rendering. Each row carries everything the template needs, so the
+   * markup contains no function calls at all: one O(rows x models) pass replaces
+   * roughly thirty per-cell computations and the same number of cached signals.
+   *
+   * `byModel` is enumerated exactly once per row to produce both the winning
+   * model and the agreement count, rather than an Object.entries scan for the
+   * winner and a separate Object.keys scan for the count.
+   */
+  interface DecoratedCell {
+    modelId: string;
+    /** undefined when this model did not predict the species in any window. */
+    confidence: number | undefined;
+    /** Global confidence-high/-medium/-low class, or '' when unscored. */
+    colorClass: string;
+    isBest: boolean;
+    /** Signed points vs the detection's own confidence; only set on its row. */
+    delta: string | null;
+  }
+
+  interface DecoratedRow {
+    pred: ReanalyzePrediction;
+    key: string;
+    isCurrent: boolean;
+    /** How many of the models that ran predicted this species at all. */
+    agreement: number;
+    cells: DecoratedCell[];
+  }
+
+  /**
+   * Same thresholds and class names ConfidenceCircle uses (>=70 high, >=40
+   * medium), reusing the global .confidence-* rules in styles/custom.css rather
+   * than restating their colours here. Note this is deliberately NOT the only
+   * scheme in the app — features/dashboard uses 90/70/50/30 for its badges — so
+   * this matches ConfidenceCircle specifically, not some single app-wide rule.
+   */
+  function confidenceClass(c: number): string {
+    const pct = c * 100;
+    if (pct >= 70) return 'confidence-high';
+    if (pct >= 40) return 'confidence-medium';
+    return 'confidence-low';
+  }
+
+  const decoratedRows = $derived.by<DecoratedRow[]>(() => {
+    if (!result) return [];
+    const models = result.modelsRun;
+    const baseConfidence = detection?.confidence ?? null;
+
+    return result.predictions.map(pred => {
+      let bestModel = '';
+      let bestConfidence = -1;
+      let agreement = 0;
+      for (const [modelId, conf] of Object.entries(pred.byModel)) {
+        agreement++;
+        if (conf > bestConfidence) {
+          bestConfidence = conf;
+          bestModel = modelId;
+        }
+      }
+
+      const isCurrent =
+        !!currentSpeciesKey && normalizeForLookup(pred.scientificName) === currentSpeciesKey;
+
+      return {
+        pred,
+        key: pred.scientificName || pred.commonName || '',
+        isCurrent,
+        agreement,
+        cells: models.map(m => {
+          const confidence = pred.byModel[m.id];
+          let delta: string | null = null;
+          if (isCurrent && confidence !== undefined && baseConfidence !== null) {
+            const points = (confidence - baseConfidence) * 100;
+            if (Math.abs(points) >= 0.05) {
+              delta = `${points > 0 ? '+' : '\u2212'}${Math.abs(points).toFixed(1)} pts`;
+            }
+          }
+          return {
+            modelId: m.id,
+            confidence,
+            colorClass: confidence === undefined ? '' : confidenceClass(confidence),
+            isBest: m.id === bestModel,
+            delta,
+          };
+        }),
+      };
+    });
+  });
+
   function formatConfidencePercent(c: number): string {
     return `${(c * 100).toFixed(1)}%`;
   }
@@ -294,7 +410,15 @@
 
     {#if result && !isRunning}
       <div class="space-y-2">
-        <div class="text-xs text-base-content/60">{summaryLine}</div>
+        <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
+          <span>{summaryLine}</span>
+          {#if isLocked}
+            <span class="badge badge-status-warning gap-1">
+              <Lock class="h-3 w-3" />
+              {t('common.review.status.locked')}
+            </span>
+          {/if}
+        </div>
 
         {#if result.predictions.length === 0}
           <div class="text-sm italic text-base-content/70">
@@ -317,37 +441,63 @@
                        wrapped one. No width clamps: min-width/max-width were tried
                        and measured no better here, only 20px taller. -->
                   {#each result.modelsRun as m (m.id)}
-                    <th class="text-right align-bottom" title={m.name}>{m.name}</th>
+                    <th class="text-right align-bottom">
+                      <div>{m.name}</div>
+                      <!-- windowCount and sampleRate come back from the API and used
+                           to be discarded. The window count is what a max score was
+                           taken over, and models use different window lengths, so a
+                           bare percentage is misleading without it. -->
+                      <div class="text-[11px] font-normal text-base-content/60">
+                        {m.windowCount} win · {formatSampleRateLabel(m.sampleRate)}
+                      </div>
+                    </th>
                   {/each}
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {#each result.predictions as pred (pred.scientificName || pred.commonName)}
-                  <tr>
+                {#each decoratedRows as row (row.key)}
+                  <tr class:current-row={row.isCurrent}>
                     <td class="text-sm">
                       <!-- Either half can be absent: a bare-scientific model row
                            has no common name, and a non-binomial sound class has
                            no scientific name. Render only what is actually there
                            rather than an empty second line. -->
-                      {#if pred.commonName}
-                        <div class="font-medium">{pred.commonName}</div>
-                        {#if pred.scientificName}
-                          <div class="font-mono text-xs italic text-base-content/60">
-                            {pred.scientificName}
-                          </div>
+                      <div class={row.pred.commonName ? 'font-medium' : 'font-mono'}>
+                        {row.pred.commonName || row.pred.scientificName}
+                        {#if row.isCurrent}
+                          <!-- The detection's existing call. Without this the
+                               operator has to remember what they came in with,
+                               since the detail page is behind the modal. -->
+                          <span class="badge badge-sm badge-status-info">current</span>
                         {/if}
-                      {:else}
-                        <div class="font-mono">{pred.scientificName}</div>
+                      </div>
+                      {#if row.pred.commonName && row.pred.scientificName}
+                        <div class="font-mono text-xs italic text-base-content/60">
+                          {row.pred.scientificName}
+                        </div>
                       {/if}
+                      <div class="text-xs text-base-content/60">
+                        {row.agreement} of {result.modelsRun.length} models
+                      </div>
                     </td>
-                    {#each result.modelsRun as m (m.id)}
-                      {@const conf = pred.byModel[m.id]}
+                    {#each row.cells as cell (cell.modelId)}
                       <td class="text-right tabular-nums whitespace-nowrap">
-                        {#if conf !== undefined}
-                          {formatConfidencePercent(conf)}
+                        {#if cell.confidence !== undefined}
+                          <!-- The winning model is emphasised because it is the one
+                               a correction would be attributed to, and because
+                               "which model is most sure" is what the grid is read
+                               for. -->
+                          <span class={cell.colorClass} class:font-bold={cell.isBest}>
+                            {formatConfidencePercent(cell.confidence)}
+                          </span>
+                          {#if cell.delta}
+                            <div class="text-xs text-base-content/50">{cell.delta}</div>
+                          {/if}
                         {:else}
-                          <span class="text-base-content/30">—</span>
+                          <span class="text-base-content/30" title="not predicted by this model"
+                            >—</span
+                          >
                         {/if}
                       </td>
                     {/each}
@@ -357,13 +507,13 @@
                            scientific name has nothing to key a correction on.
                            Omit the button rather than offering one that can only
                            fail. -->
-                      {#if pred.correctable && pred.scientificName}
+                      {#if row.pred.correctable && row.pred.scientificName && !isLocked}
                         <button
                           type="button"
                           class="btn btn-xs btn-ghost"
-                          onclick={() => startCorrection(pred)}
+                          onclick={() => startCorrection(row.pred)}
                           disabled={isCorrecting}
-                          aria-label={`Use ${pred.commonName || pred.scientificName} as the species for this detection`}
+                          aria-label={`Use ${row.pred.commonName || row.pred.scientificName} as the species for this detection`}
                         >
                           <Check class="h-3.5 w-3.5" />
                           Use this
@@ -383,7 +533,19 @@
          the user has picked a species the pending correction is the action on
          screen, and offering three competing verdicts beside it invites a
          mis-click. Mirrors the Review tab's actions. -->
-    {#if result && !isRunning && !pendingCorrection}
+    <!-- Every action below WRITES. A locked detection refuses all of them
+         server-side (review 409, delete 403), so offering them is offering
+         failure — and the app's own convention is to hide, not disable, review
+         and delete on a locked detection (see ui/ActionMenu.svelte). The reason
+         is stated rather than left to be guessed at, since a silently missing
+         control is as confusing as a silently disabled one. -->
+    {#if result && !isRunning && isLocked}
+      <div class="border-t border-base-300 pt-3 text-sm text-base-content/70">
+        {t('common.review.form.detectionLocked')}
+      </div>
+    {/if}
+
+    {#if result && !isRunning && !pendingCorrection && !isLocked}
       {#if confirmingDelete}
         <div class="rounded-md border border-error/40 bg-error/10 p-3 text-sm">
           <div class="mb-2 font-medium">Delete this detection?</div>
@@ -397,7 +559,7 @@
               onclick={() => (confirmingDelete = false)}
               disabled={isVerdictPending}
             >
-              Cancel
+              {t('common.buttons.cancel')}
             </button>
             <button
               type="button"
@@ -412,25 +574,36 @@
         </div>
       {:else}
         <div class="flex flex-wrap justify-end gap-2 border-t border-base-300 pt-3">
+          <!-- Labels reuse review-status keys the app already ships, so they read
+               in the operator's language at no i18n cost AND say what they mean:
+               "Correct" from the actions namespace would be ambiguous beside a
+               species-correction flow. No aria-label — the visible text is the
+               accessible name, so the two cannot disagree. The active verdict is
+               marked, since three context-free buttons give no way to tell an
+               unverified detection from one already reviewed. -->
           <button
             type="button"
-            class="btn btn-xs btn-ghost"
+            class="btn btn-xs"
+            class:btn-success={detection?.verified === 'correct'}
+            class:btn-ghost={detection?.verified !== 'correct'}
             onclick={() => applyVerdict('correct')}
             disabled={isVerdictPending}
-            aria-label="Mark this detection as confirmed"
+            aria-pressed={detection?.verified === 'correct'}
           >
             <Check class="h-3.5 w-3.5" />
-            Confirmed
+            {t('common.review.status.verifiedCorrect')}
           </button>
           <button
             type="button"
-            class="btn btn-xs btn-ghost"
+            class="btn btn-xs"
+            class:btn-error={detection?.verified === 'false_positive'}
+            class:btn-ghost={detection?.verified !== 'false_positive'}
             onclick={() => applyVerdict('false_positive')}
             disabled={isVerdictPending}
-            aria-label="Mark this detection as a false positive"
+            aria-pressed={detection?.verified === 'false_positive'}
           >
             <ThumbsDown class="h-3.5 w-3.5" />
-            False positive
+            {t('common.review.status.falsePositive')}
           </button>
           {#if onDeleted}
             <button
@@ -441,7 +614,7 @@
               aria-label="Delete this detection"
             >
               <Trash2 class="h-3.5 w-3.5" />
-              Delete
+              {t('common.buttons.delete')}
             </button>
           {/if}
         </div>
@@ -467,7 +640,7 @@
             onclick={cancelCorrection}
             disabled={isCorrecting}
           >
-            Cancel
+            {t('common.buttons.cancel')}
           </button>
           <button
             type="button"
@@ -483,3 +656,14 @@
     {/if}
   </div>
 </Modal>
+
+<style>
+  /* The only rule this component still needs: the detection's existing species.
+     Tinting the whole row rather than just the badge makes the comparison
+     baseline findable without reading every name. Everything else reuses classes
+     the app already ships — .confidence-* from styles/custom.css and
+     badge-status-* from styles/tailwind.css. */
+  .current-row {
+    background-color: color-mix(in srgb, var(--color-info) 8%, transparent);
+  }
+</style>
