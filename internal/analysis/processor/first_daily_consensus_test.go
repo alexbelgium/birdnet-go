@@ -32,9 +32,13 @@ type dbResult struct {
 	err   error
 }
 
+// newConsensusSettings returns settings with the rule turned on. It ships off by
+// default (see TestFirstDailyConsensusDisabledByDefault), so every case that
+// exercises the rule must opt in explicitly.
 func newConsensusSettings() *conf.Settings {
 	settings := &conf.Settings{}
 	settings.BirdNET.Threshold = 0.5
+	settings.Realtime.FirstDailyConsensus.Enabled = true
 	return settings
 }
 
@@ -304,6 +308,28 @@ func TestDynamicThresholdKeyMatchesParseAndValidateSpecies(t *testing.T) {
 	assert.Equal(t, "great tit", dynamicThresholdKey(consensusCommon, consensusSpecies))
 	assert.Equal(t, "parus major", dynamicThresholdKey("", consensusSpecies), "falls back to the scientific name")
 	assert.Empty(t, dynamicThresholdKey("", ""))
+}
+
+// TestFirstDailyConsensusDisabledByDefault pins the opt-in contract: on a
+// zero-value config the rule must not touch a detection it would otherwise
+// discard, and must not reach the datastore to decide that. The mock has no
+// CountSpeciesDetections expectation, so any query fails the test.
+func TestFirstDailyConsensusDisabledByDefault(t *testing.T) {
+	t.Parallel()
+
+	settings := &conf.Settings{}
+	settings.BirdNET.Threshold = 0.5
+	require.False(t, settings.Realtime.FirstDailyConsensus.Enabled)
+
+	p := &Processor{Ds: mocks.NewMockInterface(t)}
+	markSpeciesShared(p, true)
+
+	// Exactly the case TestShouldDiscardFirstDailyDetection discards when enabled.
+	discard, reason := p.shouldDiscardFirstDailyDetection(
+		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
+
+	assert.False(t, discard, "the rule must be inert until enabled")
+	assert.Empty(t, reason)
 }
 
 // TestShouldDiscardFirstDailyDetection_NilOrchestrator is a permanent regression

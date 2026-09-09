@@ -802,6 +802,17 @@ type FalsePositiveFilterSettings struct {
 	Level int `yaml:"level" json:"level"` // Filtering aggressivity level (0-5): 0=Off, 1=Lenient, 2=Moderate, 3=Balanced, 4=Strict, 5=Maximum
 }
 
+// FirstDailyConsensusSettings configures the first-daily-detection consensus
+// rule: the first accepted detection of a bird species each day must be
+// confirmed by a second model that also cleared its normal threshold.
+//
+// The rule only applies to species every active bird-capable model can predict;
+// bats, non-bird taxa, and species unique to one model are never affected. See
+// internal/analysis/processor/first_daily_consensus.go.
+type FirstDailyConsensusSettings struct {
+	Enabled bool `yaml:"enabled" json:"enabled"` // true to require a second model to confirm a species' first detection each day
+}
+
 // Validate checks if the filter level is within the valid range (0-5).
 func (f *FalsePositiveFilterSettings) Validate() error {
 	if f.Level < 0 || f.Level > 5 {
@@ -893,6 +904,7 @@ type RealtimeSettings struct {
 	Dashboard           Dashboard                   `yaml:"dashboard" json:"dashboard"`                     // Dashboard settings
 	DynamicThreshold    DynamicThresholdSettings    `yaml:"dynamicthreshold" json:"dynamicThreshold"`       // Dynamic threshold settings
 	FalsePositiveFilter FalsePositiveFilterSettings `yaml:"falsepositivefilter" json:"falsePositiveFilter"` // False positive filtering aggressivity settings
+	FirstDailyConsensus FirstDailyConsensusSettings `yaml:"firstdailyconsensus" json:"firstDailyConsensus"` // Require a second model to confirm each species' first detection of the day
 	Log                 struct {
 		Enabled bool   `yaml:"enabled" json:"enabled"` // true to enable OBS chat log
 		Path    string `yaml:"path" json:"path"`       // path to OBS chat log
