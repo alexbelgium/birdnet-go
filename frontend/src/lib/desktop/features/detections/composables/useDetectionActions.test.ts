@@ -160,4 +160,42 @@ describe('useDetectionActions', () => {
     expect(toastActions.error).toHaveBeenCalledTimes(1);
     expect(onRefresh).not.toHaveBeenCalled();
   });
+
+  it('opens reanalysis in place instead of navigating away', async () => {
+    // The action lives on the detection row, so sending the operator to the
+    // detail page to read the model grid would lose the list they are working
+    // through. handleReview navigates by design; handleReanalyze must not.
+    const { navigation } = await import('$lib/stores/navigation.svelte');
+    vi.mocked(navigation.navigate).mockClear();
+
+    const actions = useDetectionActions({
+      isSpeciesExcluded: () => false,
+      onToggleExclusion: () => {},
+    });
+    const detection = { id: 7, commonName: 'Great Tit' } as Detection;
+
+    expect(actions.reanalyzeTarget).toBeNull();
+    actions.handleReanalyze(detection);
+
+    // $state proxies the object, so compare by value rather than identity.
+    expect(actions.reanalyzeTarget).toStrictEqual(detection);
+    expect(navigation.navigate).not.toHaveBeenCalled();
+
+    actions.closeReanalyze();
+    expect(actions.reanalyzeTarget).toBeNull();
+  });
+
+  it('still navigates for the review action', async () => {
+    // Guards the contrast: review is a different page, reanalysis is not.
+    const { navigation } = await import('$lib/stores/navigation.svelte');
+    vi.mocked(navigation.navigate).mockClear();
+
+    const actions = useDetectionActions({
+      isSpeciesExcluded: () => false,
+      onToggleExclusion: () => {},
+    });
+    actions.handleReview({ id: 7, commonName: 'Great Tit' } as Detection);
+
+    expect(navigation.navigate).toHaveBeenCalledWith('/ui/detections/7?tab=review');
+  });
 });

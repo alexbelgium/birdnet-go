@@ -6,6 +6,8 @@ const reanalyzeDetection = vi.fn();
 const correctDetectionSpecies = vi.fn();
 const toastSuccess = vi.fn();
 const setDetectionVerification = vi.fn();
+/** Stands in for the UI-locale species map the real helper consults. */
+let localizedNames = new Map<string, string>();
 const fetchWithCSRF = vi.fn();
 
 vi.mock('$lib/utils/reanalyzeDetection', () => ({
@@ -19,6 +21,11 @@ vi.mock('$lib/stores/toast', () => ({
 
 vi.mock('$lib/utils/reviewDetection', () => ({
   setDetectionVerification: (...args: unknown[]) => setDetectionVerification(...args),
+}));
+
+vi.mock('$lib/utils/speciesDisplay', () => ({
+  localizeSpeciesName: (scientific?: string, fallback?: string) =>
+    (scientific ? localizedNames.get(scientific) : undefined) ?? fallback ?? scientific ?? '',
 }));
 
 vi.mock('$lib/utils/api', () => ({
@@ -99,6 +106,7 @@ describe('ReanalyzeModal', () => {
     toastSuccess.mockReset();
     setDetectionVerification.mockReset();
     fetchWithCSRF.mockReset();
+    localizedNames = new Map();
   });
 
   afterEach(() => {
@@ -547,5 +555,37 @@ describe('ReanalyzeModal', () => {
       'aria-pressed',
       'false'
     );
+  });
+
+  it('shows the configured language, not the English baked into model labels', async () => {
+    // BirdNET ships an English common name inside its label
+    // ("Ficedula hypoleuca_Pied Flycatcher") while Perch ships none, so rendering
+    // what the model returned gives a grid that is half English and half the
+    // configured language. Every name resolves through the app's own
+    // localizeSpeciesName instead.
+    localizedNames = new Map([
+      ['Ficedula hypoleuca', 'Gobemouche noir'],
+      ['Aegithalos caudatus', 'Mésange à longue queue'],
+    ]);
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+
+    renderModal();
+
+    await waitFor(() => expect(screen.getByText('Gobemouche noir')).toBeInTheDocument());
+    expect(screen.getByText('Mésange à longue queue')).toBeInTheDocument();
+    expect(screen.queryByText('Pied Flycatcher')).not.toBeInTheDocument();
+    expect(screen.queryByText('Long-tailed Tit')).not.toBeInTheDocument();
+    // The scientific name stays as the secondary line.
+    expect(screen.getByText('Ficedula hypoleuca')).toBeInTheDocument();
+  });
+
+  it('falls back to the model name for a species the locale map does not know', async () => {
+    // An exotic or newly added species must still render, not go blank.
+    localizedNames = new Map();
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+
+    renderModal();
+
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
   });
 });

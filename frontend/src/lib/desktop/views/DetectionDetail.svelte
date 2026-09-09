@@ -109,10 +109,8 @@
   let canReview = $derived($hasReviewPermission);
   let clipExtractionEnabled = $derived($isAuthenticated);
 
-  // Reanalyze modal — opened from the metadata bar's "Reanalyze" button, or by
-  // the ?reanalyze=1 deep link the detection action menus navigate to.
+  // Reanalyze modal — opened from the metadata bar's "Reanalyze" button.
   let reanalyzeOpen = $state(false);
-  let reanalyzeConsumed = $state(false);
   let detection = $state<Detection | null>(null);
   let speciesInfo = $state<SpeciesInfo | null>(null);
   let taxonomyInfo = $state<TaxonomyInfo | null>(null);
@@ -168,22 +166,6 @@
     if (tabParam && validTabs.includes(tabParam as TabType)) {
       activeTab = tabParam === 'review' && !canReview ? 'overview' : (tabParam as TabType);
     }
-  });
-
-  // Open the reanalysis modal when arrived at via the ?reanalyze=1 deep link the
-  // detection action menus use. Consumed once and stripped from the URL, so a
-  // reload (or closing the modal and pressing back) does not reopen it, and the
-  // shareable URL is the plain detail page. Gated on the same permission the
-  // Reanalyze button is, since the endpoints behind it are auth-protected.
-  $effect(() => {
-    if (reanalyzeConsumed || !$isAuthenticated) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('reanalyze') !== '1') return;
-    reanalyzeConsumed = true;
-    reanalyzeOpen = true;
-    params.delete('reanalyze');
-    const query = params.toString();
-    window.history.replaceState({}, '', window.location.pathname + (query ? `?${query}` : ''));
   });
 
   // Fetch detection data when resolvedDetectionId changes
