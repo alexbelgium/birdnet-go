@@ -183,6 +183,7 @@ Performance Optimizations:
     analyticsNocturnal: actualRoute === '/ui/analytics/nocturnal',
     analyticsSpecies: actualRoute === '/ui/analytics/species',
     search: actualRoute.startsWith('/ui/search'),
+    searchSettings: actualRoute === '/ui/settings/search',
     about: actualRoute.startsWith('/ui/about'),
     system: actualRoute.startsWith('/ui/system'),
     systemOverview: actualRoute === '/ui/system',
@@ -239,6 +240,7 @@ Performance Optimizations:
     analyticsNocturnal: onNavigate ? '/analytics/nocturnal' : '/ui/analytics/nocturnal',
     analyticsSpecies: onNavigate ? '/analytics/species' : '/ui/analytics/species',
     search: onNavigate ? '/search' : '/ui/search',
+    searchSettings: onNavigate ? '/settings/search' : '/ui/settings/search',
     about: onNavigate ? '/about' : '/ui/about',
     help: onNavigate ? '/help' : '/ui/help',
     helpReportBug: onNavigate ? '/help/report-bug' : '/ui/help/report-bug',
@@ -415,6 +417,12 @@ Performance Optimizations:
   ]);
 
   let settingsItems: NavItem[] = $derived([
+    {
+      icon: Search,
+      label: 'Search settings',
+      url: navigationUrls.searchSettings,
+      routeKey: 'searchSettings',
+    },
     {
       icon: SlidersHorizontal,
       label: t('settings.sections.node'),
