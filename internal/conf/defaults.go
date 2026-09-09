@@ -203,6 +203,11 @@ func setDefaultConfig() {
 	viper.SetDefault("realtime.audio.export.retention.checkinterval", DefaultCleanupCheckInterval)
 
 	// Dynamic threshold configuration
+	// Off by default: the rule holds back a species' first detection of the day
+	// until a second model agrees, which is a deliberate trade of recall for
+	// precision that an operator should opt into.
+	viper.SetDefault("realtime.firstdailyconsensus.enabled", false)
+
 	viper.SetDefault("realtime.dynamicthreshold.enabled", true)
 	viper.SetDefault("realtime.dynamicthreshold.debug", false)
 	viper.SetDefault("realtime.dynamicthreshold.trigger", 0.90)

@@ -189,6 +189,12 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 
+	// Opt-in. Read from the per-cycle settings snapshot, so toggling it takes
+	// effect on the next flush without a restart.
+	if !settings.Realtime.FirstDailyConsensus.Enabled {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
 	result := &item.Detection.Result
 	scientificName := result.Species.ScientificName
 	if scientificName == "" || result.Timestamp.IsZero() {
