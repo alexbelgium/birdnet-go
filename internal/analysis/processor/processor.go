@@ -134,7 +134,6 @@ type Processor struct {
 	pipelineStats *PipelineStats
 
 	// First-daily-detection consensus state (see first_daily_consensus.go).
-	// Zero value is ready to use.
 	firstDaily firstDailyConsensus
 
 	// Per-model recent-detection cache: a fixed-capacity, most-recent-first feed of
@@ -1001,10 +1000,7 @@ func (p *Processor) parseAndValidateSpecies(settings *conf.Settings, result data
 	}
 
 	// Convert species to lowercase for case-insensitive comparison
-	speciesLowercase = strings.ToLower(commonName)
-	if speciesLowercase == "" && scientificName != "" {
-		speciesLowercase = strings.ToLower(scientificName)
-	}
+	speciesLowercase = dynamicThresholdKey(commonName, scientificName)
 
 	return
 }

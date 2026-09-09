@@ -5,9 +5,12 @@
 package classifier
 
 import (
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
+	"github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/openfauna"
 )
 
@@ -39,31 +42,35 @@ func IsBirdSpecies(scientificName string) (isBird, known bool) {
 	if key == "" {
 		return false, false
 	}
-	if cached, ok := birdClassCache.Load(key); ok {
-		v := cached.(birdClassVerdict) //nolint:errcheck // only this file stores here
-		return v.isBird, v.known
+	if cached, loaded := birdClassCache.Load(key); loaded {
+		if v, isVerdict := cached.(birdClassVerdict); isVerdict {
+			return v.isBird, v.known
+		}
 	}
 
-	meta, ok := openfauna.LookupMeta(key)
+	meta, found := openfauna.LookupMeta(key)
 	v := birdClassVerdict{
-		isBird: ok && strings.EqualFold(meta.Class, avesClass),
-		known:  ok && meta.Class != "",
+		isBird: found && strings.EqualFold(meta.Class, avesClass),
+		known:  found && meta.Class != "",
 	}
 	birdClassCache.Store(key, v)
 	return v.isBird, v.known
 }
 
-// isBirdCapableModel reports whether a registry model classifies birds. Every
-// model in the registry does except the bat classifier, so this is expressed as
-// the single bat exclusion rather than an allow-list that a future bird model
-// would silently fall out of.
-func isBirdCapableModel(modelID string) bool {
-	return modelID != RegistryIDBat
+// IsBirdCapableModel reports whether a model classifies birds. It reuses the
+// model-type resolution the v2 datastore already uses to stamp a detection's
+// taxonomic class, so a future model is classified by the same rule rather than
+// by an allow-list here that it would silently fall out of.
+//
+// An unknown model ID resolves to the BirdNET default, i.e. bird-capable.
+func IsBirdCapableModel(modelID string) bool {
+	info := DetectionModelInfoForID(modelID)
+	return detection.ResolveModelType(info.Name, info.Version) != entities.ModelTypeBat
 }
 
-// BirdModelSpeciesSupport reports how many currently loaded, active, bird-capable
-// models are relevant to a detection, and how many of those can predict
-// scientificName at all.
+// SpeciesSharedByBirdModels reports whether at least minModels bird-capable
+// models are active and every one of them can predict scientificName. It is the
+// "could a second model realistically have confirmed this?" test.
 //
 // restrictTo, when non-nil, narrows the answer to that set of model IDs — the
 // processor passes the models actually analysing the audio source, since a model
@@ -72,18 +79,18 @@ func isBirdCapableModel(modelID string) bool {
 //
 // ok is false when the answer cannot be trusted (no orchestrator, unusable
 // species name, or a model whose labels cannot be read because its instance is
-// mid-reload). Callers must fail open on it rather than infer a count of zero.
+// mid-reload). Callers must fail open on it rather than read shared=false.
 //
 // Locking follows AllLabels: model IDs and entry pointers are snapshotted under
 // o.mu, which is released before any entry.mu is taken, because the reload,
 // unload and delete paths deliberately order those two locks the other way.
-func (o *Orchestrator) BirdModelSpeciesSupport(scientificName string, restrictTo map[string]struct{}) (relevant, supporting int, ok bool) {
-	if o == nil {
-		return 0, 0, false
+func (o *Orchestrator) SpeciesSharedByBirdModels(scientificName string, restrictTo []string, minModels int) (shared, ok bool) {
+	if o == nil || minModels < 1 {
+		return false, false
 	}
 	key := canonicalSpeciesKey(scientificName)
 	if key == "" {
-		return 0, 0, false
+		return false, false
 	}
 
 	o.mu.RLock()
@@ -91,20 +98,25 @@ func (o *Orchestrator) BirdModelSpeciesSupport(scientificName string, restrictTo
 	primaryID := o.ModelInfo.ID
 	refs := make([]entryRef, 0, len(o.models))
 	for id, entry := range o.models {
+		// IsModelActive reads an atomic, not o.mu, so it is safe under the RLock.
+		if !IsBirdCapableModel(id) || !o.IsModelActive(id) {
+			continue
+		}
+		if restrictTo != nil && !slices.Contains(restrictTo, id) {
+			continue
+		}
 		refs = append(refs, entryRef{id: id, entry: entry})
 	}
 	o.mu.RUnlock()
 
-	for _, ref := range refs {
-		if !isBirdCapableModel(ref.id) || !o.IsModelActive(ref.id) {
-			continue
-		}
-		if restrictTo != nil {
-			if _, wanted := restrictTo[ref.id]; !wanted {
-				continue
-			}
-		}
+	// Reading label sets is by far the expensive part of this call (a clone of up
+	// to ~15k strings per model, then a canonicalization per label), so settle the
+	// quorum first: below it the answer is already no.
+	if len(refs) < minModels {
+		return false, true
+	}
 
+	for _, ref := range refs {
 		var labels []string
 		if primary != nil && ref.id == primaryID {
 			// BirdNET.Labels takes the model's own lock, so entry.mu is neither
@@ -120,26 +132,13 @@ func (o *Orchestrator) BirdModelSpeciesSupport(scientificName string, restrictTo
 		if len(labels) == 0 {
 			// A loaded model we cannot read labels for makes the whole comparison
 			// unreliable, so report that rather than quietly under-counting.
-			return 0, 0, false
+			return false, false
 		}
-
-		relevant++
-		if labelsCoverSpecies(labels, key) {
-			supporting++
-		}
-	}
-
-	return relevant, supporting, true
-}
-
-// labelsCoverSpecies reports whether any label canonicalizes to key. It scans
-// rather than building a set: callers ask about one species at a time and cache
-// the verdict, so the transient map would cost more than the walk.
-func labelsCoverSpecies(labels []string, key string) bool {
-	for _, label := range labels {
-		if canonicalSpeciesKey(label) == key {
-			return true
+		if !slices.ContainsFunc(labels, func(label string) bool { return canonicalSpeciesKey(label) == key }) {
+			// One model that cannot predict the species settles it; skip the rest.
+			return false, true
 		}
 	}
-	return false
+
+	return true, true
 }
