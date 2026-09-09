@@ -351,4 +351,64 @@ describe('ReanalyzeModal', () => {
       screen.getByRole('button', { name: 'Mark this detection as confirmed' })
     ).toBeInTheDocument();
   });
+
+  it('does not navigate away when a delete is superseded by a reopen', async () => {
+    // onDeleted navigates. Without a sequence guard, a delete that resolves after
+    // the modal has been reopened for a DIFFERENT detection would navigate the
+    // user off the detection they are now looking at.
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    let finishDelete!: (v: unknown) => void;
+    fetchWithCSRF.mockReturnValue(
+      new Promise(resolve => {
+        finishDelete = resolve;
+      })
+    );
+    const onClose = vi.fn();
+    const onDeleted = vi.fn();
+
+    const { rerender } = render(ReanalyzeModal, {
+      props: { isOpen: true, detectionId: 7, onClose, onDeleted },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Delete this detection' }));
+    await user.click(screen.getByRole('button', { name: /Delete permanently/ }));
+    await waitFor(() => expect(fetchWithCSRF).toHaveBeenCalledTimes(1));
+
+    await rerender({ isOpen: false, detectionId: 7, onClose, onDeleted });
+    await rerender({ isOpen: true, detectionId: 99, onClose, onDeleted });
+
+    finishDelete({});
+    await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalledWith(99));
+
+    expect(onDeleted).not.toHaveBeenCalled();
+  });
+
+  it('does not close the reopened modal when a verdict is superseded', async () => {
+    reanalyzeDetection.mockResolvedValue(twoModelResult);
+    let finishVerdict!: (v: unknown) => void;
+    setDetectionVerification.mockReturnValue(
+      new Promise(resolve => {
+        finishVerdict = resolve;
+      })
+    );
+    const onClose = vi.fn();
+    const onCorrected = vi.fn();
+
+    const { rerender } = render(ReanalyzeModal, {
+      props: { isOpen: true, detectionId: 7, onClose, onCorrected },
+    });
+    await waitFor(() => expect(screen.getByText('Pied Flycatcher')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Mark this detection as confirmed' }));
+    await waitFor(() => expect(setDetectionVerification).toHaveBeenCalledTimes(1));
+
+    await rerender({ isOpen: false, detectionId: 7, onClose, onCorrected });
+    await rerender({ isOpen: true, detectionId: 99, onClose, onCorrected });
+
+    finishVerdict(true);
+    await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalledWith(99));
+
+    expect(onCorrected).not.toHaveBeenCalled();
+  });
 });

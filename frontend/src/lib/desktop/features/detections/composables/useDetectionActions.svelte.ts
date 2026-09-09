@@ -52,6 +52,16 @@ export function useDetectionActions(options: DetectionActionOptions) {
     navigation.navigate(`/ui/detections/${detection.id}?tab=review`);
   }
 
+  /**
+   * Open the reanalysis modal for a detection. Like handleReview this navigates
+   * to the detail page rather than opening a modal in place: the reanalysis flow
+   * needs the detail view's refresh-after-correction wiring, and hosting a second
+   * copy of the modal in every list and card view would duplicate that state.
+   */
+  function handleReanalyze(detection: Detection) {
+    navigation.navigate(`/ui/detections/${detection.id}?reanalyze=1`);
+  }
+
   function handleToggleSpecies(detection: Detection) {
     // Snapshot at modal-open so the awaited confirm uses a stable value even if
     // the detection prop is swapped by a background refresh.
@@ -186,6 +196,7 @@ export function useDetectionActions(options: DetectionActionOptions) {
       return confirmModalConfig;
     },
     handleReview,
+    handleReanalyze,
     handleMarkCorrect,
     handleMarkFalsePositive,
     handleToggleSpecies,
