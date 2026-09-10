@@ -106,6 +106,10 @@ const mockDaylightFilterSettings = writable({
   species: [],
 });
 
+const mockFirstDailyConsensusSettings = writable({
+  enabled: false,
+});
+
 const mockRealtimeSettings = writable({
   privacyFilter: {
     enabled: true,
@@ -136,6 +140,9 @@ vi.mock('$lib/stores/settings', async importOriginal => {
     },
     daylightFilterSettings: {
       subscribe: (fn: (val: unknown) => void) => mockDaylightFilterSettings.subscribe(fn),
+    },
+    firstDailyConsensusSettings: {
+      subscribe: (fn: (val: unknown) => void) => mockFirstDailyConsensusSettings.subscribe(fn),
     },
     realtimeSettings: {
       subscribe: (fn: (val: unknown) => void) => mockRealtimeSettings.subscribe(fn),
@@ -256,6 +263,47 @@ describe('FilterSettingsPage - Privacy Guard & VAD Settings', () => {
               threshold: 0.4,
             }),
           }),
+        })
+      );
+    });
+  });
+});
+
+// The section's copy is hard-coded English in the component (fork-local feature,
+// deliberately kept out of the i18n catalogues), so assert on the literal text.
+const ENABLE_LABEL = "Require two models for a species' first detection of the day";
+
+describe('FilterSettingsPage - First Daily Detection Consensus', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFirstDailyConsensusSettings.set({ enabled: false });
+  });
+
+  it('renders the section with its toggle and help text', () => {
+    const { getByText } = render(FilterSettingsPage);
+
+    expect(getByText('First Daily Detection Consensus')).toBeInTheDocument();
+    expect(getByText(ENABLE_LABEL)).toBeInTheDocument();
+    expect(getByText(/never affected/)).toBeInTheDocument();
+  });
+
+  it('is off by default', () => {
+    const { getByLabelText } = render(FilterSettingsPage);
+
+    const toggle = getByLabelText(ENABLE_LABEL);
+    expect(toggle).not.toBeChecked();
+  });
+
+  it('persists the toggle through updateSection', async () => {
+    const { getByLabelText } = render(FilterSettingsPage);
+
+    await fireEvent.click(getByLabelText(ENABLE_LABEL));
+
+    await waitFor(() => {
+      expect(mockUpdateSection).toHaveBeenCalledWith(
+        'realtime',
+        expect.objectContaining({
+          firstDailyConsensus: { enabled: true },
         })
       );
     });
