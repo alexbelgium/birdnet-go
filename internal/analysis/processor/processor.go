@@ -1806,7 +1806,7 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 	// Resolve first-daily-consensus datastore lookups (see first_daily_consensus.go)
 	// under their own brief read lock, before the exclusive lock below is taken, so
 	// a slow query cannot stall detection ingestion for the flush cycle's duration.
-	p.warmFirstDailyAcceptance(settings)
+	p.warmFirstDailyAcceptance(now, settings)
 
 	var terminalNotifs []SSEPendingDetection
 	var broadcastSnapshot []SSEPendingDetection

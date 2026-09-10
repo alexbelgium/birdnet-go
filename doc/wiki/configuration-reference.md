@@ -231,7 +231,6 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.dynamicthreshold.min` | number | minimum threshold for dynamic threshold |
 | `realtime.dynamicthreshold.validhours` | integer | number of hours to consider for dynamic threshold |
 | `realtime.falsepositivefilter.level` | integer | Filtering aggressivity level (0-5): 0=Off, 1=Lenient, 2=Moderate, 3=Balanced, 4=Strict, 5=Maximum |
-| `realtime.firstdailyconsensus.enabled` | boolean | true to require a second model to confirm a species' first detection each day |
 | `realtime.log.enabled` | boolean |  |
 | `realtime.log.path` | string |  |
 | `realtime.logdeduplication.enabled` | boolean | true to enable log deduplication |
@@ -265,6 +264,7 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.daylightfilter.enabled` | boolean | true to enable daylight filter |
 | `realtime.daylightfilter.offset` | integer | hours to adjust daylight window; positive = shrink (lenient), negative = expand (strict) |
 | `realtime.daylightfilter.species` | string[] | species, families, orders, or genera to filter during daylight |
+| `realtime.firstdailyconsensus.enabled` | boolean | true to require a second model to confirm a species' first detection each day |
 | `realtime.rtsp.streams` | stream-config[] | Stream configurations |
 | `realtime.rtsp.urls` | string[] | Legacy: accepts old format, migrated on load |
 | `realtime.rtsp.transport` | string | Legacy: global default, migrated on load |

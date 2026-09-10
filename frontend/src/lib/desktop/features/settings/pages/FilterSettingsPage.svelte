@@ -52,16 +52,6 @@
 
   const logger = loggers.settings;
 
-  // First-daily-consensus copy. Hard-coded English on purpose -- see the note on
-  // the section itself in the markup below.
-  const FIRST_DAILY_CONSENSUS_TITLE = 'First Daily Detection Consensus';
-  const FIRST_DAILY_CONSENSUS_DESCRIPTION =
-    'Require a second model to confirm the first detection of each bird species each day. Later detections that day are unaffected.';
-  const FIRST_DAILY_CONSENSUS_ENABLE =
-    "Require two models for a species' first detection of the day";
-  const FIRST_DAILY_CONSENSUS_ENABLE_HELP =
-    'Only applies to species that every active bird model can identify. Bats, non-bird species, species only one model knows, and setups running a single bird model are never affected. Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting.';
-
   // Daylight filter offset slider bounds (hours)
   const DAYLIGHT_OFFSET_MIN = -12;
   const DAYLIGHT_OFFSET_MAX = 12;
@@ -568,20 +558,18 @@
       sync. Keeping it self-contained trades translation for a clean merge.
     -->
     <SettingsSection
-      title={FIRST_DAILY_CONSENSUS_TITLE}
-      description={FIRST_DAILY_CONSENSUS_DESCRIPTION}
+      title="First Daily Detection Consensus"
+      description="Require a second model to confirm the first detection of each bird species each day. Later detections that day are unaffected."
       defaultOpen={true}
       hasChanges={firstDailyConsensusHasChanges}
     >
-      <div class="space-y-4">
-        <Checkbox
-          checked={settings.firstDailyConsensus.enabled}
-          label={FIRST_DAILY_CONSENSUS_ENABLE}
-          disabled={store.isLoading || store.isSaving}
-          helpText={FIRST_DAILY_CONSENSUS_ENABLE_HELP}
-          onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
-        />
-      </div>
+      <Checkbox
+        checked={settings.firstDailyConsensus.enabled}
+        label="Require two models for a species' first detection of the day"
+        disabled={store.isLoading || store.isSaving}
+        helpText="Only applies to species that every active bird model can identify. Bats, non-bird species, species only one model knows, and setups running a single bird model are never affected. Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting."
+        onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
+      />
     </SettingsSection>
   </div>
 {/snippet}
