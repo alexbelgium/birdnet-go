@@ -25,8 +25,7 @@ var (
 	consensusDay = consensusAt.Format(time.DateOnly)
 )
 
-// dbResult is what the datastore reports for the species today. A nil *dbResult
-// in a test case means the datastore must not be consulted at all.
+// dbResult is what the datastore reports for the species today.
 type dbResult struct {
 	count int64
 	err   error
@@ -85,10 +84,21 @@ func expectSpeciesCount(t *testing.T, db *dbResult) *mocks.MockInterface {
 	return ds
 }
 
+// pendingDue puts item in the pending map with a deadline already passed, which
+// is the set warmFirstDailyAcceptance considers.
+func pendingDue(item *PendingDetection) map[string]PendingDetection {
+	item.FlushDeadline = consensusAt.Add(-time.Second)
+	return map[string]PendingDetection{pendingKeyForDetection(consensusSource, &item.Detection): *item}
+}
+
 func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 	t.Parallel()
 
 	const perch = classifier.RegistryIDPerchV2
+
+	// memo is the per-day answer warmFirstDailyAcceptance would have left behind:
+	// nil means it could not resolve one, which the gate must fail open on.
+	accepted, absent := true, false
 
 	tests := []struct {
 		name        string
@@ -96,7 +106,7 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 		modelID     string
 		rawLabel    string
 		shared      bool
-		db          *dbResult
+		memo        *bool
 		wantDiscard bool
 	}{
 		{
@@ -104,13 +114,14 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 			confidences: map[string]float64{birdNETModel: 0.8, perch: 0.7},
 			modelID:     birdNETModel,
 			shared:      true,
+			memo:        &absent,
 		},
 		{
 			name:        "first daily detection with only one model is discarded",
 			confidences: map[string]float64{birdNETModel: 0.8},
 			modelID:     birdNETModel,
 			shared:      true,
-			db:          &dbResult{count: 0},
+			memo:        &absent,
 			wantDiscard: true,
 		},
 		{
@@ -118,7 +129,7 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 			confidences: map[string]float64{birdNETModel: 0.8, perch: 0.3},
 			modelID:     birdNETModel,
 			shared:      true,
-			db:          &dbResult{count: 0},
+			memo:        &absent,
 			wantDiscard: true,
 		},
 		{
@@ -126,26 +137,26 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 			confidences: map[string]float64{birdNETModel: 0.8},
 			modelID:     birdNETModel,
 			shared:      true,
-			db:          &dbResult{count: 3},
+			memo:        &accepted,
 		},
 		{
-			name:        "datastore error fails open",
+			name:        "an unresolved memo fails open",
 			confidences: map[string]float64{birdNETModel: 0.8},
 			modelID:     birdNETModel,
 			shared:      true,
-			db:          &dbResult{err: errors.New("database is locked")},
 		},
 		{
 			name:        "species not shared by every active bird model is untouched",
 			confidences: map[string]float64{birdNETModel: 0.8},
 			modelID:     birdNETModel,
-			shared:      false,
+			memo:        &absent,
 		},
 		{
 			name:        "bat detections are untouched",
 			confidences: map[string]float64{classifier.RegistryIDBat: 0.8},
 			modelID:     classifier.RegistryIDBat,
 			shared:      true,
+			memo:        &absent,
 		},
 		{
 			name:        "non-species sound classes are untouched",
@@ -153,6 +164,7 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 			modelID:     perch,
 			rawLabel:    "power_tool",
 			shared:      true,
+			memo:        &absent,
 		},
 	}
 
@@ -160,11 +172,12 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			// No datastore: the gate must decide entirely from memory.
 			p := &Processor{}
-			if tt.db != nil {
-				p.Ds = expectSpeciesCount(t, tt.db)
-			}
 			markSpeciesShared(p, tt.shared)
+			if tt.memo != nil {
+				p.firstDaily.markChecked(consensusDay, consensusSpecies, *tt.memo)
+			}
 
 			discard, reason := p.shouldDiscardFirstDailyDetection(
 				newConsensusDetection(tt.modelID, tt.rawLabel, tt.confidences), newConsensusSettings())
@@ -189,11 +202,10 @@ func TestShouldDiscardFirstDailyDetection_DynamicThreshold(t *testing.T) {
 	tests := []struct {
 		name        string
 		timerOffset time.Duration
-		db          *dbResult
 		wantDiscard bool
 	}{
 		{name: "active adjustment lowers the bar", timerOffset: time.Hour},
-		{name: "expired adjustment does not", timerOffset: -time.Hour, db: &dbResult{count: 0}, wantDiscard: true},
+		{name: "expired adjustment does not", timerOffset: -time.Hour, wantDiscard: true},
 	}
 
 	for _, tt := range tests {
@@ -209,10 +221,8 @@ func TestShouldDiscardFirstDailyDetection_DynamicThreshold(t *testing.T) {
 					"great tit": {Level: 2, Timer: time.Now().Add(tt.timerOffset)},
 				},
 			}
-			if tt.db != nil {
-				p.Ds = expectSpeciesCount(t, tt.db)
-			}
 			markSpeciesShared(p, true)
+			p.firstDaily.markChecked(consensusDay, consensusSpecies, false)
 
 			discard, _ := p.shouldDiscardFirstDailyDetection(
 				newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
@@ -224,36 +234,19 @@ func TestShouldDiscardFirstDailyDetection_DynamicThreshold(t *testing.T) {
 
 // TestNoteAcceptedDetection verifies that an approved detection is remembered
 // immediately, so the next detection of that species skips the rule without
-// waiting for asynchronous persistence. No datastore is wired, so a lookup would
-// fail the test by nil-mock expectation.
+// waiting for asynchronous persistence.
 func TestNoteAcceptedDetection(t *testing.T) {
 	t.Parallel()
 
 	p := &Processor{}
 	markSpeciesShared(p, true)
 	item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
+	p.firstDaily.markChecked(consensusDay, consensusSpecies, false)
 
 	p.noteAcceptedDetection(item)
 
 	discard, _ := p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
 	assert.False(t, discard, "the species was already accepted today")
-}
-
-// TestFirstDailyConsensusMemoizesAbsence pins the negative memo: a species the
-// rule is holding back must not re-query the datastore on every flush. The mock
-// allows the call exactly once across two gate evaluations.
-func TestFirstDailyConsensusMemoizesAbsence(t *testing.T) {
-	t.Parallel()
-
-	p := &Processor{Ds: expectSpeciesCount(t, &dbResult{count: 0})}
-	markSpeciesShared(p, true)
-	settings := newConsensusSettings()
-
-	for range 2 {
-		item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
-		discard, _ := p.shouldDiscardFirstDailyDetection(item, settings)
-		assert.True(t, discard)
-	}
 }
 
 func TestFirstDailyConsensusRollsOverAtMidnight(t *testing.T) {
@@ -290,6 +283,22 @@ func TestFirstDailyConsensusSupportSurvivesMidnight(t *testing.T) {
 	assert.True(t, shared)
 }
 
+// TestFirstDailySupportTTLExpires pins the bound on stale model-support verdicts:
+// a model reload or variant swap can replace a model's label set while keeping
+// its registry ID, which the cache key cannot see, so an entry must not be
+// trusted forever.
+func TestFirstDailySupportTTLExpires(t *testing.T) {
+	t.Parallel()
+
+	key := firstDailySupportKey([]string{birdNETModel}, consensusSpecies)
+	c := firstDailyConsensus{
+		support: map[string]supportEntry{key: {shared: true, expiresAt: time.Now().Add(-time.Second)}},
+	}
+
+	_, cached := c.lookupSupport(key)
+	assert.False(t, cached, "an expired entry must not be served")
+}
+
 func TestFirstDailySupportKeyIsModelSetSensitive(t *testing.T) {
 	t.Parallel()
 
@@ -310,28 +319,6 @@ func TestDynamicThresholdKeyMatchesParseAndValidateSpecies(t *testing.T) {
 	assert.Empty(t, dynamicThresholdKey("", ""))
 }
 
-// TestFirstDailyConsensusDisabledByDefault pins the opt-in contract: on a
-// zero-value config the rule must not touch a detection it would otherwise
-// discard, and must not reach the datastore to decide that. The mock has no
-// CountSpeciesDetections expectation, so any query fails the test.
-func TestFirstDailyConsensusDisabledByDefault(t *testing.T) {
-	t.Parallel()
-
-	settings := &conf.Settings{}
-	settings.BirdNET.Threshold = 0.5
-	require.False(t, settings.Realtime.FirstDailyConsensus.Enabled)
-
-	p := &Processor{Ds: mocks.NewMockInterface(t)}
-	markSpeciesShared(p, true)
-
-	// Exactly the case TestShouldDiscardFirstDailyDetection discards when enabled.
-	discard, reason := p.shouldDiscardFirstDailyDetection(
-		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
-
-	assert.False(t, discard, "the rule must be inert until enabled")
-	assert.Empty(t, reason)
-}
-
 // TestShouldDiscardFirstDailyDetection_NilOrchestrator is a permanent regression
 // test for a nil p.Bn (a zero-value Processor, or any path reached before the
 // orchestrator is wired). classifier.Orchestrator.SpeciesSharedByBirdModels
@@ -340,58 +327,50 @@ func TestFirstDailyConsensusDisabledByDefault(t *testing.T) {
 func TestShouldDiscardFirstDailyDetection_NilOrchestrator(t *testing.T) {
 	t.Parallel()
 
+	// No seeded support memo either, so speciesSharedByActiveBirdModels has to ask
+	// the nil orchestrator.
 	p := &Processor{} // p.Bn is nil
+	p.firstDaily.markChecked(consensusDay, consensusSpecies, false)
 	item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
 
-	assert.NotPanics(t, func() {
-		discard, _ := p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
-		assert.False(t, discard, "an unevaluable orchestrator must fail open")
-	})
+	discard, _ := p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
+	assert.False(t, discard, "an unevaluable orchestrator must fail open")
 }
 
-// TestFirstDailySupportTTLExpires pins the bound on stale model-support verdicts:
-// a model reload or variant swap can replace a model's label set while keeping
-// its registry ID, which the cache key cannot see, so an entry must not be
-// trusted forever. storeSupportUntil seeds an already-expired entry directly,
-// standing in for firstDailySupportTTL's passage without a real wait.
-func TestFirstDailySupportTTLExpires(t *testing.T) {
+// TestFirstDailyConsensusRechecksEligibilityAgainstStaleMemo pins the ordering
+// between the memo and the eligibility checks. A species that was shared by
+// every active bird model when the warm pass recorded "not accepted yet" can
+// stop being shared if models are reconfigured mid-day. Reading that memo before
+// re-checking eligibility would keep discarding the species for the rest of the
+// day on the strength of an answer whose premise no longer holds.
+func TestFirstDailyConsensusRechecksEligibilityAgainstStaleMemo(t *testing.T) {
 	t.Parallel()
 
-	var c firstDailyConsensus
-	key := firstDailySupportKey([]string{birdNETModel}, consensusSpecies)
+	p := &Processor{}
+	p.firstDaily.markChecked(consensusDay, consensusSpecies, false)
+	markSpeciesShared(p, false) // the reconfiguration
 
-	c.storeSupportUntil(key, true, time.Now().Add(-time.Second))
-	_, cached := c.lookupSupport(key)
-	assert.False(t, cached, "an expired entry must not be served")
+	discard, _ := p.shouldDiscardFirstDailyDetection(
+		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), newConsensusSettings())
 
-	c.storeSupportUntil(key, true, time.Now().Add(time.Minute))
-	shared, cached := c.lookupSupport(key)
-	require.True(t, cached)
-	assert.True(t, shared)
+	assert.False(t, discard, "a species no longer shared must be exempt despite the memo")
 }
 
-// TestWarmFirstDailyAcceptance verifies the datastore-warming pass: it resolves
-// the "already accepted today" memo from p.pendingDetections under its own read
-// lock, so shouldDiscardFirstDailyDetection reaches the datastore at most once
-// even though it runs later, under flushPendingDetections's exclusive lock, for
-// a different PendingDetection value of the same species.
+// TestWarmFirstDailyAcceptance is the two-phase flow: the warm pass resolves the
+// memo from the datastore off the lock, and the gate then decides from memory
+// alone. The mock's Once() proves the later gate call issues no second query.
 func TestWarmFirstDailyAcceptance(t *testing.T) {
 	t.Parallel()
 
 	settings := newConsensusSettings()
 	p := &Processor{
-		Ds: expectSpeciesCount(t, &dbResult{count: 0}),
-		pendingDetections: map[string]PendingDetection{
-			"src1:parus major": *newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}),
-		},
+		Ds:                expectSpeciesCount(t, &dbResult{count: 0}),
+		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
 	}
 	markSpeciesShared(p, true)
 
-	p.warmFirstDailyAcceptance(settings)
+	p.warmFirstDailyAcceptance(consensusAt, settings)
 
-	// A later, distinct PendingDetection value for the same species must reuse the
-	// memo the warm pass populated rather than querying again — the mock's Once()
-	// on expectSpeciesCount enforces that.
 	discard, reason := p.shouldDiscardFirstDailyDetection(
 		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.7}), settings)
 
@@ -399,21 +378,102 @@ func TestWarmFirstDailyAcceptance(t *testing.T) {
 	assert.Equal(t, reasonFirstDailyConsensus, reason)
 }
 
-// TestWarmFirstDailyAcceptance_SkipsIneligibleDetections verifies the prewarm
-// pass shares shouldDiscardFirstDailyDetection's own eligibility checks, so it
-// never queries the datastore for a species this rule would never gate anyway.
-func TestWarmFirstDailyAcceptance_SkipsIneligibleDetections(t *testing.T) {
+// TestWarmFirstDailyAcceptance_AcceptedSpecies covers the other datastore answer:
+// a species already logged today settles the memo as accepted, so the gate lets
+// the detection through.
+func TestWarmFirstDailyAcceptance_AcceptedSpecies(t *testing.T) {
 	t.Parallel()
 
 	settings := newConsensusSettings()
 	p := &Processor{
-		Ds: mocks.NewMockInterface(t), // no CountSpeciesDetections expectation set
+		Ds:                expectSpeciesCount(t, &dbResult{count: 3}),
+		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
+	}
+	markSpeciesShared(p, true)
+
+	p.warmFirstDailyAcceptance(consensusAt, settings)
+
+	discard, _ := p.shouldDiscardFirstDailyDetection(
+		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
+
+	assert.False(t, discard)
+}
+
+// TestWarmFirstDailyAcceptance_DatastoreErrorFailsOpen pins the failure mode: an
+// error leaves the memo unresolved, and the gate accepts rather than retrying the
+// query under flushPendingDetections's exclusive lock.
+func TestWarmFirstDailyAcceptance_DatastoreErrorFailsOpen(t *testing.T) {
+	t.Parallel()
+
+	settings := newConsensusSettings()
+	p := &Processor{
+		Ds:                expectSpeciesCount(t, &dbResult{err: errors.New("database is locked")}),
+		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
+	}
+	markSpeciesShared(p, true)
+
+	p.warmFirstDailyAcceptance(consensusAt, settings)
+
+	discard, _ := p.shouldDiscardFirstDailyDetection(
+		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
+
+	assert.False(t, discard, "an unanswerable query must not discard")
+}
+
+// TestWarmFirstDailyAcceptance_SkipsWhenDisabled pins the opt-in boundary: on the
+// default config the pass must return before locking or querying anything. The
+// mock has no expectation set, so any query fails the test.
+func TestWarmFirstDailyAcceptance_SkipsWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	settings := &conf.Settings{}
+	settings.BirdNET.Threshold = 0.5
+
+	p := &Processor{
+		Ds:                mocks.NewMockInterface(t),
+		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
+	}
+	markSpeciesShared(p, true)
+
+	p.warmFirstDailyAcceptance(consensusAt, settings)
+
+	discard, _ := p.shouldDiscardFirstDailyDetection(
+		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
+
+	assert.False(t, discard, "the rule must be inert until enabled")
+}
+
+// TestWarmFirstDailyAcceptance_SkipsNotYetDue pins the deadline filter: warming a
+// detection that will not flush for another ~12 ticks would re-derive the same
+// verdict every second and query for detections the min-count filter may still
+// discard.
+func TestWarmFirstDailyAcceptance_SkipsNotYetDue(t *testing.T) {
+	t.Parallel()
+
+	item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
+	item.FlushDeadline = consensusAt.Add(time.Minute)
+
+	p := &Processor{
+		Ds: mocks.NewMockInterface(t), // no expectation: a query fails the test
 		pendingDetections: map[string]PendingDetection{
-			"src1:pipistrellus pipistrellus": *newConsensusDetection(classifier.RegistryIDBat, "", map[string]float64{classifier.RegistryIDBat: 0.8}),
+			pendingKeyForDetection(consensusSource, &item.Detection): *item,
 		},
 	}
+	markSpeciesShared(p, true)
 
-	assert.NotPanics(t, func() {
-		p.warmFirstDailyAcceptance(settings)
-	})
+	p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+}
+
+// TestWarmFirstDailyAcceptance_SkipsIneligibleDetections verifies the pass shares
+// the gate's own eligibility checks, so it never queries for a species this rule
+// would never gate anyway. The mock has no expectation set.
+func TestWarmFirstDailyAcceptance_SkipsIneligibleDetections(t *testing.T) {
+	t.Parallel()
+
+	p := &Processor{
+		Ds:                mocks.NewMockInterface(t),
+		pendingDetections: pendingDue(newConsensusDetection(classifier.RegistryIDBat, "", map[string]float64{classifier.RegistryIDBat: 0.8})),
+	}
+
+	p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
 }

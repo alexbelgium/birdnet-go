@@ -49,6 +49,9 @@ const mockSettingsStore = writable({
         offset: 0,
         species: [],
       },
+      firstDailyConsensus: {
+        enabled: false,
+      },
     },
   } as unknown as SettingsFormData,
   formData: {
@@ -75,6 +78,9 @@ const mockSettingsStore = writable({
         debug: false,
         offset: 0,
         species: [],
+      },
+      firstDailyConsensus: {
+        enabled: false,
       },
     },
   } as unknown as SettingsFormData,
@@ -279,19 +285,12 @@ describe('FilterSettingsPage - First Daily Detection Consensus', () => {
     mockFirstDailyConsensusSettings.set({ enabled: false });
   });
 
-  it('renders the section with its toggle and help text', () => {
-    const { getByText } = render(FilterSettingsPage);
+  it('renders the section, off by default, with its help text', () => {
+    const { getByText, getByLabelText } = render(FilterSettingsPage);
 
     expect(getByText('First Daily Detection Consensus')).toBeInTheDocument();
-    expect(getByText(ENABLE_LABEL)).toBeInTheDocument();
     expect(getByText(/never affected/)).toBeInTheDocument();
-  });
-
-  it('is off by default', () => {
-    const { getByLabelText } = render(FilterSettingsPage);
-
-    const toggle = getByLabelText(ENABLE_LABEL);
-    expect(toggle).not.toBeChecked();
+    expect(getByLabelText(ENABLE_LABEL)).not.toBeChecked();
   });
 
   it('persists the toggle through updateSection', async () => {

@@ -1913,10 +1913,6 @@
           "$ref": "#/$defs/FalsePositiveFilterSettings",
           "description": "False positive filtering aggressivity settings"
         },
-        "firstdailyconsensus": {
-          "$ref": "#/$defs/FirstDailyConsensusSettings",
-          "description": "Require a second model to confirm each species' first detection of the day"
-        },
         "log": {
           "properties": {
             "enabled": {
@@ -1952,6 +1948,10 @@
         "daylightfilter": {
           "$ref": "#/$defs/DaylightFilterSettings",
           "description": "Daylight filter settings"
+        },
+        "firstdailyconsensus": {
+          "$ref": "#/$defs/FirstDailyConsensusSettings",
+          "description": "Require a second model to confirm each species' first detection of the day"
         },
         "rtsp": {
           "$ref": "#/$defs/RTSPSettings",
