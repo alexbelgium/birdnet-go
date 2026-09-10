@@ -72,6 +72,15 @@ func markSpeciesShared(p *Processor, shared bool) {
 	p.firstDaily.storeSupport(firstDailySupportKey(nil, consensusSpecies), shared)
 }
 
+// markMemo seeds the per-day answer warmFirstDailyAcceptance would have left.
+func markMemo(p *Processor, accepted bool) {
+	if accepted {
+		p.firstDaily.markAccepted(consensusDay, consensusSpecies)
+		return
+	}
+	p.firstDaily.markAbsent(consensusDay, consensusSpecies)
+}
+
 // expectSpeciesCount wires a datastore that answers the "already accepted today"
 // query exactly once.
 func expectSpeciesCount(t *testing.T, db *dbResult) *mocks.MockInterface {
@@ -176,7 +185,7 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 			p := &Processor{}
 			markSpeciesShared(p, tt.shared)
 			if tt.memo != nil {
-				p.firstDaily.markChecked(consensusDay, consensusSpecies, *tt.memo)
+				markMemo(p, *tt.memo)
 			}
 
 			discard, reason := p.shouldDiscardFirstDailyDetection(
@@ -222,7 +231,7 @@ func TestShouldDiscardFirstDailyDetection_DynamicThreshold(t *testing.T) {
 				},
 			}
 			markSpeciesShared(p, true)
-			p.firstDaily.markChecked(consensusDay, consensusSpecies, false)
+			markMemo(p, false)
 
 			discard, _ := p.shouldDiscardFirstDailyDetection(
 				newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
@@ -241,7 +250,7 @@ func TestNoteAcceptedDetection(t *testing.T) {
 	p := &Processor{}
 	markSpeciesShared(p, true)
 	item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
-	p.firstDaily.markChecked(consensusDay, consensusSpecies, false)
+	markMemo(p, false)
 
 	p.noteAcceptedDetection(item)
 
@@ -249,21 +258,63 @@ func TestNoteAcceptedDetection(t *testing.T) {
 	assert.False(t, discard, "the species was already accepted today")
 }
 
-func TestFirstDailyConsensusRollsOverAtMidnight(t *testing.T) {
+// TestFirstDailyConsensusRetainsTwoDays pins the midnight behaviour. Detections
+// either side of midnight are pending at the same time and the flush loop walks
+// them in map order, so a late previous-day entry must not evict the new day's
+// answers. Older days are still dropped, so the map cannot grow unbounded.
+func TestFirstDailyConsensusRetainsTwoDays(t *testing.T) {
 	t.Parallel()
 
 	var c firstDailyConsensus
 	c.markAccepted("2026-06-11", consensusSpecies)
+	c.markAccepted("2026-06-12", consensusSpecies)
 
-	accepted, settled := c.acceptedToday("2026-06-11", consensusSpecies)
+	accepted, settled := c.acceptedToday("2026-06-12", consensusSpecies)
 	require.True(t, settled)
-	require.True(t, accepted)
+	assert.True(t, accepted)
 
-	_, settled = c.acceptedToday("2026-06-12", consensusSpecies)
-	assert.False(t, settled, "yesterday's state must not carry over")
+	accepted, settled = c.acceptedToday("2026-06-11", consensusSpecies)
+	require.True(t, settled, "the previous day must survive alongside the current one")
+	assert.True(t, accepted)
 
+	c.markAccepted("2026-06-13", consensusSpecies)
 	_, settled = c.acceptedToday("2026-06-11", consensusSpecies)
-	assert.False(t, settled, "state is kept for one day only")
+	assert.False(t, settled, "only the two most recent days are retained")
+}
+
+// TestFirstDailyConsensusPreviousDayDoesNotEvictToday is the regression test for
+// the fail-closed path this ordering created: a species accepted just after
+// midnight, its memo wiped by a still-pending previous-day entry, then re-queried
+// before the asynchronous write lands — returning zero and gating the species'
+// next detection, the exact outcome the positive memo exists to prevent.
+func TestFirstDailyConsensusPreviousDayDoesNotEvictToday(t *testing.T) {
+	t.Parallel()
+
+	var c firstDailyConsensus
+	c.markAccepted("2026-06-12", consensusSpecies)
+
+	// A leftover entry from before midnight is evaluated next.
+	_, _ = c.acceptedToday("2026-06-11", consensusSpecies)
+
+	accepted, settled := c.acceptedToday("2026-06-12", consensusSpecies)
+	require.True(t, settled, "today's acceptance must survive a previous-day lookup")
+	assert.True(t, accepted)
+}
+
+// TestFirstDailyConsensusAbsenceNeverDowngradesAcceptance pins the other half of
+// that failure: approval is asynchronous, so a query issued moments after one can
+// still legitimately see zero rows, and caching that would gate the species next
+// time.
+func TestFirstDailyConsensusAbsenceNeverDowngradesAcceptance(t *testing.T) {
+	t.Parallel()
+
+	var c firstDailyConsensus
+	c.markAccepted(consensusDay, consensusSpecies)
+	c.markAbsent(consensusDay, consensusSpecies)
+
+	accepted, settled := c.acceptedToday(consensusDay, consensusSpecies)
+	require.True(t, settled)
+	assert.True(t, accepted, "a stale zero-row answer must not overwrite an acceptance")
 }
 
 // TestFirstDailyConsensusSupportSurvivesMidnight pins the deliberate asymmetry:
@@ -330,7 +381,7 @@ func TestShouldDiscardFirstDailyDetection_NilOrchestrator(t *testing.T) {
 	// No seeded support memo either, so speciesSharedByActiveBirdModels has to ask
 	// the nil orchestrator.
 	p := &Processor{} // p.Bn is nil
-	p.firstDaily.markChecked(consensusDay, consensusSpecies, false)
+	markMemo(p, false)
 	item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
 
 	discard, _ := p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
@@ -347,7 +398,7 @@ func TestFirstDailyConsensusRechecksEligibilityAgainstStaleMemo(t *testing.T) {
 	t.Parallel()
 
 	p := &Processor{}
-	p.firstDaily.markChecked(consensusDay, consensusSpecies, false)
+	markMemo(p, false)
 	markSpeciesShared(p, false) // the reconfiguration
 
 	discard, _ := p.shouldDiscardFirstDailyDetection(

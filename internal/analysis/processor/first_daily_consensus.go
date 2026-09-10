@@ -52,6 +52,11 @@ const (
 	// config, where clearing wholesale is cheaper than evicting individually.
 	firstDailySupportCacheCap = 4096
 
+	// firstDailyRetainedDays is how many calendar days of answers are kept: the
+	// current one and the previous one, which is the most that can be pending
+	// simultaneously across a midnight boundary.
+	firstDailyRetainedDays = 2
+
 	// firstDailySupportTTL bounds how long a model-support verdict is trusted.
 	// The key already changes when the active model SET changes, but a model
 	// reload or variant swap can replace a model's label set while keeping the
@@ -67,12 +72,9 @@ const (
 type firstDailyConsensus struct {
 	mu sync.Mutex
 
-	// day is the calendar day checked describes; it is dropped on roll-over.
-	day string
-
-	// checked records whether a species already has an accepted detection today.
-	// Presence means the question has been settled for the day, the value is the
-	// answer.
+	// checked maps a calendar day to that day's per-species answers. Presence of
+	// a species means the question has been settled for that day; the value is
+	// the answer.
 	//
 	// The datastore is the source of truth, but both answers are memoized. The
 	// positive is required for correctness: persistence is asynchronous, so a
@@ -80,10 +82,14 @@ type firstDailyConsensus struct {
 	// usually invisible to the next cycle — without the memo the second detection
 	// of a species would be gated again, which is precisely what the rule must not
 	// do. The negative is required for cost: a species held back by this rule
-	// would otherwise re-query on every flush, forever. A negative can only turn
-	// positive when this process accepts a detection, and that path calls
-	// markAccepted.
-	checked map[string]bool
+	// would otherwise re-query on every flush, forever.
+	//
+	// It is keyed by day rather than reset on a day change because detections
+	// either side of midnight are pending at the same time, and the flush loop
+	// walks them in map order. A single day's worth of state would be evicted by
+	// whichever late previous-day entry happened to be visited next, taking the
+	// fresh day's acceptances with it.
+	checked map[string]map[string]bool
 
 	// support memoizes whether a species is shared by every relevant active bird
 	// model, each entry bounded by firstDailySupportTTL. The key carries the
@@ -100,29 +106,39 @@ type supportEntry struct {
 
 // markAccepted records that a species has an accepted detection on day.
 func (c *firstDailyConsensus) markAccepted(day, species string) {
-	c.markChecked(day, species, true)
-}
-
-func (c *firstDailyConsensus) markChecked(day, species string, accepted bool) {
 	if day == "" || species == "" {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rollLocked(day)
-	if c.checked == nil {
-		c.checked = make(map[string]bool)
+	c.dayLocked(day)[species] = true
+}
+
+// markAbsent records that the datastore reported no detection of species on day.
+//
+// It never overwrites an acceptance already recorded for that day. Approval is
+// asynchronous, so a query issued moments after one can legitimately still see
+// zero rows; caching that as "absent" would gate the species' next detection —
+// the outcome the positive memo exists to prevent.
+func (c *firstDailyConsensus) markAbsent(day, species string) {
+	if day == "" || species == "" {
+		return
 	}
-	c.checked[species] = accepted
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	answers := c.dayLocked(day)
+	if _, settled := answers[species]; settled {
+		return
+	}
+	answers[species] = false
 }
 
 // acceptedToday reports the memoized answer; settled is false when the species
-// has not been resolved for this day yet.
+// has not been resolved for that day yet. It is a pure read.
 func (c *firstDailyConsensus) acceptedToday(day, species string) (accepted, settled bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rollLocked(day)
-	accepted, settled = c.checked[species]
+	accepted, settled = c.checked[day][species]
 	return accepted, settled
 }
 
@@ -145,13 +161,28 @@ func (c *firstDailyConsensus) storeSupport(key string, shared bool) {
 	c.support[key] = supportEntry{shared: shared, expiresAt: time.Now().Add(firstDailySupportTTL)}
 }
 
-// rollLocked drops yesterday's per-day state. Caller holds c.mu.
-func (c *firstDailyConsensus) rollLocked(day string) {
-	if c.day == day {
-		return
+// dayLocked returns day's answer map, creating it and evicting any day older
+// than the two most recent. Two are retained because that is the most that can
+// be pending at once — a detection heard before midnight and one heard after.
+// Caller holds c.mu.
+func (c *firstDailyConsensus) dayLocked(day string) map[string]bool {
+	if c.checked == nil {
+		c.checked = make(map[string]map[string]bool, firstDailyRetainedDays)
 	}
-	c.day = day
-	c.checked = nil
+	if c.checked[day] == nil {
+		c.checked[day] = make(map[string]bool)
+	}
+	for len(c.checked) > firstDailyRetainedDays {
+		oldest := ""
+		for known := range c.checked {
+			// Days are YYYY-MM-DD, so lexicographic order is chronological.
+			if oldest == "" || known < oldest {
+				oldest = known
+			}
+		}
+		delete(c.checked, oldest)
+	}
+	return c.checked[day]
 }
 
 // firstDailyCandidate is item narrowed to the two strings the datastore lookup
@@ -297,6 +328,12 @@ func (p *Processor) shouldDiscardFirstDailyDetection(item *PendingDetection, set
 // Whatever this pass leaves unresolved (a failed query, or the feature being
 // switched on mid-cycle) is failed open by shouldDiscardFirstDailyDetection
 // rather than retried under the lock.
+//
+// It is the datastore I/O specifically that this keeps off the lock. The
+// model-support lookup the gate also performs still runs under the read lock
+// here, and can walk every active model's label set when its memo misses; that
+// is bounded by firstDailySupportTTL and is the same work the flush path would
+// otherwise do under the exclusive lock.
 func (p *Processor) warmFirstDailyAcceptance(now time.Time, settings *conf.Settings) {
 	// The feature boundary sits here, not in the per-item predicate: shipped off
 	// by default, this must cost one branch per tick, not a lock plus a sweep.
@@ -472,7 +509,10 @@ func (p *Processor) speciesAcceptedInDatastore(day, scientificName string) (acce
 		return false, false
 	}
 
-	accepted = count > 0
-	p.firstDaily.markChecked(day, scientificName, accepted)
-	return accepted, true
+	if count > 0 {
+		p.firstDaily.markAccepted(day, scientificName)
+		return true, true
+	}
+	p.firstDaily.markAbsent(day, scientificName)
+	return false, true
 }
