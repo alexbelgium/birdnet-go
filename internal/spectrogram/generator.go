@@ -668,6 +668,7 @@ func (g *Generator) generateWithFFmpegSoxPipeline(ctx context.Context, settings 
 	// FFmpeg converts audio to Sox format and pipes to Sox
 	ffmpegArgs := []string{"-hide_banner", "-i", audioPath, "-f", "sox", "-"}
 	soxArgs := append([]string{"-t", "sox", "-"}, g.getSoxSpectrogramArgs(ctx, settings, audioPath, outputPath, width, raw, preValidatedDuration, profile)...)
+	soxArgs = slices.Insert(soxArgs, slices.Index(soxArgs, "spectrogram"), "channels", strconv.Itoa(conf.NumChannels))
 
 	ffmpegCmd := createCommandWithNice(ctx, ffmpegBinary, ffmpegArgs)
 	soxCmd := createCommandWithNice(ctx, soxBinary, soxArgs)
@@ -999,6 +1000,9 @@ func (g *Generator) getSoxArgs(ctx context.Context, settings *conf.Settings, aud
 	}
 
 	args = append(args, g.getSoxSpectrogramArgs(ctx, settings, audioPath, outputPath, width, raw, preValidatedDuration, profile)...)
+	if inputType == SoxInputFile {
+		args = slices.Insert(args, slices.Index(args, "spectrogram"), "channels", strconv.Itoa(conf.NumChannels))
+	}
 	return args
 }
 
