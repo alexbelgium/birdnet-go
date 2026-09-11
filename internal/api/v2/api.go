@@ -31,6 +31,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/models"
 	"github.com/tphakala/birdnet-go/internal/api/v2/notifications"
 	rangeapi "github.com/tphakala/birdnet-go/internal/api/v2/range"
+	"github.com/tphakala/birdnet-go/internal/api/v2/reanalyze"
 	"github.com/tphakala/birdnet-go/internal/api/v2/species"
 	"github.com/tphakala/birdnet-go/internal/api/v2/sse"
 	"github.com/tphakala/birdnet-go/internal/api/v2/support"
@@ -101,6 +102,13 @@ type Controller struct {
 	// because "range" is a Go reserved word; the domain package is imported as
 	// rangeapi. Like weather it needs only the shared *apicore.Core.
 	rangeHandler *rangeapi.Handler
+
+	// reanalyze serves POST /api/v2/detections/:id/reanalyze and
+	// /:id/correct-species: re-run every loaded classifier over a saved clip and,
+	// optionally, apply the operator's chosen species as a correction. It is its
+	// own domain rather than extra methods on detections so the feature stays in
+	// fork-owned files. Needs only the shared *apicore.Core.
+	reanalyze *reanalyze.Handler
 
 	// species serves the /api/v2/species/* and /api/v2/taxonomy/* endpoints
 	// (species info, rarity, the all-species picker, the dictionary, thumbnails,
@@ -425,6 +433,7 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	// *apicore.Core pointer and register their routes in initRoutes.
 	c.weather = weather.New(c.Core)
 	c.rangeHandler = rangeapi.New(c.Core)
+	c.reanalyze = reanalyze.New(c.Core)
 	// The SSE handler receives the facade-owned auth check (isClientAuthenticated)
 	// so the public detection stream can anonymize the source DisplayName for
 	// unauthenticated subscribers (matching detections/analytics and the
@@ -657,6 +666,7 @@ func (c *Controller) initRoutes() {
 		{"auth routes", func() { c.authHandler.RegisterRoutes(c.Group) }},
 		{"media routes", func() { c.media.RegisterRoutes(c.Group) }},
 		{"range routes", func() { c.rangeHandler.RegisterRoutes(c.Group) }},
+		{"reanalyze routes", func() { c.reanalyze.RegisterRoutes(c.Group) }},
 		{"heatmap routes", func() { c.analytics.RegisterHeatmapRoutes(c.Group) }},
 		{"sse routes", func() { c.sse.RegisterRoutes(c.Group) }},
 		{"diagnostics routes", func() { c.system.RegisterDiagnosticsRoutes(c.Group) }},

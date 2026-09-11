@@ -62,6 +62,7 @@
     selected?: boolean;
     onToggleSelect?: (_id: string, _shiftKey: boolean) => void;
     onReview?: () => void;
+    onReanalyze?: () => void;
     onMarkCorrect?: () => void;
     onMarkFalsePositive?: () => void;
     onToggleSpecies?: () => void;
@@ -78,6 +79,7 @@
     selected = false,
     onToggleSelect,
     onReview,
+    onReanalyze,
     onMarkCorrect,
     onMarkFalsePositive,
     onToggleSpecies,
@@ -170,9 +172,20 @@
   </td>
 {/if}
 
-<!-- Date & Time -->
+<!-- Date & Time — deep link to the detection detail page.
+     An anchor rather than a button so middle-click and the right-click context
+     menu behave normally; handleDetailsClick intercepts a plain left-click for
+     SPA navigation. -->
 <td class="text-sm">
-  <span>{detection.date} {detection.time}</span>
+  <a
+    href={buildAppUrl(`/ui/detections/${detection.id}`)}
+    onclick={handleDetailsClick}
+    class="hover:text-primary transition-colors cursor-pointer"
+    aria-label={`Open details for ${displayName} detected ${detection.date} ${detection.time}`}
+  >
+    {detection.date}
+    {detection.time}
+  </a>
 </td>
 
 <!-- Weather Column -->
@@ -284,9 +297,18 @@
   <ConfidenceCircle confidence={detection.confidence} size="md" />
 </td>
 
-<!-- Status -->
+<!-- Status — deep link to the detection detail page, same anchor pattern as the
+     date/time cell. VerificationBadges stays a pure presentation component; the
+     link wraps it. -->
 <td>
-  <VerificationBadges {detection} />
+  <a
+    href={buildAppUrl(`/ui/detections/${detection.id}`)}
+    onclick={handleDetailsClick}
+    class="inline-block cursor-pointer"
+    aria-label={`Open details for ${displayName}`}
+  >
+    <VerificationBadges {detection} />
+  </a>
 </td>
 
 <!-- Recording/Spectrogram column. The column is omitted entirely when no visible
@@ -312,6 +334,7 @@
     {onMarkCorrect}
     {onMarkFalsePositive}
     {onReview}
+    {onReanalyze}
     {onToggleSpecies}
     {onToggleLock}
     {onDelete}

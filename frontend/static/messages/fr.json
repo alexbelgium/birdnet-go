@@ -730,6 +730,7 @@
         "markCorrect": "Correcte",
         "markFalsePositive": "Incorrecte",
         "review": "Examiner la détection",
+        "reanalyze": "Réanalyser la détection",
         "showSpecies": "Afficher l'espèce",
         "ignoreSpecies": "Ignorer l'espèce",
         "lockDetection": "Verrouiller la détection",

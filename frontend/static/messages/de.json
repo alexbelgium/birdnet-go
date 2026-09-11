@@ -730,6 +730,7 @@
         "markCorrect": "Richtig",
         "markFalsePositive": "Falsch",
         "review": "Erkennung überprüfen",
+        "reanalyze": "Erkennung neu analysieren",
         "showSpecies": "Art anzeigen",
         "ignoreSpecies": "Art ignorieren",
         "lockDetection": "Erkennung sperren",

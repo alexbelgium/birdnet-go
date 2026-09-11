@@ -33,6 +33,7 @@
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
+  import ReanalyzeModal from '$lib/desktop/components/modals/ReanalyzeModal.svelte';
   import Button from '$lib/desktop/components/ui/Button.svelte';
   import EmptyState from '$lib/desktop/components/ui/EmptyState.svelte';
   import LoadingSpinner from '$lib/desktop/components/ui/LoadingSpinner.svelte';
@@ -655,6 +656,7 @@
                     selected={selection.isSelected(String(detection.id))}
                     onToggleSelect={handleToggleSelect}
                     onReview={() => detectionActions.handleReview(detection)}
+                    onReanalyze={() => detectionActions.handleReanalyze(detection)}
                     onMarkCorrect={() => detectionActions.handleMarkCorrect(detection)}
                     onMarkFalsePositive={() => detectionActions.handleMarkFalsePositive(detection)}
                     onToggleSpecies={() => detectionActions.handleToggleSpecies(detection)}
@@ -678,6 +680,7 @@
             {onDetailsClick}
             isExcluded={isSpeciesExcluded(detection.commonName)}
             onReview={() => detectionActions.handleReview(detection)}
+            onReanalyze={() => detectionActions.handleReanalyze(detection)}
             onMarkCorrect={() => detectionActions.handleMarkCorrect(detection)}
             onMarkFalsePositive={() => detectionActions.handleMarkFalsePositive(detection)}
             onToggleSpecies={() => detectionActions.handleToggleSpecies(detection)}
@@ -737,3 +740,20 @@
     />
   {/if}
 </div>
+
+<!-- Reanalysis runs in place: the action is on the row, so being navigated to the
+     detail page to read it would lose the list the operator is working through.
+     Mounted from the shared composable, the same way ConfirmModal is. -->
+<ReanalyzeModal
+  isOpen={detectionActions.reanalyzeTarget !== null}
+  detection={detectionActions.reanalyzeTarget}
+  onClose={() => detectionActions.closeReanalyze()}
+  onCorrected={() => {
+    detectionActions.closeReanalyze();
+    onRefresh?.();
+  }}
+  onDeleted={() => {
+    detectionActions.closeReanalyze();
+    onRefresh?.();
+  }}
+/>
