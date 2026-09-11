@@ -848,6 +848,11 @@ func TestGetSoxArgs_FileInput(t *testing.T) {
 
 	// Should contain spectrogram command
 	assert.True(t, slices.Contains(args, "spectrogram"), "should contain spectrogram command")
+	channelsIndex := slices.Index(args, "channels")
+	spectrogramIndex := slices.Index(args, "spectrogram")
+	require.NotEqual(t, -1, channelsIndex, "file input should be downmixed to mono")
+	assert.Equal(t, "1", args[channelsIndex+1], "file input should use one channel")
+	assert.Less(t, channelsIndex, spectrogramIndex, "downmix should occur before spectrogram generation")
 
 	// Should contain width and height
 	assert.True(t, slices.Contains(args, "-x"), "should contain -x flag")
@@ -856,6 +861,28 @@ func TestGetSoxArgs_FileInput(t *testing.T) {
 	// Should contain output path
 	assert.True(t, slices.Contains(args, "-o"), "should contain -o flag")
 	assert.True(t, slices.Contains(args, outputPath), "should contain output path")
+}
+
+// TestGetFFmpegSoxPipelineArgs_DownmixesToMono tests that the FFmpeg|Sox pipeline
+// (used when Sox can't read the file format directly, e.g. MP3) also downmixes to
+// mono before the spectrogram effect. This path builds its own argument slice
+// separate from getSoxArgs, so it needs its own coverage of the same invariant.
+func TestGetFFmpegSoxPipelineArgs_DownmixesToMono(t *testing.T) {
+	env := setupTestEnv(t)
+	env.Settings.Realtime.Audio.Export.Length = 15
+
+	gen := NewGenerator(env.Settings, env.SFS, logger.Global().Module("spectrogram.test"))
+
+	audioPath := filepath.Join(env.TempDir, "test.mp3")
+	outputPath := filepath.Join(env.TempDir, "test.png")
+
+	args := gen.getFFmpegSoxPipelineArgs(t.Context(), gen.currentSettings(), audioPath, outputPath, 800, false, 0, BirdProfile())
+
+	channelsIndex := slices.Index(args, "channels")
+	spectrogramIndex := slices.Index(args, "spectrogram")
+	require.NotEqual(t, -1, channelsIndex, "ffmpeg|sox pipeline should downmix to mono")
+	assert.Equal(t, "1", args[channelsIndex+1], "pipeline should use one channel")
+	assert.Less(t, channelsIndex, spectrogramIndex, "downmix should occur before spectrogram generation")
 }
 
 // TestGetSoxSpectrogramArgs_RawFlag tests that raw flag is properly added.
