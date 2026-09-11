@@ -11,6 +11,12 @@ export interface SourceInfo {
   displayName?: string;
 }
 
+export interface ModelInfo {
+  name: string;
+  version?: string;
+  custom?: boolean;
+}
+
 export interface Detection {
   id: number;
   date: string;
@@ -24,6 +30,7 @@ export interface Detection {
   commonName: string;
   confidence: number;
   modelType?: string; // AI model type (e.g. 'bird', 'bat'); drives the spectrogram frequency range
+  model?: ModelInfo | null; // AI model that produced the detection; absent on legacy datastores
   verified: 'correct' | 'false_positive' | 'unverified';
   locked: boolean;
   unlikely?: boolean;
