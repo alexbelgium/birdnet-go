@@ -82,12 +82,13 @@
       }
     }
 
-    // Only default to today's date for non-search query types.
-    // For search queries, omitting the date allows searching across all dates.
+    // Only default to today's date for query types that are scoped to a day.
+    // For search and species queries, omitting the date allows searching across all dates.
     // When date is included, the backend restricts results to that single day,
     // which causes search to return no results for species detected on other days.
     const date =
-      params.get('date')?.trim() || (queryType !== 'search' ? getLocalDateString() : undefined);
+      params.get('date')?.trim() ||
+      (queryType !== 'search' && queryType !== 'species' ? getLocalDateString() : undefined);
 
     return {
       queryType,
@@ -132,7 +133,7 @@
       detectionsData = {
         notes: data.data || [],
         queryType: queryParams.queryType || 'all',
-        date: queryParams.date?.trim() || getLocalDateString(),
+        date: queryParams.date?.trim() || '',
         hour: queryParams.hour ? parseInt(queryParams.hour) : undefined,
         duration: queryParams.duration,
         species: queryParams.species,

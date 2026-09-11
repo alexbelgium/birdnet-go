@@ -120,6 +120,9 @@
         return t('detections.titles.hourly', { hour: data.hour, date: data.date });
 
       case 'species':
+        if (!data.date) {
+          return `All recordings of ${data.species}`;
+        }
         return t('detections.titles.species', { species: data.species, date: data.date });
 
       case 'search':

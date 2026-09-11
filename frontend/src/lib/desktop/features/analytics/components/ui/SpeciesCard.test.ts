@@ -82,4 +82,13 @@ describe('SpeciesCard', () => {
     expect(rebound).not.toBeNull();
     expect(rebound).toHaveAttribute('src', '/api/v2/media/image/Corvus%20brachyrhynchos');
   });
+
+  it('calls onClick with the species when activated', async () => {
+    const onClick = vi.fn();
+    const { getByRole } = render(SpeciesCard, { props: { species: mockSpecies, onClick } });
+
+    await fireEvent.click(getByRole('button', { name: 'View all recordings of House Sparrow' }));
+
+    expect(onClick).toHaveBeenCalledExactlyOnceWith(mockSpecies);
+  });
 });

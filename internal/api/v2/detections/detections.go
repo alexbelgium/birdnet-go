@@ -599,6 +599,15 @@ func (p *detectionQueryParams) needsAdvancedRouting() bool {
 		return true
 	}
 
+	// An empty date on a species query means all dates. Route it through advanced
+	// search because the legacy dedicated handler applies `date = ?`
+	// unconditionally and would otherwise return no rows for the empty date.
+	// Require a non-empty species too: without one, advanced search would build
+	// an unfiltered query and return every detection instead of none.
+	if p.QueryType == queryTypeSpecies && p.Date == "" && p.Species != "" {
+		return true
+	}
+
 	if p.SortBy != "" {
 		if p.QueryType == queryTypeHourly || p.SortBy != sortByDateDesc {
 			return true

@@ -19,9 +19,10 @@
   interface Props {
     species: SpeciesData;
     className?: string;
+    onClick?: (_species: SpeciesData) => void;
   }
 
-  let { species, className = '' }: Props = $props();
+  let { species, className = '', onClick }: Props = $props();
 
   function formatPercentage(value: number): string {
     return (value * 100).toFixed(1) + '%';
@@ -30,7 +31,15 @@
   let displayName = $derived(localizeSpeciesName(species.scientific_name, species.common_name));
 </script>
 
-<div class={cn('card bg-[var(--color-base-200)]', className)}>
+<button
+  type="button"
+  class={cn(
+    'card bg-[var(--color-base-200)] w-full text-left cursor-pointer hover:bg-[var(--color-base-300)] transition-colors',
+    className
+  )}
+  onclick={() => onClick?.(species)}
+  aria-label={`View all recordings of ${displayName}`}
+>
   <figure class="px-4 pt-4">
     <div class="rounded-xl w-full aspect-[4/3] overflow-hidden bg-[var(--color-base-300)]">
       {#if species.thumbnail_url}
@@ -71,4 +80,4 @@
       {/if}
     </div>
   </div>
-</div>
+</button>

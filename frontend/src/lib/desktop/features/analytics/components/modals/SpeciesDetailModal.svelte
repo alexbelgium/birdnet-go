@@ -21,9 +21,10 @@
     species: SpeciesData | null;
     isOpen: boolean;
     onClose?: () => void;
+    onNavigate?: (_species: SpeciesData) => void;
   }
 
-  let { species, isOpen, onClose }: Props = $props();
+  let { species, isOpen, onClose, onNavigate }: Props = $props();
 
   // Cache species data so content persists during the Modal close animation.
   // Updated when a new species is provided, retained when species becomes null
@@ -98,7 +99,12 @@
         </div>
       {/if}
 
-      <div class="grid grid-cols-2 gap-3 text-sm mt-3">
+      <button
+        type="button"
+        class="grid grid-cols-2 gap-3 text-sm mt-3 w-full text-left rounded-lg cursor-pointer hover:bg-[var(--color-base-300)] transition-colors"
+        onclick={() => onNavigate?.(displaySpecies)}
+        aria-label={`View all recordings of ${displayName}`}
+      >
         <div class="flex justify-between bg-[var(--color-base-200)] rounded px-3 py-2">
           <span class="opacity-70">{t('analytics.species.card.detections')}</span>
           <span class="font-semibold">{displaySpecies.count}</span>
@@ -119,7 +125,7 @@
             <span class="font-semibold">{formatDate(displaySpecies.last_heard)}</span>
           </div>
         {/if}
-      </div>
+      </button>
     {/if}
   {/snippet}
 
