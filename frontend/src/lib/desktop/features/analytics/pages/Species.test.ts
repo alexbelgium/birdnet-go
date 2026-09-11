@@ -4,6 +4,8 @@ import { createComponentTestFactory } from '../../../../../test/render-helpers';
 import { setBasePath, resetBasePath } from '$lib/utils/urlHelpers';
 import { settingsActions } from '$lib/stores/settings';
 import { initAuthContext } from '$lib/utils/auth';
+import { navigation } from '$lib/stores/navigation.svelte';
+import { api } from '$lib/utils/api';
 import Species from './Species.svelte';
 
 /* eslint-disable security/detect-object-injection -- bracket access in this file is constant numeric indexing into NodeLists (querySelectorAll(...)[CONSTANT]) in assertions, not user-controlled keys. */
@@ -90,6 +92,131 @@ describe('Species (analytics page)', () => {
     );
 
     expect(img.getAttribute('src')).toBe('/birdnet/api/v2/media/image/Cardellina%20pusilla');
+  });
+});
+
+describe('Species (analytics page) — recordings navigation', () => {
+  const originalFetch = globalThis.fetch;
+  const summary = [
+    {
+      common_name: 'American Robin',
+      scientific_name: 'Turdus migratorius',
+      count: 5,
+      avg_confidence: 0.8,
+      max_confidence: 0.9,
+      first_heard: '2026-04-01',
+      last_heard: '2026-04-20',
+      thumbnail_url: '/api/v2/media/image/Turdus%20migratorius',
+    },
+  ];
+  const expectedUrl =
+    '/ui/detections?queryType=species&species=Turdus%20migratorius&sortBy=confidence_desc';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    initAuthContext(false);
+    vi.spyOn(settingsActions, 'loadRangeFilterSpecies').mockResolvedValue({
+      count: 0,
+      species: [],
+    });
+    vi.spyOn(api, 'post').mockResolvedValue({ action: 'added' });
+    globalThis.fetch = mockFetchSequence({
+      '/api/v2/analytics/species/review-stats': () => [
+        { scientificName: 'Turdus migratorius', total: 5, verified: 0, rejected: 0 },
+      ],
+      '/api/v2/analytics/species/summary': () => summary,
+      '/api/v2/analytics/species/thumbnails': () => ({}),
+      '/api/v2/detections/included': () => ({ species: [] }),
+      '/api/v2/detections/confirmed': () => ({ species: [] }),
+      '/api/v2/detections/ignored': () => ({ species: [] }),
+    });
+    vi.spyOn(navigation, 'navigate').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+    globalThis.fetch = originalFetch;
+    initAuthContext(false);
+    vi.restoreAllMocks();
+  });
+
+  async function renderLoaded() {
+    const result = speciesTest.render({});
+    await waitFor(() => {
+      if (!result.container.querySelector('[aria-label="View all recordings of American Robin"]')) {
+        throw new Error('species navigation target not yet rendered');
+      }
+    });
+    return result;
+  }
+
+  it('navigates from a desktop grid card', async () => {
+    const { container } = await renderLoaded();
+    const card = container.querySelector('[aria-label="View all recordings of American Robin"]');
+    if (!card) throw new Error('grid card navigation button not rendered');
+
+    await fireEvent.click(card);
+
+    expect(navigation.navigate).toHaveBeenCalledWith(expectedUrl);
+  });
+
+  it('navigates from the summary after a mobile card opens the detail modal', async () => {
+    const { container } = await renderLoaded();
+    const mobileCard = container.querySelector('.sm\\:hidden button');
+    if (!mobileCard) throw new Error('mobile species card not rendered');
+
+    await fireEvent.click(mobileCard);
+    const summaryButton = await waitFor(() => {
+      const found = container.querySelector(
+        '[role="dialog"] [aria-label="View all recordings of American Robin"]'
+      );
+      if (!found) throw new Error('mobile modal summary button not rendered');
+      return found;
+    });
+    await fireEvent.click(summaryButton);
+
+    expect(navigation.navigate).toHaveBeenCalledWith(expectedUrl);
+  });
+
+  it('navigates only from the species cell in list view', async () => {
+    const { container } = await renderLoaded();
+    await fireEvent.click(container.querySelectorAll('.join button')[1]);
+    const row = await waitFor(() => {
+      const found = container.querySelector('table tbody tr');
+      if (!found) throw new Error('list row not yet rendered');
+      return found;
+    });
+
+    await fireEvent.click(row.querySelectorAll('td')[1]);
+    expect(navigation.navigate).not.toHaveBeenCalled();
+
+    const nameButton = row.querySelector('td button');
+    if (!nameButton) throw new Error('list name button not rendered');
+    await fireEvent.click(nameButton);
+    expect(navigation.navigate).toHaveBeenCalledWith(expectedUrl);
+  });
+
+  it('navigates from the manage name while controls remain independent', async () => {
+    const { container } = await renderLoaded();
+    await fireEvent.click(container.querySelectorAll('.join button')[2]);
+    const row = await waitFor(() => {
+      const found = container.querySelector('table tbody tr');
+      if (!found) throw new Error('manage row not yet rendered');
+      return found;
+    });
+
+    const checkbox = row.querySelector('input[type="checkbox"]');
+    const deleteButton = row.querySelector('button[aria-label="analytics.species.manage.delete"]');
+    if (!checkbox || !deleteButton) throw new Error('manage controls not rendered');
+    await fireEvent.click(checkbox);
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    await fireEvent.click(deleteButton);
+    expect(navigation.navigate).not.toHaveBeenCalled();
+
+    const nameButton = row.querySelector('td button');
+    if (!nameButton) throw new Error('manage name button not rendered');
+    await fireEvent.click(nameButton);
+    expect(navigation.navigate).toHaveBeenCalledWith(expectedUrl);
   });
 });
 

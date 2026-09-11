@@ -154,4 +154,20 @@ describe('SpeciesDetailModal', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('calls onNavigate from the summary button', async () => {
+    const onNavigate = vi.fn();
+
+    modalTest.render({
+      props: {
+        isOpen: true,
+        species: mockSpecies,
+        onNavigate,
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'View all recordings of House Sparrow' }));
+
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith(mockSpecies);
+  });
 });
