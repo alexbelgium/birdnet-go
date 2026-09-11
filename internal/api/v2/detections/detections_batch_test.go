@@ -351,6 +351,27 @@ func TestBatchResolveDetections(t *testing.T) {
 				assert.Equal(t, 2, result.Count)
 			},
 		},
+		{
+			// Pins the "Locked only" toggle on the all-dates species view: the
+			// request carries Locked="true" and no SortBy, which must still force
+			// advanced routing (needsAdvancedRouting) so the locked filter is
+			// actually applied, rather than falling through to the dedicated
+			// species handler, which ignores Locked entirely.
+			name: "forwards locked=true through advanced search",
+			body: BatchResolveRequest{QueryType: "species", Species: "Turdus merula", Locked: "true"},
+			mockSetup: func(m *mock.Mock) {
+				m.On("SearchNotesAdvanced", mock.MatchedBy(func(f *datastore.AdvancedSearchFilters) bool {
+					return f.Locked != nil && *f.Locked
+				})).Return(mockNotes, int64(2), nil)
+			},
+			expectedStatus: http.StatusOK,
+			checkResult: func(t *testing.T, rec *httptest.ResponseRecorder) {
+				t.Helper()
+				var result BatchResolveResult
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+				assert.Equal(t, 2, result.Count)
+			},
+		},
 	}
 
 	for _, tc := range testCases {

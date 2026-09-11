@@ -603,8 +603,11 @@ func (p *detectionQueryParams) needsAdvancedRouting() bool {
 	// search because the legacy dedicated handler applies `date = ?`
 	// unconditionally and would otherwise return no rows for the empty date.
 	// Require a non-empty species too: without one, advanced search would build
-	// an unfiltered query and return every detection instead of none.
-	if p.QueryType == queryTypeSpecies && p.Date == "" && p.Species != "" {
+	// an unfiltered query and return every detection instead of none. Leave an
+	// hour-without-date species query alone: it's a pre-existing "handled
+	// natively" shape (hour filtering is only meaningful relative to a date on
+	// the dedicated handler), and not one this all-dates feature produces.
+	if p.QueryType == queryTypeSpecies && p.Date == "" && p.Species != "" && p.Hour == "" {
 		return true
 	}
 

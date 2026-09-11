@@ -81,6 +81,7 @@
     onRefresh?: () => void;
     onNumResultsChange?: (_numResults: number) => void;
     onSortChange?: (_sortBy: DetectionSortBy) => void;
+    onLockedFilterChange?: (_locked: boolean) => void;
     className?: string;
   }
 
@@ -93,6 +94,7 @@
     onRefresh,
     onNumResultsChange,
     onSortChange,
+    onLockedFilterChange,
     className = '',
   }: Props = $props();
 
@@ -338,6 +340,7 @@
             search: data.search,
             hour: data.hour !== undefined ? String(data.hour) : undefined,
             duration: data.duration !== undefined ? data.duration : undefined,
+            locked: data.locked ? 'true' : undefined,
           }),
         }
       );
@@ -469,6 +472,27 @@
               <span>{t('detections.selection.select')}</span>
             </button>
           </div>
+        {/if}
+
+        <!-- Locked-only filter: only meaningful on the all-dates species view
+             (every recording of one species, across all dates). Unlike Select
+             and the view toggle, this is a content filter rather than a
+             table-view-only control, so it stays visible on mobile too. -->
+        {#if data?.queryType === 'species' && !data?.date}
+          <button
+            type="button"
+            class={cn(
+              'inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              data?.locked
+                ? 'bg-[var(--color-primary)] text-[var(--color-primary-content)]'
+                : 'border border-[var(--color-base-300)] text-[var(--color-base-content)] hover:bg-[var(--color-base-200)]'
+            )}
+            onclick={() => onLockedFilterChange?.(!data?.locked)}
+            aria-pressed={data?.locked ?? false}
+          >
+            <Lock class="size-4" />
+            <span>Locked only</span>
+          </button>
         {/if}
 
         <!-- View toggle (hidden on mobile - always shows mobile cards) -->

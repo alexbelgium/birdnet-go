@@ -100,6 +100,7 @@
       numResults,
       offset: parseInt(params.get('offset') || '0'),
       sortBy,
+      locked: params.get('locked') === 'true' ? true : undefined,
     };
   }
 
@@ -147,6 +148,7 @@
         showingFrom: (queryParams.offset || 0) + 1,
         showingTo: Math.min((queryParams.offset || 0) + (data.data?.length || 0), data.total || 0),
         dashboardSettings: data.dashboardSettings,
+        locked: queryParams.locked ?? false,
       };
     } catch (err) {
       error = err instanceof Error ? err.message : t('detections.errors.fetchFailed');
@@ -219,6 +221,20 @@
     fetchDetections();
   }
 
+  // Handle locked-only filter toggle from DetectionsList (all-dates species view)
+  function handleLockedFilterChange(locked: boolean) {
+    const params = new URLSearchParams(window.location.search);
+    if (locked) {
+      params.set('locked', 'true');
+    } else {
+      params.delete('locked');
+    }
+    params.set('offset', '0'); // Reset to first page
+
+    window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+    fetchDetections();
+  }
+
   // Handle details click
   function handleDetailsClick(id: number) {
     // Navigate to detection details page
@@ -282,5 +298,6 @@
     onRefresh={fetchDetections}
     onNumResultsChange={handleNumResultsChange}
     onSortChange={handleSortChange}
+    onLockedFilterChange={handleLockedFilterChange}
   />
 </div>
