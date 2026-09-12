@@ -49,9 +49,6 @@ const mockSettingsStore = writable({
         offset: 0,
         species: [],
       },
-      firstDailyConsensus: {
-        enabled: false,
-      },
     },
   } as unknown as SettingsFormData,
   formData: {
@@ -78,9 +75,6 @@ const mockSettingsStore = writable({
         debug: false,
         offset: 0,
         species: [],
-      },
-      firstDailyConsensus: {
-        enabled: false,
       },
     },
   } as unknown as SettingsFormData,
@@ -110,10 +104,6 @@ const mockDaylightFilterSettings = writable({
   debug: false,
   offset: 0,
   species: [],
-});
-
-const mockFirstDailyConsensusSettings = writable({
-  enabled: false,
 });
 
 const mockRealtimeSettings = writable({
@@ -146,9 +136,6 @@ vi.mock('$lib/stores/settings', async importOriginal => {
     },
     daylightFilterSettings: {
       subscribe: (fn: (val: unknown) => void) => mockDaylightFilterSettings.subscribe(fn),
-    },
-    firstDailyConsensusSettings: {
-      subscribe: (fn: (val: unknown) => void) => mockFirstDailyConsensusSettings.subscribe(fn),
     },
     realtimeSettings: {
       subscribe: (fn: (val: unknown) => void) => mockRealtimeSettings.subscribe(fn),
@@ -269,40 +256,6 @@ describe('FilterSettingsPage - Privacy Guard & VAD Settings', () => {
               threshold: 0.4,
             }),
           }),
-        })
-      );
-    });
-  });
-});
-
-// The section's copy is hard-coded English in the component (fork-local feature,
-// deliberately kept out of the i18n catalogues), so assert on the literal text.
-const ENABLE_LABEL = "Require two models for a species' first detection of the day";
-
-describe('FilterSettingsPage - First Daily Detection Consensus', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockFirstDailyConsensusSettings.set({ enabled: false });
-  });
-
-  it('renders the section, off by default, with its help text', () => {
-    const { getByText, getByLabelText } = render(FilterSettingsPage);
-
-    expect(getByText('First Daily Detection Consensus')).toBeInTheDocument();
-    expect(getByText(/never affected/)).toBeInTheDocument();
-    expect(getByLabelText(ENABLE_LABEL)).not.toBeChecked();
-  });
-
-  it('persists the toggle through updateSection', async () => {
-    const { getByLabelText } = render(FilterSettingsPage);
-
-    await fireEvent.click(getByLabelText(ENABLE_LABEL));
-
-    await waitFor(() => {
-      expect(mockUpdateSection).toHaveBeenCalledWith(
-        'realtime',
-        expect.objectContaining({
-          firstDailyConsensus: { enabled: true },
         })
       );
     });

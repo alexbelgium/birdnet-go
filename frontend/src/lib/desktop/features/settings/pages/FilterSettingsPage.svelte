@@ -34,7 +34,6 @@
     privacyFilterSettings,
     dogBarkFilterSettings,
     daylightFilterSettings,
-    firstDailyConsensusSettings,
     realtimeSettings,
   } from '$lib/stores/settings';
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
@@ -87,10 +86,6 @@
         species: [],
       };
 
-      const firstDailyConsensusBase = $firstDailyConsensusSettings || {
-        enabled: false,
-      };
-
       // Ensure species is always an array even if dogBarkFilterSettings exists but has undefined/null species
       return {
         privacy: privacyBase,
@@ -102,7 +97,6 @@
           ...daylightBase,
           species: daylightBase.species ?? [],
         },
-        firstDailyConsensus: firstDailyConsensusBase,
       };
     })()
   );
@@ -131,13 +125,6 @@
     )
   );
 
-  let firstDailyConsensusHasChanges = $derived(
-    hasSettingsChanged(
-      store.originalData.realtime?.firstDailyConsensus,
-      store.formData.realtime?.firstDailyConsensus
-    )
-  );
-
   // Tab state
   let activeTab = $state('filters');
 
@@ -148,11 +135,7 @@
       label: t('settings.filters.title'),
       icon: Filter,
       content: filtersTabContent,
-      hasChanges:
-        privacyFilterHasChanges ||
-        dogBarkFilterHasChanges ||
-        daylightFilterHasChanges ||
-        firstDailyConsensusHasChanges,
+      hasChanges: privacyFilterHasChanges || dogBarkFilterHasChanges || daylightFilterHasChanges,
     },
   ]);
 
@@ -299,13 +282,6 @@
     settingsActions.updateSection('realtime', {
       ...$realtimeSettings,
       daylightFilter: { ...settings.daylight, enabled },
-    });
-  }
-
-  function updateFirstDailyConsensusEnabled(enabled: boolean) {
-    settingsActions.updateSection('realtime', {
-      ...$realtimeSettings,
-      firstDailyConsensus: { ...settings.firstDailyConsensus, enabled },
     });
   }
 
@@ -548,28 +524,6 @@
           </div>
         </fieldset>
       </div>
-    </SettingsSection>
-
-    <!-- First Daily Detection Consensus Section -->
-    <!--
-      Strings are intentionally hard-coded English rather than t() keys. This is a
-      fork-local feature, and routing it through i18n would mean editing en.json,
-      all 15 other locale catalogues and the generated types on every upstream
-      sync. Keeping it self-contained trades translation for a clean merge.
-    -->
-    <SettingsSection
-      title="First Daily Detection Consensus"
-      description="Require a second model to confirm the first detection of each bird species each day. Later detections that day are unaffected."
-      defaultOpen={true}
-      hasChanges={firstDailyConsensusHasChanges}
-    >
-      <Checkbox
-        checked={settings.firstDailyConsensus.enabled}
-        label="Require two models for a species' first detection of the day"
-        disabled={store.isLoading || store.isSaving}
-        helpText="Only applies to species that every active bird model can identify. Bats, non-bird species, species only one model knows, and setups running a single bird model are never affected. Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting."
-        onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
-      />
     </SettingsSection>
   </div>
 {/snippet}
