@@ -390,6 +390,10 @@ export interface DaylightFilterSettings {
   species: string[];
 }
 
+export interface FirstDailyConsensusSettings {
+  enabled: boolean;
+}
+
 export interface EBirdSettings {
   enabled: boolean;
   apiKey: string;
@@ -607,6 +611,7 @@ export interface RealtimeSettings {
   privacyFilter?: PrivacyFilterSettings;
   dogBarkFilter?: DogBarkFilterSettings;
   daylightFilter?: DaylightFilterSettings;
+  firstDailyConsensus?: FirstDailyConsensusSettings;
   rtsp?: RTSPSettings;
   mqtt?: MQTTSettings;
   telemetry?: TelemetrySettings;
@@ -1024,6 +1029,9 @@ function createEmptySettings(): SettingsFormData {
         offset: 0,
         species: [],
       },
+      firstDailyConsensus: {
+        enabled: false,
+      },
       extendedCapture: {
         enabled: false,
         maxDuration: 120,
@@ -1208,6 +1216,11 @@ export const dogBarkFilterSettings = derived(
 export const daylightFilterSettings = derived(
   settingsStore,
   $store => $store.formData.realtime?.daylightFilter
+);
+
+export const firstDailyConsensusSettings = derived(
+  settingsStore,
+  $store => $store.formData.realtime?.firstDailyConsensus
 );
 
 export const birdweatherSettings = derived(
