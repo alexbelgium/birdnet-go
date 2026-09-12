@@ -332,6 +332,7 @@
     }
   );
   let falsePositiveFilter = $derived($realtimeSettings?.falsePositiveFilter ?? { level: 0 });
+  let firstDailyConsensus = $derived($realtimeSettings?.firstDailyConsensus ?? { enabled: false });
   let bat = $derived(
     $batSettings ?? {
       enabled: false,
@@ -836,6 +837,12 @@
     // A fetch already running may predate the save, so queue one behind it.
     void invalidateAcousticModels();
   });
+
+  function updateFirstDailyConsensusEnabled(enabled: boolean) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { enabled },
+    });
+  }
 
   // ── Range filter state and functions ──────────────────────────────────
   interface RangeFilterSpecies {
@@ -1794,6 +1801,23 @@
           onUpdate={updateFalsePositiveFilterLevel}
           getDescription={level => getFalsePositiveFilterDescription(level, birdnet?.overlap ?? 0)}
           disabled={store.isLoading || store.isSaving}
+        />
+      </div>
+
+      <!--
+        First Daily Detection Consensus. Copy is intentionally hard-coded English
+        rather than a t() key: this is a fork-local feature, and routing it through
+        i18n would mean editing en.json, all 15 other locale catalogues and the
+        generated types on every upstream sync. Keeping it self-contained trades
+        translation for a clean merge.
+      -->
+      <div class="mt-6">
+        <Checkbox
+          checked={firstDailyConsensus.enabled}
+          label="Require two models for a species' first detection of the day"
+          disabled={store.isLoading || store.isSaving}
+          helpText="Only applies to species that every active bird model analyzing an audio source can identify. Bats, non-bird species, species only one model knows, and setups running a single bird model are never affected. Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting."
+          onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
         />
       </div>
 
