@@ -1804,23 +1804,6 @@
         />
       </div>
 
-      <!--
-        First Daily Detection Consensus. Copy is intentionally hard-coded English
-        rather than a t() key: this is a fork-local feature, and routing it through
-        i18n would mean editing en.json, all 15 other locale catalogues and the
-        generated types on every upstream sync. Keeping it self-contained trades
-        translation for a clean merge.
-      -->
-      <div class="mt-6">
-        <Checkbox
-          checked={firstDailyConsensus.enabled}
-          label="Require two models for a species' first detection of the day"
-          disabled={store.isLoading || store.isSaving}
-          helpText="Only applies to species that every active bird model analyzing an audio source can identify. Bats, non-bird species, species only one model knows, and setups running a single bird model are never affected. Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting."
-          onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
-        />
-      </div>
-
       {#if falsePositiveFilter.level === 0}
         <SettingsNote>
           {#snippet icon()}<AlertTriangle class="size-4 text-[var(--color-warning)]" />{/snippet}
@@ -1895,6 +1878,23 @@
           </div>
         </SettingsNote>
       {/if}
+
+      <!--
+        First Daily Detection Consensus. Copy is intentionally hard-coded English
+        rather than a t() key: this is a fork-local feature, and routing it through
+        i18n would mean editing en.json, all 15 other locale catalogues and the
+        generated types on every upstream sync. Keeping it self-contained trades
+        translation for a clean merge.
+      -->
+      <div class="mt-6">
+        <Checkbox
+          checked={firstDailyConsensus.enabled}
+          label="Require two models for a species' first detection of the day"
+          disabled={store.isLoading || store.isSaving}
+          helpText="Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting. Only applies to species that at least two active models analyzing an audio source can identify. Non-bird species, non-animal sounds, species only one model knows, and setups running a single bird model are not affected."
+          onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
+        />
+      </div>
     </SettingsSection>
 
     <!-- 2. Perch v2 threshold override (only when the Perch model is installed) -->
