@@ -665,9 +665,12 @@ func (g *Generator) generateWithFFmpegSoxPipeline(ctx context.Context, settings 
 			Build()
 	}
 
-	// FFmpeg converts audio to Sox format and pipes to Sox
-	ffmpegArgs := []string{"-hide_banner", "-i", audioPath, "-f", "sox", "-"}
-	soxArgs := g.getFFmpegSoxPipelineArgs(ctx, settings, audioPath, outputPath, width, raw, preValidatedDuration, profile)
+	// FFmpeg converts audio to Sox format and pipes to Sox. Downmix to mono here
+	// (-ac) rather than in Sox: FFmpeg already decoded the file, so this avoids
+	// asking Sox to downmix audio it just received, and keeps the multi-channel
+	// fix in one place instead of splitting it across both stages.
+	ffmpegArgs := []string{"-hide_banner", "-i", audioPath, "-ac", strconv.Itoa(conf.NumChannels), "-f", "sox", "-"}
+	soxArgs := append([]string{"-t", "sox", "-"}, g.getSoxSpectrogramArgs(ctx, settings, audioPath, outputPath, width, raw, preValidatedDuration, profile)...)
 
 	ffmpegCmd := createCommandWithNice(ctx, ffmpegBinary, ffmpegArgs)
 	soxCmd := createCommandWithNice(ctx, soxBinary, soxArgs)
@@ -1003,16 +1006,6 @@ func (g *Generator) getSoxArgs(ctx context.Context, settings *conf.Settings, aud
 		args = slices.Insert(args, slices.Index(args, "spectrogram"), "channels", strconv.Itoa(conf.NumChannels))
 	}
 	return args
-}
-
-// getFFmpegSoxPipelineArgs builds the Sox arguments for the FFmpeg|Sox pipeline,
-// where Sox reads already-decoded audio from stdin instead of a file. Downmixes
-// to mono before the spectrogram effect, same as getSoxArgs's file-input path,
-// so multi-channel sources (e.g. stereo historical recordings) render one panel
-// instead of one stacked panel per channel.
-func (g *Generator) getFFmpegSoxPipelineArgs(ctx context.Context, settings *conf.Settings, audioPath, outputPath string, width int, raw bool, preValidatedDuration float64, profile FrequencyProfile) []string {
-	args := append([]string{"-t", "sox", "-"}, g.getSoxSpectrogramArgs(ctx, settings, audioPath, outputPath, width, raw, preValidatedDuration, profile)...)
-	return slices.Insert(args, slices.Index(args, "spectrogram"), "channels", strconv.Itoa(conf.NumChannels))
 }
 
 // getSoxSpectrogramArgs returns the common Sox arguments for spectrogram generation.
