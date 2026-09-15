@@ -82,8 +82,8 @@ func IsBirdCapableModel(modelID string) bool {
 // mid-reload). Callers must fail open on it rather than read shared=false.
 //
 // Locking follows AllLabels: model IDs and entry pointers are snapshotted under
-// o.mu, which is released before any entry.mu is taken, because the reload,
-// unload and delete paths deliberately order those two locks the other way.
+// o.mu, which is released before any entry.mu is taken. Instances are captured
+// under entry.mu, then Labels is called after releasing it, matching AllLabels.
 func (o *Orchestrator) SpeciesSharedByBirdModels(scientificName string, restrictTo []string, minModels int) (shared, ok bool) {
 	if o == nil || minModels < 1 {
 		return false, false
@@ -94,8 +94,6 @@ func (o *Orchestrator) SpeciesSharedByBirdModels(scientificName string, restrict
 	}
 
 	o.mu.RLock()
-	primary := o.primary
-	primaryID := o.ModelInfo.ID
 	refs := make([]entryRef, 0, len(o.models))
 	for id, entry := range o.models {
 		// IsModelActive reads an atomic, not o.mu, so it is safe under the RLock.
@@ -117,17 +115,12 @@ func (o *Orchestrator) SpeciesSharedByBirdModels(scientificName string, restrict
 	}
 
 	for _, ref := range refs {
+		ref.entry.mu.Lock()
+		instance := ref.entry.instance
+		ref.entry.mu.Unlock()
 		var labels []string
-		if primary != nil && ref.id == primaryID {
-			// BirdNET.Labels takes the model's own lock, so entry.mu is neither
-			// needed nor safe to hold here. Same reasoning as AllLabels.
-			labels = primary.Labels()
-		} else {
-			ref.entry.mu.Lock()
-			if ref.entry.instance != nil {
-				labels = ref.entry.instance.Labels()
-			}
-			ref.entry.mu.Unlock()
+		if instance != nil {
+			labels = instance.Labels()
 		}
 		if len(labels) == 0 {
 			// A loaded model we cannot read labels for makes the whole comparison
