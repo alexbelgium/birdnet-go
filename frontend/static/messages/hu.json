@@ -205,6 +205,7 @@
     "serverError": "500 - Belső szerverhiba",
     "componentError": "Komponens betöltési hiba",
     "speciesAnalytics": "Faj elemzés",
+    "speciesList": "Species tools",
     "detectionDetails": "Detektálás részletei",
     "settingsNotAvailable": "Beállítások nem elérhetők",
     "analyticsSummary": "Elemzés - Összegzés",
@@ -2020,6 +2021,7 @@
       "speciesList": "Fajlista",
       "switchToGrid": "Rács nézetre váltás",
       "switchToList": "Lista nézetre váltás",
+      "switchToManage": "Váltás kezelő nézetre",
       "noSpeciesFound": "A szűrőknek megfelelő faj nem található.",
       "headers": {
         "species": "Faj",
@@ -2033,7 +2035,30 @@
         "detections": "Detektálások:",
         "confidence": "Megbízhatóság:",
         "first": "Első:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Kizárva",
+          "included": "Beleértve",
+          "reviewRatio": "Helyes",
+          "rangeProbability": "Tartomány",
+          "confirmed": "Megerősítve",
+          "actions": "Műveletek"
+        },
+        "delete": "A faj összes detektálásának törlése",
+        "deleteTitle": "Faj detektálásainak törlése",
+        "deleteConfirm": "Törlés",
+        "deleteMessage": "Törli a(z) {species} faj mind a(z) {count} detektálását? A zárolt detektálások megmaradnak.",
+        "deleteWarning": "Ez véglegesen eltávolítja a detektálásokat és azok hangklipjeit, és nem vonható vissza.",
+        "deleteFailed": "A detektálások törlése nem sikerült. Kérjük, próbálja újra.",
+        "deleteProgress": "Eddig törölve: {deleted}, hátravan: {remaining}…",
+        "membershipFailed": "A fajlisták frissítése sikertelen. Kérjük, próbálja újra.",
+        "loadFailed": "A fajadatok frissítése nem sikerült. A korábban betöltött eredmények láthatók.",
+        "allTimeNote": "A Kezelés az összes időszak összes detektálását megjeleníti; a fenti dátumszűrő itt nem érvényes."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Diagram vezérlők",

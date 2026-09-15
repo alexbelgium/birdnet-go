@@ -78,6 +78,7 @@ Performance Optimizations:
     TrendingUp,
     Leaf,
     Moon,
+    ListChecks,
   } from '@lucide/svelte';
   import { t } from '$lib/i18n';
   import type { Component } from 'svelte';
@@ -188,6 +189,7 @@ Performance Optimizations:
     analyticsBiodiversity: actualRoute === '/ui/analytics/biodiversity',
     analyticsNocturnal: actualRoute === '/ui/analytics/nocturnal',
     analyticsSpecies: actualRoute === '/ui/analytics/species',
+    analyticsSpeciesList: actualRoute === '/ui/analytics/species-list',
     search: actualRoute.startsWith('/ui/search'),
     about: actualRoute.startsWith('/ui/about'),
     system: actualRoute.startsWith('/ui/system'),
@@ -244,6 +246,7 @@ Performance Optimizations:
     analyticsBiodiversity: onNavigate ? '/analytics/biodiversity' : '/ui/analytics/biodiversity',
     analyticsNocturnal: onNavigate ? '/analytics/nocturnal' : '/ui/analytics/nocturnal',
     analyticsSpecies: onNavigate ? '/analytics/species' : '/ui/analytics/species',
+    analyticsSpeciesList: onNavigate ? '/analytics/species-list' : '/ui/analytics/species-list',
     search: onNavigate ? '/search' : '/ui/search',
     about: onNavigate ? '/about' : '/ui/about',
     help: onNavigate ? '/help' : '/ui/help',
@@ -304,6 +307,12 @@ Performance Optimizations:
             label: t('analytics.species.title'),
             url: withQuery(navigationUrls.analyticsSpecies),
             routeKey: 'analyticsSpecies',
+          },
+          {
+            icon: ListChecks,
+            label: t('analytics.speciesList.title'),
+            url: withQuery(navigationUrls.analyticsSpeciesList),
+            routeKey: 'analyticsSpeciesList',
           },
           {
             icon: Search,

@@ -205,6 +205,7 @@
     "serverError": "500 - Intern serverfeil",
     "componentError": "Feil ved lasting av komponent",
     "speciesAnalytics": "Artsanalyse",
+    "speciesList": "Species tools",
     "detectionDetails": "Registreringsdetaljer",
     "settingsNotAvailable": "Innstillinger ikke tilgjengelig",
     "analyticsSummary": "Analyse - Sammendrag",
@@ -2020,6 +2021,7 @@
       "speciesList": "Artsliste",
       "switchToGrid": "Bytt til rutenettvisning",
       "switchToList": "Bytt til listevisning",
+      "switchToManage": "Bytt til administrasjonsvisning",
       "noSpeciesFound": "Ingen arter funnet som matcher filtrene dine.",
       "headers": {
         "species": "Art",
@@ -2033,7 +2035,30 @@
         "detections": "Registreringer:",
         "confidence": "Sikkerhet:",
         "first": "Første:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Ekskludert",
+          "included": "Inkludert",
+          "reviewRatio": "Korrekt",
+          "rangeProbability": "Utvalg",
+          "confirmed": "Bekreftet",
+          "actions": "Handlinger"
+        },
+        "delete": "Slett alle registreringer for denne arten",
+        "deleteTitle": "Slett artsregistreringer",
+        "deleteConfirm": "Slett",
+        "deleteMessage": "Slette alle {count} registreringer for {species}? Låste registreringer beholdes.",
+        "deleteWarning": "Dette fjerner registreringene og lydklippene deres permanent og kan ikke angres.",
+        "deleteFailed": "Kunne ikke slette registreringer. Prøv igjen.",
+        "deleteProgress": "Slettet {deleted} så langt, {remaining} gjenstår…",
+        "membershipFailed": "Kunne ikke oppdatere artslistene. Prøv igjen.",
+        "loadFailed": "Kunne ikke oppdatere artsdata. Viser tidligere innlastede resultater.",
+        "allTimeNote": "Administrer viser alle registreringer for hele perioden; datofilteret ovenfor gjelder ikke her."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Diagramkontroller",
