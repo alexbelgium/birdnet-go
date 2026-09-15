@@ -82,12 +82,13 @@
       }
     }
 
-    // Only default to today's date for non-search query types.
-    // For search queries, omitting the date allows searching across all dates.
+    // Only default to today's date for query types that are scoped to a day.
+    // For search and species queries, omitting the date allows searching across all dates.
     // When date is included, the backend restricts results to that single day,
     // which causes search to return no results for species detected on other days.
     const date =
-      params.get('date')?.trim() || (queryType !== 'search' ? getLocalDateString() : undefined);
+      params.get('date')?.trim() ||
+      (queryType !== 'search' && queryType !== 'species' ? getLocalDateString() : undefined);
 
     return {
       queryType,
@@ -99,6 +100,7 @@
       numResults,
       offset: parseInt(params.get('offset') || '0'),
       sortBy,
+      locked: params.get('locked') === 'true' ? true : undefined,
     };
   }
 
@@ -132,7 +134,7 @@
       detectionsData = {
         notes: data.data || [],
         queryType: queryParams.queryType || 'all',
-        date: queryParams.date?.trim() || getLocalDateString(),
+        date: queryParams.date?.trim() || '',
         hour: queryParams.hour ? parseInt(queryParams.hour) : undefined,
         duration: queryParams.duration,
         species: queryParams.species,
@@ -146,6 +148,7 @@
         showingFrom: (queryParams.offset || 0) + 1,
         showingTo: Math.min((queryParams.offset || 0) + (data.data?.length || 0), data.total || 0),
         dashboardSettings: data.dashboardSettings,
+        locked: queryParams.locked ?? false,
       };
     } catch (err) {
       error = err instanceof Error ? err.message : t('detections.errors.fetchFailed');
@@ -218,6 +221,20 @@
     fetchDetections();
   }
 
+  // Handle locked-only filter toggle from DetectionsList (all-dates species view)
+  function handleLockedFilterChange(locked: boolean) {
+    const params = new URLSearchParams(window.location.search);
+    if (locked) {
+      params.set('locked', 'true');
+    } else {
+      params.delete('locked');
+    }
+    params.set('offset', '0'); // Reset to first page
+
+    window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+    fetchDetections();
+  }
+
   // Handle details click
   function handleDetailsClick(id: number) {
     // Navigate to detection details page
@@ -281,5 +298,6 @@
     onRefresh={fetchDetections}
     onNumResultsChange={handleNumResultsChange}
     onSortChange={handleSortChange}
+    onLockedFilterChange={handleLockedFilterChange}
   />
 </div>

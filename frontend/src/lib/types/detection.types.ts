@@ -76,6 +76,7 @@ export interface DetectionsListData {
       summary?: boolean;
     };
   };
+  locked?: boolean;
 }
 
 export type DetectionSortBy =
@@ -99,6 +100,7 @@ export interface DetectionQueryParams {
   numResults?: number;
   offset?: number;
   sortBy?: DetectionSortBy;
+  locked?: boolean;
 }
 
 export interface DetectionReviewRequest {
