@@ -162,6 +162,7 @@ describe('DesktopSidebar - flat task-grouped sections', () => {
     const expectations: Array<[string, string]> = [
       ['analytics.hub.tabs.summary', '/analytics/summary'],
       ['analytics.species.title', '/analytics/species'],
+      ['analytics.speciesList.title', '/analytics/species-list'],
       ['navigation.search', '/search'],
       ['analytics.hub.tabs.patterns', '/analytics/activity'],
       ['analytics.hub.tabs.trends', '/analytics/trends'],
@@ -240,7 +241,8 @@ describe('DesktopSidebar - flat task-grouped sections', () => {
     const exploreLabels = exploreButtons.map(b => b.textContent.trim()).filter(Boolean);
     expect(exploreLabels[0]).toContain('analytics.hub.tabs.summary');
     expect(exploreLabels[1]).toContain('analytics.species.title');
-    expect(exploreLabels[2]).toContain('navigation.search');
+    expect(exploreLabels[2]).toContain('analytics.speciesList.title');
+    expect(exploreLabels[3]).toContain('navigation.search');
 
     // PATTERNS: Activity, Trends, Nocturnal, Biodiversity
     const patternsGroup = container

@@ -205,6 +205,7 @@
     "serverError": "500 - Internt serverfel",
     "componentError": "Komponentladdningsfel",
     "speciesAnalytics": "Artanalys",
+    "speciesList": "Species tools",
     "detectionDetails": "Detektionsdetaljer",
     "settingsNotAvailable": "Inställningar ej tillgängliga",
     "analyticsSummary": "Analys - Sammanfattning",
@@ -2052,6 +2053,9 @@
         "loadFailed": "Det gick inte att uppdatera artdata. Visar tidigare inläst resultat.",
         "allTimeNote": "Hantera visar alla detektioner genom tiderna; datumfiltret ovan gäller inte här."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Diagramkontroller",

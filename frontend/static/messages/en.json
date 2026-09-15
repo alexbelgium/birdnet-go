@@ -205,6 +205,7 @@
     "serverError": "500 - Internal Server Error",
     "componentError": "Component Load Error",
     "speciesAnalytics": "Species Analytics",
+    "speciesList": "Species tools",
     "detectionDetails": "Detection Details",
     "settingsNotAvailable": "Settings Not Available",
     "analyticsSummary": "Analytics - Summary",
@@ -2052,6 +2053,9 @@
         "loadFailed": "Failed to refresh species data. Showing previously loaded results.",
         "allTimeNote": "Manage shows all detections across all time; the date filter above does not apply here."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Chart Controls",

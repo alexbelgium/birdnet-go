@@ -205,6 +205,7 @@
     "serverError": "500 - Error interno del servidor",
     "componentError": "Error de carga del componente",
     "speciesAnalytics": "Análisis de especies",
+    "speciesList": "Species tools",
     "detectionDetails": "Detalles de detección",
     "settingsNotAvailable": "Configuración no disponible",
     "analyticsSummary": "Análisis - Resumen",
@@ -2052,6 +2053,9 @@
         "loadFailed": "No se pudieron actualizar los datos de especies. Mostrando los últimos resultados cargados.",
         "allTimeNote": "Gestionar muestra todas las detecciones de todos los tiempos; el filtro de fecha de arriba no se aplica aquí."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Controles del gráfico",

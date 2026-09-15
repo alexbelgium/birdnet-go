@@ -205,6 +205,7 @@
     "serverError": "500 - Interne serverfout",
     "componentError": "Component laadfout",
     "speciesAnalytics": "Soortanalyses",
+    "speciesList": "Species tools",
     "detectionDetails": "Detectiedetails",
     "settingsNotAvailable": "Instellingen niet beschikbaar",
     "analyticsSummary": "Analyses - Overzicht",
@@ -2052,6 +2053,9 @@
         "loadFailed": "Kan soortgegevens niet vernieuwen. Eerder geladen resultaten worden weergegeven.",
         "allTimeNote": "Beheren toont alle detecties over alle tijd; het datumfilter hierboven is hier niet van toepassing."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Grafiekbediening",

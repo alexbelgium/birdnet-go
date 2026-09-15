@@ -205,6 +205,7 @@
     "serverError": "500 - Iekšējā servera kļūda",
     "componentError": "Komponentes ielādes kļūda",
     "speciesAnalytics": "Sugu analītika",
+    "speciesList": "Species tools",
     "detectionDetails": "Noteikšanas detaļas",
     "settingsNotAvailable": "Iestatījumi nav pieejami",
     "analyticsSummary": "Analītika - Kopsavilkums",
@@ -2052,6 +2053,9 @@
         "loadFailed": "Neizdevās atjaunināt sugu datus. Tiek rādīti iepriekš ielādētie rezultāti.",
         "allTimeNote": "Pārvaldība rāda visas atpazīšanas par visu laiku; augstāk redzamais datuma filtrs šeit netiek piemērots."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Diagrammu vadība",

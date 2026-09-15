@@ -205,6 +205,7 @@
     "serverError": "500 - Interner Serverfehler",
     "componentError": "Komponentenladefehler",
     "speciesAnalytics": "Arten-Analysen",
+    "speciesList": "Species tools",
     "detectionDetails": "Erkennungsdetails",
     "settingsNotAvailable": "Einstellungen nicht verfügbar",
     "analyticsSummary": "Analysen - Zusammenfassung",
@@ -2052,6 +2053,9 @@
         "loadFailed": "Artdaten konnten nicht aktualisiert werden. Zuvor geladene Ergebnisse werden angezeigt.",
         "allTimeNote": "Verwalten zeigt alle Erkennungen über den gesamten Zeitraum; der Datumsfilter oben gilt hier nicht."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Diagrammsteuerung",

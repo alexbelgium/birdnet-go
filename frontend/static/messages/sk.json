@@ -205,6 +205,7 @@
     "serverError": "500 - Interná chyba servera",
     "componentError": "Chyba načítania komponentu",
     "speciesAnalytics": "Analytika druhov",
+    "speciesList": "Species tools",
     "detectionDetails": "Podrobnosti detekcie",
     "settingsNotAvailable": "Nastavenia nie sú k dispozícii",
     "analyticsSummary": "Analytika - Zhrnutie",
@@ -2052,6 +2053,9 @@
         "loadFailed": "Nepodarilo sa obnoviť údaje o druhoch. Zobrazujú sa predtým načítané výsledky.",
         "allTimeNote": "Správa zobrazuje všetky detekcie za celé obdobie; vyššie uvedený filter dátumu sa tu nepoužije."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Ovládanie grafu",

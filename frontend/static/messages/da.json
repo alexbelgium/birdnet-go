@@ -205,6 +205,7 @@
     "serverError": "500 - Intern serverfejl",
     "componentError": "Komponentindlæsningsfejl",
     "speciesAnalytics": "Artsanalyse",
+    "speciesList": "Species tools",
     "detectionDetails": "Detektionsdetaljer",
     "settingsNotAvailable": "Indstillinger ikke tilgængelige",
     "analyticsSummary": "Analyse - Oversigt",
@@ -2052,6 +2053,9 @@
         "loadFailed": "Kunne ikke opdatere artsdata. Viser tidligere indlæste resultater.",
         "allTimeNote": "Administrer viser alle registreringer for hele perioden; datofilteret ovenfor gælder ikke her."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Diagramstyring",
