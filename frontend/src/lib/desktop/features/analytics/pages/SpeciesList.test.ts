@@ -3,6 +3,8 @@ import { cleanup, fireEvent, waitFor } from '@testing-library/svelte';
 import { createComponentTestFactory } from '../../../../../test/render-helpers';
 import { resetBasePath } from '$lib/utils/urlHelpers';
 import { settingsActions } from '$lib/stores/settings';
+import { navigation } from '$lib/stores/navigation.svelte';
+import { api } from '$lib/utils/api';
 import SpeciesList from './SpeciesList.svelte';
 
 /* eslint-disable security/detect-object-injection -- bracket access in this file is constant numeric indexing into NodeLists in assertions. */
@@ -206,5 +208,29 @@ describe('SpeciesList (analytics page)', () => {
       const checkbox = cell.querySelector<HTMLInputElement>('input[type="checkbox"]');
       expect(checkbox?.checked).toBe(true);
     });
+  });
+
+  it('navigates to all recordings from the species name while controls remain independent', async () => {
+    const navigateSpy = vi.spyOn(navigation, 'navigate').mockImplementation(() => undefined);
+    vi.spyOn(api, 'post').mockResolvedValue({ action: 'added' });
+    const { container } = await renderSpeciesList();
+
+    const cells = container.querySelectorAll('table tbody tr td');
+    const excludedCheckbox = cells[4].querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!excludedCheckbox) throw new Error('excluded checkbox not rendered');
+    await fireEvent.click(excludedCheckbox);
+    expect(navigateSpy).not.toHaveBeenCalled();
+
+    const deleteButton = cells[9].querySelector('button');
+    if (!deleteButton) throw new Error('delete button not rendered');
+    await fireEvent.click(deleteButton);
+    expect(navigateSpy).not.toHaveBeenCalled();
+
+    const nameButton = cells[0].querySelector('button');
+    if (!nameButton) throw new Error('species name button not rendered');
+    await fireEvent.click(nameButton);
+    expect(navigateSpy).toHaveBeenCalledExactlyOnceWith(
+      '/ui/detections?queryType=species&species=Turdus%20migratorius&sortBy=confidence_desc'
+    );
   });
 });

@@ -18,6 +18,7 @@
   import { loggers } from '$lib/utils/logger';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
+  import { navigation } from '$lib/stores/navigation.svelte';
   import { Trash2 } from '@lucide/svelte';
   import { onMount } from 'svelte';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -420,6 +421,12 @@
     deleteTarget = null;
     deleteError = null;
   }
+
+  function navigateToSpeciesDetections(species: SpeciesData) {
+    navigation.navigate(
+      `/ui/detections?queryType=species&species=${encodeURIComponent(species.scientific_name)}&sortBy=confidence_desc`
+    );
+  }
 </script>
 
 <div class="col-span-12 space-y-4" role="region" aria-label={t('analytics.speciesList.title')}>
@@ -525,9 +532,16 @@
                       ? 'bg-[var(--color-base-100)]'
                       : 'bg-[var(--color-base-200)]'}
                   >
-                    <td>
-                      <div class="font-bold">{displayName}</div>
-                      <div class="text-sm opacity-50 italic">{species.scientific_name}</div>
+                    <td class="p-0">
+                      <button
+                        type="button"
+                        class="w-full p-3 text-left cursor-pointer hover:bg-[var(--color-base-300)] transition-colors"
+                        onclick={() => navigateToSpeciesDetections(species)}
+                        aria-label={`View all recordings of ${displayName}`}
+                      >
+                        <div class="font-bold">{displayName}</div>
+                        <div class="text-sm opacity-50 italic">{species.scientific_name}</div>
+                      </button>
                     </td>
                     <td class="font-semibold">{species.count}</td>
                     <td

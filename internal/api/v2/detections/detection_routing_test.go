@@ -99,6 +99,11 @@ func TestNeedsAdvancedRouting(t *testing.T) {
 			params:   detectionQueryParams{QueryType: queryTypeHourly, SortBy: sortByDateDesc},
 			expected: true,
 		},
+		{
+			name:     "confidence sort routes all-dates species through advanced search",
+			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "Turdus merula", SortBy: "confidence_desc"},
+			expected: true,
+		},
 
 		// --- Cross-type filter checks (date/hour/species/search on non-native query types) ---
 
@@ -120,7 +125,17 @@ func TestNeedsAdvancedRouting(t *testing.T) {
 		},
 		{
 			name:     "species on species queryType does NOT trigger (handled natively)",
-			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "Turdus merula"},
+			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "Turdus merula", Date: "2024-01-15"},
+			expected: false,
+		},
+		{
+			name:     "species without date triggers advanced for all-dates query",
+			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "Turdus merula", Date: ""},
+			expected: true,
+		},
+		{
+			name:     "empty species without date does NOT trigger (would be unfiltered)",
+			params:   detectionQueryParams{QueryType: queryTypeSpecies, Species: "", Date: ""},
 			expected: false,
 		},
 

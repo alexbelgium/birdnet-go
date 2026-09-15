@@ -11,6 +11,7 @@
     onRefresh: () => void;
     onNumResultsChange: (_numResults: number) => void;
     onSortChange?: (_sortBy: DetectionSortBy) => void;
+    onLockedFilterChange?: (_locked: boolean) => void;
   }
 
   let {
@@ -22,6 +23,7 @@
     onRefresh,
     onNumResultsChange,
     onSortChange,
+    onLockedFilterChange,
   }: Props = $props();
 </script>
 
@@ -36,6 +38,7 @@
       {onRefresh}
       {onNumResultsChange}
       {onSortChange}
+      {onLockedFilterChange}
     />
   </div>
 </section>
