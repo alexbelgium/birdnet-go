@@ -20,6 +20,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
+	"github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
@@ -207,40 +208,24 @@ func (c *Handler) toggleSpeciesInList(species string, listOf func(*conf.Settings
 }
 
 // SpeciesDeleteRequest is the request body for deleting all detections of a species.
-// ExcludeIDs are IDs the caller already knows are permanently un-deletable
-// (reported as SkippedIDs by an earlier call in the same delete operation);
-// see SpeciesDeleteResult for why the caller should accumulate and resend them.
+// ExcludeIDs are the SkippedIDs returned by earlier calls of the same operation.
 type SpeciesDeleteRequest struct {
 	ScientificName string   `json:"scientific_name"`
 	ExcludeIDs     []string `json:"exclude_ids,omitempty"`
 }
 
-// SpeciesDeleteResult reports the outcome of a species-wide delete. A single
-// call processes at most maxBatchSize detections (the deleteNotesByIDs loop is
-// a per-row Get+Delete, so an unbounded species-wide delete on a common species
-// with tens of thousands of detections could hold the request - and, on
-// SQLite, its single-writer lock - for minutes).
+// SpeciesDeleteResult reports one chunk (at most maxBatchSize detections) of a
+// species-wide delete, bounding how long a single request holds the database.
 //
-// Remaining reports how many matching detections (after ExcludeIDs filtering)
-// were not attempted this call; a non-zero Remaining means the caller should
-// invoke the endpoint again to delete the rest. Locked detections are never
-// removed, so GetSpeciesNoteIDs keeps returning them on every call - the
-// caller MUST accumulate SkippedIDs across calls and resend the full
-// accumulated set as ExcludeIDs on the next call. Without that, chunk
-// selection (always the front of the current ID list) would repeatedly
-// re-examine the same locked entries: Remaining would never reach 0 (an
-// infinite loop) if not accounted for, and even a caller that stopped after
-// one such all-skipped chunk would never reach later, genuinely deletable
-// detections. Because both the deleted and the excluded portion of a chunk
-// are permanently removed from consideration (deleted rows physically, locked
-// rows via the accumulated exclusion), the set of not-yet-considered IDs
-// shrinks by up to maxBatchSize on every call regardless of how many of them
-// were locked, so a conforming caller reaches Remaining == 0 in a bounded
-// number of calls (ceil(total IDs / maxBatchSize)) with every ID examined
-// exactly once. The species workspace's remove() implements this accumulation.
+// SkippedIDs are detections that must never be deleted by this operation
+// (locked, or no longer this species); callers accumulate them and resend them
+// as ExcludeIDs so each call makes progress. Failed counts detections whose
+// lookup or delete errored; they are NOT excluded, so a caller should stop and
+// report the failure rather than loop. Callers repeat while Remaining > 0.
 type SpeciesDeleteResult struct {
 	Deleted    int      `json:"deleted"`
 	Skipped    int      `json:"skipped"`
+	Failed     int      `json:"failed"`
 	Remaining  int      `json:"remaining"`
 	SkippedIDs []string `json:"skipped_ids,omitempty"`
 }
@@ -252,13 +237,8 @@ type speciesNoteIDsDatastore interface {
 	GetSpeciesNoteIDs(ctx context.Context, scientificName string) ([]string, error)
 }
 
-// DeleteSpeciesDetections deletes up to maxBatchSize (unlocked) detections for
-// the given scientific name, excluding any IDs the caller reports via
-// ExcludeIDs. Locked detections are skipped and counted, mirroring the batch
-// delete semantics. Callers must repeat the request - accumulating each
-// response's SkippedIDs into the next call's ExcludeIDs - while the response's
-// Remaining is non-zero, to delete the rest and reach every deletable
-// detection regardless of how locked ones are distributed. Returns HTTP 501
+// DeleteSpeciesDetections deletes one chunk of unlocked detections for a
+// species; see SpeciesDeleteResult for the calling protocol. Returns HTTP 501
 // when the active datastore cannot resolve a species' detection IDs.
 func (c *Handler) DeleteSpeciesDetections(ctx echo.Context) error {
 	var req SpeciesDeleteRequest
@@ -282,40 +262,58 @@ func (c *Handler) DeleteSpeciesDetections(ctx echo.Context) error {
 		return c.HandleError(ctx, err, "Failed to look up detections for species", http.StatusInternalServerError)
 	}
 
-	unique := deduplicateIDs(ids)
-	if len(req.ExcludeIDs) > 0 {
-		exclude := make(map[string]struct{}, len(req.ExcludeIDs))
-		for _, id := range req.ExcludeIDs {
-			exclude[id] = struct{}{}
-		}
-		unique = slices.DeleteFunc(unique, func(id string) bool {
-			_, excluded := exclude[id]
-			return excluded
-		})
+	exclude := make(map[string]struct{}, len(req.ExcludeIDs))
+	for _, id := range req.ExcludeIDs {
+		exclude[id] = struct{}{}
 	}
+	unique := slices.DeleteFunc(deduplicateIDs(ids), func(id string) bool {
+		_, excluded := exclude[id]
+		return excluded
+	})
 
 	chunk, remaining := unique, 0
 	if len(unique) > maxBatchSize {
 		chunk, remaining = unique[:maxBatchSize], len(unique)-maxBatchSize
 	}
 
-	deleted, skipped, skippedIDs := c.deleteNotesByIDs(chunk)
+	result := SpeciesDeleteResult{Remaining: remaining, SkippedIDs: []string{}}
+	species := detection.ExtractScientificName(req.ScientificName)
+	for _, id := range chunk {
+		note, err := c.DS.Get(id)
+		if err != nil {
+			c.LogWarnIfEnabled("Species delete: failed to get detection", logger.String("id", id), logger.Error(err))
+			result.Failed++
+			continue
+		}
+		// Re-check ownership: the detection may have been locked or corrected to
+		// another species since the ID lookup.
+		if note.Locked || !strings.EqualFold(detection.ExtractScientificName(note.ScientificName), species) {
+			result.Skipped++
+			result.SkippedIDs = append(result.SkippedIDs, id)
+			continue
+		}
+		if err := c.DS.Delete(id); err != nil {
+			c.LogWarnIfEnabled("Species delete: failed to delete detection", logger.String("id", id), logger.Error(err))
+			result.Failed++
+			continue
+		}
+		result.Deleted++
+		if note.ClipName != "" {
+			c.removeDetectionFiles(note.ClipName)
+		}
+	}
 
 	c.invalidateDetectionCache()
 
 	c.LogInfoIfEnabled("Species detections deleted",
 		logger.String("scientific_name", req.ScientificName),
-		logger.Int("deleted", deleted),
-		logger.Int("skipped", skipped),
+		logger.Int("deleted", result.Deleted),
+		logger.Int("skipped", result.Skipped),
+		logger.Int("failed", result.Failed),
 		logger.Int("remaining", remaining),
 		logger.String("ip", ctx.RealIP()))
 
-	return ctx.JSON(http.StatusOK, SpeciesDeleteResult{
-		Deleted:    deleted,
-		Skipped:    skipped,
-		Remaining:  remaining,
-		SkippedIDs: skippedIDs,
-	})
+	return ctx.JSON(http.StatusOK, result)
 }
 
 // annotateAudioAvailability sets AudioAvailable on each detection by checking

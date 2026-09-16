@@ -80,24 +80,8 @@ func (c *Handler) BatchDeleteDetections(ctx echo.Context) error {
 			"Batch size exceeds maximum", http.StatusBadRequest)
 	}
 
-	processed, skipped, _ := c.deleteNotesByIDs(deduplicateIDs(req.IDs))
-
-	c.invalidateDetectionCache()
-
-	return ctx.JSON(http.StatusOK, BatchResult{
-		Processed: processed,
-		Skipped:   skipped,
-	})
-}
-
-// deleteNotesByIDs deletes the given detections, skipping locked ones, and removes
-// any associated audio/spectrogram files. It returns the number of deletions
-// performed, the number skipped (missing or locked), and the specific IDs that
-// were skipped (so a caller doing paginated species-wide deletes can exclude them
-// from future chunks - see DeleteSpeciesDetections). Callers are responsible for
-// deduplicating IDs and invalidating the detection cache.
-func (c *Handler) deleteNotesByIDs(ids []string) (deleted, skipped int, skippedIDs []string) {
-	skippedIDs = make([]string, 0, len(ids))
+	ids := deduplicateIDs(req.IDs)
+	var processed, skipped int
 	for _, idStr := range ids {
 		note, err := c.DS.Get(idStr)
 		if err != nil {
@@ -105,12 +89,10 @@ func (c *Handler) deleteNotesByIDs(ids []string) (deleted, skipped int, skippedI
 				logger.String("id", idStr),
 				logger.Error(err))
 			skipped++
-			skippedIDs = append(skippedIDs, idStr)
 			continue
 		}
 		if note.Locked {
 			skipped++
-			skippedIDs = append(skippedIDs, idStr)
 			continue
 		}
 
@@ -120,16 +102,21 @@ func (c *Handler) deleteNotesByIDs(ids []string) (deleted, skipped int, skippedI
 				logger.String("id", idStr),
 				logger.Error(err))
 			skipped++
-			skippedIDs = append(skippedIDs, idStr)
 			continue
 		}
 
-		deleted++
+		processed++
 		if clipName != "" {
 			c.removeDetectionFiles(clipName)
 		}
 	}
-	return deleted, skipped, skippedIDs
+
+	c.invalidateDetectionCache()
+
+	return ctx.JSON(http.StatusOK, BatchResult{
+		Processed: processed,
+		Skipped:   skipped,
+	})
 }
 
 // BatchReviewDetections sets the verification status on multiple detections, skipping locked ones.

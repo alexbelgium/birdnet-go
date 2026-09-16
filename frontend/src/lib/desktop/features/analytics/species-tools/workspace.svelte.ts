@@ -353,14 +353,20 @@ export function createWorkspace() {
   async function remove(row: SpeciesRow) {
     const skipped: string[] = [];
     for (let pass = 0; pass < 1000; pass++) {
-      const data = await fetchWithCSRF<{ remaining: number; skipped_ids?: string[] }>(
-        '/api/v2/detections/species/delete',
-        {
-          method: 'POST',
-          body: JSON.stringify({ scientific_name: row.scientific_name, exclude_ids: skipped }),
-        }
-      );
+      const data = await fetchWithCSRF<{
+        remaining: number;
+        failed?: number;
+        skipped_ids?: string[];
+      }>('/api/v2/detections/species/delete', {
+        method: 'POST',
+        body: JSON.stringify({ scientific_name: row.scientific_name, exclude_ids: skipped }),
+      });
       skipped.push(...(data.skipped_ids ?? []));
+      if (data.failed) {
+        // Failed rows are not excluded, so retrying could loop; stop and report.
+        await refresh();
+        throw new Error(t('analytics.speciesTools.manage.deleteFailed'));
+      }
       if (!data.remaining) {
         await refresh();
         return;

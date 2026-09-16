@@ -308,12 +308,18 @@ Performance Optimizations:
             url: withQuery(navigationUrls.analyticsSpecies),
             routeKey: 'analyticsSpecies',
           },
-          {
-            icon: ListChecks,
-            label: t('analytics.speciesTools.title'),
-            url: withQuery(navigationUrls.analyticsSpeciesList),
-            routeKey: 'analyticsSpeciesList',
-          },
+          // Species tools: its APIs require auth, and its `species` parameter
+          // opens a detail page, so it gets neither guests nor analytics filters.
+          ...(!securityEnabled || accessAllowed
+            ? [
+                {
+                  icon: ListChecks,
+                  label: t('analytics.speciesTools.title'),
+                  url: navigationUrls.analyticsSpeciesList,
+                  routeKey: 'analyticsSpeciesList',
+                },
+              ]
+            : []),
           {
             icon: Search,
             label: t('navigation.search'),

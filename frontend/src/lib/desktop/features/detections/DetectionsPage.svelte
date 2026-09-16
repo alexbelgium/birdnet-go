@@ -257,7 +257,8 @@
     }
 
     const params = new URLSearchParams(window.location.search);
-    if (newSortBy && newSortBy !== 'date_desc') {
+    // The workspace defaults to confidence, so it must keep an explicit date_desc.
+    if (newSortBy && (newSortBy !== 'date_desc' || speciesWorkspace)) {
       params.set('sortBy', newSortBy);
     } else {
       params.delete('sortBy');

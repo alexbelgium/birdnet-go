@@ -1,15 +1,3 @@
-<script module lang="ts">
-  // Session-scoped cache of full detection histories so re-opening the modal
-  // for a species (or switching ranges) never refetches.
-  interface FullSeries {
-    byDate: Map<string, number>;
-    firstMs: number | null;
-  }
-
-  const historyCache = new Map<string, FullSeries>();
-  const HISTORY_CACHE_MAX = 20;
-</script>
-
 <script lang="ts">
   // Self-contained species detection-history modal, opened from the daily
   // summary detail card on both mobile and desktop.
@@ -51,6 +39,14 @@
   }
 
   let { scientificName, displayName, selectedDate, onClose }: Props = $props();
+
+  // Full histories for this modal instance: range switches never refetch, while
+  // reopening the modal (a fresh instance) picks up new detections and deletions.
+  interface FullSeries {
+    byDate: Map<string, number>;
+    firstMs: number | null;
+  }
+  const historyCache = new Map<string, FullSeries>();
 
   const DEFAULT_RANGE: RangeKey = '30d';
   const ALL_TIME_START = '2000-01-01'; // pre-dates any BirdNET-Go install
@@ -106,7 +102,7 @@
   }
 
   // Full-history fetch: one request serves every range once it lands, making
-  // later range switches instant. Cached across modal opens.
+  // later range switches instant.
   $effect(() => {
     void retryToken;
     const key = `${scientificName}|${selectedDate}`;
@@ -129,10 +125,6 @@
         }
         const series: FullSeries = { byDate: toByDate(list), firstMs };
         historyCache.set(key, series);
-        if (historyCache.size > HISTORY_CACHE_MAX) {
-          const oldest = historyCache.keys().next().value;
-          if (oldest !== undefined) historyCache.delete(oldest);
-        }
         fullData = series;
       })
       .catch(() => {

@@ -155,6 +155,18 @@ describe('DesktopSidebar - flat task-grouped sections', () => {
     });
   });
 
+  it('hides Species tools from guests when security is enabled', () => {
+    sidebarTest.render({
+      currentRoute: '/ui/dashboard',
+      securityEnabled: true,
+      accessAllowed: false,
+      authConfig: { basicEnabled: true, enabledProviders: [] },
+    });
+
+    expect(screen.queryByText('analytics.speciesTools.title')).not.toBeInTheDocument();
+    expect(screen.getByText('analytics.species.title')).toBeInTheDocument();
+  });
+
   it('renders every analytics item plus Search and navigates each to its route', async () => {
     const onNavigate = vi.fn();
     sidebarTest.render({ currentRoute: '/ui/dashboard', onNavigate });
