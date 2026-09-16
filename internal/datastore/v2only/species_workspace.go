@@ -120,11 +120,8 @@ func (ds *Datastore) SpeciesWorkspaceInventory(ctx context.Context, scientificNa
 				row.Locked += lockedByLabel[id]
 				lo, hi := spanByLabel[id][0], spanByLabel[id][1]
 				if !grouped {
-					// SQLite: MIN/MAX seeks on idx_detection_label_date beat grouping every row.
-					if err := tx.Table(prefix+"detections").Where("label_id = ?", id).Select("MIN(detected_at)").Scan(&lo).Error; err != nil {
-						return err
-					}
-					if err := tx.Table(prefix+"detections").Where("label_id = ?", id).Select("MAX(detected_at)").Scan(&hi).Error; err != nil {
+					var err error
+					if lo, hi, err = ds.labelSpan(tx, id); err != nil {
 						return err
 					}
 				}
@@ -148,6 +145,17 @@ func (ds *Datastore) SpeciesWorkspaceInventory(ctx context.Context, scientificNa
 		return nil, wsError(err, "load_species_inventory")
 	}
 	return rows, nil
+}
+
+// labelSpan returns the first and last detection time of a label using MIN/MAX
+// seeks on idx_detection_label_date (faster on SQLite than grouping every row).
+func (ds *Datastore) labelSpan(tx *gorm.DB, labelID uint) (first, last int64, err error) {
+	table := ds.manager.TablePrefix() + "detections"
+	if err = tx.Table(table).Where("label_id = ?", labelID).Select("MIN(detected_at)").Scan(&first).Error; err != nil {
+		return 0, 0, err
+	}
+	err = tx.Table(table).Where("label_id = ?", labelID).Select("MAX(detected_at)").Scan(&last).Error
+	return first, last, err
 }
 
 // SpeciesWorkspaceStats returns review counts and max recording confidence per species.
