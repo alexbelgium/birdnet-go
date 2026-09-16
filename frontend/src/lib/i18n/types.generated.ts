@@ -4191,7 +4191,125 @@ export type TranslationKey =
   | 'health.detail.pattern'
   | 'health.detail.patternNone'
   | 'health.detail.patternTransient'
-  | 'health.detail.patternSustained';
+  | 'health.detail.patternSustained'
+  | 'speciesWorkspace.title'
+  | 'speciesWorkspace.subtitle'
+  | 'speciesWorkspace.refresh'
+  | 'speciesWorkspace.search.label'
+  | 'speciesWorkspace.search.placeholder'
+  | 'speciesWorkspace.sort.label'
+  | 'speciesWorkspace.sort.sortBy' // params: column
+  | 'speciesWorkspace.sort.toggleDirection'
+  | 'speciesWorkspace.edit.edit'
+  | 'speciesWorkspace.edit.done'
+  | 'speciesWorkspace.edit.reset'
+  | 'speciesWorkspace.edit.panelTitle'
+  | 'speciesWorkspace.edit.show' // params: column
+  | 'speciesWorkspace.edit.mandatory' // params: column
+  | 'speciesWorkspace.edit.moveUp' // params: column
+  | 'speciesWorkspace.edit.moveDown' // params: column
+  | 'speciesWorkspace.edit.saveFailed'
+  | 'speciesWorkspace.columns.species'
+  | 'speciesWorkspace.columns.count'
+  | 'speciesWorkspace.columns.maxConfidence'
+  | 'speciesWorkspace.columns.firstSeen'
+  | 'speciesWorkspace.columns.lastSeen'
+  | 'speciesWorkspace.columns.range'
+  | 'speciesWorkspace.columns.verification'
+  | 'speciesWorkspace.columns.excluded'
+  | 'speciesWorkspace.columns.included'
+  | 'speciesWorkspace.columns.confirmed'
+  | 'speciesWorkspace.columns.bestRecording'
+  | 'speciesWorkspace.columns.actions'
+  | 'speciesWorkspace.columnHelp.range'
+  | 'speciesWorkspace.groups.inventory'
+  | 'speciesWorkspace.groups.stats'
+  | 'speciesWorkspace.groups.memberships'
+  | 'speciesWorkspace.groups.range'
+  | 'speciesWorkspace.groups.best'
+  | 'speciesWorkspace.groups.recordings'
+  | 'speciesWorkspace.states.loading'
+  | 'speciesWorkspace.states.loadFailed' // params: what
+  | 'speciesWorkspace.states.retry'
+  | 'speciesWorkspace.states.empty'
+  | 'speciesWorkspace.states.noMatch'
+  | 'speciesWorkspace.states.notAvailable'
+  | 'speciesWorkspace.states.notFound'
+  | 'speciesWorkspace.states.membershipLoading'
+  | 'speciesWorkspace.states.unknownModel'
+  | 'speciesWorkspace.states.loginRequired'
+  | 'speciesWorkspace.verification' // params: correct, falsePositive
+  | 'speciesWorkspace.membership.confirmed'
+  | 'speciesWorkspace.membership.included'
+  | 'speciesWorkspace.membership.excluded'
+  | 'speciesWorkspace.membership.yes'
+  | 'speciesWorkspace.membership.no'
+  | 'speciesWorkspace.membership.state' // params: list, species, state
+  | 'speciesWorkspace.actions.menu' // params: species
+  | 'speciesWorkspace.actions.toggle.confirmed'
+  | 'speciesWorkspace.actions.toggle.included'
+  | 'speciesWorkspace.actions.toggle.excluded'
+  | 'speciesWorkspace.actions.delete' // params: species
+  | 'speciesWorkspace.actions.updateFailed' // params: list, species
+  | 'speciesWorkspace.best.title' // params: species
+  | 'speciesWorkspace.best.play' // params: species
+  | 'speciesWorkspace.best.locked'
+  | 'speciesWorkspace.best.confidence' // params: value
+  | 'speciesWorkspace.best.unavailable'
+  | 'speciesWorkspace.best.unavailableHint'
+  | 'speciesWorkspace.delete.title' // params: species
+  | 'speciesWorkspace.delete.message' // params: deletable, total, falsePositive, locked
+  | 'speciesWorkspace.delete.nothing'
+  | 'speciesWorkspace.delete.confirm' // params: count
+  | 'speciesWorkspace.delete.running'
+  | 'speciesWorkspace.delete.progressLabel'
+  | 'speciesWorkspace.delete.progress' // params: deleted, locked
+  | 'speciesWorkspace.delete.done'
+  | 'speciesWorkspace.delete.stop'
+  | 'speciesWorkspace.delete.cancelled'
+  | 'speciesWorkspace.delete.failed' // params: count
+  | 'speciesWorkspace.delete.stalled'
+  | 'speciesWorkspace.delete.error'
+  | 'speciesWorkspace.detail.back'
+  | 'speciesWorkspace.detail.title' // params: species
+  | 'speciesWorkspace.detail.detections' // params: count
+  | 'speciesWorkspace.detail.maxConfidence' // params: value
+  | 'speciesWorkspace.detail.lastDetected' // params: date
+  | 'speciesWorkspace.detail.bestRecording'
+  | 'speciesWorkspace.detail.quickGraph'
+  | 'speciesWorkspace.detail.openExternal' // params: species, site
+  | 'speciesWorkspace.detail.select'
+  | 'speciesWorkspace.detail.cancelSelect'
+  | 'speciesWorkspace.detail.lockedOnly'
+  | 'speciesWorkspace.detail.toggleAria' // params: list, species
+  | 'speciesWorkspace.table.dateTime'
+  | 'speciesWorkspace.table.weather'
+  | 'speciesWorkspace.table.source'
+  | 'speciesWorkspace.table.confidence'
+  | 'speciesWorkspace.table.model'
+  | 'speciesWorkspace.table.status'
+  | 'speciesWorkspace.table.recording'
+  | 'speciesWorkspace.table.actions'
+  | 'speciesWorkspace.table.selectAll'
+  | 'speciesWorkspace.table.selectRow' // params: date
+  | 'speciesWorkspace.table.selected' // params: count
+  | 'speciesWorkspace.table.bulkActions'
+  | 'speciesWorkspace.table.markCorrect'
+  | 'speciesWorkspace.table.markFalsePositive'
+  | 'speciesWorkspace.table.lock'
+  | 'speciesWorkspace.table.unlock'
+  | 'speciesWorkspace.table.deleteSelected'
+  | 'speciesWorkspace.table.deleteSelectedTitle' // params: species, count
+  | 'speciesWorkspace.table.deleteSelectedMessage'
+  | 'speciesWorkspace.table.bulkLockedHint'
+  | 'speciesWorkspace.table.bulkResult' // params: processed, skipped
+  | 'speciesWorkspace.table.bulkFailed'
+  | 'speciesWorkspace.table.empty'
+  | 'speciesWorkspace.table.emptyLocked'
+  | 'speciesWorkspace.table.sortConfidenceDesc'
+  | 'speciesWorkspace.table.sortConfidenceAsc'
+  | 'speciesWorkspace.table.sortDateDesc'
+  | 'speciesWorkspace.table.sortDateAsc';
 
 /**
  * Parameter types for translations that require parameters
@@ -4656,6 +4774,47 @@ export type TranslationParams = {
   'analysis.gallery.preview.dialogNotice': { build: string | number };
   'analysis.gallery.optimize.bannerTitle': { count: string | number };
   'analysis.gallery.optimize.fromTo': { from: string | number; to: string | number };
+  'speciesWorkspace.sort.sortBy': { column: string | number };
+  'speciesWorkspace.edit.show': { column: string | number };
+  'speciesWorkspace.edit.mandatory': { column: string | number };
+  'speciesWorkspace.edit.moveUp': { column: string | number };
+  'speciesWorkspace.edit.moveDown': { column: string | number };
+  'speciesWorkspace.states.loadFailed': { what: string | number };
+  'speciesWorkspace.verification': { correct: string | number; falsePositive: string | number };
+  'speciesWorkspace.membership.state': {
+    list: string | number;
+    species: string | number;
+    state: string | number;
+  };
+  'speciesWorkspace.actions.menu': { species: string | number };
+  'speciesWorkspace.actions.delete': { species: string | number };
+  'speciesWorkspace.actions.updateFailed': { list: string | number; species: string | number };
+  'speciesWorkspace.best.title': { species: string | number };
+  'speciesWorkspace.best.play': { species: string | number };
+  'speciesWorkspace.best.confidence': { value: string | number };
+  'speciesWorkspace.delete.title': { species: string | number };
+  'speciesWorkspace.delete.message': {
+    deletable: string | number;
+    total: string | number;
+    falsePositive: string | number;
+    locked: string | number;
+  };
+  'speciesWorkspace.delete.confirm': { count: string | number };
+  'speciesWorkspace.delete.progress': { deleted: string | number; locked: string | number };
+  'speciesWorkspace.delete.failed': { count: string | number };
+  'speciesWorkspace.detail.title': { species: string | number };
+  'speciesWorkspace.detail.detections': { count: string | number };
+  'speciesWorkspace.detail.maxConfidence': { value: string | number };
+  'speciesWorkspace.detail.lastDetected': { date: string | number };
+  'speciesWorkspace.detail.openExternal': { species: string | number; site: string | number };
+  'speciesWorkspace.detail.toggleAria': { list: string | number; species: string | number };
+  'speciesWorkspace.table.selectRow': { date: string | number };
+  'speciesWorkspace.table.selected': { count: string | number };
+  'speciesWorkspace.table.deleteSelectedTitle': {
+    species: string | number;
+    count: string | number;
+  };
+  'speciesWorkspace.table.bulkResult': { processed: string | number; skipped: string | number };
 };
 
 /**

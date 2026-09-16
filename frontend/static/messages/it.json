@@ -5734,5 +5734,153 @@
       "patternTransient": "Transitorio",
       "patternSustained": "Persistente"
     }
+  },
+  "speciesWorkspace": {
+    "title": "Area specie",
+    "subtitle": "Tutte le specie mai rilevate, con strumenti di revisione e gestione",
+    "refresh": "Ricarica dati",
+    "search": {
+      "label": "Cerca specie",
+      "placeholder": "Cerca per nome…"
+    },
+    "sort": {
+      "label": "Ordina per",
+      "sortBy": "Ordina per {column}",
+      "toggleDirection": "Inverti l’ordinamento"
+    },
+    "edit": {
+      "edit": "Modifica colonne",
+      "done": "Fatto",
+      "reset": "Ripristina",
+      "panelTitle": "Colonne",
+      "show": "Mostra la colonna {column}",
+      "mandatory": "{column} è sempre visibile",
+      "moveUp": "Sposta {column} in alto",
+      "moveDown": "Sposta {column} in basso",
+      "saveFailed": "Impossibile salvare la disposizione delle colonne: è stata ripristinata quella precedente."
+    },
+    "columns": {
+      "species": "Specie",
+      "count": "Rilevamenti",
+      "maxConfidence": "Confidenza max",
+      "firstSeen": "Primo rilevamento",
+      "lastSeen": "Ultimo rilevamento",
+      "range": "Probabilità di presenza",
+      "verification": "Verificati",
+      "excluded": "Esclusa",
+      "included": "Inclusa",
+      "confirmed": "Confermata",
+      "bestRecording": "Registrazione migliore",
+      "actions": "Azioni"
+    },
+    "columnHelp": {
+      "range": "Probabilità del filtro di distribuzione per questa località e settimana"
+    },
+    "groups": {
+      "inventory": "le specie",
+      "stats": "le statistiche",
+      "memberships": "gli elenchi di specie",
+      "range": "le probabilità di presenza",
+      "best": "le registrazioni migliori",
+      "recordings": "le registrazioni"
+    },
+    "states": {
+      "loading": "Caricamento…",
+      "loadFailed": "Impossibile caricare {what}.",
+      "retry": "Riprova",
+      "empty": "Nessuna specie è stata ancora rilevata.",
+      "noMatch": "Nessuna specie corrisponde alla ricerca e al filtro.",
+      "notAvailable": "N/D",
+      "notFound": "Non ci sono rilevamenti salvati di questa specie.",
+      "membershipLoading": "Caricamento elenchi di specie…",
+      "unknownModel": "Sconosciuto",
+      "loginRequired": "Accedi per usare l’area specie."
+    },
+    "verification": "{correct} corretti, {falsePositive} falsi positivi",
+    "membership": {
+      "confirmed": "Confermata",
+      "included": "Elenco di inclusione",
+      "excluded": "Elenco di esclusione",
+      "yes": "Sì",
+      "no": "No",
+      "state": "{list} per {species}: {state}"
+    },
+    "actions": {
+      "menu": "Azioni per {species}",
+      "toggle": {
+        "confirmed": "Attiva/disattiva confermata",
+        "included": "Attiva/disattiva elenco di inclusione",
+        "excluded": "Attiva/disattiva elenco di esclusione"
+      },
+      "delete": "Elimina rilevamenti di {species}…",
+      "updateFailed": "Impossibile aggiornare {list} per {species}."
+    },
+    "best": {
+      "title": "Registrazione migliore di {species}",
+      "play": "Riproduci la registrazione migliore di {species}",
+      "locked": "Bloccata",
+      "confidence": "Confidenza {value}",
+      "unavailable": "Nessuna registrazione disponibile",
+      "unavailableHint": "Nessun rilevamento di questa specie ha una clip audio su disco."
+    },
+    "delete": {
+      "title": "Elimina rilevamenti di {species}",
+      "message": "Rilevamenti da eliminare: {deletable} su {total} (falsi positivi inclusi: {falsePositive}). Rilevamenti bloccati mantenuti: {locked}.",
+      "nothing": "Tutti i rilevamenti di questa specie sono bloccati, quindi non c’è nulla da eliminare.",
+      "confirm": "Elimina ({count})",
+      "running": "Eliminazione…",
+      "progressLabel": "Avanzamento eliminazione",
+      "progress": "Eliminati: {deleted} · bloccati mantenuti: {locked}",
+      "done": "Eliminazione completata.",
+      "stop": "Interrompi",
+      "cancelled": "Eliminazione interrotta. I rilevamenti già eliminati restano eliminati.",
+      "failed": "Rilevamenti non eliminati: {count}. Sono stati mantenuti e si può riprovare.",
+      "stalled": "Eliminazione interrotta perché i rilevamenti rimanenti non possono essere rimossi.",
+      "error": "Eliminazione non riuscita. I rilevamenti già eliminati restano eliminati."
+    },
+    "detail": {
+      "back": "Torna all’area specie",
+      "title": "Tutte le registrazioni di {species}",
+      "detections": "Rilevamenti: {count}",
+      "maxConfidence": "confidenza max {value}",
+      "lastDetected": "ultimo rilevamento {date}",
+      "bestRecording": "Registrazione migliore",
+      "quickGraph": "Grafico rapido",
+      "openExternal": "Apri {species} su {site} (nuova scheda)",
+      "select": "Seleziona",
+      "cancelSelect": "Annulla selezione",
+      "lockedOnly": "Solo bloccate",
+      "toggleAria": "{list} per {species}"
+    },
+    "table": {
+      "dateTime": "Data e ora",
+      "weather": "Meteo",
+      "source": "Sorgente",
+      "confidence": "Confidenza",
+      "model": "Modello",
+      "status": "Stato",
+      "recording": "Registrazione",
+      "actions": "Azioni",
+      "selectAll": "Seleziona tutte le registrazioni di questa pagina",
+      "selectRow": "Seleziona la registrazione del {date}",
+      "selected": "Selezionate: {count}",
+      "bulkActions": "Azioni per le registrazioni selezionate",
+      "markCorrect": "Segna come corretta",
+      "markFalsePositive": "Segna come falso positivo",
+      "lock": "Blocca",
+      "unlock": "Sblocca",
+      "deleteSelected": "Elimina",
+      "deleteSelectedTitle": "Eliminare le registrazioni selezionate di {species} ({count})?",
+      "deleteSelectedMessage": "Le registrazioni bloccate nella selezione vengono mantenute.",
+      "bulkLockedHint": "Le registrazioni bloccate non possono essere revisionate né eliminate.",
+      "bulkResult": "Aggiornate: {processed} · saltate: {skipped}",
+      "bulkFailed": "Impossibile aggiornare le registrazioni selezionate.",
+      "empty": "Nessuna registrazione.",
+      "emptyLocked": "Nessuna registrazione bloccata.",
+      "sortConfidenceDesc": "Confidenza più alta prima",
+      "sortConfidenceAsc": "Confidenza più bassa prima",
+      "sortDateDesc": "Più recenti prima",
+      "sortDateAsc": "Più vecchie prima"
+    }
   }
 }

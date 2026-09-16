@@ -5734,5 +5734,153 @@
       "patternTransient": "Forbigående",
       "patternSustained": "Vedvarende"
     }
+  },
+  "speciesWorkspace": {
+    "title": "Artsarbejdsområde",
+    "subtitle": "Alle arter, der nogensinde er registreret, med værktøjer til kontrol og vedligeholdelse",
+    "refresh": "Genindlæs data",
+    "search": {
+      "label": "Søg efter arter",
+      "placeholder": "Søg efter navn…"
+    },
+    "sort": {
+      "label": "Sortér efter",
+      "sortBy": "Sortér efter {column}",
+      "toggleDirection": "Vend sorteringsrækkefølgen"
+    },
+    "edit": {
+      "edit": "Rediger kolonner",
+      "done": "Færdig",
+      "reset": "Nulstil",
+      "panelTitle": "Kolonner",
+      "show": "Vis kolonnen {column}",
+      "mandatory": "{column} vises altid",
+      "moveUp": "Flyt {column} op",
+      "moveDown": "Flyt {column} ned",
+      "saveFailed": "Kolonnelayoutet kunne ikke gemmes, så det tidligere layout blev gendannet."
+    },
+    "columns": {
+      "species": "Art",
+      "count": "Registreringer",
+      "maxConfidence": "Maks. sikkerhed",
+      "firstSeen": "Først set",
+      "lastSeen": "Senest set",
+      "range": "Udbredelsessandsynlighed",
+      "verification": "Verificeret",
+      "excluded": "Udelukket",
+      "included": "Inkluderet",
+      "confirmed": "Bekræftet",
+      "bestRecording": "Bedste optagelse",
+      "actions": "Handlinger"
+    },
+    "columnHelp": {
+      "range": "Udbredelsesfiltrets sandsynlighed for denne placering og uge"
+    },
+    "groups": {
+      "inventory": "arter",
+      "stats": "statistik",
+      "memberships": "artslister",
+      "range": "udbredelsessandsynligheder",
+      "best": "bedste optagelser",
+      "recordings": "optagelser"
+    },
+    "states": {
+      "loading": "Indlæser…",
+      "loadFailed": "Kunne ikke indlæse {what}.",
+      "retry": "Prøv igen",
+      "empty": "Der er endnu ikke registreret nogen arter.",
+      "noMatch": "Ingen arter matcher søgning og filter.",
+      "notAvailable": "I/T",
+      "notFound": "Der er ingen gemte registreringer af denne art.",
+      "membershipLoading": "Indlæser artslister…",
+      "unknownModel": "Ukendt",
+      "loginRequired": "Log ind for at bruge artsarbejdsområdet."
+    },
+    "verification": "{correct} korrekte, {falsePositive} falsk positive",
+    "membership": {
+      "confirmed": "Bekræftet",
+      "included": "Inkluderingsliste",
+      "excluded": "Udelukkelsesliste",
+      "yes": "Ja",
+      "no": "Nej",
+      "state": "{list} for {species}: {state}"
+    },
+    "actions": {
+      "menu": "Handlinger for {species}",
+      "toggle": {
+        "confirmed": "Skift bekræftet",
+        "included": "Skift inkluderingsliste",
+        "excluded": "Skift udelukkelsesliste"
+      },
+      "delete": "Slet registreringer af {species}…",
+      "updateFailed": "Kunne ikke opdatere {list} for {species}."
+    },
+    "best": {
+      "title": "Bedste optagelse af {species}",
+      "play": "Afspil den bedste optagelse af {species}",
+      "locked": "Låst",
+      "confidence": "Sikkerhed {value}",
+      "unavailable": "Ingen optagelse tilgængelig",
+      "unavailableHint": "Ingen registrering af denne art har et lydklip på disken."
+    },
+    "delete": {
+      "title": "Slet registreringer af {species}",
+      "message": "Registreringer der slettes: {deletable} af {total} (heraf falsk positive: {falsePositive}). Låste registreringer beholdes: {locked}.",
+      "nothing": "Alle registreringer af denne art er låst, så der er intet at slette.",
+      "confirm": "Slet ({count})",
+      "running": "Sletter…",
+      "progressLabel": "Sletningsforløb",
+      "progress": "Slettet: {deleted} · låste beholdt: {locked}",
+      "done": "Sletning fuldført.",
+      "stop": "Stop",
+      "cancelled": "Sletning stoppet. Allerede slettede registreringer forbliver slettede.",
+      "failed": "Registreringer der ikke kunne slettes: {count}. De blev beholdt og kan forsøges igen.",
+      "stalled": "Sletning stoppet, fordi de resterende registreringer ikke kunne fjernes.",
+      "error": "Sletning mislykkedes. Allerede slettede registreringer forbliver slettede."
+    },
+    "detail": {
+      "back": "Tilbage til artsarbejdsområdet",
+      "title": "Alle optagelser af {species}",
+      "detections": "Registreringer: {count}",
+      "maxConfidence": "maks. sikkerhed {value}",
+      "lastDetected": "senest registreret {date}",
+      "bestRecording": "Bedste optagelse",
+      "quickGraph": "Hurtig graf",
+      "openExternal": "Åbn {species} på {site} (ny fane)",
+      "select": "Vælg",
+      "cancelSelect": "Annuller valg",
+      "lockedOnly": "Kun låste",
+      "toggleAria": "{list} for {species}"
+    },
+    "table": {
+      "dateTime": "Dato og tid",
+      "weather": "Vejr",
+      "source": "Kilde",
+      "confidence": "Sikkerhed",
+      "model": "Model",
+      "status": "Status",
+      "recording": "Optagelse",
+      "actions": "Handlinger",
+      "selectAll": "Vælg alle optagelser på denne side",
+      "selectRow": "Vælg optagelsen fra {date}",
+      "selected": "Valgt: {count}",
+      "bulkActions": "Handlinger for valgte optagelser",
+      "markCorrect": "Markér som korrekt",
+      "markFalsePositive": "Markér som falsk positiv",
+      "lock": "Lås",
+      "unlock": "Lås op",
+      "deleteSelected": "Slet",
+      "deleteSelectedTitle": "Slet de valgte optagelser af {species} ({count})?",
+      "deleteSelectedMessage": "Låste optagelser i valget beholdes.",
+      "bulkLockedHint": "Låste optagelser kan ikke kontrolleres eller slettes.",
+      "bulkResult": "Opdateret: {processed} · sprunget over: {skipped}",
+      "bulkFailed": "De valgte optagelser kunne ikke opdateres.",
+      "empty": "Ingen optagelser.",
+      "emptyLocked": "Ingen låste optagelser.",
+      "sortConfidenceDesc": "Højeste sikkerhed først",
+      "sortConfidenceAsc": "Laveste sikkerhed først",
+      "sortDateDesc": "Nyeste først",
+      "sortDateAsc": "Ældste først"
+    }
   }
 }
