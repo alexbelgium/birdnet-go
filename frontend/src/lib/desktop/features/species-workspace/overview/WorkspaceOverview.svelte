@@ -173,6 +173,37 @@
   }
 </script>
 
+{#snippet toolbarButtons()}
+  <button
+    type="button"
+    class="btn btn-ghost btn-sm"
+    aria-label={t('speciesWorkspace.refresh')}
+    title={t('speciesWorkspace.refresh')}
+    onclick={refresh}
+  >
+    <RefreshCw class="size-4" />
+  </button>
+  {#if editing}
+    <button type="button" class="btn btn-ghost btn-sm gap-1" onclick={() => layoutStore.reset()}>
+      <RotateCcw class="size-4" />{t('speciesWorkspace.edit.reset')}
+    </button>
+    <button type="button" class="btn btn-primary btn-sm gap-1" onclick={() => (editing = false)}>
+      <Check class="size-4" />{t('speciesWorkspace.edit.done')}
+    </button>
+  {:else}
+    <button
+      type="button"
+      class="btn btn-sm gap-1"
+      aria-label={t('speciesWorkspace.edit.edit')}
+      onclick={() => (editing = true)}
+    >
+      <Pencil class="size-4" /><span class="hidden sm:inline"
+        >{t('speciesWorkspace.edit.edit')}</span
+      >
+    </button>
+  {/if}
+{/snippet}
+
 {#snippet cell(column: ColumnId, row: SpeciesRow)}
   <SpeciesCell
     {column}
@@ -197,22 +228,25 @@
     <div
       class="sticky top-0 z-20 -mx-2 flex flex-wrap items-center gap-2 bg-[var(--color-base-100)] px-2 py-2"
     >
-      <label class="input input-sm flex min-w-0 grow items-center gap-2 sm:max-w-sm">
-        <Search class="size-4 opacity-60" aria-hidden="true" />
-        <span class="sr-only">{t('speciesWorkspace.search.label')}</span>
-        <input
-          type="search"
-          class="min-w-0 grow"
-          placeholder={t('speciesWorkspace.search.placeholder')}
-          bind:value={query}
-        />
-      </label>
+      <div class="flex w-full min-w-0 items-center gap-2 md:w-auto md:max-w-sm md:grow">
+        <label class="input input-sm flex min-w-0 grow items-center gap-2">
+          <Search class="size-4 opacity-60" aria-hidden="true" />
+          <span class="sr-only">{t('speciesWorkspace.search.label')}</span>
+          <input
+            type="search"
+            class="min-w-0 grow"
+            placeholder={t('speciesWorkspace.search.placeholder')}
+            bind:value={query}
+          />
+        </label>
+        <div class="flex items-center gap-1 md:hidden">{@render toolbarButtons()}</div>
+      </div>
       <TaxonFilterDropdown value={taxon} {counts} onChange={v => (taxon = v)} />
       <!-- Mobile sort control; the table header sorts on desktop. -->
-      <label class="flex items-center gap-1 md:hidden">
-        <span class="text-sm">{t('speciesWorkspace.sort.label')}</span>
+      <label class="flex items-center gap-1 whitespace-nowrap md:hidden">
+        <span class="sr-only text-sm sm:not-sr-only">{t('speciesWorkspace.sort.label')}</span>
         <select
-          class="select select-sm"
+          class="select select-sm w-36"
           value={layout.sort.column}
           onchange={e => layoutStore.setSort(e.currentTarget.value, layout.sort.direction)}
         >
@@ -233,36 +267,8 @@
           {layout.sort.direction === 'asc' ? '↑' : '↓'}
         </button>
       </label>
-      <span class="grow"></span>
-      <button
-        type="button"
-        class="btn btn-ghost btn-sm"
-        aria-label={t('speciesWorkspace.refresh')}
-        title={t('speciesWorkspace.refresh')}
-        onclick={refresh}
-      >
-        <RefreshCw class="size-4" />
-      </button>
-      {#if editing}
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm gap-1"
-          onclick={() => layoutStore.reset()}
-        >
-          <RotateCcw class="size-4" />{t('speciesWorkspace.edit.reset')}
-        </button>
-        <button
-          type="button"
-          class="btn btn-primary btn-sm gap-1"
-          onclick={() => (editing = false)}
-        >
-          <Check class="size-4" />{t('speciesWorkspace.edit.done')}
-        </button>
-      {:else}
-        <button type="button" class="btn btn-sm gap-1" onclick={() => (editing = true)}>
-          <Pencil class="size-4" />{t('speciesWorkspace.edit.edit')}
-        </button>
-      {/if}
+      <span class="hidden grow md:block"></span>
+      <div class="hidden items-center gap-2 md:flex">{@render toolbarButtons()}</div>
     </div>
 
     {#if editing}
@@ -364,14 +370,20 @@
   </div>
 </div>
 
-<BestRecordingModal
-  speciesName={bestTarget?.displayName ?? null}
-  recording={bestTarget ? data.best.get(bestTarget.scientificName) : undefined}
-  onClose={() => (bestTarget = null)}
-/>
+<!-- Mounted only while open: the shared Modal can only move focus into a
+     dialog that is already visible when it opens. -->
+{#if bestTarget}
+  <BestRecordingModal
+    speciesName={bestTarget.displayName}
+    recording={data.best.get(bestTarget.scientificName)}
+    onClose={() => (bestTarget = null)}
+  />
+{/if}
 
-<DeleteSpeciesModal
-  target={deleteTarget}
-  onClose={() => (deleteTarget = null)}
-  onChanged={refresh}
-/>
+{#if deleteTarget}
+  <DeleteSpeciesModal
+    target={deleteTarget}
+    onClose={() => (deleteTarget = null)}
+    onChanged={refresh}
+  />
+{/if}

@@ -2,7 +2,7 @@
 <script lang="ts">
   import { Lock } from '@lucide/svelte';
   import Modal from '$lib/desktop/components/ui/Modal.svelte';
-  import SpectrogramPlayer from '$lib/desktop/components/media/SpectrogramPlayer.svelte';
+  import AudioPlayer from '$lib/desktop/components/media/AudioPlayer.svelte';
   import { t } from '$lib/i18n';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { formatPercent } from '../format';
@@ -21,6 +21,7 @@
   isOpen={speciesName !== null}
   title={speciesName ? t('speciesWorkspace.best.title', { species: speciesName }) : ''}
   size="3xl"
+  className="w-full"
   {onClose}
 >
   {#if recording}
@@ -37,10 +38,13 @@
           })}</span
         >
       </p>
-      <SpectrogramPlayer
+      <AudioPlayer
         audioUrl={buildAppUrl(`/api/v2/audio/${recording.id}`)}
         detectionId={String(recording.id)}
+        showSpectrogram={true}
         spectrogramSize="lg"
+        responsive={true}
+        className="w-full"
       />
     </div>
   {:else if recording === null}

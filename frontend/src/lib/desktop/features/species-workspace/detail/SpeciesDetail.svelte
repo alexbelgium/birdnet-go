@@ -6,7 +6,7 @@
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
   import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
   import SpeciesThumbnail from '$lib/desktop/components/modals/SpeciesThumbnail.svelte';
-  import SpectrogramPlayer from '$lib/desktop/components/media/SpectrogramPlayer.svelte';
+  import AudioPlayer from '$lib/desktop/components/media/AudioPlayer.svelte';
   import Pagination from '$lib/desktop/components/ui/Pagination.svelte';
   import SpeciesHistoryModal from '$lib/desktop/features/dashboard/components/daily-summary/SpeciesHistoryModal.svelte';
   import { useDetectionActions } from '$lib/desktop/features/detections/composables/useDetectionActions.svelte';
@@ -280,10 +280,13 @@
           {/if}
           <span>{formatPercent(best.confidence)}</span>
         </p>
-        <SpectrogramPlayer
+        <AudioPlayer
           audioUrl={buildAppUrl(`/api/v2/audio/${best.id}`)}
           detectionId={String(best.id)}
+          showSpectrogram={true}
           spectrogramSize="lg"
+          responsive={true}
+          className="w-full"
         />
       {:else if best === null}
         <p role="status" class="text-sm">
@@ -476,7 +479,7 @@
         </table>
       </div>
       <div class="md:hidden">
-        <label class="mb-2 flex items-center gap-2 text-sm">
+        <label class="mb-2 flex items-center gap-2 whitespace-nowrap text-sm">
           {t('speciesWorkspace.sort.label')}
           <select
             class="select select-sm"
@@ -534,27 +537,31 @@
   />
 {/if}
 
-<ConfirmModal
-  isOpen={actions.showConfirmModal}
-  title={actions.confirmModalConfig.title}
-  message={actions.confirmModalConfig.message}
-  confirmLabel={actions.confirmModalConfig.confirmLabel}
-  onClose={actions.closeModal}
-  onConfirm={actions.confirmModal}
-/>
+{#if actions.showConfirmModal}
+  <ConfirmModal
+    isOpen={actions.showConfirmModal}
+    title={actions.confirmModalConfig.title}
+    message={actions.confirmModalConfig.message}
+    confirmLabel={actions.confirmModalConfig.confirmLabel}
+    onClose={actions.closeModal}
+    onConfirm={actions.confirmModal}
+  />
+{/if}
 
-<ConfirmModal
-  isOpen={bulkDeleteOpen}
-  title={t('speciesWorkspace.table.deleteSelectedTitle', {
-    count: selected.size,
-    species: displayName,
-  })}
-  message={t('speciesWorkspace.table.deleteSelectedMessage')}
-  confirmLabel={t('common.buttons.delete')}
-  confirmVariant="error"
-  onClose={() => (bulkDeleteOpen = false)}
-  onConfirm={async () => {
-    bulkDeleteOpen = false;
-    await runBulk('delete');
-  }}
-/>
+{#if bulkDeleteOpen}
+  <ConfirmModal
+    isOpen={bulkDeleteOpen}
+    title={t('speciesWorkspace.table.deleteSelectedTitle', {
+      count: selected.size,
+      species: displayName,
+    })}
+    message={t('speciesWorkspace.table.deleteSelectedMessage')}
+    confirmLabel={t('common.buttons.delete')}
+    confirmVariant="error"
+    onClose={() => (bulkDeleteOpen = false)}
+    onConfirm={async () => {
+      bulkDeleteOpen = false;
+      await runBulk('delete');
+    }}
+  />
+{/if}
