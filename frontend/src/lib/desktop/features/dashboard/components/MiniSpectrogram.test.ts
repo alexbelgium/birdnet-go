@@ -9,7 +9,7 @@ vi.mock('$lib/utils/api', () => ({
   fetchWithCSRF: (...args: unknown[]) => fetchWithCSRF(...(args as [])),
 }));
 
-vi.mock('hls.js', () => ({ default: class Hls {} }));
+vi.mock('hls.js', () => ({ default: { isSupported: () => false } }));
 
 vi.mock('$lib/stores/appState.svelte', () => ({
   appState: { liveSpectrogram: false },
