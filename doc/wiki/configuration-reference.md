@@ -300,8 +300,8 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.monitoring.disk.paths` | string[] | filesystem paths to monitor |
 | `realtime.species.include` | string[] | Always include these species |
 | `realtime.species.exclude` | string[] | Always exclude these species |
-| `realtime.species.confirmed` | string[] | Species marked as confirmed (analytics-only; does not affect detection processing) |
 | `realtime.species.config` | any |  |
+| `realtime.species.confirmed` | string[] | Species marked as confirmed (analytics-only; does not affect detection processing) |
 | `realtime.weather.provider` | string | "none", "yrno", "openweather", or "wunderground" |
 | `realtime.weather.pollinterval` | integer | weather data polling interval in minutes |
 | `realtime.weather.debug` | boolean | true to enable debug mode |

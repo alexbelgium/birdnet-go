@@ -53,7 +53,7 @@
 
 <div class="sw-detail">
   <Button variant="ghost" onclick={() => navigation.navigate('/ui/analytics/species-list')}
-    >← {t('analytics.speciesList.title')}</Button
+    >← {t('analytics.speciesTools.title')}</Button
   >
   <div class="sw-heading">
     <div>

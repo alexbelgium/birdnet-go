@@ -1,14 +1,9 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
-  let {
-    speciesWorkspace = false,
-    toolbar,
-    onWorkspaceRefresh,
-  }: { speciesWorkspace?: boolean; toolbar?: Snippet; onWorkspaceRefresh?: () => void } = $props();
-  let fetchController: AbortController | null = null;
   import { t } from '$lib/i18n';
   import { fetchWithCSRF } from '$lib/utils/api';
   import type {
+    Detection,
     DetectionsListData,
     DetectionQueryParams,
     DetectionSortBy,
@@ -19,6 +14,16 @@
   import { navigation } from '$lib/stores/navigation.svelte';
 
   const logger = getLogger('app');
+
+  interface Props {
+    /** Species workspace: all-time recordings of the `species` URL parameter. */
+    speciesWorkspace?: boolean;
+    toolbar?: Snippet;
+    onWorkspaceRefresh?: () => void;
+  }
+
+  let { speciesWorkspace = false, toolbar, onWorkspaceRefresh }: Props = $props();
+  let fetchController: AbortController | null = null;
 
   let detectionsData = $state<DetectionsListData | null>(null);
   let loading = $state(true);
@@ -96,22 +101,38 @@
       params.get('date')?.trim() ||
       (queryType !== 'search' && queryType !== 'species' ? getLocalDateString() : undefined);
 
-    return {
-      queryType: speciesWorkspace ? 'species' : queryType,
-      date: speciesWorkspace ? undefined : date,
-      hour: speciesWorkspace ? undefined : params.get('hour') || undefined,
-      duration:
-        !speciesWorkspace && params.get('duration') ? parseInt(params.get('duration')!) : undefined,
+    const query: DetectionQueryParams = {
+      queryType,
+      date,
+      hour: params.get('hour') || undefined,
+      duration: params.get('duration') ? parseInt(params.get('duration')!) : undefined,
       species: params.get('species') || undefined,
-      search: speciesWorkspace ? undefined : search || undefined,
+      search: search || undefined,
       numResults,
       offset: parseInt(params.get('offset') || '0'),
-      sortBy: speciesWorkspace
-        ? sortByParam && ALLOWED_SORT_VALUES.has(sortByParam)
-          ? (sortByParam as DetectionSortBy)
-          : 'confidence_desc'
-        : sortBy,
+      sortBy,
       locked: params.get('locked') === 'true' ? true : undefined,
+    };
+    return speciesWorkspace ? workspaceQuery(query, sortByParam) : query;
+  }
+
+  // The species workspace always lists one species across all dates, best first
+  // unless the URL asks for another order (the saved page-wide sort is ignored).
+  function workspaceQuery(
+    query: DetectionQueryParams,
+    sortByParam: string | null
+  ): DetectionQueryParams {
+    return {
+      ...query,
+      queryType: 'species',
+      date: undefined,
+      hour: undefined,
+      duration: undefined,
+      search: undefined,
+      sortBy:
+        sortByParam && ALLOWED_SORT_VALUES.has(sortByParam)
+          ? (sortByParam as DetectionSortBy)
+          : 'confidence_desc',
     };
   }
 
@@ -137,18 +158,16 @@
       queryString.append('includeWeather', 'true');
       if (speciesWorkspace) queryString.append('includeAudioAvailability', 'true');
 
-      const data = await fetchWithCSRF<{
-        data: import('$lib/types/detection.types').Detection[];
-        total: number;
-        limit: number;
-        current_page: number;
-        total_pages: number;
-        dashboardSettings?: DetectionsListData['dashboardSettings'];
-      }>(`/api/v2/detections?${queryString.toString()}`, { signal: controller.signal });
+      const data = (await fetchWithCSRF(`/api/v2/detections?${queryString.toString()}`, {
+        signal: controller.signal,
+      })) as any;
       if (controller.signal.aborted) return;
       if (speciesWorkspace && preserveOrder && detectionsData) {
         const ranks = new Map(detectionsData.notes.map((note, index) => [note.id, index]));
-        data.data.sort((a, b) => (ranks.get(a.id) ?? Infinity) - (ranks.get(b.id) ?? Infinity));
+        data.data.sort(
+          (a: Detection, b: Detection) =>
+            (ranks.get(a.id) ?? Infinity) - (ranks.get(b.id) ?? Infinity)
+        );
       }
 
       // Validate numResults before using

@@ -80,7 +80,7 @@ export function createWorkspace() {
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        errors.set(group, t('analytics.species.manage.loadFailed'));
+        errors.set(group, t('analytics.speciesTools.manage.loadFailed'));
         loggers.analytics.error('Species workspace request failed', { group, error });
       }
     } finally {
@@ -256,7 +256,14 @@ export function createWorkspace() {
       const names = preferences.columns.includes('best')
         ? rows.map(row => row.scientific_name)
         : [selectedSpecies];
-      if (names.some(name => !recordings.has(name))) ready.delete('best');
+      if (names.some(name => !recordings.has(name))) {
+        // A lookup still running for a previous selection would make request()
+        // skip this one; restart it so the newly selected species is covered.
+        controllers.get('best')?.abort();
+        controllers.delete('best');
+        pending.delete('best');
+        ready.delete('best');
+      }
       jobs.push(loadRecordings(names));
     }
     await Promise.all(jobs);
@@ -311,7 +318,7 @@ export function createWorkspace() {
     const data = await fetchWithCSRF<SpeciesRow[]>(`${endpoint}?fields=count`);
     mergeMetrics(data);
     const target = data.find(candidate => candidate.scientific_name === row.scientific_name);
-    if (target?.count === undefined) throw new Error(t('analytics.species.manage.loadFailed'));
+    if (target?.count === undefined) throw new Error(t('analytics.speciesTools.manage.loadFailed'));
     return { ...row, count: target.count };
   }
   async function toggle(kind: Membership, row: SpeciesRow) {
@@ -337,7 +344,7 @@ export function createWorkspace() {
           : [...old, row.common_name || row.scientific_name],
       };
     } catch (error) {
-      errors.set(kind, t('analytics.species.manage.membershipFailed'));
+      errors.set(kind, t('analytics.speciesTools.manage.membershipFailed'));
       loggers.analytics.error('Species membership update failed', error);
     } finally {
       pending.delete(`toggle-${kind}`);
@@ -359,7 +366,7 @@ export function createWorkspace() {
         return;
       }
     }
-    throw new Error(t('analytics.species.manage.deleteFailed'));
+    throw new Error(t('analytics.speciesTools.manage.deleteFailed'));
   }
   async function refresh() {
     controllers.forEach(controller => controller.abort());

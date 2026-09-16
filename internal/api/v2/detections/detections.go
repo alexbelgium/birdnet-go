@@ -153,9 +153,7 @@ type DetectionResponse struct {
 	ScientificName     string            `json:"scientificName"`
 	CommonName         string            `json:"commonName"`
 	Confidence         float64           `json:"confidence"`
-	ClipName           string            `json:"clipName,omitempty"` // Audio clip filename (basename only, no path); empty when no clip exists
-	AudioAvailable     *bool             `json:"audioAvailable,omitempty"`
-	ModelName          string            `json:"modelName,omitempty"`
+	ClipName           string            `json:"clipName,omitempty"`  // Audio clip filename (basename only, no path); empty when no clip exists
 	ModelType          string            `json:"modelType,omitempty"` // AI model type (e.g. "bird", "bat"); drives the spectrogram frequency range
 	Verified           string            `json:"verified"`
 	Locked             bool              `json:"locked"`
@@ -172,6 +170,10 @@ type DetectionResponse struct {
 	DaysThisYear    int    `json:"daysThisYear,omitempty"`    // Days since first this year
 	DaysThisSeason  int    `json:"daysThisSeason,omitempty"`  // Days since first this season
 	CurrentSeason   string `json:"currentSeason,omitempty"`   // Current season name
+
+	// Species workspace metadata
+	ModelName      string `json:"modelName,omitempty"`      // AI model name that produced the detection
+	AudioAvailable *bool  `json:"audioAvailable,omitempty"` // Set only with includeAudioAvailability=true: whether the clip exists on disk
 }
 
 // SourceInfo describes the audio source of a detection.
@@ -570,17 +572,8 @@ func (c *Handler) GetDetections(ctx echo.Context) error {
 	// Convert notes to response format
 	detections := c.convertNotesToDetectionResponses(notes, params.IncludeWeather)
 	if ctx.QueryParam("includeAudioAvailability") == "true" && c.SFS != nil {
-		for i := range detections {
-			available := false
-			clipPath, valid := apicore.NormalizeClipPathStrict(notes[i].ClipName, c.CurrentSettings().Realtime.Audio.Export.Path)
-			if valid && clipPath != "" {
-				info, statErr := c.SFS.StatRel(clipPath)
-				if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-					return c.HandleError(ctx, statErr, "Failed to check recording availability", http.StatusInternalServerError)
-				}
-				available = statErr == nil && info.Mode().IsRegular() && info.Size() > 0
-			}
-			detections[i].AudioAvailable = &available
+		if err := c.annotateAudioAvailability(notes, detections); err != nil {
+			return c.HandleError(ctx, err, "Failed to check recording availability", http.StatusInternalServerError)
 		}
 	}
 	c.stripSourceForUnauthenticated(ctx, detections)

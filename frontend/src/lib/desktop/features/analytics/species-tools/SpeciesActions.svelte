@@ -10,7 +10,7 @@
     workspace,
     species,
     onDelete,
-  }: { workspace: Workspace; species: SpeciesRow; onDelete: (species: SpeciesRow) => void } =
+  }: { workspace: Workspace; species: SpeciesRow; onDelete: (_species: SpeciesRow) => void } =
     $props();
   let open = $state(false);
   function show() {
@@ -49,7 +49,7 @@
       onclick={() => {
         open = false;
         onDelete(species);
-      }}>{t('analytics.species.manage.delete')}</Button
+      }}>{t('analytics.speciesTools.manage.delete')}</Button
     >
   </div>
 </Modal>

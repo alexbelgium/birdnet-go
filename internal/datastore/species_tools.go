@@ -3,8 +3,13 @@ package datastore
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/tphakala/birdnet-go/internal/datastore/entities"
+	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"gorm.io/gorm"
 )
 
@@ -48,22 +53,20 @@ func SelectSpeciesToolFields(fields []string, count, confidence, last string) ([
 
 // GetSpeciesTools returns every stored species, including species with only rejected detections.
 func (ds *DataStore) GetSpeciesTools(ctx context.Context, fields []string) ([]SpeciesToolRow, error) {
-	columns := []string{"n.scientific_name", "MAX(n.common_name) AS common_name", "MAX(n.species_code) AS species_code"}
 	projection, err := SelectSpeciesToolFields(fields, "COUNT(*)", "MAX(CASE WHEN r.verified IS NULL OR r.verified != 'false_positive' THEN n.confidence END)", "MAX(n.date || ' ' || n.time) AS last_heard")
 	if err != nil {
 		return nil, err
 	}
-	if ds.DB.Dialector.Name() == "mysql" {
+	columns := make([]string, 0, 3+len(projection))
+	columns = append(columns, "n.scientific_name", "MAX(n.common_name) AS common_name", "MAX(n.species_code) AS species_code")
+	if ds.DB.Name() == DialectMySQL {
 		for i, expression := range projection {
 			projection[i] = strings.ReplaceAll(expression, "n.date || ' ' || n.time", "CONCAT(n.date, ' ', n.time)")
 		}
 	}
 	query := ds.DB.WithContext(ctx).Table("notes n")
-	for _, field := range fields {
-		if field == "max_confidence" {
-			query = query.Joins("LEFT JOIN note_reviews r ON r.note_id = n.id")
-			break
-		}
+	if slices.Contains(fields, "max_confidence") {
+		query = query.Joins("LEFT JOIN note_reviews r ON r.note_id = n.id")
 	}
 	rows := make([]SpeciesToolRow, 0)
 	err = query.Select(strings.Join(append(columns, projection...), ", ")).Group("n.scientific_name").Order("n.scientific_name").Scan(&rows).Error
@@ -89,4 +92,68 @@ func (ds *DataStore) GetSpeciesToolRecordings(ctx context.Context, names []strin
 		Joins("LEFT JOIN note_locks l ON l.note_id = n.id").Joins("LEFT JOIN note_reviews r ON r.note_id = n.id").
 		Where("n.clip_name IS NOT NULL AND n.clip_name != ''").Where("r.verified IS NULL OR r.verified != ?", "false_positive")
 	return SpeciesToolsCandidates(ctx, query.Where("n.scientific_name IN ?", names), offset)
+}
+
+// SpeciesReviewStat holds per-species detection and review counts used by the
+// analytics "Manage" view. Total counts every detection (including false
+// positives) so the verified/rejected ratio reflects all reviews.
+type SpeciesReviewStat struct {
+	ScientificName string `json:"scientificName"`
+	CommonName     string `json:"commonName"`
+	Total          int    `json:"total"`
+	Verified       int    `json:"verified"`
+	Rejected       int    `json:"rejected"`
+}
+
+// GetSpeciesReviewStats returns per-species detection and review counts across
+// all time. Unlike GetSpeciesSummaryData it intentionally does not exclude false
+// positives, so the rejected count reflects every detection marked as such.
+func (ds *DataStore) GetSpeciesReviewStats(ctx context.Context) ([]SpeciesReviewStat, error) {
+	stats := make([]SpeciesReviewStat, 0, 100)
+
+	// note_reviews.note_id carries a uniqueIndex (at most one review per note), so
+	// the LEFT JOIN below is 1:1 and cannot multiply rows per note. Plain COUNT is
+	// therefore already fan-out-immune; DISTINCT would only add a needless dedup
+	// pass (computed three times per group) on what can be a large table.
+	const query = `
+		SELECT
+			notes.scientific_name AS scientific_name,
+			COALESCE(MAX(notes.common_name), '') AS common_name,
+			COUNT(notes.id) AS total,
+			COUNT(CASE WHEN note_reviews.verified = ? THEN notes.id END) AS verified,
+			COUNT(CASE WHEN note_reviews.verified = ? THEN notes.id END) AS rejected
+		FROM notes
+		LEFT JOIN note_reviews ON notes.id = note_reviews.note_id
+		GROUP BY notes.scientific_name`
+
+	if err := ds.DB.WithContext(ctx).Raw(query,
+		string(entities.VerificationCorrect), string(entities.VerificationFalsePositive)).Scan(&stats).Error; err != nil {
+		return nil, dbError(err, "get_species_review_stats", errors.PriorityMedium,
+			"action", "generate_species_review_stats")
+	}
+
+	return stats, nil
+}
+
+// GetSpeciesNoteIDs returns the string IDs of every note for the given scientific
+// name. Legacy callers may pass a raw BirdNET label ("ScientificName_CommonName");
+// only the scientific-name portion before the first underscore is used.
+func (ds *DataStore) GetSpeciesNoteIDs(ctx context.Context, scientificName string) ([]string, error) {
+	name := detection.ExtractScientificName(scientificName)
+	if name == "" {
+		return []string{}, nil
+	}
+
+	var ids []uint
+	if err := ds.DB.WithContext(ctx).Model(&Note{}).Where("scientific_name = ?", name).Pluck("id", &ids).Error; err != nil {
+		return nil, dbError(err, "get_species_note_ids", errors.PriorityMedium,
+			"action", "lookup_species_note_ids")
+	}
+
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, strconv.FormatUint(uint64(id), 10))
+	}
+
+	return result, nil
 }

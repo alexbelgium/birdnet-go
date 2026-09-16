@@ -276,6 +276,16 @@ func TestPatchCannotChangeBlockedFields(t *testing.T) {
 			seed:    func(s *conf.Settings) { s.Realtime.Audio.SoxPath = "/usr/bin/sox" },
 			body:    map[string]any{"soxPath": "/tmp/attacker/sox"},
 		},
+		{
+			leaf:    "Realtime.Species.Confirmed",
+			section: "species",
+			seed:    func(s *conf.Settings) { s.Realtime.Species.Confirmed = []string{"Turdus merula"} },
+			body:    map[string]any{"confirmed": []string{}},
+			verify: func(t *testing.T, s *conf.Settings) {
+				t.Helper()
+				assert.Equal(t, []string{"Turdus merula"}, s.Realtime.Species.Confirmed)
+			},
+		},
 	}
 
 	// The table must cover exactly the client-reachable leaves, no more and no
@@ -604,6 +614,13 @@ func TestRestoreBlockedFieldsCoversEveryLeaf(t *testing.T) {
 			seed:    func(s *conf.Settings) { s.Realtime.Audio.SoxPath = "/usr/bin/sox" },
 			tamper:  func(s *conf.Settings) { s.Realtime.Audio.SoxPath = "/tmp/attacker/sox" },
 			current: func(s *conf.Settings) any { return s.Realtime.Audio.SoxPath },
+		},
+		{
+			name:    "Realtime.Species.Confirmed",
+			path:    "Realtime.Species.Confirmed",
+			seed:    func(s *conf.Settings) { s.Realtime.Species.Confirmed = []string{"Turdus merula"} },
+			tamper:  func(s *conf.Settings) { s.Realtime.Species.Confirmed = []string{"injected"} },
+			current: func(s *conf.Settings) any { return s.Realtime.Species.Confirmed },
 		},
 		{
 			name:    "Realtime.Audio.SoxAudioTypes",

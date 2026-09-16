@@ -448,15 +448,19 @@
 
 <div class={cn(className)}>
   <div class="card-body grow-0 p-2 sm:p-4 sm:pt-3">
-    <div class="flex justify-between items-center gap-3 flex-wrap">
+    <div
+      class="flex justify-between items-center"
+      class:gap-3={speciesWorkspace}
+      class:flex-wrap={speciesWorkspace}
+    >
       <!-- Title -->
-      {#if !speciesWorkspace}<span class="card-title grow text-base sm:text-xl">
-          {title}
-        </span>{/if}
+      <span class="card-title grow text-base sm:text-xl" class:hidden={speciesWorkspace}>
+        {title}
+      </span>
       {#if toolbar}<div class="flex items-center gap-2 flex-wrap">{@render toolbar()}</div>{/if}
 
       <!-- Controls: view toggle + results selector -->
-      <div class="flex items-center gap-3 flex-wrap">
+      <div class="flex items-center gap-3" class:flex-wrap={speciesWorkspace}>
         {#if canEdit}
           <div class={speciesWorkspace ? 'block' : 'hidden md:block'}>
             <button
@@ -645,15 +649,14 @@
                 />
                 <th scope="col" class="hidden md:table-cell">{t('detections.headers.weather')}</th>
                 <th scope="col" class="hidden lg:table-cell">{t('detections.headers.source')}</th>
-                {#if !speciesWorkspace}
-                  <SortableHeader
-                    label={t('detections.headers.species')}
-                    field="species"
-                    activeField={sortField}
-                    direction={sortDirection}
-                    onSort={handleSort}
-                  />
-                {/if}
+                <SortableHeader
+                  label={t('detections.headers.species')}
+                  field="species"
+                  activeField={sortField}
+                  direction={sortDirection}
+                  onSort={handleSort}
+                  className={speciesWorkspace ? 'hidden' : ''}
+                />
                 <SortableHeader
                   label={t('detections.headers.confidence')}
                   field="confidence"
@@ -716,11 +719,13 @@
       <!-- Mobile: card layout (always mobile cards on small screens) -->
       <div class="md:hidden space-y-2">
         {#each data.notes as detection (detection.id)}
-          {#if speciesWorkspace && selection.selectionActive}<Checkbox
+          {#if speciesWorkspace && selection.selectionActive}
+            <Checkbox
               checked={selection.isSelected(String(detection.id))}
               onchange={() => handleToggleSelect(String(detection.id), false)}
               label={t('detections.selection.select')}
-            />{/if}
+            />
+          {/if}
           <DetectionCardMobile
             {speciesWorkspace}
             {detection}

@@ -114,7 +114,7 @@
     try {
       deleteTarget = await workspace.deletionTarget(row);
     } catch {
-      deleteError = t('analytics.species.manage.loadFailed');
+      deleteError = t('analytics.speciesTools.manage.loadFailed');
     }
   }
   async function confirmDelete() {
@@ -125,7 +125,7 @@
       await workspace.remove(deleteTarget);
       deleteTarget = null;
     } catch {
-      deleteError = t('analytics.species.manage.deleteFailed');
+      deleteError = t('analytics.speciesTools.manage.deleteFailed');
     } finally {
       deleting = false;
     }
@@ -136,8 +136,8 @@
   <div hidden={!!selectedName}>
     <div class="sw-heading">
       <div>
-        <h1>{t('analytics.speciesList.title')}</h1>
-        <p>{t('analytics.species.manage.allTimeNote')}</p>
+        <h1>{t('analytics.speciesTools.title')}</h1>
+        <p>{t('analytics.speciesTools.manage.allTimeNote')}</p>
       </div>
       <Button
         onclick={() => {
@@ -221,7 +221,7 @@
     <div
       class="sw-table"
       role="region"
-      aria-label={t('analytics.speciesList.title')}
+      aria-label={t('analytics.speciesTools.title')}
       onpointerenter={() => workspace.setInteracting(true)}
       onpointerleave={event =>
         workspace.setInteracting(event.currentTarget.contains(document.activeElement))}
@@ -329,15 +329,15 @@
           : t('analytics.species.noSpeciesFound')}
       </p>
       <Button onclick={() => navigation.navigate('/ui/analytics/species-list')}
-        >{t('analytics.speciesList.title')}</Button
+        >{t('analytics.speciesTools.title')}</Button
       >{/if}{/if}
 </section>
 <Modal
   isOpen={!!deleteTarget}
-  title={t('analytics.species.manage.deleteTitle')}
+  title={t('analytics.speciesTools.manage.deleteTitle')}
   type="confirm"
   confirmVariant="error"
-  confirmLabel={t('analytics.species.manage.deleteConfirm')}
+  confirmLabel={t('analytics.speciesTools.manage.deleteConfirm')}
   loading={deleting}
   onConfirm={confirmDelete}
   onClose={() => {
@@ -345,12 +345,12 @@
   }}
 >
   {#if deleteTarget}<p>
-      {t('analytics.species.manage.deleteMessage', {
+      {t('analytics.speciesTools.manage.deleteMessage', {
         species: localizeSpeciesName(deleteTarget.scientific_name, deleteTarget.common_name),
         count: deleteTarget.count ?? 0,
       })}
     </p>
-    <p>{t('analytics.species.manage.deleteWarning')}</p>{/if}
+    <p>{t('analytics.speciesTools.manage.deleteWarning')}</p>{/if}
   {#if deleteError}<p role="alert">{deleteError}</p>{/if}
 </Modal>
 <RecordingPopup {recording} title={recordingTitle} onClose={() => (recording = null)} />

@@ -263,13 +263,17 @@
       onclick={handleViewDetails}
       aria-label={t('detections.row.viewDetails', { species: detection.commonName })}
     >
-      {#if speciesWorkspace}<span
-          >{detection.date}
-          {detection.time} · {detection.modelName || t('analytics.speciesTools.unknownModel')}</span
-        >{:else}<SpeciesInfoBar {detection} />{/if}
-      {#if speciesWorkspace && (!detection.clipName || detection.audioAvailable === false)}<span
-          >{t('analytics.speciesTools.audioUnavailable')}</span
-        >{/if}
+      {#if speciesWorkspace}
+        <span>
+          {detection.date}
+          {detection.time} · {detection.modelName || t('analytics.speciesTools.unknownModel')}
+        </span>
+        {#if !detection.clipName || detection.audioAvailable === false}
+          <span>{t('analytics.speciesTools.audioUnavailable')}</span>
+        {/if}
+      {:else}
+        <SpeciesInfoBar {detection} />
+      {/if}
     </button>
   </div>
 

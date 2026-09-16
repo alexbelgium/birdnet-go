@@ -9,15 +9,15 @@ export function columnLabel(column: Column): string {
     case 'last_heard':
       return t('analytics.species.headers.lastDetected');
     case 'correct':
-      return t('analytics.species.manage.headers.reviewRatio');
+      return t('analytics.speciesTools.manage.headers.reviewRatio');
     case 'range':
-      return t('analytics.species.manage.headers.rangeProbability');
+      return t('analytics.speciesTools.manage.headers.rangeProbability');
     case 'confirmed':
-      return t('analytics.species.manage.headers.confirmed');
+      return t('analytics.speciesTools.manage.headers.confirmed');
     case 'included':
-      return t('analytics.species.manage.headers.included');
+      return t('analytics.speciesTools.manage.headers.included');
     case 'excluded':
-      return t('analytics.species.manage.headers.excluded');
+      return t('analytics.speciesTools.manage.headers.excluded');
     case 'best':
       return t('analytics.speciesTools.bestRecording');
   }

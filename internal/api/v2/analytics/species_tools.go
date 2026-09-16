@@ -12,6 +12,14 @@ import (
 	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
+// registerSpeciesToolsRoutes registers the protected species workspace endpoints.
+func (c *Handler) registerSpeciesToolsRoutes(speciesGroup *echo.Group) {
+	speciesGroup.GET("/tools", c.GetSpeciesTools, c.AuthMiddleware)
+	speciesGroup.GET("/tools/recordings", c.GetSpeciesToolRecordings, c.AuthMiddleware)
+	speciesGroup.GET("/tools/observation-link", c.GetObservationLink, c.AuthMiddleware)
+	speciesGroup.GET("/review-stats", c.GetSpeciesReviewStats, c.AuthMiddleware)
+}
+
 type speciesToolsStore interface {
 	GetSpeciesTools(context.Context, []string) ([]datastore.SpeciesToolRow, error)
 	GetSpeciesToolRecordings(context.Context, []string, int) ([]datastore.SpeciesRecordingCandidate, error)

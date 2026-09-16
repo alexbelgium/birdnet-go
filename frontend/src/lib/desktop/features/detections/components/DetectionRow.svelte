@@ -49,6 +49,7 @@
   // passes them in as callbacks plus the server-hydrated isExcluded state.
   interface Props {
     detection: Detection;
+    /** Species workspace: hide the redundant species cell, add a model cell. */
     speciesWorkspace?: boolean;
     /**
      * Whether the Recording column exists in this table. The parent shows it when
@@ -204,92 +205,91 @@
   <SourceBadge {detection} variant="inline" />
 </td>
 
-{#if !speciesWorkspace}
-  <!-- Bird species (with thumbnail) -->
-  <td class="text-sm">
-    <div class="sp-species-container sp-layout-detections">
-      <!-- Thumbnail -->
-      <div class="sp-thumbnail-wrapper">
-        <button class="sp-thumbnail-button" onclick={handleDetailsClick} tabindex="0">
-          <!-- Screen reader announcement for loading state -->
-          <span class="sr-only" role="status" aria-live="polite">
-            {thumbnailLoader.loading
-              ? t('detections.aria.thumbnailLoading', { species: displayName })
-              : t('detections.aria.thumbnailLoaded', { species: displayName })}
-          </span>
+<!-- Bird species (with thumbnail) -->
+<td class="text-sm" class:hidden={speciesWorkspace}>
+  <div class="sp-species-container sp-layout-detections">
+    <!-- Thumbnail -->
+    <div class="sp-thumbnail-wrapper">
+      <button class="sp-thumbnail-button" onclick={handleDetailsClick} tabindex="0">
+        <!-- Screen reader announcement for loading state -->
+        <span class="sr-only" role="status" aria-live="polite">
+          {thumbnailLoader.loading
+            ? t('detections.aria.thumbnailLoading', { species: displayName })
+            : t('detections.aria.thumbnailLoaded', { species: displayName })}
+        </span>
 
-          <!-- Loading spinner overlay -->
-          {#if thumbnailLoader.showSpinner}
-            <div
-              class="absolute inset-0 flex items-center justify-center bg-[var(--color-base-200)]/75 rounded-md"
-            >
-              <div class="loading loading-spinner loading-sm text-[var(--color-primary)]"></div>
-            </div>
-          {/if}
-
-          {#if thumbnailLoader.error}
-            <!-- Error placeholder -->
-            <div
-              class="absolute inset-0 flex items-center justify-center bg-[var(--color-base-200)] rounded-md"
-            >
-              <svg
-                class="w-8 h-8 text-[var(--color-base-content)] opacity-30"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                />
-              </svg>
-              <span class="sr-only">{t('detections.row.imageFailedToLoad')}</span>
-            </div>
-          {:else if !thumbnailLoader.hasUrlFailed(getThumbnailUrl(detection.scientificName))}
-            <!-- Only render img element if URL hasn't failed before -->
-            <img
-              loading="lazy"
-              decoding="async"
-              fetchpriority="low"
-              src={getThumbnailUrl(detection.scientificName)}
-              alt={displayName}
-              class="sp-thumbnail-image"
-              class:opacity-0={thumbnailLoader.loading}
-              onload={handleThumbnailLoad}
-              onerror={e => {
-                handleThumbnailError(handleBirdImageError(e));
-              }}
-            />
-          {/if}
-        </button>
-      </div>
-
-      <!-- Species Names -->
-      <div class="sp-species-info-wrapper">
-        <div class="sp-species-names">
-          <button
-            onclick={handleDetailsClick}
-            class="sp-species-common-name hover:text-primary transition-colors cursor-pointer text-left"
+        <!-- Loading spinner overlay -->
+        {#if thumbnailLoader.showSpinner}
+          <div
+            class="absolute inset-0 flex items-center justify-center bg-[var(--color-base-200)]/75 rounded-md"
           >
-            {displayName}
-          </button>
-          <div class="sp-species-scientific-name">{detection.scientificName}</div>
-        </div>
+            <div class="loading loading-spinner loading-sm text-[var(--color-primary)]"></div>
+          </div>
+        {/if}
+
+        {#if thumbnailLoader.error}
+          <!-- Error placeholder -->
+          <div
+            class="absolute inset-0 flex items-center justify-center bg-[var(--color-base-200)] rounded-md"
+          >
+            <svg
+              class="w-8 h-8 text-[var(--color-base-content)] opacity-30"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            </svg>
+            <span class="sr-only">{t('detections.row.imageFailedToLoad')}</span>
+          </div>
+        {:else if !thumbnailLoader.hasUrlFailed(getThumbnailUrl(detection.scientificName))}
+          <!-- Only render img element if URL hasn't failed before -->
+          <img
+            loading="lazy"
+            decoding="async"
+            fetchpriority="low"
+            src={getThumbnailUrl(detection.scientificName)}
+            alt={displayName}
+            class="sp-thumbnail-image"
+            class:opacity-0={thumbnailLoader.loading}
+            onload={handleThumbnailLoad}
+            onerror={e => {
+              handleThumbnailError(handleBirdImageError(e));
+            }}
+          />
+        {/if}
+      </button>
+    </div>
+
+    <!-- Species Names -->
+    <div class="sp-species-info-wrapper">
+      <div class="sp-species-names">
+        <button
+          onclick={handleDetailsClick}
+          class="sp-species-common-name hover:text-primary transition-colors cursor-pointer text-left"
+        >
+          {displayName}
+        </button>
+        <div class="sp-species-scientific-name">{detection.scientificName}</div>
       </div>
     </div>
-  </td>
-{/if}
+  </div>
+</td>
+
 <!-- Confidence -->
 <td class="text-sm">
   <ConfidenceCircle confidence={detection.confidence} size="md" />
 </td>
+{#if speciesWorkspace}
+  <td class="text-sm">{detection.modelName || t('analytics.speciesTools.unknownModel')}</td>
+{/if}
 
-{#if speciesWorkspace}<td class="text-sm"
-    >{detection.modelName || t('analytics.speciesTools.unknownModel')}</td
-  >{/if}
 <!-- Status -->
 <td>
   <VerificationBadges {detection} />
@@ -306,7 +306,8 @@
         detectionId={detection.id.toString()}
         spectrogramSize="md"
       />
-    {:else if speciesWorkspace}<span>{t('analytics.speciesTools.audioUnavailable')}</span>
+    {:else if speciesWorkspace}
+      <span>{t('analytics.speciesTools.audioUnavailable')}</span>
     {/if}
   </td>
 {/if}

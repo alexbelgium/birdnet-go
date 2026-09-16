@@ -12,7 +12,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-var observationSpeciesPath = regexp.MustCompile(`^/species/([0-9]+)/$`)
+var observationSpeciesPath = regexp.MustCompile(`^/species/(\d+)/$`)
 
 // GetObservationLink resolves an exact scientific name on the fixed observation provider.
 // Maps cannot be embedded: the provider sends X-Frame-Options: DENY.
@@ -32,7 +32,7 @@ func (c *Handler) GetObservationLink(ctx echo.Context) error {
 	if err != nil {
 		return c.HandleError(ctx, err, "Species map lookup unavailable", http.StatusBadGateway)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return c.HandleError(ctx, nil, "Species map lookup unavailable", http.StatusBadGateway)
 	}
@@ -53,7 +53,7 @@ func observationMapPath(body, name string) string {
 	href, scientific := "", false
 	var label strings.Builder
 	for {
-		switch tokenizer.Next() {
+		switch tokenizer.Next() { //nolint:exhaustive // only anchor structure and text matter
 		case html.ErrorToken:
 			return ""
 		case html.StartTagToken:

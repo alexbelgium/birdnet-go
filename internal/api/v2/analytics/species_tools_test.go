@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,14 +26,11 @@ func (s *speciesToolsTestStore) GetSpeciesTools(context.Context, []string) ([]da
 	return nil, nil
 }
 func (s *speciesToolsTestStore) GetSpeciesToolRecordings(_ context.Context, names []string, offset int) ([]datastore.SpeciesRecordingCandidate, error) {
-	s.calls = append(s.calls, append([]string(nil), names...))
+	s.calls = append(s.calls, slices.Clone(names))
 	var matching []datastore.SpeciesRecordingCandidate
 	for _, candidate := range s.candidates {
-		for _, name := range names {
-			if candidate.ScientificName == name {
-				matching = append(matching, candidate)
-				break
-			}
+		if slices.Contains(names, candidate.ScientificName) {
+			matching = append(matching, candidate)
 		}
 	}
 	if offset >= len(matching) {

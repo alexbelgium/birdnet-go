@@ -310,7 +310,7 @@ Performance Optimizations:
           },
           {
             icon: ListChecks,
-            label: t('analytics.speciesList.title'),
+            label: t('analytics.speciesTools.title'),
             url: withQuery(navigationUrls.analyticsSpeciesList),
             routeKey: 'analyticsSpeciesList',
           },

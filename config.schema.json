@@ -2453,13 +2453,6 @@
           "type": "array",
           "description": "Always exclude these species"
         },
-        "confirmed": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "description": "Species marked as confirmed (analytics-only; does not affect detection processing)"
-        },
         "config": {
           "oneOf": [
             {
@@ -2473,6 +2466,13 @@
               "type": "null"
             }
           ]
+        },
+        "confirmed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Species marked as confirmed (analytics-only; does not affect detection processing)"
         }
       },
       "additionalProperties": false,
