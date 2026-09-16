@@ -5834,7 +5834,6 @@
       "done": "Eliminazione completata.",
       "stop": "Interrompi",
       "cancelled": "Eliminazione interrotta. I rilevamenti già eliminati restano eliminati.",
-      "failed": "Rilevamenti non eliminati: {count}. Sono stati mantenuti e si può riprovare.",
       "stalled": "Eliminazione interrotta perché i rilevamenti rimanenti non possono essere rimossi.",
       "error": "Eliminazione non riuscita. I rilevamenti già eliminati restano eliminati."
     },

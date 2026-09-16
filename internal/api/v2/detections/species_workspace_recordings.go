@@ -80,20 +80,21 @@ func (c *Handler) GetWorkspaceBestRecordings(ctx echo.Context) error {
 	if len(names) == 0 || len(names) > maxBestRecordingSpecies {
 		return c.HandleError(ctx, nil, "Expected 1 to 25 species", http.StatusBadRequest)
 	}
-	queryCtx, cancel := workspaceContext(ctx)
-	defer cancel()
-	result := make(map[string]*WorkspaceBestRecording, len(names))
 	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
+		if strings.TrimSpace(name) == "" {
 			return c.HandleError(ctx, nil, "Empty species name", http.StatusBadRequest)
 		}
-		candidates, err := store.SpeciesWorkspaceCandidates(queryCtx, name, bestRecordingCandidates)
-		if err != nil {
-			return c.HandleError(ctx, err, "Failed to find recordings", http.StatusInternalServerError)
-		}
+	}
+	queryCtx, cancel := workspaceContext(ctx)
+	defer cancel()
+	candidates, err := store.SpeciesWorkspaceCandidates(queryCtx, names, bestRecordingCandidates)
+	if err != nil {
+		return c.HandleError(ctx, err, "Failed to find recordings", http.StatusInternalServerError)
+	}
+	result := make(map[string]*WorkspaceBestRecording, len(names))
+	for _, name := range names {
 		result[name] = nil
-		for _, cand := range candidates {
+		for _, cand := range candidates[name] {
 			ok, err := c.clipAvailable(cand.ClipName)
 			if err != nil {
 				return c.HandleError(ctx, err, "Failed to check recording availability", http.StatusInternalServerError)

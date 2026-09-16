@@ -231,32 +231,58 @@ func (ds *Datastore) topCandidates(db *gorm.DB, labelIDs []uint, limit int) ([]d
 	return all, nil
 }
 
-// SpeciesWorkspaceCandidates returns up to limit best-recording candidates:
-// locked ones first, then the highest confidence.
-func (ds *Datastore) SpeciesWorkspaceCandidates(ctx context.Context, scientificName string, limit int) ([]datastore.SpeciesRecordingCandidate, error) {
+// SpeciesWorkspaceCandidates returns, per species, up to limit best-recording
+// candidates: locked ones first, then the highest confidence. Locked candidates
+// of every requested species come from one query over the (small) locks table.
+func (ds *Datastore) SpeciesWorkspaceCandidates(ctx context.Context, names []string, limit int) (map[string][]datastore.SpeciesRecordingCandidate, error) {
 	prefix := ds.manager.TablePrefix()
 	db := ds.manager.DB().WithContext(ctx)
-	ids, err := ds.speciesLabelIDs(db, scientificName)
+	out := make(map[string][]datastore.SpeciesRecordingCandidate, len(names))
+	if len(names) == 0 {
+		return out, nil
+	}
+	labels, err := ds.labelsByScientificName(db)
 	if err != nil {
 		return nil, wsError(err, "resolve_labels")
 	}
-	if len(ids) == 0 {
-		return []datastore.SpeciesRecordingCandidate{}, nil
+	nameByLabel := make(map[uint]string)
+	var allIDs []uint
+	for _, name := range names {
+		for _, id := range labels[name] {
+			nameByLabel[id] = name
+			allIDs = append(allIDs, id)
+		}
 	}
-	var locked []datastore.SpeciesRecordingCandidate
-	if err := db.Table(prefix+"detection_locks k").Select("d.id, d.confidence, d.clip_name, 1 AS locked").
-		Joins(fmt.Sprintf("JOIN %sdetections d ON d.id = k.detection_id", prefix)).
-		Joins(fmt.Sprintf("LEFT JOIN %sdetection_reviews r ON r.detection_id = d.id", prefix)).
-		Where("d.label_id IN ? AND d.clip_name IS NOT NULL AND d.clip_name <> ''", ids).
-		Where("r.verified IS NULL OR r.verified != ?", string(entities.VerificationFalsePositive)).
-		Order("d.confidence DESC, d.id ASC").Limit(limit).Scan(&locked).Error; err != nil {
-		return nil, wsError(err, "load_locked_candidates")
+	lockedBy := make(map[string][]datastore.SpeciesRecordingCandidate, len(names))
+	if len(allIDs) > 0 {
+		type lockedRow struct {
+			datastore.SpeciesRecordingCandidate
+			LabelID uint
+		}
+		var locked []lockedRow
+		// CROSS JOIN pins SQLite's join order to the small locks table; otherwise the
+		// planner walks every clip row of the species through the partial index.
+		if err := db.Table(prefix+"detection_locks k").Select("d.id, d.label_id, d.confidence, d.clip_name, 1 AS locked").
+			Joins(fmt.Sprintf("CROSS JOIN %sdetections d ON d.id = k.detection_id", prefix)).
+			Joins(fmt.Sprintf("LEFT JOIN %sdetection_reviews r ON r.detection_id = d.id", prefix)).
+			Where("d.label_id IN ? AND d.clip_name IS NOT NULL AND d.clip_name <> ''", allIDs).
+			Where("r.verified IS NULL OR r.verified != ?", string(entities.VerificationFalsePositive)).
+			Order("d.confidence DESC, d.id ASC").Scan(&locked).Error; err != nil {
+			return nil, wsError(err, "load_locked_candidates")
+		}
+		for i := range locked {
+			name := nameByLabel[locked[i].LabelID]
+			lockedBy[name] = append(lockedBy[name], locked[i].SpeciesRecordingCandidate)
+		}
 	}
-	top, err := ds.topCandidates(db, ids, limit)
-	if err != nil {
-		return nil, wsError(err, "load_top_candidates")
+	for _, name := range names {
+		top, err := ds.topCandidates(db, labels[name], limit)
+		if err != nil {
+			return nil, wsError(err, "load_top_candidates")
+		}
+		out[name] = datastore.MergeSpeciesCandidates(lockedBy[name], top, limit)
 	}
-	return datastore.MergeSpeciesCandidates(locked, top, limit), nil
+	return out, nil
 }
 
 // SpeciesWorkspaceRecordings returns one page of a species' detections and the total.
@@ -301,79 +327,83 @@ func (ds *Datastore) SpeciesWorkspaceRecordings(ctx context.Context, q datastore
 	return out, total, nil
 }
 
-// SpeciesWorkspaceDeletable returns up to limit unlocked detection IDs of the
-// species (lowest first) and how many unlocked detections remain in total.
-func (ds *Datastore) SpeciesWorkspaceDeletable(ctx context.Context, scientificName string, limit int) (ids []uint, remaining int64, err error) {
+// SpeciesWorkspaceDeleteChunk deletes up to limit unlocked detections of a
+// species. The DELETE re-checks label and lock, so a detection locked or
+// corrected after selection is kept. Reviews, locks, comments and predictions
+// cascade through foreign keys, as in the repository's single-row delete.
+func (ds *Datastore) SpeciesWorkspaceDeleteChunk(ctx context.Context, scientificName string, limit int) (datastore.SpeciesDeleteChunk, error) {
 	prefix := ds.manager.TablePrefix()
 	db := ds.manager.DB().WithContext(ctx)
+	var chunk datastore.SpeciesDeleteChunk
 	labelIDs, err := ds.speciesLabelIDs(db, scientificName)
 	if err != nil {
-		return nil, 0, wsError(err, "resolve_labels")
+		return chunk, wsError(err, "resolve_labels")
 	}
 	if len(labelIDs) == 0 {
-		return []uint{}, 0, nil
+		return chunk, nil
 	}
-	base := db.Table(prefix+"detections d").Where("d.label_id IN ?", labelIDs).
-		Where(fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %sdetection_locks k WHERE k.detection_id = d.id)", prefix))
-	if err := base.Session(&gorm.Session{}).Count(&remaining).Error; err != nil {
-		return nil, 0, wsError(err, "count_deletable")
-	}
-	if err := base.Session(&gorm.Session{}).Order("d.id ASC").Limit(limit).Pluck("d.id", &ids).Error; err != nil {
-		return nil, 0, wsError(err, "list_deletable")
-	}
-	return ids, remaining, nil
-}
-
-// SpeciesWorkspaceDeleteDetection deletes one detection only if it still belongs
-// to the species and is not locked; the check and delete are one statement.
-// Reviews, locks, comments and predictions cascade through foreign keys.
-func (ds *Datastore) SpeciesWorkspaceDeleteDetection(ctx context.Context, scientificName string, id uint) (outcome datastore.SpeciesDeleteOutcome, clipName string, err error) {
-	prefix := ds.manager.TablePrefix()
-	db := ds.manager.DB().WithContext(ctx)
-	labelIDs, err := ds.speciesLabelIDs(db, scientificName)
-	if err != nil {
-		return 0, "", wsError(err, "resolve_labels")
-	}
-	var row struct {
-		LabelID  uint
+	lockFree := fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %sdetection_locks k WHERE k.detection_id = d.id)", prefix)
+	type pickedRow struct {
+		ID       uint
 		ClipName *string
 	}
-	res := db.Table(prefix+"detections").Select("label_id, clip_name").Where("id = ?", id).Limit(1).Scan(&row)
-	if res.Error != nil {
-		return 0, "", wsError(res.Error, "load_detection")
+	var picked []pickedRow
+	if err := db.Table(prefix+"detections d").Select("d.id, d.clip_name").
+		Where("d.label_id IN ?", labelIDs).Where(lockFree).Limit(limit).Scan(&picked).Error; err != nil {
+		return chunk, wsError(err, "select_chunk")
 	}
-	if res.RowsAffected == 0 {
-		return datastore.SpeciesDeleteMissing, "", nil
-	}
-	if len(labelIDs) == 0 || !slices.Contains(labelIDs, row.LabelID) {
-		return datastore.SpeciesDeleteReassigned, "", nil
-	}
-	var affected int64
-	err = datastore.RetryOnLock(ctx, "species_workspace_delete", func() error {
-		del := db.Exec(fmt.Sprintf(
-			"DELETE FROM %sdetections WHERE id = ? AND label_id IN ? AND NOT EXISTS (SELECT 1 FROM %sdetection_locks WHERE detection_id = ?)",
-			prefix, prefix), id, labelIDs, id)
-		affected = del.RowsAffected
-		return del.Error
-	}, ds.metrics)
-	if err != nil {
-		return 0, "", wsError(err, "delete_detection")
-	}
-	if affected == 0 {
-		// The row existed a moment ago: it was locked, relabelled or deleted since.
-		var still struct{ LabelID uint }
-		if r := db.Table(prefix+"detections").Select("label_id").Where("id = ?", id).Limit(1).Scan(&still); r.Error != nil {
-			return 0, "", wsError(r.Error, "recheck_detection")
-		} else if r.RowsAffected == 0 {
-			return datastore.SpeciesDeleteMissing, "", nil
+	if len(picked) > 0 {
+		ids := make([]uint, len(picked))
+		for i, p := range picked {
+			ids[i] = p.ID
 		}
-		if !slices.Contains(labelIDs, still.LabelID) {
-			return datastore.SpeciesDeleteReassigned, "", nil
+		err = datastore.RetryOnLock(ctx, "species_workspace_delete", func() error {
+			return db.Exec(fmt.Sprintf(
+				"DELETE FROM %sdetections WHERE id IN ? AND label_id IN ? AND NOT EXISTS (SELECT 1 FROM %sdetection_locks k WHERE k.detection_id = %sdetections.id)",
+				prefix, prefix, prefix), ids, labelIDs).Error
+		}, ds.metrics)
+		if err != nil {
+			return chunk, wsError(err, "delete_chunk")
 		}
-		return datastore.SpeciesDeleteLocked, "", nil
+		type keptRow struct {
+			ID      uint
+			LabelID uint
+		}
+		var kept []keptRow
+		if err := db.Table(prefix+"detections").Select("id, label_id").Where("id IN ?", ids).Scan(&kept).Error; err != nil {
+			return chunk, wsError(err, "recheck_chunk")
+		}
+		keptIDs := make(map[uint]bool, len(kept))
+		for _, k := range kept {
+			keptIDs[k.ID] = true
+			if slices.Contains(labelIDs, k.LabelID) {
+				chunk.Locked++
+			} else {
+				chunk.Reassigned++
+			}
+		}
+		for _, p := range picked {
+			if keptIDs[p.ID] {
+				continue
+			}
+			d := datastore.DeletedDetection{ID: p.ID}
+			if p.ClipName != nil {
+				d.ClipName = strings.TrimSpace(*p.ClipName)
+			}
+			chunk.Deleted = append(chunk.Deleted, d)
+		}
 	}
-	if row.ClipName != nil {
-		clipName = strings.TrimSpace(*row.ClipName)
+	// Remaining = total - locked, from two index-driven counts; a NOT EXISTS scan
+	// over every detection of a large species takes most of a second.
+	var total, locked int64
+	if err := db.Table(prefix+"detections").Where("label_id IN ?", labelIDs).Count(&total).Error; err != nil {
+		return chunk, wsError(err, "count_remaining")
 	}
-	return datastore.SpeciesDeleteDeleted, clipName, nil
+	if err := db.Table(prefix+"detection_locks k").
+		Joins(fmt.Sprintf("JOIN %sdetections d ON d.id = k.detection_id", prefix)).
+		Where("d.label_id IN ?", labelIDs).Count(&locked).Error; err != nil {
+		return chunk, wsError(err, "count_remaining")
+	}
+	chunk.Remaining = max(total-locked, 0)
+	return chunk, nil
 }

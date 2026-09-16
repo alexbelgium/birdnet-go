@@ -5834,7 +5834,6 @@
       "done": "Verwijderen voltooid.",
       "stop": "Stoppen",
       "cancelled": "Verwijderen gestopt. Reeds verwijderde detecties blijven verwijderd.",
-      "failed": "Niet verwijderde detecties: {count}. Ze zijn behouden en kunnen opnieuw geprobeerd worden.",
       "stalled": "Verwijderen gestopt omdat de resterende detecties niet verwijderd konden worden.",
       "error": "Verwijderen mislukt. Reeds verwijderde detecties blijven verwijderd."
     },

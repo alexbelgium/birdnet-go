@@ -24,10 +24,9 @@ const speciesWorkspaceTimeout = 30 * time.Second
 type speciesWorkspaceStore interface {
 	SpeciesWorkspaceInventory(ctx context.Context, scientificName string) ([]datastore.SpeciesWorkspaceRow, error)
 	SpeciesWorkspaceStats(ctx context.Context) ([]datastore.SpeciesWorkspaceStats, error)
-	SpeciesWorkspaceCandidates(ctx context.Context, scientificName string, limit int) ([]datastore.SpeciesRecordingCandidate, error)
+	SpeciesWorkspaceCandidates(ctx context.Context, names []string, limit int) (map[string][]datastore.SpeciesRecordingCandidate, error)
 	SpeciesWorkspaceRecordings(ctx context.Context, q datastore.SpeciesRecordingQuery) ([]datastore.SpeciesWorkspaceRecording, int64, error)
-	SpeciesWorkspaceDeletable(ctx context.Context, scientificName string, limit int) (ids []uint, remaining int64, err error)
-	SpeciesWorkspaceDeleteDetection(ctx context.Context, scientificName string, id uint) (datastore.SpeciesDeleteOutcome, string, error)
+	SpeciesWorkspaceDeleteChunk(ctx context.Context, scientificName string, limit int) (datastore.SpeciesDeleteChunk, error)
 }
 
 // RegisterSpeciesWorkspaceRoutes registers /species-workspace/* on the API group.

@@ -103,12 +103,15 @@ func TestSpeciesWorkspace_V2(t *testing.T) {
 	})
 
 	t.Run("candidates put locked first and skip false positives", func(t *testing.T) {
-		got, err := ds.SpeciesWorkspaceCandidates(ctx, "Turdus merula", 5)
+		got, err := ds.SpeciesWorkspaceCandidates(ctx, []string{"Turdus merula", "Motacilla alba", "Nobody"}, 5)
 		require.NoError(t, err)
-		require.Len(t, got, 2)
-		assert.Equal(t, c, got[0].ID)
-		assert.True(t, got[0].Locked)
-		assert.Equal(t, a, got[1].ID)
+		tm := got["Turdus merula"]
+		require.Len(t, tm, 2)
+		assert.Equal(t, c, tm[0].ID)
+		assert.True(t, tm[0].Locked)
+		assert.Equal(t, a, tm[1].ID)
+		require.Len(t, got["Motacilla alba"], 1, "a prefix-sharing species is not merged")
+		assert.Empty(t, got["Nobody"])
 	})
 
 	t.Run("recordings page across labels with sort and locked filter", func(t *testing.T) {
@@ -132,31 +135,26 @@ func TestSpeciesWorkspace_V2(t *testing.T) {
 		assert.Equal(t, c, recs[0].Note.ID)
 	})
 
-	t.Run("delete keeps locked and other species", func(t *testing.T) {
-		ids, remaining, err := ds.SpeciesWorkspaceDeletable(ctx, "Turdus merula", 10)
+	t.Run("delete chunk keeps locked detections and reports remaining", func(t *testing.T) {
+		chunk, err := ds.SpeciesWorkspaceDeleteChunk(ctx, "Turdus merula", 2)
 		require.NoError(t, err)
-		assert.Equal(t, int64(3), remaining)
-		assert.ElementsMatch(t, []uint{a, b, d}, ids)
+		assert.Len(t, chunk.Deleted, 2)
+		assert.Equal(t, int64(1), chunk.Remaining)
 
-		outcome, _, err := ds.SpeciesWorkspaceDeleteDetection(ctx, "Turdus merula", c)
+		chunk, err = ds.SpeciesWorkspaceDeleteChunk(ctx, "Turdus merula", 2)
 		require.NoError(t, err)
-		assert.Equal(t, datastore.SpeciesDeleteLocked, outcome)
+		assert.Len(t, chunk.Deleted, 1)
+		assert.Equal(t, int64(0), chunk.Remaining)
 
-		outcome, _, err = ds.SpeciesWorkspaceDeleteDetection(ctx, "Motacilla alba", fp)
+		rows, err := ds.SpeciesWorkspaceInventory(ctx, "Turdus merula")
 		require.NoError(t, err)
-		assert.Equal(t, datastore.SpeciesDeleteReassigned, outcome)
+		require.Len(t, rows, 1)
+		assert.Equal(t, int64(1), rows[0].Total, "only the locked detection is left")
+		assert.Equal(t, int64(1), rows[0].Locked)
 
-		outcome, clip, err := ds.SpeciesWorkspaceDeleteDetection(ctx, "Turdus merula", a)
+		// Other species are untouched, including the prefix-sharing one.
+		rows, err = ds.SpeciesWorkspaceInventory(ctx, "Motacilla alba alba")
 		require.NoError(t, err)
-		assert.Equal(t, datastore.SpeciesDeleteDeleted, outcome)
-		assert.Equal(t, "a.wav", clip)
-
-		outcome, _, err = ds.SpeciesWorkspaceDeleteDetection(ctx, "Turdus merula", a)
-		require.NoError(t, err)
-		assert.Equal(t, datastore.SpeciesDeleteMissing, outcome)
-
-		_, remaining, err = ds.SpeciesWorkspaceDeletable(ctx, "Turdus merula", 1)
-		require.NoError(t, err)
-		assert.Equal(t, int64(2), remaining)
+		require.Len(t, rows, 1)
 	})
 }
