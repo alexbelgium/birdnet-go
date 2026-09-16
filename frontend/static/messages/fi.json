@@ -1097,6 +1097,17 @@
       "muted": "Mykistetty",
       "level": "Vahvistus: {value} dB"
     },
+    "static": {
+      "toggle": "Staattinen spektrogrammi",
+      "recording": "Tallennetaan…",
+      "generatedAt": "Luotu klo {time}",
+      "captureFailed": "Staattisen spektrogrammin tallennus epäonnistui. Yritetään uudelleen…",
+      "sessionExpired": "Kahden minuutin staattisen spektrogrammin istunto on päättynyt.",
+      "restart": "Käynnistä istunto uudelleen",
+      "fullRange": "Tulon koko taajuusalue",
+      "frequencyAxis": "Taajuus kilohertseinä",
+      "imageAlt": "Lähteen {source} staattinen spektrogrammi"
+    },
     "page": {
       "title": "Reaaliaikainen ääni",
       "sourceLabel": "Äänilähde",

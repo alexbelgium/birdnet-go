@@ -1097,6 +1097,17 @@
       "muted": "Stumm",
       "level": "Verstärkung: {value} dB"
     },
+    "static": {
+      "toggle": "Statisches Spektrogramm",
+      "recording": "Aufnahme läuft…",
+      "generatedAt": "Erstellt um {time}",
+      "captureFailed": "Aufnahme des statischen Spektrogramms fehlgeschlagen. Neuer Versuch…",
+      "sessionExpired": "Die zweiminütige Sitzung für statische Spektrogramme ist beendet.",
+      "restart": "Sitzung neu starten",
+      "fullRange": "Vollständiger Frequenzbereich des Eingangs",
+      "frequencyAxis": "Frequenz in Kilohertz",
+      "imageAlt": "Statisches Spektrogramm für {source}"
+    },
     "page": {
       "title": "Live-Audio",
       "sourceLabel": "Audioquelle",

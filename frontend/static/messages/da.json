@@ -1097,6 +1097,17 @@
       "muted": "Lydløs",
       "level": "Forstærkning: {value} dB"
     },
+    "static": {
+      "toggle": "Statisk spektrogram",
+      "recording": "Optager…",
+      "generatedAt": "Genereret kl. {time}",
+      "captureFailed": "Optagelse af statisk spektrogram mislykkedes. Prøver igen…",
+      "sessionExpired": "Den to minutter lange session med statisk spektrogram er afsluttet.",
+      "restart": "Genstart session",
+      "fullRange": "Hele inputtets frekvensområde",
+      "frequencyAxis": "Frekvens i kilohertz",
+      "imageAlt": "Statisk spektrogram for {source}"
+    },
     "page": {
       "title": "Live-lyd",
       "sourceLabel": "Lydkilde",

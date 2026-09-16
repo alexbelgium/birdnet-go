@@ -40,6 +40,7 @@ func TestIsPrivateModeExempt(t *testing.T) {
 		{http.MethodPost, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSStartPath},
 		{http.MethodPost, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSHeartbeatPath},
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSStatusPath},
+		{http.MethodGet, apiV2Prefix + audioapi.StaticSpectrogramPath},
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSTokenGroupPath + audioapi.HLSPlaylistPath},
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSTokenGroupPath + audioapi.HLSContentPath},
 	}
@@ -112,6 +113,7 @@ func TestPrivateModeExemptPathsAreRegisteredRoutes(t *testing.T) {
 	hlsGroup.POST(audioapi.HLSStopPath, noop)
 	hlsGroup.POST(audioapi.HLSHeartbeatPath, noop)
 	hlsGroup.GET(audioapi.HLSStatusPath, noop)
+	g.GET(audioapi.StaticSpectrogramPath, noop)
 	hlsTokenGroup := hlsGroup.Group(audioapi.HLSTokenGroupPath)
 	hlsTokenGroup.GET(audioapi.HLSPlaylistPath, noop)
 	hlsTokenGroup.GET(audioapi.HLSContentPath, noop)
@@ -127,6 +129,7 @@ func TestPrivateModeExemptPathsAreRegisteredRoutes(t *testing.T) {
 		key(http.MethodPost, apiV2Prefix+audioapi.HLSGroupPath+audioapi.HLSStartPath):                              true,
 		key(http.MethodPost, apiV2Prefix+audioapi.HLSGroupPath+audioapi.HLSHeartbeatPath):                          true,
 		key(http.MethodGet, apiV2Prefix+audioapi.HLSGroupPath+audioapi.HLSStatusPath):                              true,
+		key(http.MethodGet, apiV2Prefix+audioapi.StaticSpectrogramPath):                                            true,
 		key(http.MethodGet, apiV2Prefix+audioapi.HLSGroupPath+audioapi.HLSTokenGroupPath+audioapi.HLSPlaylistPath): true,
 		key(http.MethodGet, apiV2Prefix+audioapi.HLSGroupPath+audioapi.HLSTokenGroupPath+audioapi.HLSContentPath):  true,
 	}

@@ -1097,6 +1097,17 @@
       "muted": "Disattivato",
       "level": "Guadagno: {value} dB"
     },
+    "static": {
+      "toggle": "Spettrogramma statico",
+      "recording": "Registrazione…",
+      "generatedAt": "Generato alle {time}",
+      "captureFailed": "Acquisizione dello spettrogramma statico non riuscita. Nuovo tentativo…",
+      "sessionExpired": "La sessione di spettrogramma statico di due minuti è terminata.",
+      "restart": "Riavvia sessione",
+      "fullRange": "Intero intervallo di frequenza in ingresso",
+      "frequencyAxis": "Frequenza in kilohertz",
+      "imageAlt": "Spettrogramma statico per {source}"
+    },
     "page": {
       "title": "Audio dal vivo",
       "sourceLabel": "Sorgente audio",

@@ -1097,6 +1097,17 @@
       "muted": "Némítva",
       "level": "Erősítés: {value} dB"
     },
+    "static": {
+      "toggle": "Statikus spektrogram",
+      "recording": "Felvétel…",
+      "generatedAt": "Létrehozva: {time}",
+      "captureFailed": "A statikus spektrogram rögzítése sikertelen. Újrapróbálkozás…",
+      "sessionExpired": "A kétperces statikus spektrogram-munkamenet véget ért.",
+      "restart": "Munkamenet újraindítása",
+      "fullRange": "A bemenet teljes frekvenciatartománya",
+      "frequencyAxis": "Frekvencia kilohertzben",
+      "imageAlt": "Statikus spektrogram ehhez: {source}"
+    },
     "page": {
       "title": "Élő hang",
       "sourceLabel": "Hangforrás",

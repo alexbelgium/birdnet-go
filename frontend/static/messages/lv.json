@@ -1097,6 +1097,17 @@
       "muted": "Izslēgts",
       "level": "Pastiprinājums: {value} dB"
     },
+    "static": {
+      "toggle": "Statisks spektrogrammas",
+      "recording": "Notiek ierakstīšana…",
+      "generatedAt": "Izveidots plkst. {time}",
+      "captureFailed": "Neizdevās iegūt statisko spektrogrammu. Mēģina vēlreiz…",
+      "sessionExpired": "Divu minūšu statiskā spektrogrammas sesija ir beigusies.",
+      "restart": "Restartēt sesiju",
+      "fullRange": "Pilns ievades frekvenču diapazons",
+      "frequencyAxis": "Frekvence kilohercos",
+      "imageAlt": "Statisks spektrogrammas avotam {source}"
+    },
     "page": {
       "title": "Tiešraides audio",
       "sourceLabel": "Audio avots",

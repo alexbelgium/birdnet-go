@@ -1097,6 +1097,17 @@
       "muted": "Stlmené",
       "level": "Zosilnenie: {value} dB"
     },
+    "static": {
+      "toggle": "Statický spektrogram",
+      "recording": "Nahrávanie…",
+      "generatedAt": "Vygenerované o {time}",
+      "captureFailed": "Zachytenie statického spektrogramu zlyhalo. Opakujem…",
+      "sessionExpired": "Dvojminútová relácia statického spektrogramu sa skončila.",
+      "restart": "Reštartovať reláciu",
+      "fullRange": "Celý frekvenčný rozsah vstupu",
+      "frequencyAxis": "Frekvencia v kilohertzoch",
+      "imageAlt": "Statický spektrogram pre {source}"
+    },
     "page": {
       "title": "Živý zvuk",
       "sourceLabel": "Zdroj zvuku",

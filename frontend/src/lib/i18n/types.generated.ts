@@ -863,6 +863,15 @@ export type TranslationKey =
   | 'spectrogram.dashboard.audioToggle'
   | 'spectrogram.gain.muted'
   | 'spectrogram.gain.level' // params: value
+  | 'spectrogram.static.toggle'
+  | 'spectrogram.static.recording'
+  | 'spectrogram.static.generatedAt' // params: time
+  | 'spectrogram.static.captureFailed'
+  | 'spectrogram.static.sessionExpired'
+  | 'spectrogram.static.restart'
+  | 'spectrogram.static.fullRange'
+  | 'spectrogram.static.frequencyAxis'
+  | 'spectrogram.static.imageAlt' // params: source
   | 'spectrogram.page.title'
   | 'spectrogram.page.sourceLabel'
   | 'spectrogram.page.connected'
@@ -4361,6 +4370,8 @@ export type TranslationParams = {
   'detections.errors.loadFailed': { status: string | number };
   'species.rarity.basedOnLocation': { latitude: string | number; longitude: string | number };
   'spectrogram.gain.level': { value: string | number };
+  'spectrogram.static.generatedAt': { time: string | number };
+  'spectrogram.static.imageAlt': { source: string | number };
   'system.systemInfo.temperatureValue': { temp: string | number };
   'system.errors.systemInfo': { error: string | number };
   'system.errors.diskUsage': { error: string | number };

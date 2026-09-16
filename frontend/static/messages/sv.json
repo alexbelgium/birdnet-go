@@ -1097,6 +1097,17 @@
       "muted": "Tystad",
       "level": "Förstärkning: {value} dB"
     },
+    "static": {
+      "toggle": "Statiskt spektrogram",
+      "recording": "Spelar in…",
+      "generatedAt": "Genererad kl. {time}",
+      "captureFailed": "Inspelning av statiskt spektrogram misslyckades. Försöker igen…",
+      "sessionExpired": "Den två minuter långa sessionen med statiskt spektrogram har avslutats.",
+      "restart": "Starta om sessionen",
+      "fullRange": "Ingångens fullständiga frekvensområde",
+      "frequencyAxis": "Frekvens i kilohertz",
+      "imageAlt": "Statiskt spektrogram för {source}"
+    },
     "page": {
       "title": "Live-ljud",
       "sourceLabel": "Ljudkälla",

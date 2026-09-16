@@ -299,6 +299,7 @@ Both verbs report identically under the `skippedFields` response key: it lists o
 | ------ | ---------------------- | ------------------- | ---- | ---------------------------------------- |
 | GET    | `/streams/audio-level` | `StreamAudioLevel`  | ❌   | Real-time audio level SSE                |
 | GET    | `/streams/sources`     | `ListStreamSources` | ❌   | Active stream sources (RTSP, HTTP, etc.) |
+| GET    | `/streams/spectrogram/:sourceID` | `GetStaticSpectrogram` | ✅ publicLiveAudio | Capture 1–10 seconds of native-rate PCM and return a full-range PNG |
 
 **Features:**
 
