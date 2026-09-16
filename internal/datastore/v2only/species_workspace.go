@@ -151,8 +151,8 @@ func (ds *Datastore) SpeciesWorkspaceInventory(ctx context.Context, scientificNa
 // seeks on idx_detection_label_date (faster on SQLite than grouping every row).
 func (ds *Datastore) labelSpan(tx *gorm.DB, labelID uint) (first, last int64, err error) {
 	table := ds.manager.TablePrefix() + "detections"
-	if err = tx.Table(table).Where("label_id = ?", labelID).Select("MIN(detected_at)").Scan(&first).Error; err != nil {
-		return 0, 0, err
+	if minErr := tx.Table(table).Where("label_id = ?", labelID).Select("MIN(detected_at)").Scan(&first).Error; minErr != nil {
+		return 0, 0, minErr
 	}
 	err = tx.Table(table).Where("label_id = ?", labelID).Select("MAX(detected_at)").Scan(&last).Error
 	return first, last, err
