@@ -1,8 +1,11 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import type { DetectionsListData, DetectionSortBy } from '$lib/types/detection.types';
   import DetectionsList from './DetectionsList.svelte';
 
   interface Props {
+    speciesWorkspace?: boolean;
+    toolbar?: Snippet;
     data: DetectionsListData | null;
     loading?: boolean;
     error?: string | null;
@@ -11,9 +14,12 @@
     onRefresh: () => void;
     onNumResultsChange: (_numResults: number) => void;
     onSortChange?: (_sortBy: DetectionSortBy) => void;
+    onLockedFilterChange?: (_locked: boolean) => void;
   }
 
   let {
+    speciesWorkspace = false,
+    toolbar,
     data = null,
     loading = false,
     error = null,
@@ -22,12 +28,15 @@
     onRefresh,
     onNumResultsChange,
     onSortChange,
+    onLockedFilterChange,
   }: Props = $props();
 </script>
 
 <section class="card col-span-12 bg-[var(--color-base-100)] shadow-xs">
   <div class="card-body grow-0 p-2 sm:p-4 sm:pt-3">
     <DetectionsList
+      {speciesWorkspace}
+      {toolbar}
       {data}
       {loading}
       {error}
@@ -36,6 +45,7 @@
       {onRefresh}
       {onNumResultsChange}
       {onSortChange}
+      {onLockedFilterChange}
     />
   </div>
 </section>

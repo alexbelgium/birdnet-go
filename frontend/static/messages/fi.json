@@ -205,6 +205,7 @@
     "serverError": "500 - Sisäinen palvelinvirhe",
     "componentError": "Komponentin latausvirhe",
     "speciesAnalytics": "Lajianalytiikka",
+    "speciesList": "Lajien hallinta",
     "detectionDetails": "Tunnistuksen tiedot",
     "settingsNotAvailable": "Asetukset eivät ole käytettävissä",
     "analyticsSummary": "Analytiikka - Yhteenveto",
@@ -2020,6 +2021,7 @@
       "speciesList": "Lajiluettelo",
       "switchToGrid": "Vaihda ruudukkonäkymään",
       "switchToList": "Vaihda listanäkymään",
+      "switchToManage": "Vaihda hallintanäkymään",
       "noSpeciesFound": "Suodattimia vastaavia lajeja ei löytynyt.",
       "headers": {
         "species": "Laji",
@@ -2033,7 +2035,30 @@
         "detections": "Havainnot:",
         "confidence": "Luottamus:",
         "first": "Ensimmäinen:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Poissuljettu",
+          "included": "Sisällytetty",
+          "reviewRatio": "Oikein",
+          "rangeProbability": "Alue",
+          "confirmed": "Vahvistettu",
+          "actions": "Toiminnot"
+        },
+        "delete": "Poista kaikki tämän lajin havainnot",
+        "deleteTitle": "Poista lajin havainnot",
+        "deleteConfirm": "Poista",
+        "deleteMessage": "Poistetaanko {count, plural, one {# havainto} other {# havaintoa}} lajille {species}? Lukitut havainnot säilytetään.",
+        "deleteWarning": "Tämä poistaa havainnot ja niiden äänileikkeet pysyvästi, eikä toimintoa voi kumota.",
+        "deleteFailed": "Havaintojen poistaminen epäonnistui. Yritä uudelleen.",
+        "deleteProgress": "Poistettu {deleted} tähän mennessä, {remaining} jäljellä…",
+        "membershipFailed": "Lajiluetteloiden päivitys epäonnistui. Yritä uudelleen.",
+        "loadFailed": "Lajitietojen päivitys epäonnistui. Näytetään aiemmin ladatut tulokset.",
+        "allTimeNote": "Hallinta näyttää kaikki havainnot kaikilta ajoilta; yllä oleva päivämääräsuodatin ei koske tätä näkymää."
       }
+    },
+    "speciesList": {
+      "title": "Lajien hallinta"
     },
     "advanced": {
       "chartControls": "Kaavion hallinta",
@@ -2235,6 +2260,46 @@
       "afternoon12to16": "Iltapäivä (12-16)",
       "evening17to19": "Ilta (17-19)",
       "night20to23": "Yö (20-23)"
+    },
+    "speciesTools": {
+      "all": "Kaikki",
+      "birds": "Linnut",
+      "bats": "Lepakot",
+      "others": "Muut",
+      "group": "Lajiryhmä",
+      "search": "Hae lajeja…",
+      "editColumns": "Muokkaa sarakkeita",
+      "moveUp": "Siirrä ylös",
+      "moveDown": "Siirrä alas",
+      "sort": "Lajittele lajit",
+      "showingSpecies": "{shown} / {total} lajia",
+      "bestRecording": "Paras tallenne",
+      "audioUnavailable": "Ääni ei saatavilla",
+      "locked": "Lukittu",
+      "lockedOnly": "Vain lukitut",
+      "play": "Toista tallenne",
+      "image": "Lajin kuva",
+      "quickGraph": "Pikakaavio",
+      "allRecordings": "Kaikki lajin {name} tallenteet",
+      "toggleConfirmed": "Vaihda vahvistusta",
+      "toggleIncluded": "Vaihda sisällytysluetteloa",
+      "toggleExcluded": "Vaihda poissulkuluetteloa",
+      "mapExternalOnly": "Tämä sivusto edellyttää kartan avaamista erillisessä välilehdessä.",
+      "mapUnavailable": "Tälle lajille ei ole vahvistettua karttalinkkiä.",
+      "openMap": "Avaa kartta Observations.be-sivustolla",
+      "unknownModel": "Tuntematon malli",
+      "model": "Malli",
+      "historyTitle": "Havaintohistoria: {name}",
+      "historySummary": "{count} havaintoa · {range}",
+      "historySince": "Alkaen {date}",
+      "historyTwoYears": "Viimeiset 2 vuotta",
+      "historyPeak": "Huippu",
+      "historyAverage": "Keskiarvo/päivä",
+      "historyDaily": "Päivittäiset määrät",
+      "historyMovingAverage": "7 päivän keskiarvo",
+      "historyEmpty": "Ei havaintoja tällä ajanjaksolla",
+      "historyLonger": "Kokeile pidempää ajanjaksoa",
+      "historyChart": "{name}: {count} havaintoa · {range} · huippu {peak}"
     }
   },
   "settings": {

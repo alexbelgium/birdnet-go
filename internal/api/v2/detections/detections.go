@@ -153,7 +153,9 @@ type DetectionResponse struct {
 	ScientificName     string            `json:"scientificName"`
 	CommonName         string            `json:"commonName"`
 	Confidence         float64           `json:"confidence"`
-	ClipName           string            `json:"clipName,omitempty"`  // Audio clip filename (basename only, no path); empty when no clip exists
+	ClipName           string            `json:"clipName,omitempty"` // Audio clip filename (basename only, no path); empty when no clip exists
+	AudioAvailable     *bool             `json:"audioAvailable,omitempty"`
+	ModelName          string            `json:"modelName,omitempty"`
 	ModelType          string            `json:"modelType,omitempty"` // AI model type (e.g. "bird", "bat"); drives the spectrogram frequency range
 	Verified           string            `json:"verified"`
 	Locked             bool              `json:"locked"`
@@ -567,6 +569,20 @@ func (c *Handler) GetDetections(ctx echo.Context) error {
 
 	// Convert notes to response format
 	detections := c.convertNotesToDetectionResponses(notes, params.IncludeWeather)
+	if ctx.QueryParam("includeAudioAvailability") == "true" && c.SFS != nil {
+		for i := range detections {
+			available := false
+			clipPath, valid := apicore.NormalizeClipPathStrict(notes[i].ClipName, c.CurrentSettings().Realtime.Audio.Export.Path)
+			if valid && clipPath != "" {
+				info, statErr := c.SFS.StatRel(clipPath)
+				if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+					return c.HandleError(ctx, statErr, "Failed to check recording availability", http.StatusInternalServerError)
+				}
+				available = statErr == nil && info.Mode().IsRegular() && info.Size() > 0
+			}
+			detections[i].AudioAvailable = &available
+		}
+	}
 	c.stripSourceForUnauthenticated(ctx, detections)
 
 	// Create paginated response
@@ -595,6 +611,18 @@ func (p *detectionQueryParams) needsAdvancedRouting() bool {
 		p.HourRange != "" || p.Verified != "" ||
 		p.Location != "" || p.Source != "" || p.Locked != "" ||
 		p.StartDate != "" || p.EndDate != "" {
+		return true
+	}
+
+	// An empty date on a species query means all dates. Route it through advanced
+	// search because the legacy dedicated handler applies `date = ?`
+	// unconditionally and would otherwise return no rows for the empty date.
+	// Require a non-empty species too: without one, advanced search would build
+	// an unfiltered query and return every detection instead of none. Leave an
+	// hour-without-date species query alone: it's a pre-existing "handled
+	// natively" shape (hour filtering is only meaningful relative to a date on
+	// the dedicated handler), and not one this all-dates feature produces.
+	if p.QueryType == queryTypeSpecies && p.Date == "" && p.Species != "" && p.Hour == "" {
 		return true
 	}
 
@@ -738,6 +766,7 @@ func (c *Handler) noteToDetectionResponse(note *datastore.Note, includeWeather b
 	// batch-loaded ai_models relation, so reading it here adds no extra query.
 	// Fall back to the default bird range when the model type is unknown (e.g. the
 	// legacy datastore does not track it).
+	detection.ModelName = note.Model.Name
 	detection.ModelType = note.Model.ModelType
 	if detection.ModelType == "" {
 		detection.ModelType = defaultModelType

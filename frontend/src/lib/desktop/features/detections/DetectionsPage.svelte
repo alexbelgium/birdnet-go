@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, type Snippet } from 'svelte';
+  let {
+    speciesWorkspace = false,
+    toolbar,
+    onWorkspaceRefresh,
+  }: { speciesWorkspace?: boolean; toolbar?: Snippet; onWorkspaceRefresh?: () => void } = $props();
+  let fetchController: AbortController | null = null;
   import { t } from '$lib/i18n';
   import { fetchWithCSRF } from '$lib/utils/api';
   import type {
@@ -82,28 +88,38 @@
       }
     }
 
-    // Only default to today's date for non-search query types.
-    // For search queries, omitting the date allows searching across all dates.
+    // Only default to today's date for query types that are scoped to a day.
+    // For search and species queries, omitting the date allows searching across all dates.
     // When date is included, the backend restricts results to that single day,
     // which causes search to return no results for species detected on other days.
     const date =
-      params.get('date')?.trim() || (queryType !== 'search' ? getLocalDateString() : undefined);
+      params.get('date')?.trim() ||
+      (queryType !== 'search' && queryType !== 'species' ? getLocalDateString() : undefined);
 
     return {
-      queryType,
-      date,
-      hour: params.get('hour') || undefined,
-      duration: params.get('duration') ? parseInt(params.get('duration')!) : undefined,
+      queryType: speciesWorkspace ? 'species' : queryType,
+      date: speciesWorkspace ? undefined : date,
+      hour: speciesWorkspace ? undefined : params.get('hour') || undefined,
+      duration:
+        !speciesWorkspace && params.get('duration') ? parseInt(params.get('duration')!) : undefined,
       species: params.get('species') || undefined,
-      search: search || undefined,
+      search: speciesWorkspace ? undefined : search || undefined,
       numResults,
       offset: parseInt(params.get('offset') || '0'),
-      sortBy,
+      sortBy: speciesWorkspace
+        ? sortByParam && ALLOWED_SORT_VALUES.has(sortByParam)
+          ? (sortByParam as DetectionSortBy)
+          : 'confidence_desc'
+        : sortBy,
+      locked: params.get('locked') === 'true' ? true : undefined,
     };
   }
 
   // Fetch detections data
-  async function fetchDetections() {
+  async function fetchDetections(preserveOrder = false) {
+    fetchController?.abort();
+    const controller = new AbortController();
+    fetchController = controller;
     loading = true;
     error = null;
 
@@ -119,8 +135,21 @@
 
       // Always include weather data for the detections page
       queryString.append('includeWeather', 'true');
+      if (speciesWorkspace) queryString.append('includeAudioAvailability', 'true');
 
-      const data = (await fetchWithCSRF(`/api/v2/detections?${queryString.toString()}`)) as any;
+      const data = await fetchWithCSRF<{
+        data: import('$lib/types/detection.types').Detection[];
+        total: number;
+        limit: number;
+        current_page: number;
+        total_pages: number;
+        dashboardSettings?: DetectionsListData['dashboardSettings'];
+      }>(`/api/v2/detections?${queryString.toString()}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (speciesWorkspace && preserveOrder && detectionsData) {
+        const ranks = new Map(detectionsData.notes.map((note, index) => [note.id, index]));
+        data.data.sort((a, b) => (ranks.get(a.id) ?? Infinity) - (ranks.get(b.id) ?? Infinity));
+      }
 
       // Validate numResults before using
       const validatedNumResults =
@@ -132,7 +161,7 @@
       detectionsData = {
         notes: data.data || [],
         queryType: queryParams.queryType || 'all',
-        date: queryParams.date?.trim() || getLocalDateString(),
+        date: queryParams.date?.trim() || '',
         hour: queryParams.hour ? parseInt(queryParams.hour) : undefined,
         duration: queryParams.duration,
         species: queryParams.species,
@@ -146,12 +175,14 @@
         showingFrom: (queryParams.offset || 0) + 1,
         showingTo: Math.min((queryParams.offset || 0) + (data.data?.length || 0), data.total || 0),
         dashboardSettings: data.dashboardSettings,
+        locked: queryParams.locked ?? false,
       };
     } catch (err) {
+      if (controller.signal.aborted) return;
       error = err instanceof Error ? err.message : t('detections.errors.fetchFailed');
       logger.error('Error fetching detections:', err);
     } finally {
-      loading = false;
+      if (fetchController === controller) loading = false;
     }
   }
 
@@ -218,6 +249,20 @@
     fetchDetections();
   }
 
+  // Handle locked-only filter toggle from DetectionsList (all-dates species view)
+  function handleLockedFilterChange(locked: boolean) {
+    const params = new URLSearchParams(window.location.search);
+    if (locked) {
+      params.set('locked', 'true');
+    } else {
+      params.delete('locked');
+    }
+    params.set('offset', '0'); // Reset to first page
+
+    window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+    fetchDetections();
+  }
+
   // Handle details click
   function handleDetailsClick(id: number) {
     // Navigate to detection details page
@@ -260,6 +305,7 @@
     window.addEventListener('popstate', handlePopState);
 
     return () => {
+      fetchController?.abort();
       window.removeEventListener('searchUpdate', handleSearchUpdate);
       window.removeEventListener('popstate', handlePopState);
 
@@ -278,8 +324,14 @@
     {error}
     onPageChange={handlePageChange}
     onDetailsClick={handleDetailsClick}
-    onRefresh={fetchDetections}
+    {speciesWorkspace}
+    {toolbar}
+    onRefresh={() => {
+      void fetchDetections(true);
+      onWorkspaceRefresh?.();
+    }}
     onNumResultsChange={handleNumResultsChange}
     onSortChange={handleSortChange}
+    onLockedFilterChange={handleLockedFilterChange}
   />
 </div>

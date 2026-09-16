@@ -77,11 +77,15 @@ func (c *Handler) RegisterAnalyticsRoutes(g *echo.Group) {
 	speciesGroup.GET("/daily", c.GetDailySpeciesSummary)
 	speciesGroup.GET("/daily/batch", c.GetBatchDailySpeciesSummary) // Batch daily summaries endpoint
 	speciesGroup.GET("/summary", c.GetSpeciesSummary)
-	speciesGroup.GET("/detections/new", c.GetNewSpeciesDetections) // Renamed endpoint
-	speciesGroup.GET("/thumbnails", c.GetSpeciesThumbnails)        // Batch thumbnail endpoint
-	speciesGroup.GET("/diversity", c.GetSpeciesDiversity)          // Species diversity over time
-	speciesGroup.GET("/accumulation", c.GetSpeciesAccumulation)    // Species accumulation curve (biodiversity collector's curve)
-	speciesGroup.GET("/phenology", c.GetSpeciesPhenology)          // Arrival/departure phenology (residency-bar Gantt)
+	speciesGroup.GET("/tools", c.GetSpeciesTools, c.AuthMiddleware)
+	speciesGroup.GET("/tools/recordings", c.GetSpeciesToolRecordings, c.AuthMiddleware)
+	speciesGroup.GET("/tools/observation-link", c.GetObservationLink, c.AuthMiddleware)
+	speciesGroup.GET("/review-stats", c.GetSpeciesReviewStats, c.AuthMiddleware) // Protected: per-species all-time review counts (analytics Manage view)
+	speciesGroup.GET("/detections/new", c.GetNewSpeciesDetections)               // Renamed endpoint
+	speciesGroup.GET("/thumbnails", c.GetSpeciesThumbnails)                      // Batch thumbnail endpoint
+	speciesGroup.GET("/diversity", c.GetSpeciesDiversity)                        // Species diversity over time
+	speciesGroup.GET("/accumulation", c.GetSpeciesAccumulation)                  // Species accumulation curve (biodiversity collector's curve)
+	speciesGroup.GET("/phenology", c.GetSpeciesPhenology)                        // Arrival/departure phenology (residency-bar Gantt)
 
 	// Time analytics routes (can be implemented later)
 	timeGroup := analyticsGroup.Group("/time")

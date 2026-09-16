@@ -23,6 +23,8 @@ export interface Detection {
   scientificName: string;
   commonName: string;
   confidence: number;
+  audioAvailable?: boolean;
+  modelName?: string;
   modelType?: string; // AI model type (e.g. 'bird', 'bat'); drives the spectrogram frequency range
   verified: 'correct' | 'false_positive' | 'unverified';
   locked: boolean;
@@ -76,6 +78,7 @@ export interface DetectionsListData {
       summary?: boolean;
     };
   };
+  locked?: boolean;
 }
 
 export type DetectionSortBy =
@@ -99,6 +102,7 @@ export interface DetectionQueryParams {
   numResults?: number;
   offset?: number;
   sortBy?: DetectionSortBy;
+  locked?: boolean;
 }
 
 export interface DetectionReviewRequest {

@@ -205,6 +205,7 @@
     "serverError": "500 - Interná chyba servera",
     "componentError": "Chyba načítania komponentu",
     "speciesAnalytics": "Analytika druhov",
+    "speciesList": "Správa druhov",
     "detectionDetails": "Podrobnosti detekcie",
     "settingsNotAvailable": "Nastavenia nie sú k dispozícii",
     "analyticsSummary": "Analytika - Zhrnutie",
@@ -2020,6 +2021,7 @@
       "speciesList": "Zoznam druhov",
       "switchToGrid": "Prepnúť na mriežku",
       "switchToList": "Prepnúť na zoznam",
+      "switchToManage": "Prepnúť na správu druhov",
       "noSpeciesFound": "Nenašli sa žiadne druhy zodpovedajúce vašim filtrom.",
       "headers": {
         "species": "Druh",
@@ -2033,7 +2035,30 @@
         "detections": "Detekcie:",
         "confidence": "Istota:",
         "first": "Prvýkrát:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Vylúčené",
+          "included": "Zahrnuté",
+          "reviewRatio": "Správne",
+          "rangeProbability": "Rozsah",
+          "confirmed": "Potvrdené",
+          "actions": "Akcie"
+        },
+        "delete": "Odstrániť všetky detekcie tohto druhu",
+        "deleteTitle": "Odstrániť detekcie druhu",
+        "deleteConfirm": "Odstrániť",
+        "deleteMessage": "Odstrániť všetkých {count} detekcií druhu {species}? Uzamknuté detekcie zostanú zachované.",
+        "deleteWarning": "Týmto sa natrvalo odstránia detekcie aj ich zvukové klipy a túto akciu nie je možné vrátiť späť.",
+        "deleteFailed": "Detekcie sa nepodarilo odstrániť. Skúste to znova.",
+        "deleteProgress": "Zatiaľ odstránené: {deleted}, zostáva: {remaining}…",
+        "membershipFailed": "Nepodarilo sa aktualizovať zoznamy druhov. Skúste to znova.",
+        "loadFailed": "Nepodarilo sa obnoviť údaje o druhoch. Zobrazujú sa predtým načítané výsledky.",
+        "allTimeNote": "Správa zobrazuje všetky detekcie za celé obdobie; vyššie uvedený filter dátumu sa tu nepoužije."
       }
+    },
+    "speciesList": {
+      "title": "Správa druhov"
     },
     "advanced": {
       "chartControls": "Ovládanie grafu",
@@ -2235,6 +2260,46 @@
       "afternoon12to16": "Popoludnie (12-16)",
       "evening17to19": "Večer (17-19)",
       "night20to23": "Noc (20-23)"
+    },
+    "speciesTools": {
+      "all": "Všetky",
+      "birds": "Vtáky",
+      "bats": "Netopiere",
+      "others": "Ostatné",
+      "group": "Skupina druhov",
+      "search": "Hľadať druhy…",
+      "editColumns": "Upraviť stĺpce",
+      "moveUp": "Posunúť nahor",
+      "moveDown": "Posunúť nadol",
+      "sort": "Zoradiť druhy",
+      "showingSpecies": "{shown} z {total} druhov",
+      "bestRecording": "Najlepšia nahrávka",
+      "audioUnavailable": "Zvuk nie je dostupný",
+      "locked": "Uzamknuté",
+      "lockedOnly": "Iba uzamknuté",
+      "play": "Prehrať nahrávku",
+      "image": "Obrázok druhu",
+      "quickGraph": "Rýchly graf",
+      "allRecordings": "Všetky nahrávky druhu {name}",
+      "toggleConfirmed": "Prepnúť potvrdenie",
+      "toggleIncluded": "Prepnúť zoznam zahrnutých",
+      "toggleExcluded": "Prepnúť zoznam vylúčených",
+      "mapExternalOnly": "Táto stránka vyžaduje otvorenie mapy na samostatnej karte.",
+      "mapUnavailable": "Pre tento druh nie je dostupný overený odkaz na mapu.",
+      "openMap": "Otvoriť mapu na Observations.be",
+      "unknownModel": "Neznámy model",
+      "model": "Detekčný model",
+      "historyTitle": "História detekcií: {name}",
+      "historySummary": "{count} detekcií · {range}",
+      "historySince": "Od {date}",
+      "historyTwoYears": "Posledné 2 roky",
+      "historyPeak": "Maximum",
+      "historyAverage": "Priemer/deň",
+      "historyDaily": "Denné počty",
+      "historyMovingAverage": "7-dňový priemer",
+      "historyEmpty": "V tomto období nie sú žiadne detekcie",
+      "historyLonger": "Skúste dlhšie obdobie",
+      "historyChart": "{name}: {count} detekcií · {range} · maximum {peak}"
     }
   },
   "settings": {

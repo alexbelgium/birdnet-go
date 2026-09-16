@@ -205,6 +205,7 @@
     "serverError": "500 - Erro interno do servidor",
     "componentError": "Erro ao carregar componente",
     "speciesAnalytics": "Análise de espécies",
+    "speciesList": "Gestão de espécies",
     "detectionDetails": "Detalhes da detecção",
     "settingsNotAvailable": "Configurações não disponíveis",
     "analyticsSummary": "Análise - Resumo",
@@ -2020,6 +2021,7 @@
       "speciesList": "Lista de espécies",
       "switchToGrid": "Mudar para visualização em grade",
       "switchToList": "Mudar para visualização em lista",
+      "switchToManage": "Mudar para a vista de gestão",
       "noSpeciesFound": "Nenhuma espécie encontrada que corresponda aos seus filtros.",
       "headers": {
         "species": "Espécie",
@@ -2033,7 +2035,30 @@
         "detections": "Detecções:",
         "confidence": "Confiança:",
         "first": "Primeira:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Excluída",
+          "included": "Incluída",
+          "reviewRatio": "Corretas",
+          "rangeProbability": "Alcance",
+          "confirmed": "Confirmada",
+          "actions": "Ações"
+        },
+        "delete": "Eliminar todas as detecções desta espécie",
+        "deleteTitle": "Eliminar detecções da espécie",
+        "deleteConfirm": "Eliminar",
+        "deleteMessage": "Eliminar todas as {count} detecções de {species}? As detecções bloqueadas são mantidas.",
+        "deleteWarning": "Isto remove permanentemente as detecções e os respetivos clipes de áudio e não pode ser desfeito.",
+        "deleteFailed": "Não foi possível eliminar as detecções. Tente novamente.",
+        "deleteProgress": "Eliminadas {deleted} até agora, faltam {remaining}…",
+        "membershipFailed": "Não foi possível atualizar as listas de espécies. Tente novamente.",
+        "loadFailed": "Não foi possível atualizar os dados das espécies. A mostrar os últimos resultados carregados.",
+        "allTimeNote": "Gerir mostra todas as detecções de sempre; o filtro de data acima não se aplica aqui."
       }
+    },
+    "speciesList": {
+      "title": "Gestão de espécies"
     },
     "advanced": {
       "chartControls": "Controles do gráfico",
@@ -2235,6 +2260,46 @@
       "afternoon12to16": "Tarde (12-16)",
       "evening17to19": "Anoitecer (17-19)",
       "night20to23": "Noite (20-23)"
+    },
+    "speciesTools": {
+      "all": "Todos",
+      "birds": "Aves",
+      "bats": "Morcegos",
+      "others": "Outros",
+      "group": "Grupo de espécies",
+      "search": "Pesquisar espécies…",
+      "editColumns": "Editar colunas",
+      "moveUp": "Mover para cima",
+      "moveDown": "Mover para baixo",
+      "sort": "Ordenar espécies",
+      "showingSpecies": "{shown} de {total} espécies",
+      "bestRecording": "Melhor gravação",
+      "audioUnavailable": "Áudio indisponível",
+      "locked": "Bloqueada",
+      "lockedOnly": "Apenas bloqueadas",
+      "play": "Reproduzir gravação",
+      "image": "Imagem da espécie",
+      "quickGraph": "Gráfico rápido",
+      "allRecordings": "Todas as gravações de {name}",
+      "toggleConfirmed": "Alternar confirmação",
+      "toggleIncluded": "Alternar lista de inclusão",
+      "toggleExcluded": "Alternar lista de exclusão",
+      "mapExternalOnly": "Este site exige que o mapa seja aberto num separador separado.",
+      "mapUnavailable": "Não existe uma ligação de mapa verificada para esta espécie.",
+      "openMap": "Abrir mapa no Observations.be",
+      "unknownModel": "Modelo desconhecido",
+      "model": "Modelo",
+      "historyTitle": "Histórico de deteções: {name}",
+      "historySummary": "{count} deteções · {range}",
+      "historySince": "Desde {date}",
+      "historyTwoYears": "Últimos 2 anos",
+      "historyPeak": "Pico",
+      "historyAverage": "Média/dia",
+      "historyDaily": "Contagens diárias",
+      "historyMovingAverage": "Média de 7 dias",
+      "historyEmpty": "Sem deteções neste período",
+      "historyLonger": "Experimente um período mais longo",
+      "historyChart": "{name}: {count} deteções · {range} · pico {peak}"
     }
   },
   "settings": {

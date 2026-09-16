@@ -28,6 +28,7 @@
   // passes them in as callbacks plus the server-hydrated isExcluded state.
   interface Props {
     detection: Detection;
+    speciesWorkspace?: boolean;
     isExcluded?: boolean;
     onDetailsClick?: (_id: number) => void;
     onReview?: () => void;
@@ -40,6 +41,7 @@
 
   let {
     detection,
+    speciesWorkspace = false,
     isExcluded = false,
     onDetailsClick,
     onReview,
@@ -87,7 +89,7 @@
   });
 
   $effect(() => {
-    if (detection.clipName && isVisible) {
+    if (detection.clipName && detection.audioAvailable !== false && isVisible) {
       loader.start(detection.id);
     } else {
       loader.stop();
@@ -178,9 +180,12 @@
 >
   <!-- Inner container with overflow-hidden for spectrogram clipping -->
   <!-- Compact (shorter) layout when there is no spectrogram to display -->
-  <div class="detection-card-inner" class:compact={!detection.clipName}>
+  <div
+    class="detection-card-inner"
+    class:compact={!detection.clipName || detection.audioAvailable === false}
+  >
     <!-- Spectrogram Background (hidden when this detection has no clip) -->
-    {#if detection.clipName}
+    {#if detection.clipName && detection.audioAvailable !== false}
       <div class="spectrogram-container">
         {#if loader.showSpinner}
           <div class="spectrogram-loading">
@@ -240,7 +245,7 @@
     </div>
 
     <!-- Center Play Button (hidden when this detection has no clip) -->
-    {#if detection.clipName}
+    {#if detection.clipName && detection.audioAvailable !== false}
       <PlayOverlay
         detectionId={detection.id}
         gainValue={audioGainValue}
@@ -258,13 +263,19 @@
       onclick={handleViewDetails}
       aria-label={t('detections.row.viewDetails', { species: detection.commonName })}
     >
-      <SpeciesInfoBar {detection} />
+      {#if speciesWorkspace}<span
+          >{detection.date}
+          {detection.time} · {detection.modelName || t('analytics.speciesTools.unknownModel')}</span
+        >{:else}<SpeciesInfoBar {detection} />{/if}
+      {#if speciesWorkspace && (!detection.clipName || detection.audioAvailable === false)}<span
+          >{t('analytics.speciesTools.audioUnavailable')}</span
+        >{/if}
     </button>
   </div>
 
   <!-- Top-Right Controls - OUTSIDE overflow-hidden container -->
   <div class="absolute top-2 right-2 z-50 flex items-center gap-1.5">
-    {#if detection.clipName}
+    {#if detection.clipName && detection.audioAvailable !== false}
       {#if isBatDetection}
         <AudibleBatsButton
           active={audibleBats.active}
@@ -302,7 +313,9 @@
       {onToggleSpecies}
       {onToggleLock}
       {onDelete}
-      onDownload={detection.clipName ? () => downloadDetectionAudio(detection) : undefined}
+      onDownload={detection.clipName && detection.audioAvailable !== false
+        ? () => downloadDetectionAudio(detection)
+        : undefined}
       onMenuOpen={handleMenuOpen}
       onMenuClose={handleMenuClose}
     />

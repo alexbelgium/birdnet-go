@@ -205,6 +205,7 @@
     "serverError": "500 - Errore interno del server",
     "componentError": "Errore caricamento componente",
     "speciesAnalytics": "Analisi specie",
+    "speciesList": "Gestione delle specie",
     "detectionDetails": "Dettagli rilevamento",
     "settingsNotAvailable": "Impostazioni non disponibili",
     "analyticsSummary": "Analisi - Riepilogo",
@@ -2020,6 +2021,7 @@
       "speciesList": "Elenco Specie",
       "switchToGrid": "Passa alla vista griglia",
       "switchToList": "Passa alla vista elenco",
+      "switchToManage": "Passa alla vista di gestione",
       "noSpeciesFound": "Nessuna specie trovata corrispondente ai tuoi filtri.",
       "headers": {
         "species": "Specie",
@@ -2033,7 +2035,30 @@
         "detections": "Rilevamenti:",
         "confidence": "Confidenza:",
         "first": "Primo:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Escluso",
+          "included": "Incluso",
+          "reviewRatio": "Corretti",
+          "rangeProbability": "Intervallo",
+          "confirmed": "Confermato",
+          "actions": "Azioni"
+        },
+        "delete": "Elimina tutti i rilevamenti di questa specie",
+        "deleteTitle": "Elimina rilevamenti della specie",
+        "deleteConfirm": "Elimina",
+        "deleteMessage": "Eliminare tutti i {count} rilevamenti di {species}? I rilevamenti bloccati vengono mantenuti.",
+        "deleteWarning": "Questa operazione rimuove definitivamente i rilevamenti e le loro clip audio e non può essere annullata.",
+        "deleteFailed": "Eliminazione dei rilevamenti non riuscita. Riprova.",
+        "deleteProgress": "Eliminati {deleted} finora, {remaining} rimanenti…",
+        "membershipFailed": "Impossibile aggiornare gli elenchi delle specie. Riprova.",
+        "loadFailed": "Impossibile aggiornare i dati sulla specie. Vengono mostrati i risultati caricati in precedenza.",
+        "allTimeNote": "Gestisci mostra tutti i rilevamenti di sempre; il filtro data sopra non si applica qui."
       }
+    },
+    "speciesList": {
+      "title": "Gestione delle specie"
     },
     "advanced": {
       "chartControls": "Controlli Grafico",
@@ -2235,6 +2260,46 @@
       "afternoon12to16": "Pomeriggio (12-16)",
       "evening17to19": "Sera (17-19)",
       "night20to23": "Notte (20-23)"
+    },
+    "speciesTools": {
+      "all": "Tutte",
+      "birds": "Uccelli",
+      "bats": "Pipistrelli",
+      "others": "Altre",
+      "group": "Gruppo di specie",
+      "search": "Cerca specie…",
+      "editColumns": "Modifica colonne",
+      "moveUp": "Sposta su",
+      "moveDown": "Sposta giù",
+      "sort": "Ordina specie",
+      "showingSpecies": "{shown} di {total} specie",
+      "bestRecording": "Migliore registrazione",
+      "audioUnavailable": "Audio non disponibile",
+      "locked": "Bloccata",
+      "lockedOnly": "Solo bloccate",
+      "play": "Riproduci registrazione",
+      "image": "Immagine della specie",
+      "quickGraph": "Grafico rapido",
+      "allRecordings": "Tutte le registrazioni di {name}",
+      "toggleConfirmed": "Attiva/disattiva conferma",
+      "toggleIncluded": "Attiva/disattiva lista di inclusione",
+      "toggleExcluded": "Attiva/disattiva lista di esclusione",
+      "mapExternalOnly": "Questo sito richiede di aprire la mappa in una scheda separata.",
+      "mapUnavailable": "Non è disponibile un collegamento verificato alla mappa per questa specie.",
+      "openMap": "Apri mappa su Observations.be",
+      "unknownModel": "Modello sconosciuto",
+      "model": "Modello",
+      "historyTitle": "Cronologia rilevamenti: {name}",
+      "historySummary": "{count} rilevamenti · {range}",
+      "historySince": "Dal {date}",
+      "historyTwoYears": "Ultimi 2 anni",
+      "historyPeak": "Picco",
+      "historyAverage": "Media/giorno",
+      "historyDaily": "Conteggi giornalieri",
+      "historyMovingAverage": "Media su 7 giorni",
+      "historyEmpty": "Nessun rilevamento in questo periodo",
+      "historyLonger": "Prova un intervallo più lungo",
+      "historyChart": "{name}: {count} rilevamenti · {range} · picco {peak}"
     }
   },
   "settings": {

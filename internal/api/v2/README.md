@@ -94,6 +94,10 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | ------ | ------------------------------------- | -------------------------- | ---- | ---------------------------------- |
 | GET    | `/analytics/species/daily`            | `GetDailySpeciesSummary`   | ❌   | Daily species detection summary (`first_heard` earliest, `latest_heard` latest call of the day) |
 | GET    | `/analytics/species/summary`          | `GetSpeciesSummary`        | ❌   | Overall species statistics         |
+| GET    | `/analytics/species/tools` | `GetSpeciesTools` | ✅ | Complete species inventory; optional comma-separated `fields=count,max_confidence,last_heard` projects only requested metrics |
+| GET    | `/analytics/species/tools/recordings` | `GetSpeciesToolRecordings` | ✅ | Best available audio for 1–25 repeated `species` parameters; prefers locked recordings, then confidence; null means unavailable |
+| GET    | `/analytics/species/tools/observation-link` | `GetObservationLink` | ✅ | Resolves an exact scientific `species` name to its Observations.be map; 404 if unknown, 502 if provider unavailable |
+| GET    | `/analytics/species/review-stats`     | `GetSpeciesReviewStats`    | ✅   | Per-species total/verified/rejected review counts (Manage view; 501 if datastore unsupported) |
 | GET    | `/analytics/species/detections/new`   | `GetNewSpeciesDetections`  | ❌   | Recently detected new species, with the non-false-positive detection count in `count_in_period` |
 | GET    | `/analytics/species/thumbnails`       | `GetSpeciesThumbnails`     | ❌   | Species thumbnail images           |
 | GET    | `/analytics/species/accumulation`     | `GetSpeciesAccumulation`   | ❌   | Species accumulation curve (biodiversity collector's curve): per calendar day, the cumulative count of distinct species first detected within the range (false positives excluded; "first seen" is bounded to the window, not lifetime). All-species (no species filter). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days) |
@@ -144,6 +148,11 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | POST   | `/detections/:id/lock`        | `LockDetection`         | ✅   | Lock detection from changes                |
 | POST   | `/detections/ignore`          | `IgnoreSpecies`         | ✅   | Toggle species in ignore list (add/remove) |
 | GET    | `/detections/ignored`         | `GetExcludedSpecies`    | ✅   | Get list of excluded species               |
+| POST   | `/detections/include`         | `IncludeSpecies`        | ✅   | Toggle species in always-include list (add/remove) |
+| GET    | `/detections/included`        | `GetIncludedSpecies`    | ✅   | Get always-include species list            |
+| POST   | `/detections/confirm`         | `ConfirmSpecies`        | ✅   | Toggle species in confirmed list (analytics-only) |
+| GET    | `/detections/confirmed`       | `GetConfirmedSpecies`   | ✅   | Get confirmed species list                 |
+| POST   | `/detections/species/delete`  | `DeleteSpeciesDetections` | ✅ | Delete up to 500 detections for a species per call (skips locked). Repeat while response `remaining` is non-zero, each time sending `exclude_ids` = the accumulated `skipped_ids` from every prior call for this operation, so locked entries can't block later deletable ones; 501 if datastore unsupported |
 | POST   | `/detections/batch/delete`    | `BatchDeleteDetections` | ✅   | Bulk delete detections by ID               |
 | POST   | `/detections/batch/review`    | `BatchReviewDetections` | ✅   | Bulk set verification status               |
 | POST   | `/detections/batch/lock`      | `BatchLockDetections`   | ✅   | Bulk lock or unlock detections             |
@@ -1105,3 +1114,11 @@ A: Ensure the URL is properly URL-encoded. Use `encodeURIComponent()` in JavaScr
 
 **Q: Error history is empty even though stream has errors**
 A: Error history only stores errors that occurred after the FFmpeg error detection system was initialized (PR #1380). Older errors before this feature are not tracked.
+
+### Species tools workspace
+
+`/ui/analytics/species-list` provides a saved, browser-local column layout and progressive enrichment. A `species` query parameter opens the species' all-time recordings. Species confirmation is a separate analytics-only list; it does not change individual detection reviews or recording thresholds.
+
+Detection responses include `modelName` when known. Opt-in `includeAudioAvailability=true` checks the bounded response page and adds `audioAvailable`; ordinary detection queries do not perform these filesystem checks.
+
+Observations.be disallows iframe embedding. Its modal opens the resolved map externally; the external site's language follows its own browser/session language settings. eBird links include `BE-WAL` and the UI language.

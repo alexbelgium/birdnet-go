@@ -205,6 +205,7 @@
     "serverError": "500 - Internal Server Error",
     "componentError": "Component Load Error",
     "speciesAnalytics": "Species Analytics",
+    "speciesList": "Species tools",
     "detectionDetails": "Detection Details",
     "settingsNotAvailable": "Settings Not Available",
     "analyticsSummary": "Analytics - Summary",
@@ -2020,6 +2021,7 @@
       "speciesList": "Species List",
       "switchToGrid": "Switch to grid view",
       "switchToList": "Switch to list view",
+      "switchToManage": "Switch to manage view",
       "noSpeciesFound": "No species found matching your filters.",
       "headers": {
         "species": "Species",
@@ -2033,7 +2035,30 @@
         "detections": "Detections:",
         "confidence": "Confidence:",
         "first": "First:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Excluded",
+          "included": "Included",
+          "reviewRatio": "Correct",
+          "rangeProbability": "Range",
+          "confirmed": "Confirmed",
+          "actions": "Actions"
+        },
+        "delete": "Delete all detections for this species",
+        "deleteTitle": "Delete species detections",
+        "deleteConfirm": "Delete",
+        "deleteMessage": "Delete all {count} detections for {species}? Locked detections are kept.",
+        "deleteWarning": "This permanently removes the detections and their audio clips and cannot be undone.",
+        "deleteFailed": "Failed to delete detections. Please try again.",
+        "deleteProgress": "Deleted {deleted} so far, {remaining} remaining…",
+        "membershipFailed": "Failed to update species lists. Please try again.",
+        "loadFailed": "Failed to refresh species data. Showing previously loaded results.",
+        "allTimeNote": "Manage shows all detections across all time; the date filter above does not apply here."
       }
+    },
+    "speciesList": {
+      "title": "Species tools"
     },
     "advanced": {
       "chartControls": "Chart Controls",
@@ -2235,6 +2260,46 @@
       "afternoon12to16": "Afternoon (12-16)",
       "evening17to19": "Evening (17-19)",
       "night20to23": "Night (20-23)"
+    },
+    "speciesTools": {
+      "all": "All",
+      "birds": "Birds",
+      "bats": "Bats",
+      "others": "Others",
+      "group": "Species group",
+      "search": "Search species…",
+      "editColumns": "Edit columns",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "sort": "Sort species",
+      "showingSpecies": "{shown} of {total} species",
+      "bestRecording": "Best recording",
+      "audioUnavailable": "Audio unavailable",
+      "locked": "Locked",
+      "lockedOnly": "Locked only",
+      "play": "Play recording",
+      "image": "Species image",
+      "quickGraph": "Quick graph",
+      "allRecordings": "All recordings of {name}",
+      "toggleConfirmed": "Toggle confirmed",
+      "toggleIncluded": "Toggle include list",
+      "toggleExcluded": "Toggle exclude list",
+      "mapExternalOnly": "This website requires opening the map in a separate tab.",
+      "mapUnavailable": "No verified map link is available for this species.",
+      "openMap": "Open map on Observations.be",
+      "unknownModel": "Unknown model",
+      "model": "Model",
+      "historyTitle": "Detection history: {name}",
+      "historySummary": "{count} detections · {range}",
+      "historySince": "Since {date}",
+      "historyTwoYears": "Last 2 years",
+      "historyPeak": "Peak",
+      "historyAverage": "Average/day",
+      "historyDaily": "Daily counts",
+      "historyMovingAverage": "7-day average",
+      "historyEmpty": "No detections in this period",
+      "historyLonger": "Try a longer range",
+      "historyChart": "{name}: {count} detections · {range} · peak {peak}"
     }
   },
   "settings": {

@@ -205,6 +205,7 @@
     "serverError": "500 - Intern serverfeil",
     "componentError": "Feil ved lasting av komponent",
     "speciesAnalytics": "Artsanalyse",
+    "speciesList": "Artsverktøy",
     "detectionDetails": "Registreringsdetaljer",
     "settingsNotAvailable": "Innstillinger ikke tilgjengelig",
     "analyticsSummary": "Analyse - Sammendrag",
@@ -2020,6 +2021,7 @@
       "speciesList": "Artsliste",
       "switchToGrid": "Bytt til rutenettvisning",
       "switchToList": "Bytt til listevisning",
+      "switchToManage": "Bytt til administrasjonsvisning",
       "noSpeciesFound": "Ingen arter funnet som matcher filtrene dine.",
       "headers": {
         "species": "Art",
@@ -2033,7 +2035,30 @@
         "detections": "Registreringer:",
         "confidence": "Sikkerhet:",
         "first": "Første:"
+      },
+      "manage": {
+        "headers": {
+          "excluded": "Ekskludert",
+          "included": "Inkludert",
+          "reviewRatio": "Korrekt",
+          "rangeProbability": "Utvalg",
+          "confirmed": "Bekreftet",
+          "actions": "Handlinger"
+        },
+        "delete": "Slett alle registreringer for denne arten",
+        "deleteTitle": "Slett artsregistreringer",
+        "deleteConfirm": "Slett",
+        "deleteMessage": "Slette alle {count} registreringer for {species}? Låste registreringer beholdes.",
+        "deleteWarning": "Dette fjerner registreringene og lydklippene deres permanent og kan ikke angres.",
+        "deleteFailed": "Kunne ikke slette registreringer. Prøv igjen.",
+        "deleteProgress": "Slettet {deleted} så langt, {remaining} gjenstår…",
+        "membershipFailed": "Kunne ikke oppdatere artslistene. Prøv igjen.",
+        "loadFailed": "Kunne ikke oppdatere artsdata. Viser tidligere innlastede resultater.",
+        "allTimeNote": "Administrer viser alle registreringer for hele perioden; datofilteret ovenfor gjelder ikke her."
       }
+    },
+    "speciesList": {
+      "title": "Artsverktøy"
     },
     "advanced": {
       "chartControls": "Diagramkontroller",
@@ -2235,6 +2260,46 @@
       "afternoon12to16": "Ettermiddag (12-16)",
       "evening17to19": "Kveld (17-19)",
       "night20to23": "Natt (20-23)"
+    },
+    "speciesTools": {
+      "all": "Alle",
+      "birds": "Fugler",
+      "bats": "Flaggermus",
+      "others": "Andre",
+      "group": "Artsgruppe",
+      "search": "Søk etter arter…",
+      "editColumns": "Rediger kolonner",
+      "moveUp": "Flytt opp",
+      "moveDown": "Flytt ned",
+      "sort": "Sorter arter",
+      "showingSpecies": "{shown} av {total} arter",
+      "bestRecording": "Beste opptak",
+      "audioUnavailable": "Lyd utilgjengelig",
+      "locked": "Låst",
+      "lockedOnly": "Bare låste",
+      "play": "Spill av opptak",
+      "image": "Artsbilde",
+      "quickGraph": "Hurtiggraf",
+      "allRecordings": "Alle opptak av {name}",
+      "toggleConfirmed": "Bytt bekreftelse",
+      "toggleIncluded": "Bytt inkluderingsliste",
+      "toggleExcluded": "Bytt ekskluderingsliste",
+      "mapExternalOnly": "Dette nettstedet krever at kartet åpnes i en egen fane.",
+      "mapUnavailable": "Ingen bekreftet kartlenke er tilgjengelig for denne arten.",
+      "openMap": "Åpne kart på Observations.be",
+      "unknownModel": "Ukjent modell",
+      "model": "Modell",
+      "historyTitle": "Deteksjonshistorikk: {name}",
+      "historySummary": "{count} deteksjoner · {range}",
+      "historySince": "Siden {date}",
+      "historyTwoYears": "Siste 2 år",
+      "historyPeak": "Toppverdi",
+      "historyAverage": "Gjennomsnitt/dag",
+      "historyDaily": "Daglige antall",
+      "historyMovingAverage": "7-dagers gjennomsnitt",
+      "historyEmpty": "Ingen deteksjoner i denne perioden",
+      "historyLonger": "Prøv en lengre periode",
+      "historyChart": "{name}: {count} deteksjoner · {range} · toppverdi {peak}"
     }
   },
   "settings": {

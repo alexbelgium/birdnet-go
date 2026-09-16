@@ -56,7 +56,7 @@
     Trash2,
     XCircle,
   } from '@lucide/svelte';
-  import { onMount, untrack } from 'svelte';
+  import { onMount, untrack, type Snippet } from 'svelte';
   import { useSelectionMode } from '../composables/useSelectionMode.svelte';
   import { useDetectionActions } from '../composables/useDetectionActions.svelte';
   import {
@@ -73,6 +73,8 @@
   type SortDirection = 'asc' | 'desc';
 
   interface Props {
+    speciesWorkspace?: boolean;
+    toolbar?: Snippet;
     data: DetectionsListData | null;
     loading?: boolean;
     error?: string | null;
@@ -81,10 +83,13 @@
     onRefresh?: () => void;
     onNumResultsChange?: (_numResults: number) => void;
     onSortChange?: (_sortBy: DetectionSortBy) => void;
+    onLockedFilterChange?: (_locked: boolean) => void;
     className?: string;
   }
 
   let {
+    speciesWorkspace = false,
+    toolbar,
     data,
     loading = false,
     error = null,
@@ -93,6 +98,7 @@
     onRefresh,
     onNumResultsChange,
     onSortChange,
+    onLockedFilterChange,
     className = '',
   }: Props = $props();
 
@@ -101,7 +107,9 @@
   // actually has a clip (so historical clips remain reachable after export is
   // turned off). The per-row spectrogram is still gated on detection.clipName.
   let showRecordingColumn = $derived(
-    appState.audioExportEnabled || (data?.notes ?? []).some(d => Boolean(d.clipName))
+    speciesWorkspace ||
+      appState.audioExportEnabled ||
+      (data?.notes ?? []).some(d => Boolean(d.clipName))
   );
 
   // Generate title based on query type
@@ -120,6 +128,9 @@
         return t('detections.titles.hourly', { hour: data.hour, date: data.date });
 
       case 'species':
+        if (!data.date) {
+          return t('analytics.speciesTools.allRecordings', { name: data.species });
+        }
         return t('detections.titles.species', { species: data.species, date: data.date });
 
       case 'search':
@@ -170,7 +181,9 @@
     return 'table';
   }
 
-  let viewMode = $state<'table' | 'cards'>(loadViewMode());
+  let viewMode = $state<'table' | 'cards'>(
+    untrack(() => speciesWorkspace) ? 'table' : loadViewMode()
+  );
 
   function handleViewChange(mode: 'table' | 'cards') {
     viewMode = mode;
@@ -335,6 +348,7 @@
             search: data.search,
             hour: data.hour !== undefined ? String(data.hour) : undefined,
             duration: data.duration !== undefined ? data.duration : undefined,
+            locked: data.locked ? 'true' : undefined,
           }),
         }
       );
@@ -434,16 +448,17 @@
 
 <div class={cn(className)}>
   <div class="card-body grow-0 p-2 sm:p-4 sm:pt-3">
-    <div class="flex justify-between items-center">
+    <div class="flex justify-between items-center gap-3 flex-wrap">
       <!-- Title -->
-      <span class="card-title grow text-base sm:text-xl">
-        {title}
-      </span>
+      {#if !speciesWorkspace}<span class="card-title grow text-base sm:text-xl">
+          {title}
+        </span>{/if}
+      {#if toolbar}<div class="flex items-center gap-2 flex-wrap">{@render toolbar()}</div>{/if}
 
       <!-- Controls: view toggle + results selector -->
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-3 flex-wrap">
         {#if canEdit}
-          <div class="hidden md:block">
+          <div class={speciesWorkspace ? 'block' : 'hidden md:block'}>
             <button
               type="button"
               class={cn(
@@ -468,8 +483,32 @@
           </div>
         {/if}
 
+        <!-- Locked-only filter: only meaningful on the all-dates species view
+             (every recording of one species, across all dates). Unlike Select
+             and the view toggle, this is a content filter rather than a
+             table-view-only control, so it stays visible on mobile too. -->
+        {#if data?.queryType === 'species' && !data?.date}
+          <button
+            type="button"
+            class={cn(
+              'inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              data?.locked
+                ? 'bg-[var(--color-primary)] text-[var(--color-primary-content)]'
+                : 'border border-[var(--color-base-300)] text-[var(--color-base-content)] hover:bg-[var(--color-base-200)]'
+            )}
+            onclick={() => {
+              selection.clear();
+              onLockedFilterChange?.(!data?.locked);
+            }}
+            aria-pressed={data?.locked ?? false}
+          >
+            <Lock class="size-4" />
+            <span>{t('analytics.speciesTools.lockedOnly')}</span>
+          </button>
+        {/if}
+
         <!-- View toggle (hidden on mobile - always shows mobile cards) -->
-        <div class="hidden md:block">
+        <div class={speciesWorkspace ? 'hidden' : 'hidden md:block'}>
           <ViewToggle view={viewMode} onViewChange={handleViewChange} />
         </div>
 
@@ -606,13 +645,15 @@
                 />
                 <th scope="col" class="hidden md:table-cell">{t('detections.headers.weather')}</th>
                 <th scope="col" class="hidden lg:table-cell">{t('detections.headers.source')}</th>
-                <SortableHeader
-                  label={t('detections.headers.species')}
-                  field="species"
-                  activeField={sortField}
-                  direction={sortDirection}
-                  onSort={handleSort}
-                />
+                {#if !speciesWorkspace}
+                  <SortableHeader
+                    label={t('detections.headers.species')}
+                    field="species"
+                    activeField={sortField}
+                    direction={sortDirection}
+                    onSort={handleSort}
+                  />
+                {/if}
                 <SortableHeader
                   label={t('detections.headers.confidence')}
                   field="confidence"
@@ -620,6 +661,7 @@
                   direction={sortDirection}
                   onSort={handleSort}
                 />
+                {#if speciesWorkspace}<th scope="col">{t('analytics.speciesTools.model')}</th>{/if}
                 <SortableHeader
                   label={t('detections.headers.status')}
                   field="status"
@@ -648,6 +690,7 @@
                 >
                   <DetectionRow
                     {detection}
+                    {speciesWorkspace}
                     {showRecordingColumn}
                     {onDetailsClick}
                     isExcluded={isSpeciesExcluded(detection.commonName)}
@@ -673,7 +716,13 @@
       <!-- Mobile: card layout (always mobile cards on small screens) -->
       <div class="md:hidden space-y-2">
         {#each data.notes as detection (detection.id)}
+          {#if speciesWorkspace && selection.selectionActive}<Checkbox
+              checked={selection.isSelected(String(detection.id))}
+              onchange={() => handleToggleSelect(String(detection.id), false)}
+              label={t('detections.selection.select')}
+            />{/if}
           <DetectionCardMobile
+            {speciesWorkspace}
             {detection}
             {onDetailsClick}
             isExcluded={isSpeciesExcluded(detection.commonName)}
