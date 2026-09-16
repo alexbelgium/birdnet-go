@@ -1,5 +1,6 @@
 <script lang="ts">
   import { AlertCircle, Loader2, RefreshCw } from '@lucide/svelte';
+  import { untrack } from 'svelte';
   import { t } from '$lib/i18n';
   import { getLocalTimeString } from '$lib/utils/date';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
@@ -102,12 +103,16 @@
     const captureSourceId = sourceId;
     const sessionDeadline = sessionStartedAt + SESSION_DURATION_MS;
 
-    sessionExpired = false;
-    recording = false;
-    error = null;
-    generatedAt = null;
-    sampleRate = 0;
-    replaceImage(null);
+    // untrack: replaceImage reads imageUrl, which would otherwise make every
+    // rendered image re-run this effect and restart the capture loop.
+    untrack(() => {
+      sessionExpired = false;
+      recording = false;
+      error = null;
+      generatedAt = null;
+      sampleRate = 0;
+      replaceImage(null);
+    });
 
     if (!captureSourceId) return;
 
