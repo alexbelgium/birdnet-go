@@ -17,12 +17,13 @@
   import { ReconnectingEventSource } from '$lib/utils/ReconnectingEventSource';
   import { onMount } from 'svelte';
 
-  import { Volume, Volume1, Volume2, VolumeX, Play, Square, Tag } from '@lucide/svelte';
+  import { Volume, Volume1, Volume2, VolumeX, Play, Square, Tag, Image } from '@lucide/svelte';
   import { t } from '$lib/i18n';
   import { appState, hasLiveAudioAccess } from '$lib/stores/appState.svelte';
   import { HLS_AUDIO_CONFIG } from '$lib/desktop/components/ui/hls-config';
   import { useSpectrogramAnalyser } from '$lib/utils/useSpectrogramAnalyser.svelte';
   import SpectrogramCanvas from '$lib/desktop/components/media/SpectrogramCanvas.svelte';
+  import StaticSpectrogramView from '$lib/desktop/features/live-stream/components/StaticSpectrogramView.svelte';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
@@ -43,6 +44,7 @@
 
   const logger = loggers.audio;
   const STORAGE_KEY = 'birdnet-spectrogram-active';
+  const STATIC_STORAGE_KEY = 'birdnet-spectrogram-static';
   const FFT_SIZE = 1024;
   const HEARTBEAT_INTERVAL = 20000;
   const SOURCE_DISCOVERY_TIMEOUT = 5000;
@@ -69,6 +71,14 @@
   let isConnecting = $state(false);
   let gainPresetIndex = $state(0);
   let showDetectionLabels = $state(true);
+
+  // Static full-range mode: replaces the live stream while enabled. Capture is
+  // owned by StaticSpectrogramView, so unmounting it (toggle off, leaving the
+  // dashboard) aborts it; the view also caps a session at two minutes.
+  let staticMode = $state(false);
+  let staticSourceId = $state<string | null>(null);
+  let staticDiscovering = $state(false);
+  let staticDiscovery: AbortController | null = null;
 
   const gainLabel = $derived.by(() => {
     // eslint-disable-next-line security/detect-object-injection -- gainPresetIndex is a numeric index bounded by GAIN_PRESETS.length
@@ -179,7 +189,7 @@
   }
 
   async function start() {
-    if (isActive || isConnecting) return;
+    if (staticMode || isActive || isConnecting) return;
     isConnecting = true;
 
     // Abort any previous in-flight operation
@@ -375,6 +385,43 @@
     persistToggleState(false);
   }
 
+  async function startStatic() {
+    staticDiscovery?.abort();
+    const controller = new AbortController();
+    staticDiscovery = controller;
+    staticDiscovering = true;
+    const sourceId = await discoverFirstSource(controller.signal);
+    if (controller.signal.aborted) return;
+    staticSourceId = sourceId;
+    staticDiscovering = false;
+  }
+
+  function stopStatic() {
+    staticDiscovery?.abort();
+    staticDiscovery = null;
+    staticSourceId = null;
+    staticDiscovering = false;
+  }
+
+  function toggleStaticMode() {
+    staticMode = !staticMode;
+    try {
+      if (staticMode) {
+        globalThis.localStorage?.setItem(STATIC_STORAGE_KEY, 'true');
+      } else {
+        globalThis.localStorage?.removeItem(STATIC_STORAGE_KEY);
+      }
+    } catch {
+      /* localStorage not available */
+    }
+    if (staticMode) {
+      stopRuntime();
+      startStatic();
+    } else {
+      stopStatic();
+    }
+  }
+
   function cycleVolume() {
     gainPresetIndex = (gainPresetIndex + 1) % GAIN_PRESETS.length;
     // eslint-disable-next-line security/detect-object-injection -- gainPresetIndex is a numeric index bounded by modulo
@@ -459,10 +506,20 @@
   // - The "re-run on auth change" use case ($effect) is not worth the complexity;
   //   if a user logs in after mount, they can click the play button.
   onMount(() => {
-    if (hasLiveAudioAccess() && shouldAutoStart()) {
+    try {
+      staticMode = globalThis.localStorage?.getItem(STATIC_STORAGE_KEY) === 'true';
+    } catch {
+      /* localStorage not available */
+    }
+    if (hasLiveAudioAccess() && staticMode) {
+      startStatic();
+    } else if (hasLiveAudioAccess() && shouldAutoStart()) {
       start();
     }
-    return () => stop();
+    return () => {
+      stopStatic();
+      stop();
+    };
   });
 </script>
 
@@ -475,7 +532,21 @@
     >
       <h3 class="font-semibold">{t('spectrogram.dashboard.toggle')}</h3>
       <div class="flex items-center gap-1">
-        {#if isActive}
+        <button
+          type="button"
+          onclick={toggleStaticMode}
+          class="rounded p-1 transition-colors {staticMode
+            ? 'bg-[var(--color-primary)]/20 text-[var(--color-primary)]'
+            : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'}"
+          aria-label={t('spectrogram.static.toggle')}
+          aria-pressed={staticMode}
+          title={t('spectrogram.static.toggle')}
+        >
+          <Image class="size-4" />
+        </button>
+        {#if staticMode}
+          <!-- live controls hidden in static mode -->
+        {:else if isActive}
           <button
             type="button"
             onclick={() => {
@@ -528,7 +599,25 @@
       </div>
     </div>
 
-    {#if (isActive || isConnecting) && spectro.isActive}
+    {#if staticMode}
+      <div class="h-40">
+        {#if staticSourceId}
+          <StaticSpectrogramView sourceId={staticSourceId} compact />
+        {:else}
+          <div class="flex h-full items-center justify-center bg-black text-xs text-white/70">
+            {#if staticDiscovering}
+              <div
+                class="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent"
+              ></div>
+            {:else}
+              <button type="button" onclick={startStatic} class="underline">
+                {t('common.noAudioSources')}
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {:else if (isActive || isConnecting) && spectro.isActive}
       <SpectrogramCanvas
         analyser={spectro.analyser}
         frequencyData={spectro.frequencyData}
