@@ -5734,5 +5734,153 @@
       "patternTransient": "Prechodný",
       "patternSustained": "Trvalý"
     }
+  },
+  "speciesWorkspace": {
+    "title": "Pracovný priestor druhov",
+    "subtitle": "Všetky kedy zistené druhy s nástrojmi na kontrolu a správu",
+    "refresh": "Znovu načítať údaje",
+    "search": {
+      "label": "Hľadať druhy",
+      "placeholder": "Hľadať podľa názvu…"
+    },
+    "sort": {
+      "label": "Zoradiť podľa",
+      "sortBy": "Zoradiť podľa: {column}",
+      "toggleDirection": "Obrátiť poradie"
+    },
+    "edit": {
+      "edit": "Upraviť stĺpce",
+      "done": "Hotovo",
+      "reset": "Obnoviť predvolené",
+      "panelTitle": "Stĺpce",
+      "show": "Zobraziť stĺpec {column}",
+      "mandatory": "{column} sa zobrazuje vždy",
+      "moveUp": "Posunúť {column} nahor",
+      "moveDown": "Posunúť {column} nadol",
+      "saveFailed": "Rozloženie stĺpcov sa nepodarilo uložiť, preto sa obnovilo predchádzajúce."
+    },
+    "columns": {
+      "species": "Druh",
+      "count": "Detekcie",
+      "maxConfidence": "Max. spoľahlivosť",
+      "firstSeen": "Prvýkrát zistený",
+      "lastSeen": "Naposledy zistený",
+      "range": "Pravdepodobnosť výskytu",
+      "verification": "Overené",
+      "excluded": "Vylúčený",
+      "included": "Zahrnutý",
+      "confirmed": "Potvrdený",
+      "bestRecording": "Najlepšia nahrávka",
+      "actions": "Akcie"
+    },
+    "columnHelp": {
+      "range": "Pravdepodobnosť podľa filtra výskytu pre toto miesto a týždeň"
+    },
+    "groups": {
+      "inventory": "druhy",
+      "stats": "štatistiky",
+      "memberships": "zoznamy druhov",
+      "range": "pravdepodobnosti výskytu",
+      "best": "najlepšie nahrávky",
+      "recordings": "nahrávky"
+    },
+    "states": {
+      "loading": "Načítava sa…",
+      "loadFailed": "Nepodarilo sa načítať: {what}.",
+      "retry": "Skúsiť znova",
+      "empty": "Zatiaľ neboli zistené žiadne druhy.",
+      "noMatch": "Vyhľadávaniu a filtru nezodpovedá žiadny druh.",
+      "notAvailable": "N/A",
+      "notFound": "Pre tento druh nie sú uložené žiadne detekcie.",
+      "membershipLoading": "Načítavajú sa zoznamy druhov…",
+      "unknownModel": "Neznámy",
+      "loginRequired": "Na použitie pracovného priestoru druhov sa prihláste."
+    },
+    "verification": "správne: {correct}, falošne pozitívne: {falsePositive}",
+    "membership": {
+      "confirmed": "Potvrdený",
+      "included": "Zoznam zahrnutých",
+      "excluded": "Zoznam vylúčených",
+      "yes": "Áno",
+      "no": "Nie",
+      "state": "{list} pre {species}: {state}"
+    },
+    "actions": {
+      "menu": "Akcie pre {species}",
+      "toggle": {
+        "confirmed": "Prepnúť potvrdenie",
+        "included": "Prepnúť zoznam zahrnutých",
+        "excluded": "Prepnúť zoznam vylúčených"
+      },
+      "delete": "Vymazať detekcie druhu {species}…",
+      "updateFailed": "Nepodarilo sa aktualizovať {list} pre {species}."
+    },
+    "best": {
+      "title": "Najlepšia nahrávka druhu {species}",
+      "play": "Prehrať najlepšiu nahrávku druhu {species}",
+      "locked": "Zamknuté",
+      "confidence": "Spoľahlivosť {value}",
+      "unavailable": "Nie je dostupná žiadna nahrávka",
+      "unavailableHint": "Žiadna detekcia tohto druhu nemá zvukový klip na disku."
+    },
+    "delete": {
+      "title": "Vymazať detekcie druhu {species}",
+      "message": "Detekcie na vymazanie: {deletable} z {total} (vrátane falošne pozitívnych: {falsePositive}). Zamknuté detekcie zostanú: {locked}.",
+      "nothing": "Všetky detekcie tohto druhu sú zamknuté, nie je čo vymazať.",
+      "confirm": "Vymazať ({count})",
+      "running": "Mazanie…",
+      "progressLabel": "Priebeh mazania",
+      "progress": "Vymazané: {deleted} · zamknuté ponechané: {locked}",
+      "done": "Mazanie dokončené.",
+      "stop": "Zastaviť",
+      "cancelled": "Mazanie zastavené. Už vymazané detekcie zostávajú vymazané.",
+      "failed": "Detekcie, ktoré sa nepodarilo vymazať: {count}. Boli ponechané a dá sa to skúsiť znova.",
+      "stalled": "Mazanie zastavené, pretože zostávajúce detekcie sa nedajú odstrániť.",
+      "error": "Mazanie zlyhalo. Už vymazané detekcie zostávajú vymazané."
+    },
+    "detail": {
+      "back": "Späť do pracovného priestoru druhov",
+      "title": "Všetky nahrávky druhu {species}",
+      "detections": "Detekcie: {count}",
+      "maxConfidence": "max. spoľahlivosť {value}",
+      "lastDetected": "naposledy zistený {date}",
+      "bestRecording": "Najlepšia nahrávka",
+      "quickGraph": "Rýchly graf",
+      "openExternal": "Otvoriť {species} na {site} (nová karta)",
+      "select": "Vybrať",
+      "cancelSelect": "Zrušiť výber",
+      "lockedOnly": "Len zamknuté",
+      "toggleAria": "{list} pre {species}"
+    },
+    "table": {
+      "dateTime": "Dátum a čas",
+      "weather": "Počasie",
+      "source": "Zdroj",
+      "confidence": "Spoľahlivosť",
+      "model": "Model",
+      "status": "Stav",
+      "recording": "Nahrávka",
+      "actions": "Akcie",
+      "selectAll": "Vybrať všetky nahrávky na tejto strane",
+      "selectRow": "Vybrať nahrávku z {date}",
+      "selected": "Vybrané: {count}",
+      "bulkActions": "Akcie pre vybrané nahrávky",
+      "markCorrect": "Označiť ako správne",
+      "markFalsePositive": "Označiť ako falošne pozitívne",
+      "lock": "Zamknúť",
+      "unlock": "Odomknúť",
+      "deleteSelected": "Vymazať",
+      "deleteSelectedTitle": "Vymazať vybrané nahrávky druhu {species} ({count})?",
+      "deleteSelectedMessage": "Zamknuté nahrávky vo výbere zostanú zachované.",
+      "bulkLockedHint": "Zamknuté nahrávky nemožno kontrolovať ani mazať.",
+      "bulkResult": "Aktualizované: {processed} · preskočené: {skipped}",
+      "bulkFailed": "Vybrané nahrávky sa nepodarilo aktualizovať.",
+      "empty": "Žiadne nahrávky.",
+      "emptyLocked": "Žiadne zamknuté nahrávky.",
+      "sortConfidenceDesc": "Najvyššia spoľahlivosť prvá",
+      "sortConfidenceAsc": "Najnižšia spoľahlivosť prvá",
+      "sortDateDesc": "Najnovšie prvé",
+      "sortDateAsc": "Najstaršie prvé"
+    }
   }
 }

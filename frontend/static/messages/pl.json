@@ -5734,5 +5734,153 @@
       "patternTransient": "Przejściowy",
       "patternSustained": "Utrzymujący się"
     }
+  },
+  "speciesWorkspace": {
+    "title": "Obszar roboczy gatunków",
+    "subtitle": "Wszystkie kiedykolwiek wykryte gatunki z narzędziami do weryfikacji i zarządzania",
+    "refresh": "Wczytaj dane ponownie",
+    "search": {
+      "label": "Szukaj gatunków",
+      "placeholder": "Szukaj po nazwie…"
+    },
+    "sort": {
+      "label": "Sortuj według",
+      "sortBy": "Sortuj według: {column}",
+      "toggleDirection": "Odwróć kolejność"
+    },
+    "edit": {
+      "edit": "Edytuj kolumny",
+      "done": "Gotowe",
+      "reset": "Przywróć domyślne",
+      "panelTitle": "Kolumny",
+      "show": "Pokaż kolumnę {column}",
+      "mandatory": "{column} jest zawsze widoczna",
+      "moveUp": "Przesuń {column} w górę",
+      "moveDown": "Przesuń {column} w dół",
+      "saveFailed": "Nie udało się zapisać układu kolumn, więc przywrócono poprzedni."
+    },
+    "columns": {
+      "species": "Gatunek",
+      "count": "Wykrycia",
+      "maxConfidence": "Maks. pewność",
+      "firstSeen": "Pierwsze wykrycie",
+      "lastSeen": "Ostatnie wykrycie",
+      "range": "Prawdopodobieństwo występowania",
+      "verification": "Zweryfikowane",
+      "excluded": "Wykluczony",
+      "included": "Uwzględniony",
+      "confirmed": "Potwierdzony",
+      "bestRecording": "Najlepsze nagranie",
+      "actions": "Akcje"
+    },
+    "columnHelp": {
+      "range": "Prawdopodobieństwo filtra zasięgu dla tej lokalizacji i tygodnia"
+    },
+    "groups": {
+      "inventory": "gatunków",
+      "stats": "statystyk",
+      "memberships": "list gatunków",
+      "range": "prawdopodobieństw występowania",
+      "best": "najlepszych nagrań",
+      "recordings": "nagrań"
+    },
+    "states": {
+      "loading": "Wczytywanie…",
+      "loadFailed": "Nie udało się wczytać {what}.",
+      "retry": "Ponów",
+      "empty": "Nie wykryto jeszcze żadnych gatunków.",
+      "noMatch": "Żaden gatunek nie pasuje do wyszukiwania i filtra.",
+      "notAvailable": "b.d.",
+      "notFound": "Brak zapisanych wykryć tego gatunku.",
+      "membershipLoading": "Wczytywanie list gatunków…",
+      "unknownModel": "Nieznany",
+      "loginRequired": "Zaloguj się, aby korzystać z obszaru roboczego gatunków."
+    },
+    "verification": "poprawne: {correct}, fałszywie dodatnie: {falsePositive}",
+    "membership": {
+      "confirmed": "Potwierdzony",
+      "included": "Lista uwzględnionych",
+      "excluded": "Lista wykluczonych",
+      "yes": "Tak",
+      "no": "Nie",
+      "state": "{list} dla {species}: {state}"
+    },
+    "actions": {
+      "menu": "Akcje dla {species}",
+      "toggle": {
+        "confirmed": "Przełącz potwierdzenie",
+        "included": "Przełącz listę uwzględnionych",
+        "excluded": "Przełącz listę wykluczonych"
+      },
+      "delete": "Usuń wykrycia gatunku {species}…",
+      "updateFailed": "Nie udało się zaktualizować: {list} dla {species}."
+    },
+    "best": {
+      "title": "Najlepsze nagranie gatunku {species}",
+      "play": "Odtwórz najlepsze nagranie gatunku {species}",
+      "locked": "Zablokowane",
+      "confidence": "Pewność {value}",
+      "unavailable": "Brak dostępnego nagrania",
+      "unavailableHint": "Żadne wykrycie tego gatunku nie ma klipu audio na dysku."
+    },
+    "delete": {
+      "title": "Usuń wykrycia gatunku {species}",
+      "message": "Wykrycia do usunięcia: {deletable} z {total} (w tym fałszywie dodatnie: {falsePositive}). Zablokowane wykrycia pozostają: {locked}.",
+      "nothing": "Wszystkie wykrycia tego gatunku są zablokowane, więc nie ma czego usuwać.",
+      "confirm": "Usuń ({count})",
+      "running": "Usuwanie…",
+      "progressLabel": "Postęp usuwania",
+      "progress": "Usunięto: {deleted} · zablokowane zachowane: {locked}",
+      "done": "Usuwanie zakończone.",
+      "stop": "Zatrzymaj",
+      "cancelled": "Usuwanie zatrzymane. Już usunięte wykrycia pozostają usunięte.",
+      "failed": "Wykrycia, których nie udało się usunąć: {count}. Zachowano je i można spróbować ponownie.",
+      "stalled": "Usuwanie zatrzymane, ponieważ nie można usunąć pozostałych wykryć.",
+      "error": "Usuwanie nie powiodło się. Już usunięte wykrycia pozostają usunięte."
+    },
+    "detail": {
+      "back": "Powrót do obszaru roboczego gatunków",
+      "title": "Wszystkie nagrania gatunku {species}",
+      "detections": "Wykrycia: {count}",
+      "maxConfidence": "maks. pewność {value}",
+      "lastDetected": "ostatnio wykryty {date}",
+      "bestRecording": "Najlepsze nagranie",
+      "quickGraph": "Szybki wykres",
+      "openExternal": "Otwórz {species} w {site} (nowa karta)",
+      "select": "Zaznacz",
+      "cancelSelect": "Anuluj zaznaczenie",
+      "lockedOnly": "Tylko zablokowane",
+      "toggleAria": "{list} dla {species}"
+    },
+    "table": {
+      "dateTime": "Data i godzina",
+      "weather": "Pogoda",
+      "source": "Źródło",
+      "confidence": "Pewność",
+      "model": "Model",
+      "status": "Status",
+      "recording": "Nagranie",
+      "actions": "Akcje",
+      "selectAll": "Zaznacz wszystkie nagrania na tej stronie",
+      "selectRow": "Zaznacz nagranie z {date}",
+      "selected": "Zaznaczone: {count}",
+      "bulkActions": "Akcje dla zaznaczonych nagrań",
+      "markCorrect": "Oznacz jako poprawne",
+      "markFalsePositive": "Oznacz jako fałszywie dodatnie",
+      "lock": "Zablokuj",
+      "unlock": "Odblokuj",
+      "deleteSelected": "Usuń",
+      "deleteSelectedTitle": "Usunąć zaznaczone nagrania gatunku {species} ({count})?",
+      "deleteSelectedMessage": "Zablokowane nagrania w zaznaczeniu zostaną zachowane.",
+      "bulkLockedHint": "Zablokowanych nagrań nie można weryfikować ani usuwać.",
+      "bulkResult": "Zaktualizowano: {processed} · pominięto: {skipped}",
+      "bulkFailed": "Nie udało się zaktualizować zaznaczonych nagrań.",
+      "empty": "Brak nagrań.",
+      "emptyLocked": "Brak zablokowanych nagrań.",
+      "sortConfidenceDesc": "Najwyższa pewność najpierw",
+      "sortConfidenceAsc": "Najniższa pewność najpierw",
+      "sortDateDesc": "Najnowsze najpierw",
+      "sortDateAsc": "Najstarsze najpierw"
+    }
   }
 }

@@ -5734,5 +5734,153 @@
       "patternTransient": "Átmeneti",
       "patternSustained": "Tartós"
     }
+  },
+  "speciesWorkspace": {
+    "title": "Faj munkaterület",
+    "subtitle": "Minden valaha észlelt faj ellenőrző és karbantartó eszközökkel",
+    "refresh": "Adatok újratöltése",
+    "search": {
+      "label": "Fajok keresése",
+      "placeholder": "Keresés név szerint…"
+    },
+    "sort": {
+      "label": "Rendezés",
+      "sortBy": "Rendezés: {column}",
+      "toggleDirection": "Rendezési sorrend megfordítása"
+    },
+    "edit": {
+      "edit": "Oszlopok szerkesztése",
+      "done": "Kész",
+      "reset": "Alaphelyzet",
+      "panelTitle": "Oszlopok",
+      "show": "{column} oszlop megjelenítése",
+      "mandatory": "{column} mindig látható",
+      "moveUp": "{column} feljebb mozgatása",
+      "moveDown": "{column} lejjebb mozgatása",
+      "saveFailed": "Az oszlopelrendezést nem sikerült menteni, ezért az előző elrendezés visszaállt."
+    },
+    "columns": {
+      "species": "Faj",
+      "count": "Észlelések",
+      "maxConfidence": "Max. megbízhatóság",
+      "firstSeen": "Első észlelés",
+      "lastSeen": "Utolsó észlelés",
+      "range": "Előfordulási valószínűség",
+      "verification": "Ellenőrzött",
+      "excluded": "Kizárva",
+      "included": "Belefoglalva",
+      "confirmed": "Megerősítve",
+      "bestRecording": "Legjobb felvétel",
+      "actions": "Műveletek"
+    },
+    "columnHelp": {
+      "range": "Az elterjedési szűrő valószínűsége erre a helyre és hétre"
+    },
+    "groups": {
+      "inventory": "a fajok",
+      "stats": "a statisztikák",
+      "memberships": "a fajlisták",
+      "range": "az előfordulási valószínűségek",
+      "best": "a legjobb felvételek",
+      "recordings": "a felvételek"
+    },
+    "states": {
+      "loading": "Betöltés…",
+      "loadFailed": "Nem sikerült betölteni: {what}.",
+      "retry": "Újra",
+      "empty": "Még nem észleltünk fajt.",
+      "noMatch": "Egyetlen faj sem felel meg a keresésnek és a szűrőnek.",
+      "notAvailable": "N/A",
+      "notFound": "Ehhez a fajhoz nincs tárolt észlelés.",
+      "membershipLoading": "Fajlisták betöltése…",
+      "unknownModel": "Ismeretlen",
+      "loginRequired": "A faj munkaterület használatához jelentkezzen be."
+    },
+    "verification": "helyes: {correct}, téves pozitív: {falsePositive}",
+    "membership": {
+      "confirmed": "Megerősítve",
+      "included": "Belefoglalási lista",
+      "excluded": "Kizárási lista",
+      "yes": "Igen",
+      "no": "Nem",
+      "state": "{list} – {species}: {state}"
+    },
+    "actions": {
+      "menu": "Műveletek: {species}",
+      "toggle": {
+        "confirmed": "Megerősítés be/ki",
+        "included": "Belefoglalási lista be/ki",
+        "excluded": "Kizárási lista be/ki"
+      },
+      "delete": "{species} észleléseinek törlése…",
+      "updateFailed": "Nem sikerült frissíteni: {list} – {species}."
+    },
+    "best": {
+      "title": "{species} legjobb felvétele",
+      "play": "{species} legjobb felvételének lejátszása",
+      "locked": "Zárolva",
+      "confidence": "Megbízhatóság: {value}",
+      "unavailable": "Nincs elérhető felvétel",
+      "unavailableHint": "Ennek a fajnak egyetlen észleléséhez sincs hangfájl a lemezen."
+    },
+    "delete": {
+      "title": "{species} észleléseinek törlése",
+      "message": "Törlendő észlelések: {deletable} / {total} (ebből téves pozitív: {falsePositive}). Megtartott zárolt észlelések: {locked}.",
+      "nothing": "Ennek a fajnak minden észlelése zárolt, így nincs mit törölni.",
+      "confirm": "Törlés ({count})",
+      "running": "Törlés…",
+      "progressLabel": "Törlés folyamata",
+      "progress": "Törölve: {deleted} · zárolt megtartva: {locked}",
+      "done": "A törlés befejeződött.",
+      "stop": "Leállítás",
+      "cancelled": "A törlés leállt. A már törölt észlelések töröltek maradnak.",
+      "failed": "Nem törölhető észlelések: {count}. Megmaradtak, és újra megpróbálható.",
+      "stalled": "A törlés leállt, mert a maradék észleléseket nem lehetett eltávolítani.",
+      "error": "A törlés sikertelen. A már törölt észlelések töröltek maradnak."
+    },
+    "detail": {
+      "back": "Vissza a faj munkaterülethez",
+      "title": "{species} összes felvétele",
+      "detections": "Észlelések: {count}",
+      "maxConfidence": "max. megbízhatóság: {value}",
+      "lastDetected": "utoljára észlelve: {date}",
+      "bestRecording": "Legjobb felvétel",
+      "quickGraph": "Gyors grafikon",
+      "openExternal": "{species} megnyitása itt: {site} (új lap)",
+      "select": "Kijelölés",
+      "cancelSelect": "Kijelölés megszüntetése",
+      "lockedOnly": "Csak zároltak",
+      "toggleAria": "{list} – {species}"
+    },
+    "table": {
+      "dateTime": "Dátum és idő",
+      "weather": "Időjárás",
+      "source": "Forrás",
+      "confidence": "Megbízhatóság",
+      "model": "Modell",
+      "status": "Állapot",
+      "recording": "Felvétel",
+      "actions": "Műveletek",
+      "selectAll": "Az oldal összes felvételének kijelölése",
+      "selectRow": "A(z) {date} felvétel kijelölése",
+      "selected": "Kijelölve: {count}",
+      "bulkActions": "Műveletek a kijelölt felvételekkel",
+      "markCorrect": "Megjelölés helyesként",
+      "markFalsePositive": "Megjelölés téves pozitívként",
+      "lock": "Zárolás",
+      "unlock": "Feloldás",
+      "deleteSelected": "Törlés",
+      "deleteSelectedTitle": "Törli {species} kijelölt felvételeit ({count})?",
+      "deleteSelectedMessage": "A kijelölés zárolt felvételei megmaradnak.",
+      "bulkLockedHint": "Zárolt felvételek nem ellenőrizhetők és nem törölhetők.",
+      "bulkResult": "Frissítve: {processed} · kihagyva: {skipped}",
+      "bulkFailed": "A kijelölt felvételeket nem sikerült frissíteni.",
+      "empty": "Nincsenek felvételek.",
+      "emptyLocked": "Nincsenek zárolt felvételek.",
+      "sortConfidenceDesc": "Legnagyobb megbízhatóság elöl",
+      "sortConfidenceAsc": "Legkisebb megbízhatóság elöl",
+      "sortDateDesc": "Legújabbak elöl",
+      "sortDateAsc": "Legrégebbiek elöl"
+    }
   }
 }

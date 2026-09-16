@@ -77,6 +77,7 @@ Performance Optimizations:
     ArrowDownToLine,
     TrendingUp,
     Leaf,
+    ListChecks,
     Moon,
   } from '@lucide/svelte';
   import { t } from '$lib/i18n';
@@ -182,6 +183,7 @@ Performance Optimizations:
     analyticsBiodiversity: actualRoute === '/ui/analytics/biodiversity',
     analyticsNocturnal: actualRoute === '/ui/analytics/nocturnal',
     analyticsSpecies: actualRoute === '/ui/analytics/species',
+    analyticsSpeciesWorkspace: actualRoute === '/ui/analytics/species-workspace',
     search: actualRoute.startsWith('/ui/search'),
     about: actualRoute.startsWith('/ui/about'),
     system: actualRoute.startsWith('/ui/system'),
@@ -299,6 +301,20 @@ Performance Optimizations:
             url: withQuery(navigationUrls.analyticsSpecies),
             routeKey: 'analyticsSpecies',
           },
+          // Species workspace: its API is protected, so guests do not see it, and it
+          // never carries analytics filters (its `species` parameter opens a species).
+          ...(!securityEnabled || accessAllowed
+            ? [
+                {
+                  icon: ListChecks,
+                  label: t('speciesWorkspace.title'),
+                  url: onNavigate
+                    ? '/analytics/species-workspace'
+                    : '/ui/analytics/species-workspace',
+                  routeKey: 'analyticsSpeciesWorkspace',
+                },
+              ]
+            : []),
           {
             icon: Search,
             label: t('navigation.search'),

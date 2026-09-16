@@ -5734,5 +5734,153 @@
       "patternTransient": "Transitório",
       "patternSustained": "Persistente"
     }
+  },
+  "speciesWorkspace": {
+    "title": "Área de espécies",
+    "subtitle": "Todas as espécies já detetadas, com ferramentas de revisão e gestão",
+    "refresh": "Recarregar dados",
+    "search": {
+      "label": "Pesquisar espécies",
+      "placeholder": "Pesquisar por nome…"
+    },
+    "sort": {
+      "label": "Ordenar por",
+      "sortBy": "Ordenar por {column}",
+      "toggleDirection": "Inverter a ordem"
+    },
+    "edit": {
+      "edit": "Editar colunas",
+      "done": "Concluído",
+      "reset": "Repor",
+      "panelTitle": "Colunas",
+      "show": "Mostrar a coluna {column}",
+      "mandatory": "{column} é sempre mostrada",
+      "moveUp": "Mover {column} para cima",
+      "moveDown": "Mover {column} para baixo",
+      "saveFailed": "Não foi possível guardar a disposição das colunas, por isso a anterior foi reposta."
+    },
+    "columns": {
+      "species": "Espécie",
+      "count": "Deteções",
+      "maxConfidence": "Confiança máx.",
+      "firstSeen": "Primeira deteção",
+      "lastSeen": "Última deteção",
+      "range": "Probabilidade de ocorrência",
+      "verification": "Verificadas",
+      "excluded": "Excluída",
+      "included": "Incluída",
+      "confirmed": "Confirmada",
+      "bestRecording": "Melhor gravação",
+      "actions": "Ações"
+    },
+    "columnHelp": {
+      "range": "Probabilidade do filtro de distribuição para este local e semana"
+    },
+    "groups": {
+      "inventory": "as espécies",
+      "stats": "as estatísticas",
+      "memberships": "as listas de espécies",
+      "range": "as probabilidades de ocorrência",
+      "best": "as melhores gravações",
+      "recordings": "as gravações"
+    },
+    "states": {
+      "loading": "A carregar…",
+      "loadFailed": "Não foi possível carregar {what}.",
+      "retry": "Tentar novamente",
+      "empty": "Ainda não foi detetada nenhuma espécie.",
+      "noMatch": "Nenhuma espécie corresponde à pesquisa e ao filtro.",
+      "notAvailable": "N/D",
+      "notFound": "Não existem deteções guardadas desta espécie.",
+      "membershipLoading": "A carregar listas de espécies…",
+      "unknownModel": "Desconhecido",
+      "loginRequired": "Inicie sessão para usar a área de espécies."
+    },
+    "verification": "{correct} corretas, {falsePositive} falsos positivos",
+    "membership": {
+      "confirmed": "Confirmada",
+      "included": "Lista de inclusão",
+      "excluded": "Lista de exclusão",
+      "yes": "Sim",
+      "no": "Não",
+      "state": "{list} para {species}: {state}"
+    },
+    "actions": {
+      "menu": "Ações para {species}",
+      "toggle": {
+        "confirmed": "Alternar confirmada",
+        "included": "Alternar lista de inclusão",
+        "excluded": "Alternar lista de exclusão"
+      },
+      "delete": "Eliminar deteções de {species}…",
+      "updateFailed": "Não foi possível atualizar {list} para {species}."
+    },
+    "best": {
+      "title": "Melhor gravação de {species}",
+      "play": "Reproduzir a melhor gravação de {species}",
+      "locked": "Bloqueada",
+      "confidence": "Confiança {value}",
+      "unavailable": "Nenhuma gravação disponível",
+      "unavailableHint": "Nenhuma deteção desta espécie tem um clip de áudio no disco."
+    },
+    "delete": {
+      "title": "Eliminar deteções de {species}",
+      "message": "Deteções a eliminar: {deletable} de {total} (falsos positivos incluídos: {falsePositive}). Deteções bloqueadas mantidas: {locked}.",
+      "nothing": "Todas as deteções desta espécie estão bloqueadas, por isso não há nada para eliminar.",
+      "confirm": "Eliminar ({count})",
+      "running": "A eliminar…",
+      "progressLabel": "Progresso da eliminação",
+      "progress": "Eliminadas: {deleted} · bloqueadas mantidas: {locked}",
+      "done": "Eliminação concluída.",
+      "stop": "Parar",
+      "cancelled": "Eliminação parada. As deteções já eliminadas continuam eliminadas.",
+      "failed": "Deteções que não puderam ser eliminadas: {count}. Foram mantidas e pode tentar novamente.",
+      "stalled": "Eliminação parada porque não foi possível remover as deteções restantes.",
+      "error": "A eliminação falhou. As deteções já eliminadas continuam eliminadas."
+    },
+    "detail": {
+      "back": "Voltar à área de espécies",
+      "title": "Todas as gravações de {species}",
+      "detections": "Deteções: {count}",
+      "maxConfidence": "confiança máx. {value}",
+      "lastDetected": "última deteção {date}",
+      "bestRecording": "Melhor gravação",
+      "quickGraph": "Gráfico rápido",
+      "openExternal": "Abrir {species} em {site} (novo separador)",
+      "select": "Selecionar",
+      "cancelSelect": "Cancelar seleção",
+      "lockedOnly": "Apenas bloqueadas",
+      "toggleAria": "{list} para {species}"
+    },
+    "table": {
+      "dateTime": "Data e hora",
+      "weather": "Meteorologia",
+      "source": "Fonte",
+      "confidence": "Confiança",
+      "model": "Modelo",
+      "status": "Estado",
+      "recording": "Gravação",
+      "actions": "Ações",
+      "selectAll": "Selecionar todas as gravações desta página",
+      "selectRow": "Selecionar a gravação de {date}",
+      "selected": "Selecionadas: {count}",
+      "bulkActions": "Ações para as gravações selecionadas",
+      "markCorrect": "Marcar como correta",
+      "markFalsePositive": "Marcar como falso positivo",
+      "lock": "Bloquear",
+      "unlock": "Desbloquear",
+      "deleteSelected": "Eliminar",
+      "deleteSelectedTitle": "Eliminar as gravações selecionadas de {species} ({count})?",
+      "deleteSelectedMessage": "As gravações bloqueadas na seleção são mantidas.",
+      "bulkLockedHint": "Gravações bloqueadas não podem ser revistas nem eliminadas.",
+      "bulkResult": "Atualizadas: {processed} · ignoradas: {skipped}",
+      "bulkFailed": "Não foi possível atualizar as gravações selecionadas.",
+      "empty": "Sem gravações.",
+      "emptyLocked": "Sem gravações bloqueadas.",
+      "sortConfidenceDesc": "Maior confiança primeiro",
+      "sortConfidenceAsc": "Menor confiança primeiro",
+      "sortDateDesc": "Mais recentes primeiro",
+      "sortDateAsc": "Mais antigas primeiro"
+    }
   }
 }
