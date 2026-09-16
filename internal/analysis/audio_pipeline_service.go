@@ -1849,7 +1849,7 @@ func (p *AudioPipelineService) buildSourceConfigsWithModels(fallbackSources map[
 			// rate is lost, but a channel count may still have been recovered, and
 			// that recovery must not be silent (the exact class of hidden behavior
 			// this change surfaces).
-			GetLogger().Error("stream probe failed with no previously known sample rate; high sample rate model audio will be resampled to the target rate until the source is re-probed",
+			GetLogger().Error("stream probe failed with no previously known sample rate; bat model audio is captured at the minimum bat capture rate until the source is re-probed",
 				logger.String("stream", stream.Name),
 				logger.Int("target_sample_rate", conf.SampleRate),
 				logger.Int("channels", sourceChannels),
@@ -1976,6 +1976,10 @@ func hasBatModel(modelIDs []string) bool {
 	return false
 }
 
+// batCaptureRate is the minimum capture rate for streams feeding a bat model; see
+// resolveStreamSampleRates.
+const batCaptureRate = 192000
+
 // resolveStreamSampleRates decides the source and output sample rates for a
 // stream config from a fresh probe result and a fallback rate to use when the
 // probe failed.
@@ -1987,13 +1991,17 @@ func hasBatModel(modelIDs []string) bool {
 // failed and a positive fallbackRate is known, that rate is reused so the
 // pipeline keeps the correct geometry (retained=true).
 //
-// outputRate is the target rate, raised to the source rate only for bat models,
-// which analyse at the source's native high rate; other models always analyse at
-// targetRate and rely on downstream resampling.
+// outputRate is the target rate for non-bat models, which rely on downstream
+// resampling. Bat models capture at the source rate, but never below
+// batCaptureRate: FFmpeg always resamples to outputRate (-ar), so a source probed
+// at 48 kHz by day that switches itself to 192 kHz at night would otherwise stay
+// capped at the start-time rate until the source is restarted. A lower-rate
+// source is upsampled; the band above its own Nyquist is simply empty.
 //
 // escalate reports a genuine loss: the probe failed, no fallback was available,
 // and the stream uses a high-sample-rate (bat) model, so its audio will be
-// resampled to targetRate until a successful re-probe. Callers should log this.
+// captured at batCaptureRate without knowing the real source rate. Callers
+// should log this.
 func resolveStreamSampleRates(probeRate, fallbackRate, targetRate int, isBatModel bool) (sourceRate, outputRate int, retained, escalate bool) {
 	sourceRate = probeRate
 	if sourceRate == 0 && fallbackRate > 0 {
@@ -2001,8 +2009,8 @@ func resolveStreamSampleRates(probeRate, fallbackRate, targetRate int, isBatMode
 		retained = true
 	}
 	outputRate = targetRate
-	if isBatModel && sourceRate > targetRate {
-		outputRate = sourceRate
+	if isBatModel {
+		outputRate = max(sourceRate, batCaptureRate, targetRate)
 	}
 	escalate = probeRate == 0 && !retained && isBatModel
 	return sourceRate, outputRate, retained, escalate
