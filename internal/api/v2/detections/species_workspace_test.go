@@ -56,11 +56,11 @@ func (f *fakeWorkspaceStore) SpeciesWorkspaceStats(context.Context) ([]datastore
 	return f.stats, nil
 }
 
-func (f *fakeWorkspaceStore) SpeciesWorkspaceCandidates(_ context.Context, names []string, _ int) (map[string][]datastore.SpeciesRecordingCandidate, error) {
+func (f *fakeWorkspaceStore) SpeciesWorkspaceCandidates(_ context.Context, names []string, limit int) (map[string][]datastore.SpeciesRecordingCandidate, error) {
 	f.candidateQs = append(f.candidateQs, names)
 	out := make(map[string][]datastore.SpeciesRecordingCandidate, len(names))
 	for _, n := range names {
-		out[n] = f.candidates[n]
+		out[n] = f.candidates[n][:min(limit, len(f.candidates[n]))]
 	}
 	return out, nil
 }
@@ -184,6 +184,22 @@ func TestGetWorkspaceBestRecordings(t *testing.T) {
 	assert.Contains(t, got, "Nobody")
 	assert.Nil(t, got["Nobody"])
 	assert.Len(t, store.candidateQs, 1, "all species of a batch are resolved in one datastore call")
+
+	// A species whose first candidates all lack a clip is looked up further.
+	deep := make([]datastore.SpeciesRecordingCandidate, 0, 30)
+	for i := range 25 {
+		deep = append(deep, datastore.SpeciesRecordingCandidate{ID: uint(100 + i), ClipName: "missing.wav"})
+	}
+	deep = append(deep, datastore.SpeciesRecordingCandidate{ID: 999, Confidence: 0.4, ClipName: "present.wav"})
+	store.candidates["Parus major"] = deep
+	store.candidateQs = nil
+	rec = doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/best-recordings?species=Parus%20major", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	got = nil
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.NotNil(t, got["Parus major"])
+	assert.Equal(t, uint(999), got["Parus major"].ID)
+	assert.Len(t, store.candidateQs, 2)
 
 	assert.Equal(t, http.StatusBadRequest, doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/best-recordings", "").Code)
 	params := make([]string, 0, maxBestRecordingSpecies+1)

@@ -201,6 +201,22 @@ describe('layout store', () => {
     expect(store.saveError).toBe(true);
   });
 
+  it('applies only the newest save when saves overlap', async () => {
+    const replies: Array<(_l: WorkspaceLayout) => void> = [];
+    const save = vi.fn(
+      (l: WorkspaceLayout) =>
+        new Promise<WorkspaceLayout>(resolve => replies.push(() => resolve(l)))
+    );
+    const store = createLayoutStore({ fetch: vi.fn(), save });
+    const first = store.save({ ...DEFAULT_LAYOUT, sort: { column: 'lastSeen', direction: 'asc' } });
+    const second = store.save({ ...DEFAULT_LAYOUT, sort: { column: 'species', direction: 'asc' } });
+    replies[1]?.(DEFAULT_LAYOUT);
+    replies[0]?.(DEFAULT_LAYOUT);
+    await Promise.all([first, second]);
+    expect(store.layout.sort).toEqual({ column: 'species', direction: 'asc' });
+    expect(store.saving).toBe(false);
+  });
+
   it('reset restores the default layout', async () => {
     const save = vi.fn(async (l: WorkspaceLayout) => l);
     const store = createLayoutStore({ fetch: vi.fn(), save });
