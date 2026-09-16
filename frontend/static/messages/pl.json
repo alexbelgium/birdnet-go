@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Historia wykryć: {species}",
-        "subtitle": "{count} wykryć · {range}",
-        "subtitleSince": "{count} wykryć · {range} (od {since})",
+        "subtitle": "{count, plural, one {{formattedCount} wykrycie} few {{formattedCount} wykrycia} many {{formattedCount} wykryć} other {{formattedCount} wykrycia}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} wykrycie} few {{formattedCount} wykrycia} many {{formattedCount} wykryć} other {{formattedCount} wykrycia}} · {range} (od {since})",
         "loading": "Wczytywanie historii wykryć…",
         "unavailable": "Historia niedostępna",
         "loadFailed": "Nie udało się wczytać historii",
@@ -707,7 +707,7 @@
         "avgPerDay": "Śr./dzień",
         "daily": "dziennie",
         "movingAverage": "śr. 7-dniowa",
-        "chartLabel": "{species}: {count} wykryć w okresie {range}, szczyt {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} wykrycie} few {{count} wykrycia} many {{count} wykryć} other {{count} wykrycia}} w okresie {range}, szczyt {peak}",
         "rangeGroup": "Zakres historii",
         "allShort": "Wszystko",
         "ranges": {

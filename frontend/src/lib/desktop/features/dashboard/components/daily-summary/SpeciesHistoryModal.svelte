@@ -9,11 +9,16 @@
   const historyCache = new Map<string, FullSeries>();
   const HISTORY_CACHE_MAX = 20;
 
+  // Bumped by every invalidation so a request that was already in flight when
+  // the cache was dropped cannot repopulate it with pre-change data.
+  let cacheGeneration = 0;
+
   /**
    * Drops cached histories so the next open refetches. Call after detections
    * change (refresh, delete, review). Without a name every species is dropped.
    */
   export function invalidateSpeciesHistory(scientificName?: string): void {
+    cacheGeneration += 1;
     if (scientificName === undefined) {
       historyCache.clear();
       return;
@@ -56,7 +61,7 @@
     parseYmd,
     rangeWindow,
     selectPeakIndices,
-    shortDayLabel,
+    fullDayLabel,
     topRoundedBarPath,
   } from '../../utils/speciesHistory';
 
@@ -140,6 +145,7 @@
     }
     fullData = null;
     const controller = new AbortController();
+    const generation = cacheGeneration;
     fetchSeries(ALL_TIME_START, selectedDate, controller.signal)
       .then(list => {
         let firstMs: number | null = null;
@@ -150,10 +156,12 @@
           }
         }
         const series: FullSeries = { byDate: toByDate(list), firstMs };
-        historyCache.set(key, series);
-        if (historyCache.size > HISTORY_CACHE_MAX) {
-          const oldest = historyCache.keys().next().value;
-          if (oldest !== undefined) historyCache.delete(oldest);
+        if (generation === cacheGeneration) {
+          historyCache.set(key, series);
+          if (historyCache.size > HISTORY_CACHE_MAX) {
+            const oldest = historyCache.keys().next().value;
+            if (oldest !== undefined) historyCache.delete(oldest);
+          }
         }
         fullData = series;
       })
@@ -324,12 +332,15 @@
     if (showError) return t('dashboard.dailySummary.history.unavailable');
     const v = displayed;
     if (!v) return t('dashboard.dailySummary.history.loading');
-    const params = { count: formatDetectionCount(v.total), range: rangeLabel(v.range) };
+    const params = {
+      count: v.total,
+      formattedCount: formatDetectionCount(v.total),
+      range: rangeLabel(v.range),
+    };
     if (v.range === 'all' && fullData?.firstMs != null) {
-      const firstYear = new Date(fullData.firstMs).getUTCFullYear();
       return t('dashboard.dailySummary.history.subtitleSince', {
         ...params,
-        since: `${shortDayLabel(fullData.firstMs)}, ${firstYear}`,
+        since: fullDayLabel(fullData.firstMs),
       });
     }
     return t('dashboard.dailySummary.history.subtitle', params);
@@ -377,7 +388,7 @@
   title={dialogTitle}
   size="2xl"
   {onClose}
-  className="hist-panel"
+  className="hist-panel w-full"
   ontouchstart={stopTouch}
   ontouchend={stopTouch}
 >

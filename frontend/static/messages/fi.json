@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Havaintohistoria: {species}",
-        "subtitle": "{count} havaintoa · {range}",
-        "subtitleSince": "{count} havaintoa · {range} (alkaen {since})",
+        "subtitle": "{count, plural, one {{formattedCount} havainto} other {{formattedCount} havaintoa}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} havainto} other {{formattedCount} havaintoa}} · {range} (alkaen {since})",
         "loading": "Ladataan havaintohistoriaa…",
         "unavailable": "Historia ei saatavilla",
         "loadFailed": "Historian lataus epäonnistui",
@@ -707,7 +707,7 @@
         "avgPerDay": "Ka./päivä",
         "daily": "päivittäin",
         "movingAverage": "7 päivän ka.",
-        "chartLabel": "{species}: {count} havaintoa ({range}), huippu {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} havainto} other {{count} havaintoa}} ({range}), huippu {peak}",
         "rangeGroup": "Historian jakso",
         "allShort": "Kaikki",
         "ranges": {

@@ -49,8 +49,29 @@ export interface BucketPoint {
   count: number;
 }
 
-// Short month names follow the active UI locale; formatters are cached per locale.
-const monthFormatters = new Map<string, Intl.DateTimeFormat>();
+// Date labels follow the active UI locale (field order and month grammar included).
+// Formatters are cached per locale + pattern; all dates are UTC midnights.
+const DAY_FORMAT: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+const DAY_YEAR_FORMAT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+};
+const MONTH_YEAR_FORMAT: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short' };
+const MONTH_SHORT_YEAR_FORMAT: Intl.DateTimeFormatOptions = { year: '2-digit', month: 'short' };
+
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatterFor(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const locale = getLocale();
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let formatter = formatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' });
+    formatters.set(key, formatter);
+  }
+  return formatter;
+}
 
 // ── Date helpers ──
 
@@ -69,20 +90,14 @@ export function formatYmd(utcMs: number): string {
   return `${y}-${m}-${d}`;
 }
 
-function monthShort(utcMs: number): string {
-  const locale = getLocale();
-  let formatter = monthFormatters.get(locale);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
-    monthFormatters.set(locale, formatter);
-  }
-  return formatter.format(new Date(utcMs));
+/** Localized month + day label for a single day, e.g. "Jun 12" or "12. Juni". */
+export function shortDayLabel(utcMs: number): string {
+  return formatterFor(DAY_FORMAT).format(new Date(utcMs));
 }
 
-/** "Jun 12" style label for a single day. */
-export function shortDayLabel(utcMs: number): string {
-  const dt = new Date(utcMs);
-  return `${monthShort(utcMs)} ${dt.getUTCDate()}`;
+/** Localized full date, e.g. "Jun 12, 2026" or "12. Juni 2026". */
+export function fullDayLabel(utcMs: number): string {
+  return formatterFor(DAY_YEAR_FORMAT).format(new Date(utcMs));
 }
 
 // ── API response parsing ──
@@ -204,26 +219,19 @@ export function movingAverage(values: number[], window: number): number[] {
 
 /** Tooltip / stats label for one bucket, e.g. "Jun 12, 2026" or "Jun 12 – 18, 2026". */
 export function bucketLabel(bp: BucketPoint, bucket: Bucket): string {
-  const start = new Date(bp.startMs);
-  const year = start.getUTCFullYear();
   if (bucket === 'day') {
-    return `${shortDayLabel(bp.startMs)}, ${year}`;
+    return fullDayLabel(bp.startMs);
   }
   if (bucket === 'month') {
-    return `${monthShort(bp.startMs)} ${year}`;
+    return formatterFor(MONTH_YEAR_FORMAT).format(new Date(bp.startMs));
   }
-  const end = new Date(bp.endMs);
-  const sameMonth =
-    start.getUTCMonth() === end.getUTCMonth() && start.getUTCFullYear() === end.getUTCFullYear();
-  const endLabel = sameMonth ? `${end.getUTCDate()}` : shortDayLabel(bp.endMs);
-  return `${shortDayLabel(bp.startMs)} – ${endLabel}, ${end.getUTCFullYear()}`;
+  return formatterFor(DAY_YEAR_FORMAT).formatRange(new Date(bp.startMs), new Date(bp.endMs));
 }
 
-/** Compact x-axis label for one bucket, e.g. "Jun 12" or "Jun '26". */
+/** Compact x-axis label for one bucket, e.g. "Jun 12" or "Jun 26". */
 export function axisLabel(bp: BucketPoint, bucket: Bucket): string {
   if (bucket === 'month') {
-    const yy = String(new Date(bp.startMs).getUTCFullYear() % 100).padStart(2, '0');
-    return `${monthShort(bp.startMs)} '${yy}`;
+    return formatterFor(MONTH_SHORT_YEAR_FORMAT).format(new Date(bp.startMs));
   }
   return shortDayLabel(bp.startMs);
 }

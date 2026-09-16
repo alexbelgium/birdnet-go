@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Cronologia rilevamenti di {species}",
-        "subtitle": "{count} rilevamenti · {range}",
-        "subtitleSince": "{count} rilevamenti · {range} (dal {since})",
+        "subtitle": "{count, plural, one {{formattedCount} rilevamento} other {{formattedCount} rilevamenti}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} rilevamento} other {{formattedCount} rilevamenti}} · {range} (dal {since})",
         "loading": "Caricamento cronologia rilevamenti…",
         "unavailable": "Cronologia non disponibile",
         "loadFailed": "Impossibile caricare la cronologia",
@@ -707,7 +707,7 @@
         "avgPerDay": "Media/giorno",
         "daily": "giornaliero",
         "movingAverage": "media 7 giorni",
-        "chartLabel": "{species}: {count} rilevamenti negli {range}, picco di {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} rilevamento} other {{count} rilevamenti}} negli {range}, picco di {peak}",
         "rangeGroup": "Intervallo cronologia",
         "allShort": "Tutto",
         "ranges": {

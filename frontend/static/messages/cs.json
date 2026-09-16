@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Historie detekcí: {species}",
-        "subtitle": "{count} detekcí · {range}",
-        "subtitleSince": "{count} detekcí · {range} (od {since})",
+        "subtitle": "{count, plural, one {{formattedCount} detekce} few {{formattedCount} detekce} many {{formattedCount} detekce} other {{formattedCount} detekcí}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detekce} few {{formattedCount} detekce} many {{formattedCount} detekce} other {{formattedCount} detekcí}} · {range} (od {since})",
         "loading": "Načítání historie detekcí…",
         "unavailable": "Historie není k dispozici",
         "loadFailed": "Historii se nepodařilo načíst",
@@ -707,7 +707,7 @@
         "avgPerDay": "Průměr/den",
         "daily": "denně",
         "movingAverage": "7denní průměr",
-        "chartLabel": "{species}: {count} detekcí za {range}, maximum {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} detekce} few {{count} detekce} many {{count} detekce} other {{count} detekcí}} za {range}, maximum {peak}",
         "rangeGroup": "Rozsah historie",
         "allShort": "Vše",
         "ranges": {

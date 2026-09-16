@@ -558,8 +558,8 @@ export type TranslationKey =
   | 'dashboard.dailySummary.taxonFilter.other'
   | 'dashboard.dailySummary.taxonFilter.ariaLabel' // params: current
   | 'dashboard.dailySummary.history.title' // params: species
-  | 'dashboard.dailySummary.history.subtitle' // params: count, range
-  | 'dashboard.dailySummary.history.subtitleSince' // params: count, range, since
+  | 'dashboard.dailySummary.history.subtitle' // params: count, formattedCount, range
+  | 'dashboard.dailySummary.history.subtitleSince' // params: count, formattedCount, range, since
   | 'dashboard.dailySummary.history.loading'
   | 'dashboard.dailySummary.history.unavailable'
   | 'dashboard.dailySummary.history.loadFailed'
@@ -4322,9 +4322,14 @@ export type TranslationParams = {
   'dashboard.dailySummary.tooltips.infrequent': { days: string | number };
   'dashboard.dailySummary.taxonFilter.ariaLabel': { current: string | number };
   'dashboard.dailySummary.history.title': { species: string | number };
-  'dashboard.dailySummary.history.subtitle': { count: string | number; range: string | number };
+  'dashboard.dailySummary.history.subtitle': {
+    count: string | number;
+    formattedCount: string | number;
+    range: string | number;
+  };
   'dashboard.dailySummary.history.subtitleSince': {
     count: string | number;
+    formattedCount: string | number;
     range: string | number;
     since: string | number;
   };

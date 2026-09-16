@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Erkennungsverlauf: {species}",
-        "subtitle": "{count} Erkennungen · {range}",
-        "subtitleSince": "{count} Erkennungen · {range} (seit {since})",
+        "subtitle": "{count, plural, one {{formattedCount} Erkennung} other {{formattedCount} Erkennungen}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} Erkennung} other {{formattedCount} Erkennungen}} · {range} (seit {since})",
         "loading": "Erkennungsverlauf wird geladen…",
         "unavailable": "Verlauf nicht verfügbar",
         "loadFailed": "Verlauf konnte nicht geladen werden",
@@ -707,7 +707,7 @@
         "avgPerDay": "Ø/Tag",
         "daily": "täglich",
         "movingAverage": "7-Tage-Ø",
-        "chartLabel": "{species}: {count} Erkennungen in {range}, Spitze bei {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} Erkennung} other {{count} Erkennungen}} in {range}, Spitze bei {peak}",
         "rangeGroup": "Verlaufszeitraum",
         "allShort": "Alle",
         "ranges": {

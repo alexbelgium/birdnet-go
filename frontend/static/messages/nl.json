@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Detectiegeschiedenis van {species}",
-        "subtitle": "{count} detecties · {range}",
-        "subtitleSince": "{count} detecties · {range} (sinds {since})",
+        "subtitle": "{count, plural, one {{formattedCount} detectie} other {{formattedCount} detecties}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detectie} other {{formattedCount} detecties}} · {range} (sinds {since})",
         "loading": "Detectiegeschiedenis laden…",
         "unavailable": "Geschiedenis niet beschikbaar",
         "loadFailed": "Geschiedenis laden mislukt",
@@ -707,7 +707,7 @@
         "avgPerDay": "Gem./dag",
         "daily": "dagelijks",
         "movingAverage": "7-daags gem.",
-        "chartLabel": "{species}: {count} detecties in {range}, piek van {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} detectie} other {{count} detecties}} in {range}, piek van {peak}",
         "rangeGroup": "Periode geschiedenis",
         "allShort": "Alles",
         "ranges": {

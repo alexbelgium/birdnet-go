@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Észlelési előzmények: {species}",
-        "subtitle": "{count} észlelés · {range}",
-        "subtitleSince": "{count} észlelés · {range} ({since} óta)",
+        "subtitle": "{count, plural, one {{formattedCount} észlelés} other {{formattedCount} észlelés}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} észlelés} other {{formattedCount} észlelés}} · {range} ({since} óta)",
         "loading": "Észlelési előzmények betöltése…",
         "unavailable": "Előzmények nem érhetők el",
         "loadFailed": "Az előzmények betöltése sikertelen",
@@ -707,7 +707,7 @@
         "avgPerDay": "Átl./nap",
         "daily": "naponta",
         "movingAverage": "7 napos átl.",
-        "chartLabel": "{species}: {count} észlelés ({range}), csúcs: {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} észlelés} other {{count} észlelés}} ({range}), csúcs: {peak}",
         "rangeGroup": "Előzmények időszaka",
         "allShort": "Mind",
         "ranges": {

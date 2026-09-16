@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Detektionshistorik for {species}",
-        "subtitle": "{count} detektioner · {range}",
-        "subtitleSince": "{count} detektioner · {range} (siden {since})",
+        "subtitle": "{count, plural, one {{formattedCount} detektion} other {{formattedCount} detektioner}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detektion} other {{formattedCount} detektioner}} · {range} (siden {since})",
         "loading": "Indlæser detektionshistorik…",
         "unavailable": "Historik ikke tilgængelig",
         "loadFailed": "Kunne ikke indlæse historik",
@@ -707,7 +707,7 @@
         "avgPerDay": "Gns./dag",
         "daily": "dagligt",
         "movingAverage": "7-dages gns.",
-        "chartLabel": "{species}: {count} detektioner i {range}, top på {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} detektion} other {{count} detektioner}} i {range}, top på {peak}",
         "rangeGroup": "Historikinterval",
         "allShort": "Alle",
         "ranges": {

@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Noteikšanas vēsture: {species}",
-        "subtitle": "{count} noteikšanas · {range}",
-        "subtitleSince": "{count} noteikšanas · {range} (kopš {since})",
+        "subtitle": "{count, plural, zero {{formattedCount} noteikšanu} one {{formattedCount} noteikšana} other {{formattedCount} noteikšanas}} · {range}",
+        "subtitleSince": "{count, plural, zero {{formattedCount} noteikšanu} one {{formattedCount} noteikšana} other {{formattedCount} noteikšanas}} · {range} (kopš {since})",
         "loading": "Ielādē noteikšanas vēsturi…",
         "unavailable": "Vēsture nav pieejama",
         "loadFailed": "Neizdevās ielādēt vēsturi",
@@ -707,7 +707,7 @@
         "avgPerDay": "Vid./dienā",
         "daily": "dienā",
         "movingAverage": "7 dienu vid.",
-        "chartLabel": "{species}: {count} noteikšanas ({range}), maksimums {peak}",
+        "chartLabel": "{species}: {count, plural, zero {{count} noteikšanu} one {{count} noteikšana} other {{count} noteikšanas}} ({range}), maksimums {peak}",
         "rangeGroup": "Vēstures periods",
         "allShort": "Visi",
         "ranges": {

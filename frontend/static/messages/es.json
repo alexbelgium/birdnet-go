@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "Historial de detecciones de {species}",
-        "subtitle": "{count} detecciones · {range}",
-        "subtitleSince": "{count} detecciones · {range} (desde {since})",
+        "subtitle": "{count, plural, one {{formattedCount} detección} other {{formattedCount} detecciones}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detección} other {{formattedCount} detecciones}} · {range} (desde {since})",
         "loading": "Cargando historial de detecciones…",
         "unavailable": "Historial no disponible",
         "loadFailed": "No se pudo cargar el historial",
@@ -707,7 +707,7 @@
         "avgPerDay": "Media/día",
         "daily": "diario",
         "movingAverage": "media de 7 días",
-        "chartLabel": "{species}: {count} detecciones en {range}, pico de {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} detección} other {{count} detecciones}} en {range}, pico de {peak}",
         "rangeGroup": "Rango del historial",
         "allShort": "Todo",
         "ranges": {

@@ -694,8 +694,8 @@
       },
       "history": {
         "title": "{species} detection history",
-        "subtitle": "{count} detections · {range}",
-        "subtitleSince": "{count} detections · {range} (since {since})",
+        "subtitle": "{count, plural, one {{formattedCount} detection} other {{formattedCount} detections}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detection} other {{formattedCount} detections}} · {range} (since {since})",
         "loading": "Loading detection history…",
         "unavailable": "History unavailable",
         "loadFailed": "Failed to load history",
@@ -707,7 +707,7 @@
         "avgPerDay": "Avg/day",
         "daily": "daily",
         "movingAverage": "7-day avg",
-        "chartLabel": "{species}: {count} detections over {range}, peaking at {peak}",
+        "chartLabel": "{species}: {count, plural, one {{count} detection} other {{count} detections}} over {range}, peaking at {peak}",
         "rangeGroup": "History range",
         "allShort": "All",
         "ranges": {
