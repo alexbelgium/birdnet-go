@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { COLUMNS, DEFAULT_LAYOUT, neededGroups, normalizeLayout, visibleColumns } from './columns';
-import { deleteAllUnlocked, SpeciesDeleteError } from './deleteSpecies';
+import { deleteAllUnlocked } from './deleteSpecies';
 import { ebirdLanguage, ebirdSpeciesUrl } from './externalLinks';
 import { createRequestSlot, isAbortError } from './requestSlot';
 import { foldText, matchesSearch } from './search';
