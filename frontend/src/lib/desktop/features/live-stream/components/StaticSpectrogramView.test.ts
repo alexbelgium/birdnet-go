@@ -59,4 +59,52 @@ describe('StaticSpectrogramView', () => {
     expect(signals[1].aborted).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+  it('stops for good after the two-minute session cap', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const signals: AbortSignal[] = [];
+      const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.signal instanceof AbortSignal) signals.push(init.signal);
+        // Fail fast so the loop exercises its retry delay across the session.
+        return Promise.reject(new Error('capture failed'));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const view = renderTyped(StaticSpectrogramView, { props: { sourceId: 'src' } });
+
+      await vi.advanceTimersByTimeAsync(119_000);
+      const callsBeforeCap = fetchMock.mock.calls.length;
+      expect(callsBeforeCap).toBeGreaterThan(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(signals.every(signal => signal.aborted)).toBe(true);
+      const callsAtCap = fetchMock.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      expect(fetchMock.mock.calls.length).toBe(callsAtCap);
+      expect(view.container.textContent).toContain('spectrogram.static.restart');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('issues no further capture after unmount during a retry delay', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const fetchMock = vi.fn(() => Promise.reject(new Error('capture failed')));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const view = renderTyped(StaticSpectrogramView, { props: { sourceId: 'src' } });
+      await vi.advanceTimersByTimeAsync(500);
+      const calls = fetchMock.mock.calls.length;
+      expect(calls).toBe(1);
+
+      view.unmount();
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      expect(fetchMock.mock.calls.length).toBe(calls);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

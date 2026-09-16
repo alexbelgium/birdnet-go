@@ -8,6 +8,8 @@
   interface Props {
     sourceId: string;
     sourceName?: string;
+    /** Dense layout for small cards such as the dashboard widget. */
+    compact?: boolean;
   }
 
   const CAPTURE_DURATION_SECONDS = 10;
@@ -16,7 +18,7 @@
   const SAMPLE_RATE_HEADER = 'X-Spectrogram-Sample-Rate';
   const GENERATED_AT_HEADER = 'X-Spectrogram-Generated-At';
 
-  let { sourceId, sourceName = '' }: Props = $props();
+  let { sourceId, sourceName = '', compact = false }: Props = $props();
   let imageUrl = $state<string | null>(null);
   let sampleRate = $state(0);
   let generatedAt = $state<string | null>(null);
@@ -45,15 +47,15 @@
         resolve();
         return;
       }
-      const timer = globalThis.setTimeout(resolve, RETRY_DELAY_MS);
-      signal.addEventListener(
-        'abort',
-        () => {
-          globalThis.clearTimeout(timer);
-          resolve();
-        },
-        { once: true }
-      );
+      const onAbort = () => {
+        globalThis.clearTimeout(timer);
+        resolve();
+      };
+      const timer = globalThis.setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, RETRY_DELAY_MS);
+      signal.addEventListener('abort', onAbort, { once: true });
     });
   }
 
@@ -144,7 +146,9 @@
 <div class="flex h-full min-h-0 flex-col bg-black text-white">
   <div class="flex min-h-0 flex-1 items-stretch">
     <div
-      class="relative w-16 shrink-0 border-r border-white/20 text-[10px] tabular-nums text-white/70"
+      class="relative shrink-0 border-r {compact
+        ? 'w-12'
+        : 'w-16'} border-white/20 text-[10px] tabular-nums text-white/70"
       aria-label={t('spectrogram.static.frequencyAxis')}
     >
       {#each frequencyLabels as label, index (index)}
@@ -166,20 +170,26 @@
         />
       {:else if !sessionExpired}
         <div class="flex h-full flex-col items-center justify-center gap-3 text-white/70">
-          <Loader2 class="size-8 animate-spin" />
-          <span class="text-sm">{t('spectrogram.static.recording')}</span>
+          <Loader2 class="animate-spin {compact ? 'size-5' : 'size-8'}" />
+          <span class={compact ? 'text-xs' : 'text-sm'}>{t('spectrogram.static.recording')}</span>
         </div>
       {/if}
 
       {#if sessionExpired}
         <div
-          class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 p-6"
+          class="absolute inset-0 flex flex-col items-center justify-center bg-black/80 {compact
+            ? 'gap-2 p-2'
+            : 'gap-4 p-6'}"
         >
-          <p class="max-w-md text-center text-sm">{t('spectrogram.static.sessionExpired')}</p>
+          <p class="max-w-md text-center {compact ? 'text-xs' : 'text-sm'}">
+            {t('spectrogram.static.sessionExpired')}
+          </p>
           <button
             type="button"
             onclick={restartSession}
-            class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] font-medium text-white hover:opacity-90 {compact
+              ? 'px-3 py-1 text-xs'
+              : 'px-4 py-2 text-sm'}"
           >
             <RefreshCw class="size-4" />
             {t('spectrogram.static.restart')}
@@ -190,7 +200,9 @@
   </div>
 
   <div
-    class="flex min-h-10 flex-none items-center gap-4 border-t border-white/20 px-4 py-2 text-xs text-white/70"
+    class="flex flex-none items-center gap-4 border-t border-white/20 text-xs text-white/70 {compact
+      ? 'min-h-7 px-3 py-1'
+      : 'min-h-10 px-4 py-2'}"
     aria-live="polite"
   >
     {#if recording && !sessionExpired}
@@ -208,6 +220,8 @@
         {t('spectrogram.static.captureFailed')}
       </span>
     {/if}
-    <span class="ml-auto">{t('spectrogram.static.fullRange')}</span>
+    {#if !compact}
+      <span class="ml-auto">{t('spectrogram.static.fullRange')}</span>
+    {/if}
   </div>
 </div>
