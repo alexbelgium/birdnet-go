@@ -351,6 +351,7 @@ func performAutoMigration(db *gorm.DB, debug bool, dbType, dbName string) error 
 	if err := createOptimizedIndexes(db, dbType, migrationLogger); err != nil {
 		return err
 	}
+	ensureSpeciesWorkspaceIndex(db, dbType, migrationLogger)
 
 	// Log successful migration completion
 	migrationLogger.Debug("Database migration completed successfully",
