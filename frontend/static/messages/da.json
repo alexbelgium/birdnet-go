@@ -730,6 +730,7 @@
         "markCorrect": "Korrekt",
         "markFalsePositive": "Ukorrekt",
         "review": "Gennemgå registrering",
+        "reanalyze": "Genanalyser detektion",
         "showSpecies": "Vis art",
         "ignoreSpecies": "Ignorér art",
         "lockDetection": "Lås registrering",

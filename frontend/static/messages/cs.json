@@ -730,6 +730,7 @@
         "markCorrect": "Správně",
         "markFalsePositive": "Nesprávně",
         "review": "Zkontrolovat detekci",
+        "reanalyze": "Znovu analyzovat detekci",
         "showSpecies": "Zobrazovat druh",
         "ignoreSpecies": "Ignorovat druh",
         "lockDetection": "Uzamknout detekci",

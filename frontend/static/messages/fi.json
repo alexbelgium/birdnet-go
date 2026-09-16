@@ -730,6 +730,7 @@
         "markCorrect": "Oikein",
         "markFalsePositive": "Virhe",
         "review": "Tarkista havainto",
+        "reanalyze": "Analysoi havainto uudelleen",
         "showSpecies": "Näytä laji",
         "ignoreSpecies": "Ohita laji",
         "lockDetection": "Lukitse havainto",

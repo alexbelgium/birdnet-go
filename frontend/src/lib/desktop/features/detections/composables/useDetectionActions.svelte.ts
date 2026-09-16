@@ -41,6 +41,8 @@ interface IgnoreSpeciesResponse {
 export function useDetectionActions(options: DetectionActionOptions) {
   let showConfirmModal = $state(false);
   let selectedDetection = $state<Detection | null>(null);
+  /** Detection whose reanalysis modal is open, or null when it is closed. */
+  let reanalyzeTarget = $state<Detection | null>(null);
   let confirmModalConfig = $state({
     title: '',
     message: '',
@@ -50,6 +52,24 @@ export function useDetectionActions(options: DetectionActionOptions) {
 
   function handleReview(detection: Detection) {
     navigation.navigate(`/ui/detections/${detection.id}?tab=review`);
+  }
+
+  /**
+   * Open the reanalysis modal in place, on whatever page the user is already on.
+   * Unlike handleReview this does NOT navigate: being sent to the detail page to
+   * compare model verdicts loses the list you were working through, and the whole
+   * point of the action being on the row is to stay there.
+   *
+   * The target lives here rather than in each view for the same reason
+   * selectedDetection does — the three views that host this composable all mount
+   * the modal from it, so the state exists once.
+   */
+  function handleReanalyze(detection: Detection) {
+    reanalyzeTarget = detection;
+  }
+
+  function closeReanalyze() {
+    reanalyzeTarget = null;
   }
 
   function handleToggleSpecies(detection: Detection) {
@@ -185,7 +205,12 @@ export function useDetectionActions(options: DetectionActionOptions) {
     get confirmModalConfig() {
       return confirmModalConfig;
     },
+    get reanalyzeTarget() {
+      return reanalyzeTarget;
+    },
+    closeReanalyze,
     handleReview,
+    handleReanalyze,
     handleMarkCorrect,
     handleMarkFalsePositive,
     handleToggleSpecies,
