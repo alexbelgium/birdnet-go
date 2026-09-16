@@ -2466,6 +2466,17 @@
               "type": "null"
             }
           ]
+        },
+        "confirmed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Species marked confirmed in the species workspace (analytics only; does not affect detection)"
+        },
+        "speciesworkspace": {
+          "$ref": "#/$defs/SpeciesWorkspaceLayout",
+          "description": "Species workspace column layout and sort"
         }
       },
       "additionalProperties": false,
@@ -2506,6 +2517,54 @@
       "additionalProperties": false,
       "type": "object",
       "description": "SpeciesTrackingSettings contains settings for tracking new species"
+    },
+    "SpeciesWorkspaceColumn": {
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "column identifier from SpeciesWorkspaceColumnIDs"
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "whether the column is shown"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "SpeciesWorkspaceColumn is one column of the species workspace table."
+    },
+    "SpeciesWorkspaceLayout": {
+      "properties": {
+        "columns": {
+          "items": {
+            "$ref": "#/$defs/SpeciesWorkspaceColumn"
+          },
+          "type": "array",
+          "description": "ordered columns"
+        },
+        "sort": {
+          "$ref": "#/$defs/SpeciesWorkspaceSort",
+          "description": "active sort"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "SpeciesWorkspaceLayout is the saved column order, visibility and sort of the species workspace."
+    },
+    "SpeciesWorkspaceSort": {
+      "properties": {
+        "column": {
+          "type": "string",
+          "description": "column identifier"
+        },
+        "direction": {
+          "type": "string",
+          "description": "\"asc\" or \"desc\""
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "SpeciesWorkspaceSort is the saved sort of the species workspace table."
     },
     "SpectrogramPreRender": {
       "properties": {

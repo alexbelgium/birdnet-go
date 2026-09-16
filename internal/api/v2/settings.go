@@ -2183,6 +2183,12 @@ func getBlockedFieldMap() map[string]any {
 		// Realtime section - block runtime fields
 		"Realtime": map[string]any{
 			"Audio": getAudioBlockedFields(),
+			// Written only through /api/v2/species-workspace/*, so a generic settings
+			// save (which may not carry them) cannot clobber them.
+			"Species": map[string]any{
+				"Confirmed":        true,
+				"SpeciesWorkspace": true,
+			},
 		},
 
 		// All other fields are allowed by default
