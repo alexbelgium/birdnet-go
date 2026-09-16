@@ -129,12 +129,12 @@ describe('workspace data tiers', () => {
 
   it('loads best recordings in serialized batches without dropping any', async () => {
     const calls: string[][] = [];
-    const gates: Array<ReturnType<typeof deferred<void>>> = [];
+    const gates: Array<{ resolve: () => void }> = [];
     const api = fakeApi({
       fetchBestRecordings: vi.fn(async (names: string[]) => {
         calls.push(names);
-        const gate = deferred<void>();
-        gates.push(gate);
+        const gate = deferred<undefined>();
+        gates.push({ resolve: () => gate.resolve(undefined) });
         await gate.promise;
         return Object.fromEntries(names.map(n => [n, { id: 1, confidence: 0.9, locked: false }]));
       }),
