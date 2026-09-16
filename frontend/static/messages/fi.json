@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Havaintohistoria: {species}",
+        "subtitle": "{count} havaintoa · {range}",
+        "subtitleSince": "{count} havaintoa · {range} (alkaen {since})",
+        "loading": "Ladataan havaintohistoriaa…",
+        "unavailable": "Historia ei saatavilla",
+        "loadFailed": "Historian lataus epäonnistui",
+        "retry": "Yritä uudelleen",
+        "empty": "Ei havaintoja tällä jaksolla",
+        "emptyHint": "Kokeile pidempää jaksoa",
+        "total": "Yhteensä",
+        "peak": "Huippu",
+        "avgPerDay": "Ka./päivä",
+        "daily": "päivittäin",
+        "movingAverage": "7 päivän ka.",
+        "chartLabel": "{species}: {count} havaintoa ({range}), huippu {peak}",
+        "rangeGroup": "Historian jakso",
+        "allShort": "Kaikki",
+        "ranges": {
+          "last7d": "viimeiset 7 päivää",
+          "last30d": "viimeiset 30 päivää",
+          "last90d": "viimeiset 90 päivää",
+          "last1y": "viimeiset 12 kuukautta",
+          "last2y": "viimeiset 2 vuotta",
+          "all": "koko ajalta"
+        }
       }
     },
     "recentDetections": {

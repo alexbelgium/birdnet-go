@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Historie detekcí: {species}",
+        "subtitle": "{count} detekcí · {range}",
+        "subtitleSince": "{count} detekcí · {range} (od {since})",
+        "loading": "Načítání historie detekcí…",
+        "unavailable": "Historie není k dispozici",
+        "loadFailed": "Historii se nepodařilo načíst",
+        "retry": "Zkusit znovu",
+        "empty": "V tomto období žádné detekce",
+        "emptyHint": "Zkuste delší rozsah",
+        "total": "Celkem",
+        "peak": "Maximum",
+        "avgPerDay": "Průměr/den",
+        "daily": "denně",
+        "movingAverage": "7denní průměr",
+        "chartLabel": "{species}: {count} detekcí za {range}, maximum {peak}",
+        "rangeGroup": "Rozsah historie",
+        "allShort": "Vše",
+        "ranges": {
+          "last7d": "posledních 7 dní",
+          "last30d": "posledních 30 dní",
+          "last90d": "posledních 90 dní",
+          "last1y": "posledních 12 měsíců",
+          "last2y": "poslední 2 roky",
+          "all": "celou dobu"
+        }
       }
     },
     "recentDetections": {

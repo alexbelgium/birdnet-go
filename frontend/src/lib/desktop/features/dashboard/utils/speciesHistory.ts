@@ -4,8 +4,10 @@
  * Data source is GET /api/v2/analytics/time/daily which returns a wrapper
  * object: { start_date, end_date, species, data: [{date, count}...], total }.
  * All date math is UTC-based on "YYYY-MM-DD" strings (never toISOString).
- * Strings are hardcoded English so the mobile feature stays self-contained.
+ * Month names are formatted for the active UI locale.
  */
+
+import { getLocale } from '$lib/i18n';
 
 export const DAY_MS = 86_400_000;
 
@@ -47,20 +49,8 @@ export interface BucketPoint {
   count: number;
 }
 
-const MONTHS_SHORT = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-] as const;
+// Short month names follow the active UI locale; formatters are cached per locale.
+const monthFormatters = new Map<string, Intl.DateTimeFormat>();
 
 // ── Date helpers ──
 
@@ -80,7 +70,13 @@ export function formatYmd(utcMs: number): string {
 }
 
 function monthShort(utcMs: number): string {
-  return MONTHS_SHORT[new Date(utcMs).getUTCMonth()] ?? '';
+  const locale = getLocale();
+  let formatter = monthFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
+    monthFormatters.set(locale, formatter);
+  }
+  return formatter.format(new Date(utcMs));
 }
 
 /** "Jun 12" style label for a single day. */

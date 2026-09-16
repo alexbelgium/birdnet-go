@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Historial de detecciones de {species}",
+        "subtitle": "{count} detecciones · {range}",
+        "subtitleSince": "{count} detecciones · {range} (desde {since})",
+        "loading": "Cargando historial de detecciones…",
+        "unavailable": "Historial no disponible",
+        "loadFailed": "No se pudo cargar el historial",
+        "retry": "Reintentar",
+        "empty": "No hay detecciones en este periodo",
+        "emptyHint": "Pruebe un rango más largo",
+        "total": "Total",
+        "peak": "Pico",
+        "avgPerDay": "Media/día",
+        "daily": "diario",
+        "movingAverage": "media de 7 días",
+        "chartLabel": "{species}: {count} detecciones en {range}, pico de {peak}",
+        "rangeGroup": "Rango del historial",
+        "allShort": "Todo",
+        "ranges": {
+          "last7d": "últimos 7 días",
+          "last30d": "últimos 30 días",
+          "last90d": "últimos 90 días",
+          "last1y": "últimos 12 meses",
+          "last2y": "últimos 2 años",
+          "all": "todo el tiempo"
+        }
       }
     },
     "recentDetections": {

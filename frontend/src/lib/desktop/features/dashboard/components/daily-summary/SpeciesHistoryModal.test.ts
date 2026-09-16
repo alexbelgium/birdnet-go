@@ -1,6 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
-import SpeciesHistoryModal from './SpeciesHistoryModal.svelte';
+import SpeciesHistoryModal, { invalidateSpeciesHistory } from './SpeciesHistoryModal.svelte';
+import en from '../../../../../../../static/messages/en.json';
+
+// Resolve keys against the real English catalog so the assertions check the
+// rendered copy, not just the key names.
+vi.mock('$lib/i18n', () => ({
+  getLocale: () => 'en',
+  t: (key: string, params?: Record<string, unknown>) => {
+    let node: unknown = en;
+    for (const part of key.split('.')) {
+      // eslint-disable-next-line security/detect-object-injection -- walking the static en.json catalog
+      node = (node as Record<string, unknown> | undefined)?.[part];
+    }
+    let text = typeof node === 'string' ? node : key;
+    for (const [name, value] of Object.entries(params ?? {})) {
+      text = text.replaceAll(`{${name}}`, String(value));
+    }
+    return text;
+  },
+}));
 
 // Exact response shape produced by GET /api/v2/analytics/time/daily
 // (GetDailyAnalytics in internal/api/v2/analytics): the series is wrapped in
@@ -139,7 +158,32 @@ describe('SpeciesHistoryModal', () => {
   it('closes on Escape', async () => {
     const onClose = vi.fn();
     renderModal({ scientificName: 'Escape species', onClose });
-    await fireEvent.keyDown(window, { key: 'Escape' });
+    await fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('refetches after invalidateSpeciesHistory drops the cached series', async () => {
+    const { unmount } = renderModal({ scientificName: 'Invalidated species' });
+    await waitFor(() => {
+      expect(screen.getByText('8 detections · last 30 days')).toBeInTheDocument();
+    });
+    unmount();
+    invalidateSpeciesHistory('Invalidated species');
+    fetchMock.mockClear();
+
+    renderModal({ scientificName: 'Invalidated species' });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+  });
+
+  it('labels the dialog with the species title', async () => {
+    renderModal({ scientificName: 'Titled species' });
+    expect(
+      screen.getByRole('dialog', { name: 'Common Blackbird detection history' })
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
   });
 });

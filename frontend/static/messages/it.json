@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Cronologia rilevamenti di {species}",
+        "subtitle": "{count} rilevamenti · {range}",
+        "subtitleSince": "{count} rilevamenti · {range} (dal {since})",
+        "loading": "Caricamento cronologia rilevamenti…",
+        "unavailable": "Cronologia non disponibile",
+        "loadFailed": "Impossibile caricare la cronologia",
+        "retry": "Riprova",
+        "empty": "Nessun rilevamento in questo periodo",
+        "emptyHint": "Prova un intervallo più lungo",
+        "total": "Totale",
+        "peak": "Picco",
+        "avgPerDay": "Media/giorno",
+        "daily": "giornaliero",
+        "movingAverage": "media 7 giorni",
+        "chartLabel": "{species}: {count} rilevamenti negli {range}, picco di {peak}",
+        "rangeGroup": "Intervallo cronologia",
+        "allShort": "Tutto",
+        "ranges": {
+          "last7d": "ultimi 7 giorni",
+          "last30d": "ultimi 30 giorni",
+          "last90d": "ultimi 90 giorni",
+          "last1y": "ultimi 12 mesi",
+          "last2y": "ultimi 2 anni",
+          "all": "tutto il periodo"
+        }
       }
     },
     "recentDetections": {

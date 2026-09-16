@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Detektionshistorik för {species}",
+        "subtitle": "{count} detektioner · {range}",
+        "subtitleSince": "{count} detektioner · {range} (sedan {since})",
+        "loading": "Läser in detektionshistorik…",
+        "unavailable": "Historik inte tillgänglig",
+        "loadFailed": "Det gick inte att läsa in historiken",
+        "retry": "Försök igen",
+        "empty": "Inga detektioner under perioden",
+        "emptyHint": "Prova ett längre intervall",
+        "total": "Totalt",
+        "peak": "Topp",
+        "avgPerDay": "Snitt/dag",
+        "daily": "dagligen",
+        "movingAverage": "7-dagars snitt",
+        "chartLabel": "{species}: {count} detektioner senaste {range}, topp på {peak}",
+        "rangeGroup": "Historikintervall",
+        "allShort": "Alla",
+        "ranges": {
+          "last7d": "senaste 7 dagarna",
+          "last30d": "senaste 30 dagarna",
+          "last90d": "senaste 90 dagarna",
+          "last1y": "senaste 12 månaderna",
+          "last2y": "senaste 2 åren",
+          "all": "hela perioden"
+        }
       }
     },
     "recentDetections": {
