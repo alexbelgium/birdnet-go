@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Detectiegeschiedenis van {species}",
+        "subtitle": "{count, plural, one {{formattedCount} detectie} other {{formattedCount} detecties}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detectie} other {{formattedCount} detecties}} · {range} (sinds {since})",
+        "loading": "Detectiegeschiedenis laden…",
+        "unavailable": "Geschiedenis niet beschikbaar",
+        "loadFailed": "Geschiedenis laden mislukt",
+        "retry": "Opnieuw proberen",
+        "empty": "Geen detecties in deze periode",
+        "emptyHint": "Probeer een langere periode",
+        "total": "Totaal",
+        "peak": "Piek",
+        "avgPerDay": "Gem./dag",
+        "daily": "dagelijks",
+        "movingAverage": "7-daags gem.",
+        "chartLabel": "{species}: {count, plural, one {{count} detectie} other {{count} detecties}} in {range}, piek van {peak}",
+        "rangeGroup": "Periode geschiedenis",
+        "allShort": "Alles",
+        "ranges": {
+          "last7d": "laatste 7 dagen",
+          "last30d": "laatste 30 dagen",
+          "last90d": "laatste 90 dagen",
+          "last1y": "laatste 12 maanden",
+          "last2y": "laatste 2 jaar",
+          "all": "hele periode"
+        }
       }
     },
     "recentDetections": {

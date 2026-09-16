@@ -557,6 +557,29 @@ export type TranslationKey =
   | 'dashboard.dailySummary.taxonFilter.bat'
   | 'dashboard.dailySummary.taxonFilter.other'
   | 'dashboard.dailySummary.taxonFilter.ariaLabel' // params: current
+  | 'dashboard.dailySummary.history.title' // params: species
+  | 'dashboard.dailySummary.history.subtitle' // params: count, formattedCount, range
+  | 'dashboard.dailySummary.history.subtitleSince' // params: count, formattedCount, range, since
+  | 'dashboard.dailySummary.history.loading'
+  | 'dashboard.dailySummary.history.unavailable'
+  | 'dashboard.dailySummary.history.loadFailed'
+  | 'dashboard.dailySummary.history.retry'
+  | 'dashboard.dailySummary.history.empty'
+  | 'dashboard.dailySummary.history.emptyHint'
+  | 'dashboard.dailySummary.history.total'
+  | 'dashboard.dailySummary.history.peak'
+  | 'dashboard.dailySummary.history.avgPerDay'
+  | 'dashboard.dailySummary.history.daily'
+  | 'dashboard.dailySummary.history.movingAverage'
+  | 'dashboard.dailySummary.history.chartLabel' // params: species, count, range, peak
+  | 'dashboard.dailySummary.history.rangeGroup'
+  | 'dashboard.dailySummary.history.allShort'
+  | 'dashboard.dailySummary.history.ranges.last7d'
+  | 'dashboard.dailySummary.history.ranges.last30d'
+  | 'dashboard.dailySummary.history.ranges.last90d'
+  | 'dashboard.dailySummary.history.ranges.last1y'
+  | 'dashboard.dailySummary.history.ranges.last2y'
+  | 'dashboard.dailySummary.history.ranges.all'
   | 'dashboard.recentDetections.title'
   | 'dashboard.recentDetections.subtitle'
   | 'dashboard.recentDetections.controls.show'
@@ -4298,6 +4321,24 @@ export type TranslationParams = {
   };
   'dashboard.dailySummary.tooltips.infrequent': { days: string | number };
   'dashboard.dailySummary.taxonFilter.ariaLabel': { current: string | number };
+  'dashboard.dailySummary.history.title': { species: string | number };
+  'dashboard.dailySummary.history.subtitle': {
+    count: string | number;
+    formattedCount: string | number;
+    range: string | number;
+  };
+  'dashboard.dailySummary.history.subtitleSince': {
+    count: string | number;
+    formattedCount: string | number;
+    range: string | number;
+    since: string | number;
+  };
+  'dashboard.dailySummary.history.chartLabel': {
+    species: string | number;
+    count: string | number;
+    range: string | number;
+    peak: string | number;
+  };
   'dashboard.recentDetections.modals.showSpecies': { species: string | number };
   'dashboard.recentDetections.modals.ignoreSpecies': { species: string | number };
   'dashboard.recentDetections.modals.showSpeciesConfirm': { species: string | number };

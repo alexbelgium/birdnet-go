@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Észlelési előzmények: {species}",
+        "subtitle": "{count, plural, one {{formattedCount} észlelés} other {{formattedCount} észlelés}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} észlelés} other {{formattedCount} észlelés}} · {range} ({since} óta)",
+        "loading": "Észlelési előzmények betöltése…",
+        "unavailable": "Előzmények nem érhetők el",
+        "loadFailed": "Az előzmények betöltése sikertelen",
+        "retry": "Újra",
+        "empty": "Nincs észlelés ebben az időszakban",
+        "emptyHint": "Próbáljon hosszabb időszakot",
+        "total": "Összesen",
+        "peak": "Csúcs",
+        "avgPerDay": "Átl./nap",
+        "daily": "naponta",
+        "movingAverage": "7 napos átl.",
+        "chartLabel": "{species}: {count, plural, one {{count} észlelés} other {{count} észlelés}} ({range}), csúcs: {peak}",
+        "rangeGroup": "Előzmények időszaka",
+        "allShort": "Mind",
+        "ranges": {
+          "last7d": "utolsó 7 nap",
+          "last30d": "utolsó 30 nap",
+          "last90d": "utolsó 90 nap",
+          "last1y": "utolsó 12 hónap",
+          "last2y": "utolsó 2 év",
+          "all": "teljes időszak"
+        }
       }
     },
     "recentDetections": {

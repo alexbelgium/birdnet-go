@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Erkennungsverlauf: {species}",
+        "subtitle": "{count, plural, one {{formattedCount} Erkennung} other {{formattedCount} Erkennungen}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} Erkennung} other {{formattedCount} Erkennungen}} · {range} (seit {since})",
+        "loading": "Erkennungsverlauf wird geladen…",
+        "unavailable": "Verlauf nicht verfügbar",
+        "loadFailed": "Verlauf konnte nicht geladen werden",
+        "retry": "Erneut versuchen",
+        "empty": "Keine Erkennungen in diesem Zeitraum",
+        "emptyHint": "Längeren Zeitraum wählen",
+        "total": "Gesamt",
+        "peak": "Spitze",
+        "avgPerDay": "Ø/Tag",
+        "daily": "täglich",
+        "movingAverage": "7-Tage-Ø",
+        "chartLabel": "{species}: {count, plural, one {{count} Erkennung} other {{count} Erkennungen}} in {range}, Spitze bei {peak}",
+        "rangeGroup": "Verlaufszeitraum",
+        "allShort": "Alle",
+        "ranges": {
+          "last7d": "letzte 7 Tage",
+          "last30d": "letzte 30 Tage",
+          "last90d": "letzte 90 Tage",
+          "last1y": "letzte 12 Monate",
+          "last2y": "letzte 2 Jahre",
+          "all": "gesamter Zeitraum"
+        }
       }
     },
     "recentDetections": {

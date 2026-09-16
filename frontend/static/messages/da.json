@@ -691,6 +691,33 @@
         "bat": "Bats",
         "other": "Others",
         "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Detektionshistorik for {species}",
+        "subtitle": "{count, plural, one {{formattedCount} detektion} other {{formattedCount} detektioner}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detektion} other {{formattedCount} detektioner}} · {range} (siden {since})",
+        "loading": "Indlæser detektionshistorik…",
+        "unavailable": "Historik ikke tilgængelig",
+        "loadFailed": "Kunne ikke indlæse historik",
+        "retry": "Prøv igen",
+        "empty": "Ingen detektioner i denne periode",
+        "emptyHint": "Prøv et længere interval",
+        "total": "I alt",
+        "peak": "Top",
+        "avgPerDay": "Gns./dag",
+        "daily": "dagligt",
+        "movingAverage": "7-dages gns.",
+        "chartLabel": "{species}: {count, plural, one {{count} detektion} other {{count} detektioner}} i {range}, top på {peak}",
+        "rangeGroup": "Historikinterval",
+        "allShort": "Alle",
+        "ranges": {
+          "last7d": "seneste 7 dage",
+          "last30d": "seneste 30 dage",
+          "last90d": "seneste 90 dage",
+          "last1y": "seneste 12 måneder",
+          "last2y": "seneste 2 år",
+          "all": "hele perioden"
+        }
       }
     },
     "recentDetections": {
