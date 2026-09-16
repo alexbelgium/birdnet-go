@@ -26,6 +26,10 @@ export function createLayoutStore(deps: LayoutDeps = { fetch: fetchLayout, save:
   let saveError = $state(false);
   let loadError = $state(false);
   let saving = $state(false);
+  // Last layout the server accepted, and a counter so only the newest save's
+  // response (or failure) is applied when saves overlap.
+  let confirmed = layout;
+  let latestSave = 0;
 
   function apply(next: WorkspaceLayout) {
     layout = normalizeLayout(next);
@@ -48,7 +52,10 @@ export function createLayoutStore(deps: LayoutDeps = { fetch: fetchLayout, save:
     /** Reconciles with the server copy. A failure keeps the cached layout. */
     async load(signal?: AbortSignal) {
       try {
-        apply(await deps.fetch(signal));
+        const server = await deps.fetch(signal);
+        if (latestSave > 0) return; // a local change is newer than this read
+        apply(server);
+        confirmed = layout;
         loadError = false;
       } catch (error) {
         if (!isAbortError(error)) loadError = true;
@@ -56,17 +63,21 @@ export function createLayoutStore(deps: LayoutDeps = { fetch: fetchLayout, save:
     },
     /** Applies immediately and persists; rolls back if the server rejects it. */
     async save(next: WorkspaceLayout) {
-      const previous = layout;
+      const seq = ++latestSave;
       apply(next);
       saving = true;
       saveError = false;
       try {
-        apply(await deps.save(layout));
+        const saved = await deps.save(layout);
+        confirmed = normalizeLayout(saved);
+        if (seq === latestSave) apply(saved);
       } catch {
-        apply(previous);
-        saveError = true;
+        if (seq === latestSave) {
+          apply(confirmed);
+          saveError = true;
+        }
       } finally {
-        saving = false;
+        if (seq === latestSave) saving = false;
       }
     },
     /** Changes the sort locally and persists it. */

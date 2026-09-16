@@ -211,9 +211,37 @@ func (ds *DataStore) SpeciesWorkspaceStats(ctx context.Context) ([]SpeciesWorksp
 	}
 	byName := make(map[string]*SpeciesWorkspaceStats, len(names))
 	out := make([]SpeciesWorkspaceStats, len(names))
+	maxByName := map[string]float64{}
+	grouped := ds.DB.Name() == DialectMySQL
+	if grouped {
+		// Without the SQLite partial index, one grouped scan beats a sort per species.
+		type maxRow struct {
+			ScientificName string
+			MaxConf        *float64
+		}
+		var maxes []maxRow
+		if err := db.Table("notes n").Select("n.scientific_name, MAX(n.confidence) AS max_conf").
+			Joins("LEFT JOIN note_reviews r ON r.note_id = n.id").
+			Where("n.clip_name <> ''").
+			Where("r.verified IS NULL OR r.verified != ?", string(entities.VerificationFalsePositive)).
+			Group("n.scientific_name").Scan(&maxes).Error; err != nil {
+			return nil, dbError(err, "species_workspace_stats", errors.PriorityMedium, "action", "load_max_confidence")
+		}
+		for _, m := range maxes {
+			if m.MaxConf != nil {
+				maxByName[m.ScientificName] = *m.MaxConf
+			}
+		}
+	}
 	for i, name := range names {
 		out[i].ScientificName = name
 		byName[name] = &out[i]
+		if grouped {
+			if conf, ok := maxByName[name]; ok {
+				out[i].MaxConfidence = &conf
+			}
+			continue
+		}
 		best, err := ds.topNoteCandidates(db, name, 1)
 		if err != nil {
 			return nil, err

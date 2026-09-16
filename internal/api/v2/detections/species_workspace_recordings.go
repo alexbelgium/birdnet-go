@@ -18,8 +18,10 @@ import (
 const (
 	// maxBestRecordingSpecies bounds one best-recordings request.
 	maxBestRecordingSpecies = 25
-	// bestRecordingCandidates is how many candidates are checked on disk per species.
-	bestRecordingCandidates = 10
+	// bestRecordingCandidates is how many candidates are checked on disk per species
+	// at first; when all are missing the lookup widens up to maxBestRecordingCandidates.
+	bestRecordingCandidates    = 10
+	maxBestRecordingCandidates = 250
 	// defaultRecordingsPerPage and maxRecordingsPerPage bound the recordings listing.
 	defaultRecordingsPerPage = 25
 	maxRecordingsPerPage     = 100
@@ -87,25 +89,42 @@ func (c *Handler) GetWorkspaceBestRecordings(ctx echo.Context) error {
 	}
 	queryCtx, cancel := workspaceContext(ctx)
 	defer cancel()
-	candidates, err := store.SpeciesWorkspaceCandidates(queryCtx, names, bestRecordingCandidates)
-	if err != nil {
-		return c.HandleError(ctx, err, "Failed to find recordings", http.StatusInternalServerError)
-	}
 	result := make(map[string]*WorkspaceBestRecording, len(names))
-	for _, name := range names {
-		result[name] = nil
-		for _, cand := range candidates[name] {
-			ok, err := c.clipAvailable(cand.ClipName)
+	pending := names
+	for limit := bestRecordingCandidates; len(pending) > 0; limit *= 5 {
+		candidates, err := store.SpeciesWorkspaceCandidates(queryCtx, pending, limit)
+		if err != nil {
+			return c.HandleError(ctx, err, "Failed to find recordings", http.StatusInternalServerError)
+		}
+		var widen []string
+		for _, name := range pending {
+			found, ok, err := c.firstAvailable(candidates[name])
 			if err != nil {
 				return c.HandleError(ctx, err, "Failed to check recording availability", http.StatusInternalServerError)
 			}
-			if ok {
-				result[name] = &WorkspaceBestRecording{ID: cand.ID, Confidence: cand.Confidence, Locked: cand.Locked}
-				break
+			result[name] = found
+			// Every candidate was missing on disk and more may exist: look further.
+			if !ok && len(candidates[name]) == limit && limit < maxBestRecordingCandidates {
+				widen = append(widen, name)
 			}
 		}
+		pending = widen
 	}
 	return ctx.JSON(http.StatusOK, result)
+}
+
+// firstAvailable returns the first candidate whose clip exists; ok is false when none does.
+func (c *Handler) firstAvailable(candidates []datastore.SpeciesRecordingCandidate) (rec *WorkspaceBestRecording, ok bool, err error) {
+	for _, cand := range candidates {
+		available, err := c.clipAvailable(cand.ClipName)
+		if err != nil {
+			return nil, false, err
+		}
+		if available {
+			return &WorkspaceBestRecording{ID: cand.ID, Confidence: cand.Confidence, Locked: cand.Locked}, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // parseRecordingsQuery validates the recordings listing parameters.

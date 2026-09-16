@@ -69,9 +69,18 @@ func (ds *Datastore) SpeciesWorkspaceInventory(ctx context.Context, scientificNa
 		type countRow struct {
 			LabelID uint
 			Total   int64
+			FirstAt int64
+			LastAt  int64
 		}
+		// MySQL answers counts and first/last in one grouped query (one round trip);
+		// SQLite is faster with a covering count plus per-label MIN/MAX seeks.
+		grouped := ds.manager.IsMySQL()
 		var counts []countRow
-		cq := tx.Table(prefix + "detections").Select("label_id, COUNT(*) AS total").Group("label_id")
+		columns := "label_id, COUNT(*) AS total"
+		if grouped {
+			columns += ", MIN(detected_at) AS first_at, MAX(detected_at) AS last_at"
+		}
+		cq := tx.Table(prefix + "detections").Select(columns).Group("label_id")
 		if scientificName != "" {
 			cq = cq.Where("label_id IN ?", append(labels[scientificName], 0))
 		}
@@ -88,8 +97,10 @@ func (ds *Datastore) SpeciesWorkspaceInventory(ctx context.Context, scientificNa
 			return err
 		}
 		totalByLabel := make(map[uint]int64, len(counts))
+		spanByLabel := make(map[uint][2]int64, len(counts))
 		for _, c := range counts {
 			totalByLabel[c.LabelID] = c.Total
+			spanByLabel[c.LabelID] = [2]int64{c.FirstAt, c.LastAt}
 		}
 		lockedByLabel := make(map[uint]int64, len(locks))
 		for _, l := range locks {
@@ -107,13 +118,15 @@ func (ds *Datastore) SpeciesWorkspaceInventory(ctx context.Context, scientificNa
 				}
 				row.Total += totalByLabel[id]
 				row.Locked += lockedByLabel[id]
-				// MIN/MAX seeks on idx_detection_label_date.
-				var lo, hi int64
-				if err := tx.Table(prefix+"detections").Where("label_id = ?", id).Select("MIN(detected_at)").Scan(&lo).Error; err != nil {
-					return err
-				}
-				if err := tx.Table(prefix+"detections").Where("label_id = ?", id).Select("MAX(detected_at)").Scan(&hi).Error; err != nil {
-					return err
+				lo, hi := spanByLabel[id][0], spanByLabel[id][1]
+				if !grouped {
+					// SQLite: MIN/MAX seeks on idx_detection_label_date beat grouping every row.
+					if err := tx.Table(prefix+"detections").Where("label_id = ?", id).Select("MIN(detected_at)").Scan(&lo).Error; err != nil {
+						return err
+					}
+					if err := tx.Table(prefix+"detections").Where("label_id = ?", id).Select("MAX(detected_at)").Scan(&hi).Error; err != nil {
+						return err
+					}
 				}
 				if first == 0 || lo < first {
 					first = lo
@@ -180,6 +193,32 @@ func (ds *Datastore) SpeciesWorkspaceStats(ctx context.Context) ([]datastore.Spe
 			s.FalsePositive += r.N
 		}
 	}
+	if ds.manager.IsMySQL() {
+		// Without the SQLite partial index, one grouped scan beats a sort per label.
+		type maxRow struct {
+			LabelID uint
+			MaxConf *float64
+		}
+		var maxes []maxRow
+		if err := db.Table(prefix+"detections d").Select("d.label_id, MAX(d.confidence) AS max_conf").
+			Joins(fmt.Sprintf("LEFT JOIN %sdetection_reviews r ON r.detection_id = d.id", prefix)).
+			Where("d.clip_name IS NOT NULL AND d.clip_name <> ''").
+			Where("r.verified IS NULL OR r.verified != ?", string(entities.VerificationFalsePositive)).
+			Group("d.label_id").Scan(&maxes).Error; err != nil {
+			return nil, wsError(err, "load_max_confidence")
+		}
+		for _, m := range maxes {
+			name, ok := nameByLabel[m.LabelID]
+			if !ok || m.MaxConf == nil {
+				continue
+			}
+			if st := statFor(name); st.MaxConfidence == nil || *m.MaxConf > *st.MaxConfidence {
+				conf := *m.MaxConf
+				st.MaxConfidence = &conf
+			}
+		}
+		return collectStats(stats), nil
+	}
 	for name, ids := range labels {
 		best, err := ds.topCandidates(db, ids, 1)
 		if err != nil {
@@ -190,13 +229,18 @@ func (ds *Datastore) SpeciesWorkspaceStats(ctx context.Context) ([]datastore.Spe
 			statFor(name).MaxConfidence = &conf
 		}
 	}
+	return collectStats(stats), nil
+}
+
+// collectStats flattens per-species stats, dropping unnamed labels.
+func collectStats(stats map[string]*datastore.SpeciesWorkspaceStats) []datastore.SpeciesWorkspaceStats {
 	out := make([]datastore.SpeciesWorkspaceStats, 0, len(stats))
 	for _, s := range stats {
 		if s.ScientificName != "" {
 			out = append(out, *s)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // topCandidates returns the highest-confidence non-false-positive detections with
