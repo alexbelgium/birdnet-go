@@ -105,6 +105,6 @@ await Promise.all(
 );
 
 const sorted = Object.fromEntries(Object.entries(ids).sort(([a], [b]) => a.localeCompare(b)));
-await writeFile(OUTPUT, JSON.stringify(sorted) + '\n');
+await writeFile(OUTPUT, JSON.stringify(sorted, null, 2) + '\n');
 // eslint-disable-next-line no-console -- CLI summary
 console.log(`wrote ${Object.keys(sorted).length} of ${names.size} species to ${OUTPUT}`);

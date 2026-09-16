@@ -5834,7 +5834,6 @@
       "done": "Borttagningen är klar.",
       "stop": "Stoppa",
       "cancelled": "Borttagningen stoppades. Redan borttagna detektioner förblir borttagna.",
-      "failed": "Detektioner som inte kunde tas bort: {count}. De behölls och kan försökas igen.",
       "stalled": "Borttagningen stoppades eftersom de återstående detektionerna inte kunde tas bort.",
       "error": "Borttagningen misslyckades. Redan borttagna detektioner förblir borttagna."
     },

@@ -138,7 +138,6 @@ describe('deleteAllUnlocked', () => {
     deleted: 0,
     locked: 0,
     reassigned: 0,
-    failedIds: [],
     remaining: 0,
     ...r,
   });
@@ -155,16 +154,14 @@ describe('deleteAllUnlocked', () => {
     expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ remaining: 0 }));
   });
 
-  it('stops on failed rows and reports them for a retry', async () => {
+  it('rejects when a chunk request fails, keeping the progress so far', async () => {
+    const onProgress = vi.fn();
     const fn = vi
       .fn()
       .mockResolvedValueOnce(chunk({ deleted: 10, remaining: 5 }))
-      .mockResolvedValueOnce(chunk({ deleted: 3, failedIds: ['7', '8'], remaining: 2 }));
-    const error = await deleteAllUnlocked('X', { chunk: fn }).catch(e => e);
-    expect(error).toBeInstanceOf(SpeciesDeleteError);
-    expect(error.reason).toBe('failed');
-    expect(error.failedIds).toEqual(['7', '8']);
-    expect(error.progress.deleted).toBe(13);
+      .mockRejectedValueOnce(new Error('HTTP 500'));
+    await expect(deleteAllUnlocked('X', { chunk: fn, onProgress })).rejects.toThrow('HTTP 500');
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ deleted: 10 }));
     expect(fn).toHaveBeenCalledTimes(2);
   });
 

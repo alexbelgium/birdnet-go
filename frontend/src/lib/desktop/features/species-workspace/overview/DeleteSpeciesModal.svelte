@@ -70,10 +70,7 @@
       if (isAbortError(error)) {
         errorMessage = t('speciesWorkspace.delete.cancelled');
       } else if (error instanceof SpeciesDeleteError) {
-        errorMessage =
-          error.reason === 'failed'
-            ? t('speciesWorkspace.delete.failed', { count: error.failedIds.length })
-            : t('speciesWorkspace.delete.stalled');
+        errorMessage = t('speciesWorkspace.delete.stalled');
         progress = error.progress;
       } else {
         errorMessage = t('speciesWorkspace.delete.error');

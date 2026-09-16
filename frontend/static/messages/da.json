@@ -5834,7 +5834,6 @@
       "done": "Sletning fuldført.",
       "stop": "Stop",
       "cancelled": "Sletning stoppet. Allerede slettede registreringer forbliver slettede.",
-      "failed": "Registreringer der ikke kunne slettes: {count}. De blev beholdt og kan forsøges igen.",
       "stalled": "Sletning stoppet, fordi de resterende registreringer ikke kunne fjernes.",
       "error": "Sletning mislykkedes. Allerede slettede registreringer forbliver slettede."
     },

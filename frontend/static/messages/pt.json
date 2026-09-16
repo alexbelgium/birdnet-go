@@ -5834,7 +5834,6 @@
       "done": "Eliminação concluída.",
       "stop": "Parar",
       "cancelled": "Eliminação parada. As deteções já eliminadas continuam eliminadas.",
-      "failed": "Deteções que não puderam ser eliminadas: {count}. Foram mantidas e pode tentar novamente.",
       "stalled": "Eliminação parada porque não foi possível remover as deteções restantes.",
       "error": "A eliminação falhou. As deteções já eliminadas continuam eliminadas."
     },

@@ -5834,7 +5834,6 @@
       "done": "Usuwanie zakończone.",
       "stop": "Zatrzymaj",
       "cancelled": "Usuwanie zatrzymane. Już usunięte wykrycia pozostają usunięte.",
-      "failed": "Wykrycia, których nie udało się usunąć: {count}. Zachowano je i można spróbować ponownie.",
       "stalled": "Usuwanie zatrzymane, ponieważ nie można usunąć pozostałych wykryć.",
       "error": "Usuwanie nie powiodło się. Już usunięte wykrycia pozostają usunięte."
     },

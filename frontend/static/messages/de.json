@@ -5834,7 +5834,6 @@
       "done": "Löschen abgeschlossen.",
       "stop": "Stoppen",
       "cancelled": "Löschen gestoppt. Bereits gelöschte Erkennungen bleiben gelöscht.",
-      "failed": "Nicht löschbare Erkennungen: {count}. Sie wurden behalten und können erneut versucht werden.",
       "stalled": "Löschen gestoppt, weil die verbleibenden Erkennungen nicht entfernt werden konnten.",
       "error": "Löschen fehlgeschlagen. Bereits gelöschte Erkennungen bleiben gelöscht."
     },

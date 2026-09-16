@@ -4267,7 +4267,6 @@ export type TranslationKey =
   | 'speciesWorkspace.delete.done'
   | 'speciesWorkspace.delete.stop'
   | 'speciesWorkspace.delete.cancelled'
-  | 'speciesWorkspace.delete.failed' // params: count
   | 'speciesWorkspace.delete.stalled'
   | 'speciesWorkspace.delete.error'
   | 'speciesWorkspace.detail.back'
@@ -4801,7 +4800,6 @@ export type TranslationParams = {
   };
   'speciesWorkspace.delete.confirm': { count: string | number };
   'speciesWorkspace.delete.progress': { deleted: string | number; locked: string | number };
-  'speciesWorkspace.delete.failed': { count: string | number };
   'speciesWorkspace.detail.title': { species: string | number };
   'speciesWorkspace.detail.detections': { count: string | number };
   'speciesWorkspace.detail.maxConfidence': { value: string | number };

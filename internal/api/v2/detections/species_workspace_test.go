@@ -34,10 +34,9 @@ type fakeWorkspaceStore struct {
 	recordings  []datastore.SpeciesWorkspaceRecording
 	recTotal    int64
 	lastQuery   datastore.SpeciesRecordingQuery
-	deletable   []uint
-	remaining   []int64 // returned by successive Deletable calls
-	outcomes    map[uint]datastore.SpeciesDeleteOutcome
-	deleteFails map[uint]bool
+	chunk       datastore.SpeciesDeleteChunk
+	chunkErr    error
+	candidateQs [][]string
 }
 
 func (f *fakeWorkspaceStore) SpeciesWorkspaceInventory(_ context.Context, name string) ([]datastore.SpeciesWorkspaceRow, error) {
@@ -57,8 +56,13 @@ func (f *fakeWorkspaceStore) SpeciesWorkspaceStats(context.Context) ([]datastore
 	return f.stats, nil
 }
 
-func (f *fakeWorkspaceStore) SpeciesWorkspaceCandidates(_ context.Context, name string, _ int) ([]datastore.SpeciesRecordingCandidate, error) {
-	return f.candidates[name], nil
+func (f *fakeWorkspaceStore) SpeciesWorkspaceCandidates(_ context.Context, names []string, _ int) (map[string][]datastore.SpeciesRecordingCandidate, error) {
+	f.candidateQs = append(f.candidateQs, names)
+	out := make(map[string][]datastore.SpeciesRecordingCandidate, len(names))
+	for _, n := range names {
+		out[n] = f.candidates[n]
+	}
+	return out, nil
 }
 
 func (f *fakeWorkspaceStore) SpeciesWorkspaceRecordings(_ context.Context, q datastore.SpeciesRecordingQuery) ([]datastore.SpeciesWorkspaceRecording, int64, error) {
@@ -66,18 +70,8 @@ func (f *fakeWorkspaceStore) SpeciesWorkspaceRecordings(_ context.Context, q dat
 	return f.recordings, f.recTotal, nil
 }
 
-func (f *fakeWorkspaceStore) SpeciesWorkspaceDeletable(_ context.Context, _ string, _ int) (ids []uint, remaining int64, err error) {
-	if len(f.remaining) > 0 {
-		remaining, f.remaining = f.remaining[0], f.remaining[1:]
-	}
-	return f.deletable, remaining, nil
-}
-
-func (f *fakeWorkspaceStore) SpeciesWorkspaceDeleteDetection(_ context.Context, _ string, id uint) (datastore.SpeciesDeleteOutcome, string, error) {
-	if f.deleteFails[id] {
-		return 0, "", errors.NewStd("database is locked")
-	}
-	return f.outcomes[id], "", nil
+func (f *fakeWorkspaceStore) SpeciesWorkspaceDeleteChunk(context.Context, string, int) (datastore.SpeciesDeleteChunk, error) {
+	return f.chunk, f.chunkErr
 }
 
 // newWorkspaceTest wires a handler around store with the workspace routes registered.
@@ -189,6 +183,7 @@ func TestGetWorkspaceBestRecordings(t *testing.T) {
 	assert.Nil(t, got["Strix aluco"])
 	assert.Contains(t, got, "Nobody")
 	assert.Nil(t, got["Nobody"])
+	assert.Len(t, store.candidateQs, 1, "all species of a batch are resolved in one datastore call")
 
 	assert.Equal(t, http.StatusBadRequest, doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/best-recordings", "").Code)
 	params := make([]string, 0, maxBestRecordingSpecies+1)
@@ -246,13 +241,12 @@ func TestDeleteWorkspaceSpeciesChunk(t *testing.T) {
 	t.Parallel()
 	store := &fakeWorkspaceStore{
 		MockInterface: mocks.NewMockInterface(t),
-		deletable:     []uint{1, 2, 3, 4, 5},
-		remaining:     []int64{5, 2},
-		outcomes: map[uint]datastore.SpeciesDeleteOutcome{
-			1: datastore.SpeciesDeleteDeleted, 2: datastore.SpeciesDeleteLocked,
-			3: datastore.SpeciesDeleteReassigned, 4: datastore.SpeciesDeleteDeleted,
+		chunk: datastore.SpeciesDeleteChunk{
+			Deleted:    []datastore.DeletedDetection{{ID: 1}, {ID: 4, ClipName: "a.wav"}},
+			Locked:     1,
+			Reassigned: 1,
+			Remaining:  2,
 		},
-		deleteFails: map[uint]bool{5: true},
 	}
 	e, _ := newWorkspaceTest(t, store)
 
@@ -260,10 +254,14 @@ func TestDeleteWorkspaceSpeciesChunk(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var got WorkspaceDeleteResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	assert.Equal(t, WorkspaceDeleteResponse{Deleted: 2, Locked: 1, Reassigned: 1, FailedIDs: []string{"5"}, Remaining: 2}, got,
-		"only operational failures are reported as failed, and they are not excluded from later chunks")
+	assert.Equal(t, WorkspaceDeleteResponse{Deleted: 2, Locked: 1, Reassigned: 1, Remaining: 2}, got)
 
 	assert.Equal(t, http.StatusBadRequest, doWorkspace(t, e, http.MethodPost, "/api/v2/species-workspace/species/delete", `{"scientificName":"  "}`).Code)
+
+	store.chunkErr = errors.NewStd("database is locked")
+	assert.Equal(t, http.StatusInternalServerError,
+		doWorkspace(t, e, http.MethodPost, "/api/v2/species-workspace/species/delete", `{"scientificName":"Turdus merula"}`).Code,
+		"a datastore failure fails the request so the client can retry")
 }
 
 func TestWorkspaceMemberships(t *testing.T) {

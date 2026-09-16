@@ -34,9 +34,11 @@ export type WorkspaceSort = 'confidence_desc' | 'confidence_asc' | 'date_desc' |
 
 export interface DeleteChunkResult {
   deleted: number;
+  /** Kept because they were locked while the chunk ran. */
   locked: number;
+  /** Kept because they moved to another species while the chunk ran. */
   reassigned: number;
-  failedIds: string[];
+  /** Unlocked detections of the species still stored. */
   remaining: number;
 }
 

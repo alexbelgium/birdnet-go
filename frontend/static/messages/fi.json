@@ -5834,7 +5834,6 @@
       "done": "Poisto valmis.",
       "stop": "Pysäytä",
       "cancelled": "Poisto pysäytettiin. Jo poistetut havainnot pysyvät poistettuina.",
-      "failed": "Havainnot, joita ei voitu poistaa: {count}. Ne säilytettiin, ja voit yrittää uudelleen.",
       "stalled": "Poisto pysäytettiin, koska jäljellä olevia havaintoja ei voitu poistaa.",
       "error": "Poisto epäonnistui. Jo poistetut havainnot pysyvät poistettuina."
     },

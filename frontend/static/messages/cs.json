@@ -5834,7 +5834,6 @@
       "done": "Mazání dokončeno.",
       "stop": "Zastavit",
       "cancelled": "Mazání zastaveno. Již smazané detekce zůstávají smazané.",
-      "failed": "Detekce, které se nepodařilo smazat: {count}. Byly ponechány a lze to zkusit znovu.",
       "stalled": "Mazání zastaveno, protože zbývající detekce nelze odstranit.",
       "error": "Mazání selhalo. Již smazané detekce zůstávají smazané."
     },

@@ -65,8 +65,9 @@ func TestSpeciesWorkspace_Legacy(t *testing.T) {
 				assert.InDelta(t, 0.80, *s.MaxConfidence, 1e-9)
 			}
 		}
-		got, err := ds.SpeciesWorkspaceCandidates(ctx, "Turdus merula", 5)
+		byName, err := ds.SpeciesWorkspaceCandidates(ctx, []string{"Turdus merula"}, 5)
 		require.NoError(t, err)
+		got := byName["Turdus merula"]
 		require.Len(t, got, 2)
 		assert.Equal(t, uint(3), got[0].ID)
 		assert.True(t, got[0].Locked)
@@ -83,22 +84,22 @@ func TestSpeciesWorkspace_Legacy(t *testing.T) {
 		assert.Empty(t, recs[0].ModelName)
 	})
 
-	t.Run("delete", func(t *testing.T) {
-		outcome, _, err := ds.SpeciesWorkspaceDeleteDetection(ctx, "Turdus merula", 3)
+	t.Run("delete chunk", func(t *testing.T) {
+		chunk, err := ds.SpeciesWorkspaceDeleteChunk(ctx, "Turdus merula", 2)
 		require.NoError(t, err)
-		assert.Equal(t, SpeciesDeleteLocked, outcome)
-		outcome, _, err = ds.SpeciesWorkspaceDeleteDetection(ctx, "Turdus merula", 5)
+		assert.Len(t, chunk.Deleted, 2)
+		assert.Equal(t, int64(1), chunk.Remaining)
+		chunk, err = ds.SpeciesWorkspaceDeleteChunk(ctx, "Turdus merula", 10)
 		require.NoError(t, err)
-		assert.Equal(t, SpeciesDeleteReassigned, outcome)
-		outcome, clip, err := ds.SpeciesWorkspaceDeleteDetection(ctx, "Turdus merula", 1)
-		require.NoError(t, err)
-		assert.Equal(t, SpeciesDeleteDeleted, outcome)
-		assert.Equal(t, "a.wav", clip)
-		var results int64
+		require.Len(t, chunk.Deleted, 1)
+		assert.Equal(t, int64(0), chunk.Remaining)
+
+		var notes, results int64
+		require.NoError(t, ds.DB.Model(&Note{}).Where("scientific_name = ?", "Turdus merula").Count(&notes).Error)
+		assert.Equal(t, int64(1), notes, "the locked detection is kept")
 		require.NoError(t, ds.DB.Model(&Results{}).Where("note_id = ?", 1).Count(&results).Error)
 		assert.Zero(t, results)
-		_, remaining, err := ds.SpeciesWorkspaceDeletable(ctx, "Turdus merula", 10)
-		require.NoError(t, err)
-		assert.Equal(t, int64(2), remaining)
+		require.NoError(t, ds.DB.Model(&Note{}).Where("scientific_name = ?", "Strix aluco").Count(&notes).Error)
+		assert.Equal(t, int64(1), notes, "other species are untouched")
 	})
 }

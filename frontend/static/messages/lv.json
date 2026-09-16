@@ -5834,7 +5834,6 @@
       "done": "Dzēšana pabeigta.",
       "stop": "Apturēt",
       "cancelled": "Dzēšana apturēta. Jau izdzēstās noteikšanas paliek izdzēstas.",
-      "failed": "Noteikšanas, kuras neizdevās izdzēst: {count}. Tās tika saglabātas, un var mēģināt vēlreiz.",
       "stalled": "Dzēšana apturēta, jo atlikušās noteikšanas nevarēja noņemt.",
       "error": "Dzēšana neizdevās. Jau izdzēstās noteikšanas paliek izdzēstas."
     },

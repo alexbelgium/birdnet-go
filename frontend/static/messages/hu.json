@@ -5834,7 +5834,6 @@
       "done": "A törlés befejeződött.",
       "stop": "Leállítás",
       "cancelled": "A törlés leállt. A már törölt észlelések töröltek maradnak.",
-      "failed": "Nem törölhető észlelések: {count}. Megmaradtak, és újra megpróbálható.",
       "stalled": "A törlés leállt, mert a maradék észleléseket nem lehetett eltávolítani.",
       "error": "A törlés sikertelen. A már törölt észlelések töröltek maradnak."
     },

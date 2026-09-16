@@ -79,19 +79,22 @@ type SpeciesWorkspaceRecording struct {
 	ModelName  string // empty when the store does not record the model
 }
 
-// SpeciesDeleteOutcome describes what happened to one detection in a species delete.
-type SpeciesDeleteOutcome int
+// DeletedDetection is a detection removed by a species delete chunk.
+type DeletedDetection struct {
+	ID       uint
+	ClipName string
+}
 
-const (
-	// SpeciesDeleteDeleted means the detection was removed.
-	SpeciesDeleteDeleted SpeciesDeleteOutcome = iota
-	// SpeciesDeleteLocked means the detection is locked and was kept.
-	SpeciesDeleteLocked
-	// SpeciesDeleteReassigned means the detection now belongs to another species and was kept.
-	SpeciesDeleteReassigned
-	// SpeciesDeleteMissing means the detection no longer exists.
-	SpeciesDeleteMissing
-)
+// SpeciesDeleteChunk is the result of deleting one chunk of a species' unlocked
+// detections. Locked and Reassigned count candidates that were kept because they
+// were locked, or moved to another species, between selection and deletion.
+// Remaining is the number of unlocked detections of the species still stored.
+type SpeciesDeleteChunk struct {
+	Deleted    []DeletedDetection
+	Locked     int
+	Reassigned int
+	Remaining  int64
+}
 
 // SpeciesSortClause maps a workspace sort to an ORDER BY using the given column
 // expressions (timeCols is a comma-separated list). Unknown values fall back to confidence descending.
@@ -211,7 +214,7 @@ func (ds *DataStore) SpeciesWorkspaceStats(ctx context.Context) ([]SpeciesWorksp
 	for i, name := range names {
 		out[i].ScientificName = name
 		byName[name] = &out[i]
-		best, err := ds.SpeciesWorkspaceCandidates(ctx, name, 1)
+		best, err := ds.topNoteCandidates(db, name, 1)
 		if err != nil {
 			return nil, err
 		}
@@ -235,30 +238,56 @@ func (ds *DataStore) SpeciesWorkspaceStats(ctx context.Context) ([]SpeciesWorksp
 	return out, nil
 }
 
-// SpeciesWorkspaceCandidates returns up to limit non-false-positive detections
-// with a clip, highest confidence first; locked detections come first when
-// they are within the returned set's species (a separate locked-first query).
-func (ds *DataStore) SpeciesWorkspaceCandidates(ctx context.Context, scientificName string, limit int) ([]SpeciesRecordingCandidate, error) {
+// SpeciesWorkspaceCandidates returns, per species, up to limit non-false-positive
+// detections with a clip: locked detections first, then the highest confidence.
+// Locked candidates of every requested species come from one query.
+func (ds *DataStore) SpeciesWorkspaceCandidates(ctx context.Context, names []string, limit int) (map[string][]SpeciesRecordingCandidate, error) {
 	db := ds.DB.WithContext(ctx)
-	var locked []SpeciesRecordingCandidate
-	if err := db.Table("note_locks k").Select("n.id, n.confidence, n.clip_name, 1 AS locked").
-		Joins("JOIN notes n ON n.id = k.note_id").
+	out := make(map[string][]SpeciesRecordingCandidate, len(names))
+	if len(names) == 0 {
+		return out, nil
+	}
+	type lockedRow struct {
+		SpeciesRecordingCandidate
+		ScientificName string
+	}
+	var locked []lockedRow
+	// CROSS JOIN pins SQLite's join order to the small locks table.
+	if err := db.Table("note_locks k").Select("n.id, n.scientific_name, n.confidence, n.clip_name, 1 AS locked").
+		Joins("CROSS JOIN notes n ON n.id = k.note_id").
 		Joins("LEFT JOIN note_reviews r ON r.note_id = n.id").
-		Where("n.scientific_name = ? AND n.clip_name <> ''", scientificName).
+		Where("n.scientific_name IN ? AND n.clip_name <> ''", names).
 		Where("r.verified IS NULL OR r.verified != ?", string(entities.VerificationFalsePositive)).
-		Order("n.confidence DESC, n.id ASC").Limit(limit).Scan(&locked).Error; err != nil {
+		Order("n.confidence DESC, n.id ASC").Scan(&locked).Error; err != nil {
 		return nil, dbError(err, "species_workspace_candidates", errors.PriorityMedium, "action", "load_locked_candidates")
 	}
+	lockedBy := make(map[string][]SpeciesRecordingCandidate, len(names))
+	for i := range locked {
+		lockedBy[locked[i].ScientificName] = append(lockedBy[locked[i].ScientificName], locked[i].SpeciesRecordingCandidate)
+	}
+	for _, name := range names {
+		top, err := ds.topNoteCandidates(db, name, limit)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = MergeSpeciesCandidates(lockedBy[name], top, limit)
+	}
+	return out, nil
+}
+
+// topNoteCandidates walks the partial (scientific_name, confidence) index.
+func (ds *DataStore) topNoteCandidates(db *gorm.DB, name string, limit int) ([]SpeciesRecordingCandidate, error) {
 	var top []SpeciesRecordingCandidate
-	if err := db.Table("notes n").Select("n.id, n.confidence, n.clip_name, CASE WHEN k.note_id IS NULL THEN 0 ELSE 1 END AS locked").
+	err := db.Table("notes n").Select("n.id, n.confidence, n.clip_name, CASE WHEN k.note_id IS NULL THEN 0 ELSE 1 END AS locked").
 		Joins("LEFT JOIN note_reviews r ON r.note_id = n.id").
 		Joins("LEFT JOIN note_locks k ON k.note_id = n.id").
-		Where("n.scientific_name = ? AND n.clip_name <> ''", scientificName).
+		Where("n.scientific_name = ? AND n.clip_name <> ''", name).
 		Where("r.verified IS NULL OR r.verified != ?", string(entities.VerificationFalsePositive)).
-		Order("n.confidence DESC, n.id ASC").Limit(limit).Scan(&top).Error; err != nil {
+		Order("n.confidence DESC, n.id ASC").Limit(limit).Scan(&top).Error
+	if err != nil {
 		return nil, dbError(err, "species_workspace_candidates", errors.PriorityMedium, "action", "load_top_candidates")
 	}
-	return MergeSpeciesCandidates(locked, top, limit), nil
+	return top, nil
 }
 
 // MergeSpeciesCandidates puts locked candidates first, then the rest, without duplicates.
@@ -306,66 +335,76 @@ func (ds *DataStore) SpeciesWorkspaceRecordings(ctx context.Context, q SpeciesRe
 	return out, total, nil
 }
 
-// SpeciesWorkspaceDeletable returns up to limit unlocked detection IDs of the
-// species (lowest first) and how many unlocked detections remain in total.
-func (ds *DataStore) SpeciesWorkspaceDeletable(ctx context.Context, scientificName string, limit int) (ids []uint, remaining int64, err error) {
-	base := ds.DB.WithContext(ctx).Table("notes n").
-		Where("n.scientific_name = ?", scientificName).
-		Where("NOT EXISTS (SELECT 1 FROM note_locks k WHERE k.note_id = n.id)")
-	if err := base.Session(&gorm.Session{}).Count(&remaining).Error; err != nil {
-		return nil, 0, dbError(err, "species_workspace_delete", errors.PriorityMedium, "action", "count_deletable")
-	}
-	if err := base.Session(&gorm.Session{}).Order("n.id ASC").Limit(limit).Pluck("n.id", &ids).Error; err != nil {
-		return nil, 0, dbError(err, "species_workspace_delete", errors.PriorityMedium, "action", "list_deletable")
-	}
-	return ids, remaining, nil
-}
-
-// SpeciesWorkspaceDeleteDetection deletes one detection only if it still belongs
-// to the species and is not locked, in a single transaction. It returns the
-// outcome and, when deleted, the clip name so the caller can remove files.
-func (ds *DataStore) SpeciesWorkspaceDeleteDetection(ctx context.Context, scientificName string, id uint) (outcome SpeciesDeleteOutcome, clipName string, err error) {
-	err = RetryTransactionOnLock(ctx, ds.DB, "species_workspace_delete", func(tx *gorm.DB) error {
-		var note struct {
-			ScientificName string
-			ClipName       string
-		}
-		res := tx.Table("notes").Select("scientific_name, clip_name").Where("id = ?", id).Limit(1).Scan(&note)
-		if res.Error != nil {
-			return res.Error
-		}
-		switch {
-		case res.RowsAffected == 0:
-			outcome = SpeciesDeleteMissing
-			return nil
-		case note.ScientificName != scientificName:
-			outcome = SpeciesDeleteReassigned
-			return nil
-		}
-		if err := tx.Where("note_id = ?", id).Delete(&Results{}).Error; err != nil {
+// SpeciesWorkspaceDeleteChunk deletes up to limit unlocked detections of a
+// species in one transaction. The delete statement itself re-checks species and
+// lock, so a detection locked or corrected after selection is kept, never deleted.
+func (ds *DataStore) SpeciesWorkspaceDeleteChunk(ctx context.Context, scientificName string, limit int) (SpeciesDeleteChunk, error) {
+	var chunk SpeciesDeleteChunk
+	err := RetryTransactionOnLock(ctx, ds.DB.WithContext(ctx), "species_workspace_delete", func(tx *gorm.DB) error {
+		chunk = SpeciesDeleteChunk{}
+		var picked []DeletedDetection
+		if err := tx.Table("notes n").Select("n.id, n.clip_name").
+			Where("n.scientific_name = ?", scientificName).
+			Where("NOT EXISTS (SELECT 1 FROM note_locks k WHERE k.note_id = n.id)").
+			Limit(limit).Scan(&picked).Error; err != nil {
 			return err
 		}
-		del := tx.Exec("DELETE FROM notes WHERE id = ? AND scientific_name = ? AND NOT EXISTS (SELECT 1 FROM note_locks WHERE note_id = ?)",
-			id, scientificName, id)
-		if del.Error != nil {
-			return del.Error
+		if len(picked) > 0 {
+			ids := make([]uint, len(picked))
+			for i, p := range picked {
+				ids[i] = p.ID
+			}
+			const deletable = "id IN ? AND scientific_name = ? AND NOT EXISTS (SELECT 1 FROM note_locks k WHERE k.note_id = notes.id)"
+			if err := tx.Exec("DELETE FROM results WHERE note_id IN (SELECT id FROM notes WHERE "+deletable+")",
+				ids, scientificName).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec("DELETE FROM notes WHERE "+deletable, ids, scientificName).Error; err != nil {
+				return err
+			}
+			type keptRow struct {
+				ID             uint
+				ScientificName string
+			}
+			var kept []keptRow
+			if err := tx.Table("notes").Select("id, scientific_name").Where("id IN ?", ids).Scan(&kept).Error; err != nil {
+				return err
+			}
+			keptIDs := make(map[uint]bool, len(kept))
+			for _, k := range kept {
+				keptIDs[k.ID] = true
+				if k.ScientificName == scientificName {
+					chunk.Locked++
+				} else {
+					chunk.Reassigned++
+				}
+			}
+			for _, p := range picked {
+				if !keptIDs[p.ID] {
+					chunk.Deleted = append(chunk.Deleted, p)
+				}
+			}
 		}
-		if del.RowsAffected == 0 {
-			outcome = SpeciesDeleteLocked
-			// Roll back the results delete for a kept detection.
-			return errSpeciesDeleteKept
-		}
-		outcome, clipName = SpeciesDeleteDeleted, note.ClipName
-		return nil
+		remaining, err := legacyUnlockedCount(tx, scientificName)
+		chunk.Remaining = remaining
+		return err
 	}, nil)
-	if errors.Is(err, errSpeciesDeleteKept) {
-		return SpeciesDeleteLocked, "", nil
-	}
 	if err != nil {
-		return 0, "", dbError(err, "species_workspace_delete", errors.PriorityMedium, "action", "delete_detection")
+		return SpeciesDeleteChunk{}, dbError(err, "species_workspace_delete", errors.PriorityMedium, "action", "delete_chunk")
 	}
-	return outcome, clipName, nil
+	return chunk, nil
 }
 
-// errSpeciesDeleteKept aborts a delete transaction for a detection that must be kept.
-var errSpeciesDeleteKept = errors.NewStd("species workspace: detection kept")
+// legacyUnlockedCount is total minus locked detections of a species, from two
+// index-only counts (a NOT EXISTS scan over every row is far slower).
+func legacyUnlockedCount(tx *gorm.DB, scientificName string) (int64, error) {
+	var total, locked int64
+	if err := tx.Table("notes").Where("scientific_name = ?", scientificName).Count(&total).Error; err != nil {
+		return 0, err
+	}
+	if err := tx.Table("note_locks k").Joins("JOIN notes n ON n.id = k.note_id").
+		Where("n.scientific_name = ?", scientificName).Count(&locked).Error; err != nil {
+		return 0, err
+	}
+	return max(total-locked, 0), nil
+}

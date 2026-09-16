@@ -5834,7 +5834,6 @@
       "done": "Deletion finished.",
       "stop": "Stop",
       "cancelled": "Deletion stopped. Detections already deleted stay deleted.",
-      "failed": "Detections that could not be deleted: {count}. They were kept and can be retried.",
       "stalled": "Deletion stopped because the remaining detections could not be removed.",
       "error": "Deletion failed. Detections already deleted stay deleted."
     },

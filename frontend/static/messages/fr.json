@@ -5834,7 +5834,6 @@
       "done": "Suppression terminée.",
       "stop": "Arrêter",
       "cancelled": "Suppression arrêtée. Les détections déjà supprimées le restent.",
-      "failed": "Détections non supprimées : {count}. Elles ont été conservées et peuvent être retentées.",
       "stalled": "Suppression arrêtée, car les détections restantes n’ont pas pu être supprimées.",
       "error": "Échec de la suppression. Les détections déjà supprimées le restent."
     },
