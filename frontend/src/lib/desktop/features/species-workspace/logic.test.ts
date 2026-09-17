@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { classifyTaxon } from '$lib/desktop/features/dashboard/utils/taxonFilter';
 import { COLUMNS, DEFAULT_LAYOUT, neededGroups, normalizeLayout, visibleColumns } from './columns';
 import { deleteAllUnlocked } from './deleteSpecies';
 import { ebirdLanguage, ebirdSpeciesUrl } from './externalLinks';
@@ -52,6 +53,28 @@ describe('sortRows', () => {
       'C c',
       'A a',
     ]);
+  });
+});
+
+describe('taxon filter (shared classifier)', () => {
+  // A station can hold the same species under an old and a new genus label. Both
+  // must land in Birds, or the species shows up twice: once as a bird, once as
+  // "other" (the jackdaw case: BirdNET says Corvus monedula, multi-taxa models and
+  // current checklists say Coloeus monedula).
+  it('classifies both jackdaw genera as birds', () => {
+    expect(classifyTaxon({ scientific_name: 'Corvus monedula' })).toBe('bird');
+    expect(classifyTaxon({ scientific_name: 'Coloeus monedula' })).toBe('bird');
+  });
+
+  it('classifies renamed raptor genera as birds', () => {
+    expect(classifyTaxon({ scientific_name: 'Accipiter gentilis' })).toBe('bird');
+    expect(classifyTaxon({ scientific_name: 'Astur gentilis' })).toBe('bird');
+  });
+
+  it('still keeps bats and sound classes out of Birds', () => {
+    expect(classifyTaxon({ scientific_name: 'Pipistrellus pipistrellus' })).toBe('bat');
+    expect(classifyTaxon({ scientific_name: 'Vulpes vulpes' })).toBe('other');
+    expect(classifyTaxon({ scientific_name: 'Engine' })).toBe('other');
   });
 });
 
