@@ -27,6 +27,10 @@ vi.mock('./externalLinks', () => ({
   ebirdSpeciesUrl: () => 'https://ebird.org/species/eurbla/BE-WAL?siteLanguage=en',
   observationsUrl: async () => 'https://observations.be/species/150/',
 }));
+vi.mock('$lib/utils/reanalyzeDetection', () => ({
+  reanalyzeDetection: vi.fn(() => new Promise(() => {})),
+  correctDetectionSpecies: vi.fn(),
+}));
 vi.mock('$lib/stores/excludedSpecies.svelte', () => ({
   hydrateExcludedSpecies: vi.fn(async () => {}),
   isExcluded: () => false,
@@ -365,6 +369,28 @@ describe('SpeciesDetail', () => {
     const table = await screen.findByRole('table');
     await waitFor(() => expect(within(table).getByText('BirdNET')).toBeInTheDocument());
     expect(within(table).getByText('speciesWorkspace.states.unknownModel')).toBeInTheDocument();
+  });
+
+  it('opens the reanalysis dialog in place from a recording row action', async () => {
+    const { reanalyzeDetection } = await import('$lib/utils/reanalyzeDetection');
+    render(SpeciesDetail, {
+      props: {
+        scientificName: 'Turdus merula',
+        query: '',
+        onBack: vi.fn(),
+        onQueryChange: vi.fn(),
+      },
+    });
+    const table = await screen.findByRole('table');
+    await fireEvent.click(
+      within(table).getAllByRole('button', { name: /Actions/i })[0] as HTMLElement
+    );
+    await fireEvent.click(
+      await screen.findByRole('menuitem', { name: 'dashboard.recentDetections.actions.reanalyze' })
+    );
+    expect(await screen.findByRole('dialog', { name: 'Reanalyze this clip' })).toBeInTheDocument();
+    await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalled());
+    expect(vi.mocked(reanalyzeDetection).mock.calls[0]?.[0]).toBe(1);
   });
 
   it('clears the selection when Locked only is toggled', async () => {
