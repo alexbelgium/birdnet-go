@@ -72,6 +72,8 @@ describe('classifyTaxon', () => {
     expect(classifyTaxon({ scientific_name: 'Gryllus assimilis' })).toBe('other'); // Field cricket
     expect(classifyTaxon({ scientific_name: 'Oecanthus celerinictus' })).toBe('other'); // Tree cricket
     expect(classifyTaxon({ scientific_name: 'Conocephalus fasciatus' })).toBe('other'); // Meadow katydid
+    expect(classifyTaxon({ scientific_name: 'Orocharis saltator' })).toBe('other'); // Bush cricket
+    expect(classifyTaxon({ scientific_name: 'Amblycorypha oblongifolia' })).toBe('other'); // Katydid
   });
 
   it('classifies BirdNET amphibian labels as other', () => {
@@ -80,11 +82,21 @@ describe('classifyTaxon', () => {
     expect(classifyTaxon({ scientific_name: 'Dryophytes cinereus' })).toBe('other'); // Green treefrog
     expect(classifyTaxon({ scientific_name: 'Pseudacris crucifer' })).toBe('other'); // Spring peeper
     expect(classifyTaxon({ scientific_name: 'Lithobates catesbeianus' })).toBe('other'); // Bullfrog
+    expect(classifyTaxon({ scientific_name: 'Hyliola regilla' })).toBe('other'); // Pacific chorus frog
+    expect(classifyTaxon({ scientific_name: 'Acris crepitans' })).toBe('other'); // Cricket frog
   });
 
   it('classifies BirdNET mammal labels as other', () => {
     expect(classifyTaxon({ scientific_name: 'Alouatta pigra' })).toBe('other'); // Howler monkey
     expect(classifyTaxon({ scientific_name: 'Odocoileus virginianus' })).toBe('other'); // White-tailed deer
+  });
+
+  it('classifies a genus renamed since the BirdNET label set as bird', () => {
+    // The label file says "Corvus monedula"; current checklists and multi-taxa
+    // models emit "Coloeus monedula". Both must be birds, not "other".
+    expect(classifyTaxon({ scientific_name: 'Coloeus monedula' })).toBe('bird'); // Eurasian Jackdaw
+    expect(classifyTaxon({ scientific_name: 'Corvus monedula' })).toBe('bird');
+    expect(classifyTaxon({ scientific_name: 'Astur cooperii' })).toBe('bird'); // ex-Accipiter
   });
 
   it('falls back to other for empty or single-token names', () => {

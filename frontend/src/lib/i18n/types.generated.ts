@@ -394,6 +394,15 @@ export type TranslationKey =
   | 'notifications.content.region.staleTitle'
   | 'notifications.content.region.staleMessage' // params: modelName, oldRegion, newRegion
   | 'notifications.content.region.staleGlobalMessage' // params: modelName, oldRegion
+  | 'notifications.content.modelPath.reconciledTitle' // params: modelName
+  | 'notifications.content.modelPath.reconciledMessage' // params: modelName, modelPath
+  | 'notifications.content.modelPath.substitutedTitle' // params: modelName
+  | 'notifications.content.modelPath.substitutedMessage' // params: modelName, modelPath
+  | 'notifications.content.modelPath.unreadableTitle' // params: modelName
+  | 'notifications.content.modelPath.unreadableMessage' // params: modelName, modelPath
+  | 'notifications.content.modelPath.builtinMessage' // params: modelName
+  | 'notifications.content.modelPath.notRegisteredTitle' // params: sourceName
+  | 'notifications.content.modelPath.notRegisteredMessage' // params: models, sourceName
   | 'notifications.content.alert.firedTitle' // params: rule_name
   | 'notifications.content.alert.metricExceeded' // params: value, threshold
   | 'notifications.content.alert.detectionOccurred' // params: species_name, confidence
@@ -548,6 +557,29 @@ export type TranslationKey =
   | 'dashboard.dailySummary.taxonFilter.bat'
   | 'dashboard.dailySummary.taxonFilter.other'
   | 'dashboard.dailySummary.taxonFilter.ariaLabel' // params: current
+  | 'dashboard.dailySummary.history.title' // params: species
+  | 'dashboard.dailySummary.history.subtitle' // params: count, formattedCount, range
+  | 'dashboard.dailySummary.history.subtitleSince' // params: count, formattedCount, range, since
+  | 'dashboard.dailySummary.history.loading'
+  | 'dashboard.dailySummary.history.unavailable'
+  | 'dashboard.dailySummary.history.loadFailed'
+  | 'dashboard.dailySummary.history.retry'
+  | 'dashboard.dailySummary.history.empty'
+  | 'dashboard.dailySummary.history.emptyHint'
+  | 'dashboard.dailySummary.history.total'
+  | 'dashboard.dailySummary.history.peak'
+  | 'dashboard.dailySummary.history.avgPerDay'
+  | 'dashboard.dailySummary.history.daily'
+  | 'dashboard.dailySummary.history.movingAverage'
+  | 'dashboard.dailySummary.history.chartLabel' // params: species, count, range, peak
+  | 'dashboard.dailySummary.history.rangeGroup'
+  | 'dashboard.dailySummary.history.allShort'
+  | 'dashboard.dailySummary.history.ranges.last7d'
+  | 'dashboard.dailySummary.history.ranges.last30d'
+  | 'dashboard.dailySummary.history.ranges.last90d'
+  | 'dashboard.dailySummary.history.ranges.last1y'
+  | 'dashboard.dailySummary.history.ranges.last2y'
+  | 'dashboard.dailySummary.history.ranges.all'
   | 'dashboard.recentDetections.title'
   | 'dashboard.recentDetections.subtitle'
   | 'dashboard.recentDetections.controls.show'
@@ -1371,6 +1403,8 @@ export type TranslationKey =
   | 'system.inference.sources'
   | 'system.inference.noSources'
   | 'system.inference.primaryFallback'
+  | 'system.inference.sourceNotRunning'
+  | 'system.inference.sourceNotRunningTooltip'
   | 'system.inference.notMeasured'
   | 'system.inference.unitMs'
   | 'system.inference.unitKhz'
@@ -1961,8 +1995,8 @@ export type TranslationKey =
   | 'settings.main.fields.overlap.helpText'
   | 'settings.main.fields.locale.label'
   | 'settings.main.fields.locale.helpText'
-  | 'settings.main.fields.tensorflowThreads.label'
-  | 'settings.main.fields.tensorflowThreads.helpText'
+  | 'settings.main.fields.inferenceThreads.label'
+  | 'settings.main.fields.inferenceThreads.helpText'
   | 'settings.main.errors.localesLoadFailed'
   | 'settings.main.errors.providersLoadFailed'
   | 'settings.main.errors.rangeFilterTestFailed'
@@ -3554,6 +3588,13 @@ export type TranslationKey =
   | 'media.audio.streamArtist'
   | 'media.audio.streamAlbum'
   | 'media.audio.playbackError' // params: details
+  | 'media.audio.audibleBats.title'
+  | 'media.audio.audibleBats.subtitle'
+  | 'media.audio.audibleBats.timeExpansion'
+  | 'media.audio.audibleBats.enable'
+  | 'media.audio.audibleBats.disable'
+  | 'media.audio.audibleBats.generating'
+  | 'media.audio.audibleBats.error'
   | 'media.spectrogram.notGenerated'
   | 'media.spectrogram.generate'
   | 'media.spectrogram.generateButton'
@@ -4209,6 +4250,27 @@ export type TranslationParams = {
     modelName: string | number;
     oldRegion: string | number;
   };
+  'notifications.content.modelPath.reconciledTitle': { modelName: string | number };
+  'notifications.content.modelPath.reconciledMessage': {
+    modelName: string | number;
+    modelPath: string | number;
+  };
+  'notifications.content.modelPath.substitutedTitle': { modelName: string | number };
+  'notifications.content.modelPath.substitutedMessage': {
+    modelName: string | number;
+    modelPath: string | number;
+  };
+  'notifications.content.modelPath.unreadableTitle': { modelName: string | number };
+  'notifications.content.modelPath.unreadableMessage': {
+    modelName: string | number;
+    modelPath: string | number;
+  };
+  'notifications.content.modelPath.builtinMessage': { modelName: string | number };
+  'notifications.content.modelPath.notRegisteredTitle': { sourceName: string | number };
+  'notifications.content.modelPath.notRegisteredMessage': {
+    models: string | number;
+    sourceName: string | number;
+  };
   'notifications.content.alert.firedTitle': { rule_name: string | number };
   'notifications.content.alert.metricExceeded': {
     value: string | number;
@@ -4259,6 +4321,24 @@ export type TranslationParams = {
   };
   'dashboard.dailySummary.tooltips.infrequent': { days: string | number };
   'dashboard.dailySummary.taxonFilter.ariaLabel': { current: string | number };
+  'dashboard.dailySummary.history.title': { species: string | number };
+  'dashboard.dailySummary.history.subtitle': {
+    count: string | number;
+    formattedCount: string | number;
+    range: string | number;
+  };
+  'dashboard.dailySummary.history.subtitleSince': {
+    count: string | number;
+    formattedCount: string | number;
+    range: string | number;
+    since: string | number;
+  };
+  'dashboard.dailySummary.history.chartLabel': {
+    species: string | number;
+    count: string | number;
+    range: string | number;
+    peak: string | number;
+  };
   'dashboard.recentDetections.modals.showSpecies': { species: string | number };
   'dashboard.recentDetections.modals.ignoreSpecies': { species: string | number };
   'dashboard.recentDetections.modals.showSpeciesConfirm': { species: string | number };

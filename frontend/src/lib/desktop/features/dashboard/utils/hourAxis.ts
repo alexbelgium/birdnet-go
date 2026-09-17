@@ -9,18 +9,39 @@
  *  BAR_WIDTH(3) wide on a BAR_STRIDE(4) grid, so the centre sits at 1.5/4 = 0.375. */
 const BAR_CENTRE_FRACTION = 0.375;
 
-/** Fixed candidate ticks; the last hour is always appended when not already present. */
-const CANDIDATE_TICKS = [0, 6, 12, 18] as const;
+/** Default tick step in hours: the compact table header labels 0/6/12/18. */
+const DEFAULT_TICK_STEP = 6;
 
 /**
- * Adaptive axis ticks for a 0..maxHour chart: the fixed candidates that fall
+ * Minimum gap between the last two ticks, in hours: two thirds of the step
+ * (4 h for the 6-hour compact axis, 2 h for the 3-hour detail axis).
+ *
+ * Hours rather than a fraction of the axis, because the compact chart column is
+ * sized at BAR_STRIDE px per hour: an hour is always 4 px wide there, so four
+ * hours is 16 px, which clears a two-digit label (~10 px). Without this,
+ * computeAxisTicks appended maxHour unconditionally and drew "12" and "14" on
+ * top of each other at 14:00.
+ */
+function minTickSpacingHours(step: number): number {
+  return Math.ceil((step * 2) / 3);
+}
+
+/**
+ * Adaptive axis ticks for a 0..maxHour chart: the stepped candidates that fall
  * within range, plus maxHour itself so the axis always ends at the last bar.
  * Naturally thins out for short "today" charts (e.g. maxHour=3 → [0, 3]).
+ *
+ * A trailing candidate too close to maxHour is dropped rather than drawn, unless
+ * it is the only one left — the origin tick always survives.
  */
-export function computeAxisTicks(maxHour: number): number[] {
-  const base = CANDIDATE_TICKS.filter(h => h <= maxHour);
+export function computeAxisTicks(maxHour: number, step = DEFAULT_TICK_STEP): number[] {
+  const base = Array.from({ length: Math.floor(maxHour / step) + 1 }, (_, index) => index * step);
   const last = base[base.length - 1];
-  return last !== maxHour ? [...base, maxHour] : base;
+  if (last === maxHour) return base;
+  if (base.length > 1 && maxHour - last < minTickSpacingHours(step)) {
+    return [...base.slice(0, -1), maxHour];
+  }
+  return [...base, maxHour];
 }
 
 /**
