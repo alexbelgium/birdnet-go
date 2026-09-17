@@ -95,6 +95,7 @@
   import { normalizeForLookup } from '$lib/utils/speciesNames';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { mapSpeciesListResponse, type SpeciesListResponse } from '$lib/utils/speciesPredictions';
+  import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import {
     Download,
     Trash2,
@@ -1652,8 +1653,10 @@
           addPlaceholder="Type a common or scientific name"
           addHelpText="Whitelisted species always use the normal single-model threshold behavior."
           addButtonText="Add species"
-          hasChanges={JSON.stringify(firstDailyConsensus.whitelist) !==
-            JSON.stringify(store.originalData.realtime?.firstDailyConsensus?.whitelist ?? [])}
+          hasChanges={hasSettingsChanged(
+            store.originalData.realtime?.firstDailyConsensus?.whitelist ?? [],
+            firstDailyConsensus.whitelist
+          )}
           onSpeciesChange={updateFirstDailyConsensusWhitelist}
         />
       </div>
