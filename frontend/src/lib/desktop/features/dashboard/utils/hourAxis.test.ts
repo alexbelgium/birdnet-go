@@ -54,6 +54,13 @@ describe('computeAxisTicks', () => {
       expect(new Set(ticks).size).toBe(ticks.length);
     }
   });
+
+  it('supports three-hour ticks with two-hour minimum trailing spacing', () => {
+    expect(computeAxisTicks(23, 3)).toEqual([0, 3, 6, 9, 12, 15, 18, 21, 23]);
+    expect(computeAxisTicks(22, 3)).toEqual([0, 3, 6, 9, 12, 15, 18, 22]);
+    expect(computeAxisTicks(4, 3)).toEqual([0, 4]);
+    expect(computeAxisTicks(0, 3)).toEqual([0]);
+  });
 });
 
 describe('tickPositionPercent', () => {

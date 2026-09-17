@@ -112,9 +112,16 @@
           : null
   );
 
-  // Adaptive axis ticks + bar-centre positioning shared with the compact table
-  // header so the header ticks line up with the bars drawn here (see utils/hourAxis).
-  const axisTicks = $derived(computeAxisTicks(maxHour));
+  // The expanded chart uses a denser three-hour axis than the compact table.
+  // Gridlines mark every 3 h even where a label was thinned out near maxHour.
+  const DETAIL_TICK_STEP = 3;
+  const axisTicks = $derived(computeAxisTicks(maxHour, DETAIL_TICK_STEP));
+  const gridTicks = $derived(
+    Array.from(
+      { length: Math.floor(maxHour / DETAIL_TICK_STEP) + 1 },
+      (_, i) => i * DETAIL_TICK_STEP
+    )
+  );
   const tickPct = (hour: number): string => tickPositionCss(hour, maxHour);
 
   const thumbSrc = $derived(
@@ -204,7 +211,7 @@
             showHistory = true;
           }}
         >
-          <BarChart2 class="size-3" />
+          <BarChart2 class="size-3" />Graph
         </button>
       </div>
 
@@ -287,6 +294,12 @@
       }
     }}
   >
+    <div class="card-gridlines" aria-hidden="true">
+      {#each gridTicks as tick (tick)}
+        <span class="card-gridline" style:left={tickPct(tick)}></span>
+      {/each}
+    </div>
+
     <div class="card-chart-wrap">
       <HourlyMiniChart {item} {sunriseHour} {sunsetHour} {maxHour} {chartHeight} />
     </div>
@@ -320,14 +333,8 @@
 
     <!-- Hour axis labels -->
     <div class="card-axis" aria-hidden="true">
-      {#each axisTicks as tick, i (tick)}
-        <span
-          class="card-axis-tick"
-          class:tick-first={i === 0}
-          class:tick-last={i === axisTicks.length - 1}
-          style:left={i === axisTicks.length - 1 ? undefined : tickPct(tick)}
-          style:right={i === axisTicks.length - 1 ? '0' : undefined}
-        >
+      {#each axisTicks as tick (tick)}
+        <span class="card-axis-tick" style:left={tickPct(tick)}>
           {String(tick).padStart(2, '0')}
         </span>
       {/each}
@@ -458,18 +465,20 @@
     background: color-mix(in srgb, var(--color-base-content) 8%, transparent);
   }
 
-  /* Icon-only history button — same pill treatment as Detections */
+  /* History button — same labelled pill treatment as Detections */
   .card-history-btn {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    gap: 0.2rem;
     flex-shrink: 0;
+    font-size: 0.6rem;
+    font-weight: 600;
     color: var(--color-base-content);
     background: none;
     border: 1px solid color-mix(in srgb, var(--color-base-content) 30%, transparent);
     border-radius: 9999px;
-    padding: 0.15rem;
-    line-height: 1;
+    padding: 0.1rem 0.375rem;
+    line-height: 1.4;
     cursor: pointer;
   }
 
@@ -610,6 +619,30 @@
     outline-offset: -2px;
   }
 
+  .card-gridlines {
+    position: absolute;
+    z-index: 0;
+    top: 0.375rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    height: var(--detail-chart-h, 64px);
+    pointer-events: none;
+  }
+
+  .card-gridline {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    transform: translateX(-0.5px);
+    background: color-mix(in srgb, var(--color-base-content) 12%, transparent);
+  }
+
+  .card-chart-wrap {
+    position: relative;
+    z-index: 1;
+  }
+
   /* SVG fills full chart-section width; height follows the chartHeight prop */
   .card-chart-wrap :global(svg) {
     width: 100%;
@@ -625,6 +658,7 @@
     right: 0.5rem;
     height: var(--detail-chart-h, 64px);
     pointer-events: none;
+    z-index: 2;
   }
 
   .card-peak-label {
@@ -646,6 +680,7 @@
     right: 0.5rem;
     height: 0.75rem;
     pointer-events: none;
+    z-index: 2;
   }
 
   .card-sun-mark {
@@ -679,15 +714,14 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .card-axis-tick.tick-first {
-    left: 0 !important;
-    transform: none;
-  }
-
-  .card-axis-tick.tick-last {
-    right: 0;
-    left: auto !important;
-    transform: none;
+  .card-axis-tick::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -0.3rem;
+    width: 1px;
+    height: 3px;
+    background: currentcolor;
   }
 
   /* ─── Desktop (≥768px): the card renders under a heatmap row — roomier
@@ -731,7 +765,8 @@
     }
 
     .card-ebird-btn,
-    .card-detections-btn {
+    .card-detections-btn,
+    .card-history-btn {
       font-size: 0.7rem;
       padding: 0.15rem 0.5rem;
     }
