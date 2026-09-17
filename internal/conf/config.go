@@ -807,10 +807,11 @@ type FalsePositiveFilterSettings struct {
 // confirmed by a second model that also cleared its normal threshold.
 //
 // The rule only applies to species every active bird-capable model can predict;
-// bats, non-bird taxa, and species unique to one model are never affected. See
-// internal/analysis/processor/first_daily_consensus.go.
+// bats, non-bird taxa, whitelisted species, and species unique to one model are
+// never affected. See internal/analysis/processor/first_daily_consensus.go.
 type FirstDailyConsensusSettings struct {
-	Enabled bool `yaml:"enabled" json:"enabled"` // true to require a second model to confirm a species' first detection each day
+	Enabled   bool     `yaml:"enabled" json:"enabled"`     // true to require a second model to confirm a species' first detection each day
+	Whitelist []string `yaml:"whitelist" json:"whitelist"` // species exempt from the first-daily consensus rule, by common or scientific name
 }
 
 // Validate checks if the filter level is within the valid range (0-5).

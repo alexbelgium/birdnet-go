@@ -14,14 +14,15 @@
 // buffering — it is a count over item.ModelContributions. Nothing here changes
 // inference, persistence, settings or the API.
 //
-// Every uncertainty fails open (the detection is accepted as it is today):
-// unknown taxonomy, unreadable model metadata, a datastore error, or a species
-// the active models do not all share.
+// Every exception and uncertainty fails open (the detection is accepted as it
+// is today): a whitelisted species, unknown taxonomy, unreadable model metadata,
+// a datastore error, or a species the active models do not all share.
 //
 // The checks run cheapest-first because the gate is evaluated while
-// p.pendingMutex is held: in-memory counts, then the per-day memo, then the
-// cached taxonomy and model-support lookups. The datastore is not consulted
-// there at all — warmFirstDailyAcceptance resolves it beforehand, off the lock.
+// p.pendingMutex is held: whitelist, in-memory counts, then the per-day memo,
+// then the cached taxonomy and model-support lookups. The datastore is not
+// consulted there at all — warmFirstDailyAcceptance resolves it beforehand,
+// off the lock.
 package processor
 
 import (
@@ -225,6 +226,13 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 	result := &item.Detection.Result
 	scientificName := result.Species.ScientificName
 	if scientificName == "" || result.Timestamp.IsZero() {
+		return firstDailyNormal, firstDailyCandidate{}
+	}
+
+	// Whitelisted species always retain normal single-model behaviour. Keep this
+	// before taxonomy, model-support and datastore work so an exemption is free
+	// apart from the same canonical name matching used by the species exclude list.
+	if isSpeciesExcluded(result.Species.CommonName, scientificName, settings.Realtime.FirstDailyConsensus.Whitelist) {
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 

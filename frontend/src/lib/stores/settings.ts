@@ -403,6 +403,7 @@ export interface DaylightFilterSettings {
 
 export interface FirstDailyConsensusSettings {
   enabled: boolean;
+  whitelist: string[];
 }
 
 export interface EBirdSettings {
@@ -1067,6 +1068,7 @@ function createEmptySettings(): SettingsFormData & { security: SecuritySettings 
       },
       firstDailyConsensus: {
         enabled: false,
+        whitelist: [],
       },
       extendedCapture: {
         enabled: false,

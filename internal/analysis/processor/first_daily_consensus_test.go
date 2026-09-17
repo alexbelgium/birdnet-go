@@ -201,6 +201,39 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 	}
 }
 
+func TestShouldDiscardFirstDailyDetection_Whitelist(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		whitelist []string
+	}{
+		{name: "common name case insensitive", whitelist: []string{"great tit"}},
+		{name: "scientific name case insensitive", whitelist: []string{"PARUS MAJOR"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := &Processor{}
+			markSpeciesShared(p, true)
+			markMemo(p, false)
+			item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
+
+			discard, _ := p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
+			require.True(t, discard, "the fixture must trigger the consensus gate without an exemption")
+
+			settings := newConsensusSettings()
+			settings.Realtime.FirstDailyConsensus.Whitelist = tt.whitelist
+			discard, reason := p.shouldDiscardFirstDailyDetection(item, settings)
+
+			assert.False(t, discard)
+			assert.Empty(t, reason)
+		})
+	}
+}
+
 // TestShouldDiscardFirstDailyDetection_DynamicThreshold covers the exception for
 // a species whose bar dynamic thresholding has actually lowered: the operator
 // asked for a more permissive gate, so one model is enough. An expired
