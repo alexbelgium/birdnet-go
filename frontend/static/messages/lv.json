@@ -5753,11 +5753,16 @@
       "done": "Gatavs",
       "reset": "Atiestatīt",
       "panelTitle": "Kolonnas",
+      "condensed": "Kompakts skats tālruņos",
+      "condensedHelp": "Parāda katru sugu divās kompaktās rindās.",
       "show": "Rādīt kolonnu {column}",
       "mandatory": "{column} tiek rādīta vienmēr",
       "moveUp": "Pārvietot {column} uz augšu",
       "moveDown": "Pārvietot {column} uz leju",
       "saveFailed": "Kolonnu izkārtojumu neizdevās saglabāt, tāpēc tika atjaunots iepriekšējais."
+    },
+    "condensed": {
+      "noRecording": "Ieraksts nav pieejams"
     },
     "columns": {
       "species": "Suga",

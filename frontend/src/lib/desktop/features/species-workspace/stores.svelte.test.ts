@@ -162,6 +162,7 @@ describe('layout store', () => {
   const custom: WorkspaceLayout = {
     columns: DEFAULT_LAYOUT.columns.map(c => (c.id === 'range' ? { ...c, visible: true } : c)),
     sort: { column: 'lastSeen', direction: 'asc' },
+    condensed: true,
   };
 
   beforeEach(() => {
@@ -188,6 +189,7 @@ describe('layout store', () => {
     await store.save(custom);
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ sort: custom.sort }));
     expect(store.layout.sort).toEqual(custom.sort);
+    expect(store.layout.condensed).toBe(true);
     expect(store.saveError).toBe(false);
   });
 

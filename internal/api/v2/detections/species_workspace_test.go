@@ -319,10 +319,15 @@ func TestWorkspaceLayout(t *testing.T) {
 	assert.Equal(t, conf.DefaultSpeciesWorkspaceLayout(), layout)
 
 	rec = doWorkspace(t, e, http.MethodPut, "/api/v2/species-workspace/layout",
-		`{"columns":[{"id":"lastSeen","visible":true},{"id":"species","visible":false},{"id":"nope","visible":true}],"sort":{"column":"lastSeen","direction":"asc"}}`)
+		`{"columns":[{"id":"lastSeen","visible":true},{"id":"species","visible":false},{"id":"nope","visible":true}],"sort":{"column":"lastSeen","direction":"asc"},"condensed":true}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	saved := h.getSettingsOrFallback().Realtime.Species.SpeciesWorkspace
 	assert.Equal(t, conf.SpeciesWorkspaceColumn{ID: "lastSeen", Visible: true}, saved.Columns[0])
 	assert.Equal(t, conf.SpeciesWorkspaceColumn{ID: "species", Visible: true}, saved.Columns[1])
 	assert.Equal(t, conf.SpeciesWorkspaceSort{Column: "lastSeen", Direction: "asc"}, saved.Sort)
+	assert.True(t, saved.Condensed)
+
+	var response conf.SpeciesWorkspaceLayout
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	assert.True(t, response.Condensed)
 }

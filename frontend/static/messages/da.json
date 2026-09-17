@@ -5753,11 +5753,16 @@
       "done": "Færdig",
       "reset": "Nulstil",
       "panelTitle": "Kolonner",
+      "condensed": "Kompakt visning på telefoner",
+      "condensedHelp": "Viser hver art på to kompakte linjer.",
       "show": "Vis kolonnen {column}",
       "mandatory": "{column} vises altid",
       "moveUp": "Flyt {column} op",
       "moveDown": "Flyt {column} ned",
       "saveFailed": "Kolonnelayoutet kunne ikke gemmes, så det tidligere layout blev gendannet."
+    },
+    "condensed": {
+      "noRecording": "Ingen optagelse tilgængelig"
     },
     "columns": {
       "species": "Art",

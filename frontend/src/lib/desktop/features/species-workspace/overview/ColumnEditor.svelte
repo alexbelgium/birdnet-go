@@ -36,6 +36,15 @@
   aria-label={t('speciesWorkspace.edit.panelTitle')}
 >
   <h2 class="mb-2 text-sm font-semibold">{t('speciesWorkspace.edit.panelTitle')}</h2>
+  <div class="mb-3 max-w-xl rounded-md bg-[var(--color-base-200)] p-2">
+    <Checkbox
+      checked={layout.condensed}
+      helpText={t('speciesWorkspace.edit.condensedHelp')}
+      onchange={condensed => onChange({ ...layout, condensed })}
+    >
+      <span class="text-sm font-medium">{t('speciesWorkspace.edit.condensed')}</span>
+    </Checkbox>
+  </div>
   <ol class="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
     {#each layout.columns as column, index (column.id)}
       {@const def = getColumn(column.id)}

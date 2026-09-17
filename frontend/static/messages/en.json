@@ -5753,11 +5753,16 @@
       "done": "Done",
       "reset": "Reset",
       "panelTitle": "Columns",
+      "condensed": "Condensed view on phones",
+      "condensedHelp": "Shows each species in two compact lines.",
       "show": "Show the {column} column",
       "mandatory": "{column} is always shown",
       "moveUp": "Move {column} up",
       "moveDown": "Move {column} down",
       "saveFailed": "The column layout could not be saved, so the previous layout was restored."
+    },
+    "condensed": {
+      "noRecording": "No recording available"
     },
     "columns": {
       "species": "Species",

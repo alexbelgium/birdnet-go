@@ -2545,11 +2545,15 @@
         "sort": {
           "$ref": "#/$defs/SpeciesWorkspaceSort",
           "description": "active sort"
+        },
+        "condensed": {
+          "type": "boolean",
+          "description": "use two-line rows on phones"
         }
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "SpeciesWorkspaceLayout is the saved column order, visibility and sort of the species workspace."
+      "description": "SpeciesWorkspaceLayout is the saved column order, visibility, sort and phone density of the species workspace."
     },
     "SpeciesWorkspaceSort": {
       "properties": {

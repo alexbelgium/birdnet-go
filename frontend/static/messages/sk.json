@@ -5753,11 +5753,16 @@
       "done": "Hotovo",
       "reset": "Obnoviť predvolené",
       "panelTitle": "Stĺpce",
+      "condensed": "Kompaktné zobrazenie v telefónoch",
+      "condensedHelp": "Zobrazí každý druh v dvoch kompaktných riadkoch.",
       "show": "Zobraziť stĺpec {column}",
       "mandatory": "{column} sa zobrazuje vždy",
       "moveUp": "Posunúť {column} nahor",
       "moveDown": "Posunúť {column} nadol",
       "saveFailed": "Rozloženie stĺpcov sa nepodarilo uložiť, preto sa obnovilo predchádzajúce."
+    },
+    "condensed": {
+      "noRecording": "Nahrávka nie je k dispozícii"
     },
     "columns": {
       "species": "Druh",

@@ -5753,11 +5753,16 @@
       "done": "Hotovo",
       "reset": "Obnovit výchozí",
       "panelTitle": "Sloupce",
+      "condensed": "Zhuštěné zobrazení na telefonech",
+      "condensedHelp": "Zobrazí každý druh ve dvou kompaktních řádcích.",
       "show": "Zobrazit sloupec {column}",
       "mandatory": "{column} se zobrazuje vždy",
       "moveUp": "Posunout {column} nahoru",
       "moveDown": "Posunout {column} dolů",
       "saveFailed": "Rozvržení sloupců se nepodařilo uložit, proto bylo obnoveno předchozí."
+    },
+    "condensed": {
+      "noRecording": "Nahrávka není k dispozici"
     },
     "columns": {
       "species": "Druh",

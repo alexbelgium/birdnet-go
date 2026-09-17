@@ -20,11 +20,13 @@ type SpeciesWorkspaceSort struct {
 	Direction string `yaml:"direction" json:"direction"` // "asc" or "desc"
 }
 
-// SpeciesWorkspaceLayout is the saved column order, visibility and sort of the
-// species workspace. It is written only through /api/v2/species-workspace/layout.
+// SpeciesWorkspaceLayout is the saved column order, visibility, sort and phone
+// density of the species workspace. It is written only through
+// /api/v2/species-workspace/layout.
 type SpeciesWorkspaceLayout struct {
-	Columns []SpeciesWorkspaceColumn `yaml:"columns,omitempty" json:"columns"` // ordered columns
-	Sort    SpeciesWorkspaceSort     `yaml:"sort,omitempty" json:"sort"`       // active sort
+	Columns   []SpeciesWorkspaceColumn `yaml:"columns,omitempty" json:"columns"` // ordered columns
+	Sort      SpeciesWorkspaceSort     `yaml:"sort,omitempty" json:"sort"`       // active sort
+	Condensed bool                     `yaml:"condensed" json:"condensed"`       // use two-line rows on phones
 }
 
 // speciesWorkspaceColumn describes a known column and its defaults.
@@ -73,7 +75,10 @@ func NormalizeSpeciesWorkspaceLayout(in SpeciesWorkspaceLayout) SpeciesWorkspace
 	for _, c := range speciesWorkspaceColumns {
 		known[c.id] = c
 	}
-	out := SpeciesWorkspaceLayout{Columns: make([]SpeciesWorkspaceColumn, 0, len(speciesWorkspaceColumns))}
+	out := SpeciesWorkspaceLayout{
+		Columns:   make([]SpeciesWorkspaceColumn, 0, len(speciesWorkspaceColumns)),
+		Condensed: in.Condensed,
+	}
 	seen := make(map[string]bool, len(speciesWorkspaceColumns))
 	for _, col := range in.Columns {
 		def, ok := known[col.ID]

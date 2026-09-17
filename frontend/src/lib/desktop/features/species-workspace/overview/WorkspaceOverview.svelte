@@ -23,6 +23,7 @@
   import { createWorkspaceData } from '../workspaceData.svelte';
   import BestRecordingModal from './BestRecordingModal.svelte';
   import ColumnEditor from './ColumnEditor.svelte';
+  import CondensedSpeciesRow from './CondensedSpeciesRow.svelte';
   import DeleteSpeciesModal from './DeleteSpeciesModal.svelte';
   import SpeciesCell from './SpeciesCell.svelte';
   import { columnSortValue, type SpeciesRow } from './rows';
@@ -346,26 +347,44 @@
         </table>
       </div>
 
-      <!-- Mobile cards -->
-      <ul class="space-y-2 md:hidden">
-        {#each visibleRows as row (row.scientificName)}
-          <li
-            class="rounded-lg border border-[var(--color-base-300)] p-3"
-            use:observeRow={row.scientificName}
-          >
-            <div class="flex items-start justify-between gap-2">
-              {@render cell('species', row)}
-              {#if columns.some(c => c.id === 'actions')}{@render cell('actions', row)}{/if}
-            </div>
-            <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-              {#each columns.filter(c => c.id !== 'species' && c.id !== 'actions') as column (column.id)}
-                <dt class="opacity-60">{t(column.labelKey)}</dt>
-                <dd class="text-right">{@render cell(column.id, row)}</dd>
-              {/each}
-            </dl>
-          </li>
-        {/each}
-      </ul>
+      {#if layout.condensed}
+        <!-- Condensed phone rows -->
+        <ul class="divide-y divide-[var(--color-base-300)] md:hidden">
+          {#each visibleRows as row (row.scientificName)}
+            <li use:observeRow={row.scientificName}>
+              <CondensedSpeciesRow
+                {row}
+                {columns}
+                {data}
+                {onOpenSpecies}
+                onPlayBest={r => (bestTarget = r)}
+                onDelete={r => (deleteTarget = r)}
+              />
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <!-- Mobile cards -->
+        <ul class="space-y-2 md:hidden">
+          {#each visibleRows as row (row.scientificName)}
+            <li
+              class="rounded-lg border border-[var(--color-base-300)] p-3"
+              use:observeRow={row.scientificName}
+            >
+              <div class="flex items-start justify-between gap-2">
+                {@render cell('species', row)}
+                {#if columns.some(c => c.id === 'actions')}{@render cell('actions', row)}{/if}
+              </div>
+              <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                {#each columns.filter(c => c.id !== 'species' && c.id !== 'actions') as column (column.id)}
+                  <dt class="opacity-60">{t(column.labelKey)}</dt>
+                  <dd class="text-right">{@render cell(column.id, row)}</dd>
+                {/each}
+              </dl>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     {/if}
   </div>
 </div>

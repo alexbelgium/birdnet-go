@@ -305,6 +305,7 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.species.speciesworkspace.columns` | species-workspace-column[] | ordered columns |
 | `realtime.species.speciesworkspace.sort.column` | string | column identifier |
 | `realtime.species.speciesworkspace.sort.direction` | string | "asc" or "desc" |
+| `realtime.species.speciesworkspace.condensed` | boolean | use two-line rows on phones |
 | `realtime.weather.provider` | string | "none", "yrno", "openweather", or "wunderground" |
 | `realtime.weather.pollinterval` | integer | weather data polling interval in minutes |
 | `realtime.weather.debug` | boolean | true to enable debug mode |
