@@ -1076,7 +1076,9 @@ Responsive Breakpoints:
       {#if headerWeather}
         <!-- Decorative background: clipped to the header (the header itself stays
              overflow-visible for the taxon dropdown) and centred in the gap
-             between the title and the date controls. -->
+             between the title and the date controls. The content below is
+             positioned without a z-index: a z-index there would trap the taxon
+             dropdown menu under the mobile table's column header (z-index 50). -->
         <div
           class="pointer-events-none absolute inset-0 overflow-hidden rounded-t-2xl"
           aria-hidden="true"
@@ -1088,7 +1090,7 @@ Responsive Breakpoints:
         <span class="sr-only">{headerWeather.label}</span>
       {/if}
       <div
-        class="relative z-10 flex flex-col gap-2 md:flex-row md:items-center md:justify-between overflow-visible"
+        class="relative flex flex-col gap-2 md:flex-row md:items-center md:justify-between overflow-visible"
       >
         <div class="flex flex-col">
           <h3 class="font-semibold">{t('dashboard.dailySummary.title')}</h3>
