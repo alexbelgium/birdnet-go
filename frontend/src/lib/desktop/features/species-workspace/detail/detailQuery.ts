@@ -39,6 +39,7 @@ export function detailParams(q: DetailQuery): Record<string, string | undefined>
 /** Row action callbacks for a recording. */
 export interface RecordingHandlers {
   onReview: (_r: WorkspaceRecording) => void;
+  onReanalyze: (_r: WorkspaceRecording) => void;
   onMarkCorrect: (_r: WorkspaceRecording) => void;
   onMarkFalsePositive: (_r: WorkspaceRecording) => void;
   onToggleLock: (_r: WorkspaceRecording) => void;

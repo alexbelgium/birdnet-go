@@ -65,6 +65,7 @@
   <ActionMenu
     detection={recording}
     onReview={() => handlers.onReview(recording)}
+    onReanalyze={() => handlers.onReanalyze(recording)}
     onMarkCorrect={() => handlers.onMarkCorrect(recording)}
     onMarkFalsePositive={() => handlers.onMarkFalsePositive(recording)}
     onToggleLock={() => handlers.onToggleLock(recording)}
