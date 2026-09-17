@@ -39,7 +39,15 @@ const (
 	staticSpectrogramBytesPerSample  = staticSpectrogramBitDepth / 8
 	staticSpectrogramMinDB           = -100.0
 	staticSpectrogramMaxDB           = -20.0
+	// staticSpectrogramDetectFrames caps the FFT frames averaged to detect the
+	// real source rate.
+	staticSpectrogramDetectFrames = 64
 )
+
+// staticSpectrogramSourceRates are the real source rates checked, lowest first,
+// when audio is captured at a higher rate (bat streams always capture at
+// >= 192 kHz, whatever the device currently sends).
+var staticSpectrogramSourceRates = [...]int{48000, 96000}
 
 const (
 	staticSpectrogramSampleRateHeader = "X-Spectrogram-Sample-Rate"
@@ -108,7 +116,10 @@ func (c *Handler) GetStaticSpectrogram(ctx echo.Context) error {
 	}
 
 	pcm := consumer.samples()
-	pngData, renderErr := renderStaticSpectrogram(ctx.Request().Context(), pcm, source.SampleRate)
+	// Show the rate the device really sends, not the capture rate, so the axis
+	// follows a source that switches between 48 and 192 kHz on its own.
+	displayRate := detectSourceSampleRate(pcm, source.SampleRate)
+	pngData, renderErr := renderStaticSpectrogram(ctx.Request().Context(), pcm, source.SampleRate, displayRate)
 	if renderErr != nil {
 		if ctx.Request().Context().Err() != nil {
 			return ctx.Request().Context().Err()
@@ -118,7 +129,7 @@ func (c *Handler) GetStaticSpectrogram(ctx echo.Context) error {
 
 	generatedAt := time.Now()
 	ctx.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	ctx.Response().Header().Set(staticSpectrogramSampleRateHeader, strconv.Itoa(source.SampleRate))
+	ctx.Response().Header().Set(staticSpectrogramSampleRateHeader, strconv.Itoa(displayRate))
 	ctx.Response().Header().Set(staticSpectrogramGeneratedHeader, generatedAt.Format(time.RFC3339))
 	ctx.Response().Header().Set(staticSpectrogramDurationHeader, strconv.FormatFloat(duration.Seconds(), 'f', 0, 64))
 	return ctx.Blob(http.StatusOK, "image/png", pngData)
@@ -221,16 +232,79 @@ func (c *staticSpectrogramConsumer) samples() []int16 {
 	return samples
 }
 
-func renderStaticSpectrogram(ctx context.Context, samples []int16, sampleRate int) ([]byte, error) {
-	if sampleRate <= 0 || len(samples) < staticSpectrogramFFTSize {
-		return nil, fmt.Errorf("insufficient PCM for spectrogram")
+// detectSourceSampleRate returns the rate the audio really carries when it was
+// captured at captureRate. Audio upsampled to the capture rate holds only 16-bit
+// rounding noise above its original Nyquist, while real audio, even a quiet
+// ultrasonic mic, sits clearly above that floor. The band checked starts at 1.25x
+// the candidate Nyquist to stay clear of the resampler's transition band. The
+// lowest candidate whose band is at the floor wins; otherwise captureRate is real.
+func detectSourceSampleRate(samples []int16, captureRate int) int {
+	if len(samples) < staticSpectrogramFFTSize {
+		return captureRate
+	}
+	window := staticSpectrogramWindow()
+	var windowPower float64
+	for _, w := range window {
+		windowPower += w * w
 	}
 
-	img := image.NewRGBA(image.Rect(0, 0, staticSpectrogramWidth, staticSpectrogramHeight))
+	// Average the power spectrum over evenly spread frames.
+	half := staticSpectrogramFFTSize / 2
+	power := make([]float64, half)
+	frames := min(staticSpectrogramDetectFrames, len(samples)/staticSpectrogramFFTSize)
+	step := (len(samples) - staticSpectrogramFFTSize) / max(frames-1, 1)
+	buf := make([]complex128, staticSpectrogramFFTSize)
+	for f := range frames {
+		start := f * step
+		for i := range staticSpectrogramFFTSize {
+			buf[i] = complex(float64(samples[start+i])/32768.0*window[i], 0)
+		}
+		staticSpectrogramFFT(buf)
+		for bin := range half {
+			power[bin] += real(buf[bin])*real(buf[bin]) + imag(buf[bin])*imag(buf[bin])
+		}
+	}
+
+	// Rounding noise of 16-bit PCM has variance 1/12 LSB^2 per sample; treat a
+	// band within 3 dB (2x) of it as empty.
+	emptyBandPower := 2 * float64(frames) * windowPower / 12 / (32768.0 * 32768.0)
+	binHz := float64(captureRate) / staticSpectrogramFFTSize
+	top := int(float64(captureRate) / 2 * 0.95 / binHz)
+	for _, rate := range staticSpectrogramSourceRates {
+		bottom := int(float64(rate) / 2 * 1.25 / binHz)
+		if rate >= captureRate || bottom >= top {
+			continue
+		}
+		var band float64
+		for bin := bottom; bin < top; bin++ {
+			band += power[bin]
+		}
+		if band/float64(top-bottom) < emptyBandPower {
+			return rate
+		}
+	}
+	return captureRate
+}
+
+func staticSpectrogramWindow() []float64 {
 	window := make([]float64, staticSpectrogramFFTSize)
 	for i := range window {
 		window[i] = 0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(staticSpectrogramFFTSize-1))
 	}
+	return window
+}
+
+// renderStaticSpectrogram renders samples captured at sampleRate, with the
+// frequency axis spanning 0 to displayRate/2.
+func renderStaticSpectrogram(ctx context.Context, samples []int16, sampleRate, displayRate int) ([]byte, error) {
+	if sampleRate <= 0 || len(samples) < staticSpectrogramFFTSize {
+		return nil, fmt.Errorf("insufficient PCM for spectrogram")
+	}
+	displayRate = min(max(displayRate, 1), sampleRate)
+	topBin := (staticSpectrogramFFTSize / 2) * displayRate / sampleRate
+
+	img := image.NewRGBA(image.Rect(0, 0, staticSpectrogramWidth, staticSpectrogramHeight))
+	window := staticSpectrogramWindow()
 	fftBuffer := make([]complex128, staticSpectrogramFFTSize)
 	maxStart := len(samples) - staticSpectrogramFFTSize
 	for x := range staticSpectrogramWidth {
@@ -252,7 +326,7 @@ func renderStaticSpectrogram(ctx context.Context, samples []int16, sampleRate in
 		staticSpectrogramFFT(fftBuffer)
 
 		for y := range staticSpectrogramHeight {
-			bin := (staticSpectrogramHeight - 1 - y) * (staticSpectrogramFFTSize / 2) / (staticSpectrogramHeight - 1)
+			bin := min((staticSpectrogramHeight-1-y)*topBin/(staticSpectrogramHeight-1), staticSpectrogramFFTSize/2-1)
 			magnitude := 2 * cmplxAbs(fftBuffer[bin]) / float64(staticSpectrogramFFTSize)
 			db := 20 * math.Log10(max(magnitude, math.SmallestNonzeroFloat64))
 			level := (db - staticSpectrogramMinDB) / (staticSpectrogramMaxDB - staticSpectrogramMinDB)
