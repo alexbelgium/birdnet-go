@@ -5753,11 +5753,16 @@
       "done": "Klar",
       "reset": "Återställ",
       "panelTitle": "Kolumner",
+      "condensed": "Kompakt vy på telefoner",
+      "condensedHelp": "Visar varje art på två kompakta rader.",
       "show": "Visa kolumnen {column}",
       "mandatory": "{column} visas alltid",
       "moveUp": "Flytta upp {column}",
       "moveDown": "Flytta ned {column}",
       "saveFailed": "Kolumnlayouten kunde inte sparas, så den tidigare layouten återställdes."
+    },
+    "condensed": {
+      "noRecording": "Ingen inspelning tillgänglig"
     },
     "columns": {
       "species": "Art",

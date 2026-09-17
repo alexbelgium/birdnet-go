@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import WorkspaceOverview from './overview/WorkspaceOverview.svelte';
+import ColumnEditor from './overview/ColumnEditor.svelte';
 import SpeciesDetail from './detail/SpeciesDetail.svelte';
 import * as api from './api';
 import { DEFAULT_LAYOUT } from './columns';
@@ -62,15 +63,22 @@ const SPECIES = [
   },
 ];
 
-function layoutWith(visible: string[]): WorkspaceLayout {
+function layoutWith(visible: string[], condensed = false): WorkspaceLayout {
   return {
     columns: DEFAULT_LAYOUT.columns.map(c => ({
       ...c,
       visible: visible.includes(c.id) || c.id === 'species' || c.id === 'actions',
     })),
     sort: { column: 'count', direction: 'desc' },
+    condensed,
   };
 }
+
+const defaultIntersectionObserver = globalThis.IntersectionObserver;
+
+afterEach(() => {
+  globalThis.IntersectionObserver = defaultIntersectionObserver;
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -124,6 +132,96 @@ describe('WorkspaceOverview', () => {
     expect(api.fetchBestRecordings).not.toHaveBeenCalled();
   });
 
+  it('renders condensed mobile rows with ordered status icons and no hidden range fetch', async () => {
+    class ImmediateIntersectionObserver {
+      readonly root: Element | null = null;
+      readonly rootMargin = '';
+      readonly thresholds: ReadonlyArray<number> = [];
+
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+
+      observe = (target: Element) => {
+        this.callback(
+          [{ isIntersecting: true, target } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver
+        );
+      };
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+      takeRecords = vi.fn().mockReturnValue([]);
+    }
+    globalThis.IntersectionObserver =
+      ImmediateIntersectionObserver as unknown as typeof IntersectionObserver;
+
+    const layout = layoutWith(
+      [
+        'count',
+        'maxConfidence',
+        'lastSeen',
+        'verification',
+        'excluded',
+        'included',
+        'confirmed',
+        'bestRecording',
+      ],
+      true
+    );
+    vi.mocked(api.fetchLayout).mockResolvedValue(layout);
+    localStorage.setItem(LAYOUT_CACHE_KEY, JSON.stringify(layout));
+    vi.mocked(api.fetchSpecies).mockResolvedValue(
+      SPECIES.map(species =>
+        species.scientificName === 'Pipistrellus pipistrellus'
+          ? { ...species, total: 1_200_000 }
+          : species
+      )
+    );
+    vi.mocked(api.fetchStats).mockResolvedValue([
+      {
+        scientificName: 'Pipistrellus pipistrellus',
+        correct: 3,
+        falsePositive: 1,
+        maxConfidence: 0.93,
+      },
+    ]);
+    vi.mocked(api.fetchMemberships).mockResolvedValue({
+      confirmed: ['Pipistrellus pipistrellus'],
+      included: [],
+      excluded: ['Turdus merula'],
+    });
+    vi.mocked(api.fetchBestRecordings).mockImplementation(async names =>
+      Object.fromEntries(names.map(name => [name, { id: 1, confidence: 0.93, locked: false }]))
+    );
+
+    render(WorkspaceOverview, { props: { onOpenSpecies: vi.fn() } });
+
+    const condensedRows = await screen.findAllByTestId('condensed-species-row');
+    expect(condensedRows).toHaveLength(3);
+    const row = condensedRows.find(item => within(item).queryByText('Common Pipistrelle'));
+    expect(row).toBeDefined();
+    if (!row) return;
+
+    expect(within(row).getByTestId('condensed-primary')).toHaveTextContent('1.2M');
+    expect(within(row).getByTestId('condensed-secondary')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(row).getByRole('button', { name: 'speciesWorkspace.best.play' })
+      ).toBeInTheDocument()
+    );
+    expect(
+      within(row).getByRole('button', { name: 'speciesWorkspace.actions.menu' })
+    ).toBeInTheDocument();
+    expect(row.querySelector('[data-column="confirmed"]')).toHaveAttribute(
+      'data-membership-state',
+      'active'
+    );
+    expect(row.querySelector('[data-column="included"]')).toHaveAttribute(
+      'data-membership-state',
+      'inactive'
+    );
+    expect(row.querySelector('[data-column="range"]')).not.toBeInTheDocument();
+    expect(api.fetchRangeScores).not.toHaveBeenCalled();
+  });
+
   it('shows a load error with a working retry', async () => {
     const layout = layoutWith(['count']);
     vi.mocked(api.fetchLayout).mockResolvedValue(layout);
@@ -169,6 +267,19 @@ describe('WorkspaceOverview', () => {
     const table = screen.getByRole('table');
     await fireEvent.click(within(table).getAllByRole('link')[0] as HTMLElement);
     expect(onOpenSpecies).toHaveBeenCalledWith('Pipistrellus pipistrellus');
+  });
+});
+
+describe('ColumnEditor', () => {
+  it('enables condensed phone rows through the layout callback', async () => {
+    const onChange = vi.fn();
+    const layout = layoutWith(['count']);
+    render(ColumnEditor, { props: { layout, onChange } });
+
+    const editor = screen.getByRole('region', { name: 'speciesWorkspace.edit.panelTitle' });
+    await fireEvent.click(within(editor).getAllByRole('checkbox')[0] as HTMLElement);
+
+    expect(onChange).toHaveBeenCalledWith({ ...layout, condensed: true });
   });
 });
 

@@ -5753,11 +5753,16 @@
       "done": "Gotowe",
       "reset": "Przywróć domyślne",
       "panelTitle": "Kolumny",
+      "condensed": "Widok kompaktowy na telefonach",
+      "condensedHelp": "Wyświetla każdy gatunek w dwóch zwartych wierszach.",
       "show": "Pokaż kolumnę {column}",
       "mandatory": "{column} jest zawsze widoczna",
       "moveUp": "Przesuń {column} w górę",
       "moveDown": "Przesuń {column} w dół",
       "saveFailed": "Nie udało się zapisać układu kolumn, więc przywrócono poprzedni."
+    },
+    "condensed": {
+      "noRecording": "Brak dostępnego nagrania"
     },
     "columns": {
       "species": "Gatunek",

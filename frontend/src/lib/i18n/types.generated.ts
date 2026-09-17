@@ -4204,11 +4204,14 @@ export type TranslationKey =
   | 'speciesWorkspace.edit.done'
   | 'speciesWorkspace.edit.reset'
   | 'speciesWorkspace.edit.panelTitle'
+  | 'speciesWorkspace.edit.condensed'
+  | 'speciesWorkspace.edit.condensedHelp'
   | 'speciesWorkspace.edit.show' // params: column
   | 'speciesWorkspace.edit.mandatory' // params: column
   | 'speciesWorkspace.edit.moveUp' // params: column
   | 'speciesWorkspace.edit.moveDown' // params: column
   | 'speciesWorkspace.edit.saveFailed'
+  | 'speciesWorkspace.condensed.noRecording'
   | 'speciesWorkspace.columns.species'
   | 'speciesWorkspace.columns.count'
   | 'speciesWorkspace.columns.maxConfidence'

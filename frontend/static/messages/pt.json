@@ -5753,11 +5753,16 @@
       "done": "Concluído",
       "reset": "Repor",
       "panelTitle": "Colunas",
+      "condensed": "Vista compacta em telemóveis",
+      "condensedHelp": "Mostra cada espécie em duas linhas compactas.",
       "show": "Mostrar a coluna {column}",
       "mandatory": "{column} é sempre mostrada",
       "moveUp": "Mover {column} para cima",
       "moveDown": "Mover {column} para baixo",
       "saveFailed": "Não foi possível guardar a disposição das colunas, por isso a anterior foi reposta."
+    },
+    "condensed": {
+      "noRecording": "Nenhuma gravação disponível"
     },
     "columns": {
       "species": "Espécie",

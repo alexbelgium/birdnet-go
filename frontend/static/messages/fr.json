@@ -5753,11 +5753,16 @@
       "done": "Terminé",
       "reset": "Réinitialiser",
       "panelTitle": "Colonnes",
+      "condensed": "Vue compacte sur téléphone",
+      "condensedHelp": "Affiche chaque espèce sur deux lignes compactes.",
       "show": "Afficher la colonne {column}",
       "mandatory": "{column} est toujours affichée",
       "moveUp": "Monter {column}",
       "moveDown": "Descendre {column}",
       "saveFailed": "La disposition des colonnes n’a pas pu être enregistrée ; la disposition précédente a été rétablie."
+    },
+    "condensed": {
+      "noRecording": "Aucun enregistrement disponible"
     },
     "columns": {
       "species": "Espèce",

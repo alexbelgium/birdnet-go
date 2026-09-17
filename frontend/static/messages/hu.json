@@ -5753,11 +5753,16 @@
       "done": "Kész",
       "reset": "Alaphelyzet",
       "panelTitle": "Oszlopok",
+      "condensed": "Tömör nézet telefonokon",
+      "condensedHelp": "Minden fajt két tömör sorban jelenít meg.",
       "show": "{column} oszlop megjelenítése",
       "mandatory": "{column} mindig látható",
       "moveUp": "{column} feljebb mozgatása",
       "moveDown": "{column} lejjebb mozgatása",
       "saveFailed": "Az oszlopelrendezést nem sikerült menteni, ezért az előző elrendezés visszaállt."
+    },
+    "condensed": {
+      "noRecording": "Nincs elérhető felvétel"
     },
     "columns": {
       "species": "Faj",
