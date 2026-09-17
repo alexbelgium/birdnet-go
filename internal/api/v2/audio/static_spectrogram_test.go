@@ -3,8 +3,10 @@ package audio
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"image/png"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -18,6 +20,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 	"github.com/tphakala/birdnet-go/internal/audiocore"
 	"github.com/tphakala/birdnet-go/internal/audiocore/engine"
+	"github.com/tphakala/birdnet-go/internal/audiocore/resample"
 )
 
 func TestStaticSpectrogramDurationClampsInput(t *testing.T) {
@@ -62,7 +65,7 @@ func TestRenderStaticSpectrogramProducesFullSizePNG(t *testing.T) {
 		samples[i] = int16(30000 * math.Sin(2*math.Pi*1000*float64(i)/sampleRate))
 	}
 
-	data, err := renderStaticSpectrogram(t.Context(), samples, sampleRate)
+	data, err := renderStaticSpectrogram(t.Context(), samples, sampleRate, sampleRate)
 	require.NoError(t, err)
 	decoded, err := png.DecodeConfig(bytes.NewReader(data))
 	require.NoError(t, err)
@@ -179,4 +182,53 @@ func TestGetStaticSpectrogramCancellationRemovesRoute(t *testing.T) {
 		require.Fail(t, "handler did not stop after request cancellation")
 	}
 	assert.Empty(t, eng.Router().Routes(sourceID))
+}
+
+// TestDetectSourceSampleRate checks that audio upsampled to a 192 kHz capture is
+// reported at its real rate, while real 192 kHz audio, even very quiet, is not.
+func TestDetectSourceSampleRate(t *testing.T) {
+	t.Parallel()
+	const captureRate = 192000
+
+	noise := func(rate int, amplitude float64) []byte {
+		rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // G404: deterministic test noise
+		pcm := make([]byte, rate*2*staticSpectrogramBytesPerSample)
+		for i := range len(pcm) / staticSpectrogramBytesPerSample {
+			sample := int16((rng.Float64()*2 - 1) * amplitude * 32767)
+			binary.LittleEndian.PutUint16(pcm[i*staticSpectrogramBytesPerSample:], uint16(sample)) //nolint:gosec // G115: PCM bit reinterpretation
+		}
+		return pcm
+	}
+	upsample := func(pcm []byte, from int) []byte {
+		r, err := resample.NewResampler(from, captureRate)
+		require.NoError(t, err)
+		out, err := r.ResampleInto(pcm)
+		require.NoError(t, err)
+		return out
+	}
+	toSamples := func(pcm []byte) []int16 {
+		samples := make([]int16, len(pcm)/staticSpectrogramBytesPerSample)
+		for i := range samples {
+			samples[i] = int16(binary.LittleEndian.Uint16(pcm[i*staticSpectrogramBytesPerSample:])) //nolint:gosec // G115: PCM bit reinterpretation
+		}
+		return samples
+	}
+
+	tests := []struct {
+		name string
+		pcm  []byte
+		want int
+	}{
+		{"loud_48k_upsampled", upsample(noise(48000, 0.5), 48000), 48000},
+		{"quiet_48k_upsampled", upsample(noise(48000, 0.001), 48000), 48000},
+		{"loud_96k_upsampled", upsample(noise(96000, 0.5), 96000), 96000},
+		{"native_192k", noise(captureRate, 0.01), captureRate},
+		{"very_quiet_native_192k", noise(captureRate, 0.0002), captureRate},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, detectSourceSampleRate(toSamples(tt.pcm), captureRate))
+		})
+	}
 }
