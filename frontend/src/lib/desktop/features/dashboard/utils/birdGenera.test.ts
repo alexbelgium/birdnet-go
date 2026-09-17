@@ -7,7 +7,8 @@ import { BIRD_GENERA } from './birdGenera';
 // the BirdNET non-bird entries leaking back in.
 describe('BIRD_GENERA', () => {
   it('contains a realistic number of genera', () => {
-    // BirdNET GLOBAL 6K V2.4 has ~1.8k bird genera after excluding non-birds.
+    // BirdNET V2.4 labels unioned with the Aves genera of genus_taxonomy.json
+    // gives ~2.4k after excluding non-birds.
     expect(BIRD_GENERA.size).toBeGreaterThan(1500);
   });
 
@@ -20,7 +21,8 @@ describe('BIRD_GENERA', () => {
   });
 
   it('includes well-known bird genera', () => {
-    for (const genus of ['turdus', 'erithacus', 'falco', 'parus', 'corvus']) {
+    // coloeus/astur are genera the V2.4 label set predates; they must be present.
+    for (const genus of ['turdus', 'erithacus', 'falco', 'parus', 'corvus', 'coloeus', 'astur']) {
       expect(BIRD_GENERA.has(genus)).toBe(true);
     }
   });
@@ -51,5 +53,21 @@ describe('BIRD_GENERA', () => {
     // Foxes/deer from multi-taxa or custom models were never bird genera.
     expect(BIRD_GENERA.has('vulpes')).toBe(false);
     expect(BIRD_GENERA.has('capreolus')).toBe(false);
+  });
+
+  it('excludes the insect and amphibian genera of the BirdNET label set', () => {
+    // These slipped through the original label-only extraction; genus_taxonomy.json
+    // classifies them as Insecta/Amphibia.
+    for (const nonBird of [
+      'acris',
+      'amblycorypha',
+      'atlanticus',
+      'cyrtoxipha',
+      'hyliola',
+      'orocharis',
+      'phyllopalpus',
+    ]) {
+      expect(BIRD_GENERA.has(nonBird)).toBe(false);
+    }
   });
 });
