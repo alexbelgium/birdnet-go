@@ -1111,6 +1111,17 @@
       "muted": "Muted",
       "level": "Gain: {value} dB"
     },
+    "static": {
+      "toggle": "Static spectrogram",
+      "recording": "Recording…",
+      "generatedAt": "Generated at {time}",
+      "captureFailed": "Static spectrogram capture failed. Retrying…",
+      "sessionExpired": "The two-minute static spectrogram session has ended.",
+      "restart": "Restart session",
+      "fullRange": "Full input frequency range",
+      "frequencyAxis": "Frequency in kilohertz",
+      "imageAlt": "Static spectrogram for {source}"
+    },
     "page": {
       "title": "Live Audio",
       "sourceLabel": "Audio Source",

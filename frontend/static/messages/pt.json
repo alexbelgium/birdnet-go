@@ -1111,6 +1111,17 @@
       "muted": "Silenciado",
       "level": "Ganho: {value} dB"
     },
+    "static": {
+      "toggle": "Espectrograma estático",
+      "recording": "A gravar…",
+      "generatedAt": "Gerado às {time}",
+      "captureFailed": "Falha na captura do espectrograma estático. A tentar novamente…",
+      "sessionExpired": "A sessão de espectrograma estático de dois minutos terminou.",
+      "restart": "Reiniciar sessão",
+      "fullRange": "Gama de frequências completa da entrada",
+      "frequencyAxis": "Frequência em quilohertz",
+      "imageAlt": "Espectrograma estático de {source}"
+    },
     "page": {
       "title": "Áudio em Direto",
       "sourceLabel": "Fonte de Áudio",

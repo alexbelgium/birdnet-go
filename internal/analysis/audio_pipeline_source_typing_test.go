@@ -289,11 +289,11 @@ func TestBuildSourceConfigsWithModels_FallbackPreservesParamsOnProbeFailure(t *t
 	assert.True(t, cfg.SourceSampleRateEstimated, "a retained rate must be flagged estimated so FFmpeg still force-resamples if the live rate changed")
 }
 
-// TestBuildSourceConfigsWithModels_NoFallbackCollapsesToTarget documents the
-// unavoidable cold-start behaviour: with no probe result and no fallback, a bat
-// stream collapses to the target rate with an unknown source rate. The escalation
+// TestBuildSourceConfigsWithModels_NoFallbackCapturesAtBatFloor documents the
+// cold-start behaviour: with no probe result and no fallback, a bat stream is
+// captured at batCaptureRate with an unknown source rate. The escalation
 // path logs an error in this case so the loss is not silent (#4350).
-func TestBuildSourceConfigsWithModels_NoFallbackCollapsesToTarget(t *testing.T) {
+func TestBuildSourceConfigsWithModels_NoFallbackCapturesAtBatFloor(t *testing.T) {
 	prev := conf.CloneSettings(conf.GetSettings())
 	t.Cleanup(func() { conftest.SetTestSettings(prev) })
 
@@ -318,6 +318,6 @@ func TestBuildSourceConfigsWithModels_NoFallbackCollapsesToTarget(t *testing.T) 
 	cfg := findConfigByConnection(configs, url)
 	require.NotNil(t, cfg, "rtsp stream config should be present")
 	assert.Equal(t, 0, cfg.SourceSampleRate, "unknown source rate stays 0 when nothing is known")
-	assert.Equal(t, conf.SampleRate, cfg.SampleRate, "output rate falls back to the analysis target")
+	assert.Equal(t, batCaptureRate, cfg.SampleRate, "bat output rate falls back to the bat capture floor")
 	assert.False(t, cfg.SourceSampleRateEstimated, "nothing was retained, so the rate is not flagged estimated (SourceSampleRate 0 already forces resampling)")
 }

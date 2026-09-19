@@ -682,6 +682,7 @@ func (c *Controller) initRoutes() {
 		{"audio health routes", func() { c.audio.RegisterAudioHealthRoutes(c.Group) }},
 		{"quiet hours routes", func() { c.audio.RegisterQuietHoursRoutes(c.Group) }},
 		{"audio level routes", func() { c.audio.RegisterAudioLevelRoutes(c.Group) }},
+		{"static spectrogram routes", func() { c.audio.RegisterStaticSpectrogramRoutes(c.Group) }},
 		{"hls streaming routes", func() { c.audio.RegisterHLSRoutes(c.Group) }},
 		{"integration routes", func() { c.integrations.RegisterRoutes(c.Group) }},
 		{"control routes", func() { c.control.RegisterRoutes(c.Group) }},

@@ -133,6 +133,7 @@ var goldenRoutes = []string{
 	"GET /api/v2/streams/hls/t/:streamToken/playlist.m3u8",
 	"GET /api/v2/streams/quiet-hours/status",
 	"GET /api/v2/streams/sources",
+	"GET /api/v2/streams/spectrogram/:sourceID",
 	"GET /api/v2/streams/status",
 	"GET /api/v2/support/download/:id",
 	"GET /api/v2/support/status",
