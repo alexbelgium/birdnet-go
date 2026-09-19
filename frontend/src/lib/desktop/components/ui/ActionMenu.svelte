@@ -29,6 +29,7 @@
     Download,
     CircleCheck,
     CircleX,
+    Sparkles,
   } from '@lucide/svelte';
   import { dropdown } from '$lib/utils/transitions';
   import { portal } from '$lib/utils/portal';
@@ -52,6 +53,13 @@
     onMarkFalsePositive?: () => void;
     /** Callback fired when user clicks review action */
     onReview?: () => void;
+    /**
+     * Callback fired when the user clicks the reanalyze action. Optional: the
+     * item only renders when a caller supplies it, so existing call sites are
+     * unchanged and menus in contexts that cannot host the reanalysis flow do
+     * not advertise it.
+     */
+    onReanalyze?: () => void;
     /** Callback fired when user toggles species visibility */
     onToggleSpecies?: () => void;
     /** Callback fired when user toggles detection lock status */
@@ -76,6 +84,7 @@
     onMarkCorrect,
     onMarkFalsePositive,
     onReview,
+    onReanalyze,
     onToggleSpecies,
     onToggleLock,
     onDelete,
@@ -311,6 +320,24 @@
                     >✗</span
                   >
                 {/if}
+              </div>
+            </button>
+          </li>
+        {/if}
+
+        {#if canEdit && onReanalyze}
+          <li>
+            <button
+              onclick={() => handleAction(onReanalyze)}
+              class={cn(
+                'text-sm w-full text-left px-3 py-2 rounded-md transition-colors',
+                itemHoverClass
+              )}
+              role="menuitem"
+            >
+              <div class="flex items-center gap-2">
+                <Sparkles class="size-4" />
+                <span>{t('dashboard.recentDetections.actions.reanalyze')}</span>
               </div>
             </button>
           </li>
