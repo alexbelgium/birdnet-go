@@ -78,8 +78,13 @@ func (c *Handler) RegisterRoutes(g *echo.Group) {
 
 // ModelListItem represents a model in the API response.
 type ModelListItem struct {
-	ID                    string `json:"id"`                              // Config alias (e.g., "birdnet", "perch_v2")
-	Name                  string `json:"name"`                            // Display name (e.g., "BirdNET v2.4 (TFLite)")
+	ID   string `json:"id"`   // Config alias (e.g., "birdnet", "perch_v2")
+	Name string `json:"name"` // Display name (e.g., "BirdNET v2.4 (TFLite)")
+	// RegistryID is the classifier registry ID (e.g., "BirdNET_V2.4"). It is the
+	// join key against the registry-ID entries in the defaultTargets list served by
+	// GET /api/v2/system/inference, letting the frontend map default targets back to
+	// the config aliases this endpoint uses (model de-privilege epic, Phase 4).
+	RegistryID            string `json:"registryId"`
 	Category              string `json:"category"`                        // Model category (e.g., "bird", "bat")
 	MinSampleRate         int    `json:"minSampleRate,omitempty"`         // Minimum required sample rate in Hz
 	RecommendedSampleRate int    `json:"recommendedSampleRate,omitempty"` // Recommended sample rate in Hz
@@ -220,6 +225,7 @@ func (c *Handler) ListModels(ctx echo.Context) error {
 				models = append(models, ModelListItem{
 					ID:                    alias,
 					Name:                  info.DisplayName(),
+					RegistryID:            id,
 					Category:              category,
 					MinSampleRate:         info.Spec.MinRawSampleRate,
 					RecommendedSampleRate: info.Spec.RecommendedSampleRate,
@@ -729,7 +735,7 @@ func (c *Handler) InstallModel(ctx echo.Context) error {
 	// Hidden entries are foundation-only: excluded from the gallery and not meant to
 	// be installed by ID. The permanent BirdNET v2.4 entry is intentionally NOT
 	// hidden: it is always installed, and an install request against it is a
-	// within-model variant swap routed to InstallOrReplace -> replacePrimaryVariant.
+	// within-model variant swap routed to InstallOrReplace -> replaceVariant.
 	if entry.Hidden {
 		return c.HandleError(ctx, nil, "catalog entry "+catalogID+" is not available for installation", http.StatusNotFound)
 	}

@@ -472,7 +472,13 @@
         "unreadableMessage": "Modellfilen som konfigurerats för {modelName} finns men kunde inte läsas, så den installerade modellen på {modelPath} används i stället. Din konfiguration lämnades oförändrad. Kontrollera filens behörigheter och att dess lagring är monterad.",
         "builtinMessage": "Modellfilen som konfigurerats för {modelName} hittades inte på disken och det finns ingen installerad modell tillgänglig att ersätta den med, så den inbyggda modellen används i stället. Din konfiguration lämnades oförändrad.",
         "notRegisteredTitle": "Ingen modell analyserar {sourceName}",
-        "notRegisteredMessage": "Inget ljud når {models} på ljudkällan \"{sourceName}\", så det produceras inga detektioner. Öppna modellgalleriet i Inställningar för att kontrollera status."
+        "notRegisteredMessage": "Inget ljud når {models} på ljudkällan \"{sourceName}\", så det produceras inga detektioner. Öppna System > AI-modeller för att kontrollera dess status per källa, och bekräfta att ljudkällan är ansluten och skickar ljud."
+      },
+      "acousticModels": {
+        "noneTitle": "Ingen akustisk modell aktiverad",
+        "noneMessage": "Ingen akustisk modell är inläst, så ljud spelas in men analyseras inte. Aktivera en modell i Inställningar > Analys, eller installera en från modellgalleriet.",
+        "loadFailedTitle": "Akustisk modell kunde inte läsas in",
+        "loadFailedMessage": "En aktiverad akustisk modell kunde inte läsas in, så ljud spelas in men analyseras inte. Kontrollera modellen på sidan System > AI-modeller."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -783,6 +789,14 @@
       "recentDetectionsFetch": "Kunde inte hämta senaste detekteringar: {status}",
       "recentDetectionsLoad": "Kunde inte ladda senaste detekteringar",
       "configFetch": "Kunde inte hämta instrumentpanelens konfiguration: {status}"
+    },
+    "acousticModels": {
+      "noneTitle": "Ingen akustisk modell aktiverad",
+      "noneMessage": "Ljud fångas, men analyseras inte. Aktivera en modell i modellgalleriet för att börja detektera arter.",
+      "noneAction": "Öppna modellgalleri",
+      "loadFailedTitle": "Akustisk modell kunde inte läsas in",
+      "loadFailedMessage": "En aktiverad modell kunde inte läsas in, så inget ljud analyseras. Sidan AI-modeller visar vilken modell som misslyckades och varför.",
+      "loadFailedAction": "Visa status för AI-modeller"
     },
     "banner": {
       "title": "Titel",
@@ -1813,7 +1827,10 @@
       "noSources": "Inga källor anslutna",
       "primaryFallback": "primär (reserv)",
       "sourceNotRunning": "analyserar inte",
-      "sourceNotRunningTooltip": "Denna källa är tilldelad modellen i inställningarna, men dess ljud når inte modellen, så den producerar inga detektioner. Öppna modellgalleriet i Inställningar för att kontrollera dess status.",
+      "sourceNotRunningTooltip": "Denna källa är tilldelad modellen i inställningarna, men dess ljud når inte modellen, så den producerar inga detektioner. Kontrollera att ljudkällan är ansluten och skickar ljud.",
+      "modelNotAnalyzingTooltip": "En eller flera ljudkällor tilldelade denna modell skickar inte ljud till den, så den producerar inga detektioner. Se källorna som anges nedan.",
+      "sourcesDegraded": "{count} av {total} källor nere",
+      "sourcesDegradedTooltip": "Vissa, men inte alla av denna modells ljudkällor är nere, så den analyserar fortfarande via de fungerande. Den specifika källan som är nere och hur den åtgärdas anges nedan.",
       "notMeasured": "-",
       "unitMs": "ms",
       "unitKhz": "kHz",
@@ -2371,7 +2388,7 @@
           "title": "Falskpositivfilter",
           "description": "Minska felaktiga detektioner genom att kräva flera bekräftelser över överlappande ljudsegment",
           "level": {
-            "label": "Filternivå"
+            "label": "Styrka för falskpositivfilter"
           },
           "detectionCount": "{count} bekräftelser krävs. {description}",
           "levels": {
@@ -2401,7 +2418,19 @@
           "description": "Begränsa detektion till arter som är sannolika i ditt geografiska område",
           "stationLocation": {
             "label": "Stationsplats",
-            "helpText": "Stationsplats, används för väderdata och för att begränsa fågelarter till de som är sannolika i regionen."
+            "helpText": "Stationsplats, används för väderdata och för att begränsa fågelarter till de som är sannolika i regionen.",
+            "automaticLocation": "Automatisk plats",
+            "useCurrentLocation": "Använd webbläsarens plats",
+            "locationHelp": "Fyller i koordinaterna med hjälp av den här webbläsarens plats.",
+            "locating": "Söker plats...",
+            "accuracy": "Uppskattad noggrannhet: inom {accuracy} m",
+            "locationDetected": "Webbläsarens plats hittades.",
+            "geolocationUnsupported": "Den här webbläsaren stöder inte enhetspositionering. Ange koordinater manuellt eller använd kartan.",
+            "geolocationRequiresHttps": "Webbläsarens platsbestämning kräver HTTPS eller localhost. Ange koordinater manuellt eller använd kartan.",
+            "geolocationDenied": "Platsbehörighet nekades. Ange koordinater manuellt eller använd kartan.",
+            "geolocationUnavailable": "Enheten kunde inte fastställa sin plats. Ange koordinater manuellt eller använd kartan.",
+            "geolocationTimedOut": "Platsbegäran överskred tidsgränsen. Försök igen, ange koordinater manuellt eller använd kartan.",
+            "geolocationFailed": "Det gick inte att fastställa enhetens plats. Ange koordinater manuellt eller använd kartan."
           },
           "latitude": {
             "label": "Latitud",
@@ -2939,6 +2968,7 @@
             "shoutrrrDocs": "https://github.com/nicholas-fedor/shoutrrr?tab=readme-ov-file#supported-services"
           },
           "saveButton": "Spara leverantör",
+          "saveWaitingNtfyCheck": "Väntar på att ntfy-anslutningskontrollen ska slutföras",
           "savingButton": "Sparar...",
           "cancelButton": "Avbryt",
           "testButton": "Testa",
@@ -3010,6 +3040,7 @@
               "http": "HTTP fungerar - servern använder inte HTTPS"
             },
             "connectionFailed": "Kunde inte ansluta - kontrollera värdnamn och serverstatus",
+            "checkError": "Det gick inte att verifiera servern - kontrollera adressen eller ladda om sidan och försök igen",
             "auth": {
               "label": "Autentisering (valfritt)",
               "username": {
@@ -3840,7 +3871,17 @@
       },
       "models": {
         "recommendBoth": "För bästa artdetekteringstäckning rekommenderas att köra både BirdNET och Perch tillsammans.",
-        "perchOnlyWarning": "Perch ensamt ger färre detektioner. Sänk konfidensströskeln till 0.50 för meningsfulla resultat, eller aktivera BirdNET bredvid för bästa täckning."
+        "perchOnlyWarning": "Perch ensamt ger färre detektioner. Sänk konfidensströskeln till 0.50 för meningsfulla resultat, eller aktivera BirdNET bredvid för bästa täckning.",
+        "loading": "Laddar detektionsmodeller...",
+        "noneEnabledTitle": "Ingen detektionsmodell aktiverad.",
+        "noneEnabledHelp": "Du kan fortfarande spara den här källan. Dess ljud kommer att analyseras av standardmodellerna så snart en har aktiverats.",
+        "noneEnabledLink": "Öppna modellgalleri",
+        "noneAvailable": "Inga detektionsmodeller är aktiverade på den här servern.",
+        "loadFailedWarning": "En detektionsmodell kunde inte läsas in, så den här källan analyseras inte förrän den återställs.",
+        "loadFailedLink": "Visa status för AI-modeller",
+        "defaultBadge": "{models} (standard)",
+        "defaultPendingBadge": "Standardmodeller",
+        "noneBadge": "Ingen modell inläst"
       }
     },
     "security": {
@@ -4386,7 +4427,7 @@
       "dynamicThreshold": {
         "tabLabel": "Inlärda",
         "title": "Inlärda tröskelvärden",
-        "description": "Denna sida visar körtidsdata för dynamiska tröskelvärden. När aktiverad i Huvudinställningar -> Detektering justeras tröskelvärden automatiskt av flera högkonfidensdetekteringar. Arter som visas här antas finnas på denna plats.",
+        "description": "Denna sida visar körtidsdata för dynamiska tröskelvärden. När aktiverad justeras tröskelvärden automatiskt av flera högkonfidensdetekteringar. Arter som visas här antas finnas på denna plats.",
         "stats": {
           "active": "Aktiva",
           "atMinimum": "Vid minimum",
@@ -5129,6 +5170,7 @@
       "notFound": "Avisering hittades inte",
       "hostRequired": "Värdparameter krävs",
       "invalidHost": "Ogiltig värdparameter",
+      "invalidBody": "Ogiltig förfrågningstext",
       "rateLimit": "För många anslutningsförsök till aviseringsströmmen, vänta innan du försöker igen"
     },
     "streams": {

@@ -1428,7 +1428,12 @@ type BSGConfig struct {
 type ModelsConfig struct {
 	Enabled   []string `yaml:"enabled" json:"enabled"`                         // list of model IDs to load (e.g., "birdnet", "perch_v2")
 	Directory string   `yaml:"directory,omitempty" json:"directory,omitempty"` // base directory for downloaded model files
-	Installed []string `yaml:"installed,omitempty" json:"installed,omitempty"` // list of installed model IDs managed by the model gallery
+	// AutoEnableMigrated is an internal marker recording that the classifier's one-shot legacy
+	// model auto-enable has run for this config file, so it never re-runs. Do not edit by hand;
+	// a managed read-only config may set it true (with configversion: 2) to keep an explicit
+	// models.enabled from being re-seeded. Set by the classifier; hidden from the JSON API; the
+	// companion-marker rationale (why not ConfigVersion) lives in internal/conf/migrations.go.
+	AutoEnableMigrated bool `yaml:"autoenablemigrated,omitempty" json:"-"`
 }
 
 // Low-memory mode constants for the manual override.
@@ -1856,6 +1861,13 @@ type DiagnosticsConfig struct {
 type Settings struct {
 	Debug bool `yaml:"debug" json:"debug"` // true to enable debug mode
 
+	// ConfigVersion records the newest one-shot config migration applied to this file.
+	// It is managed automatically by config loading and should not be edited by hand;
+	// it lets a migration whose precondition cannot be recovered from the data itself
+	// run exactly once (see MigrateSourceTargetDefaults). Hidden from the settings API
+	// and preserved across saves by CloneSettings, so writers never drop it.
+	ConfigVersion int `yaml:"configversion,omitempty" json:"-"`
+
 	// Runtime values, not stored in config file
 	Version            string   `yaml:"-" json:"version,omitempty"`            // Version from build
 	BuildDate          string   `yaml:"-" json:"buildDate,omitempty"`          // Build date from build
@@ -1919,6 +1931,31 @@ type Settings struct {
 	Notification NotificationConfig `yaml:"notification" json:"notification"` // Configuration for push notifications
 
 	Alerting AlertSettings `yaml:"alerting" json:"alerting"` // Alerting rules engine settings
+}
+
+// RangeFilterConfig returns a pointer to the range filter settings block. The block
+// is stored under birdnet.rangefilter for historical reasons; callers use this
+// accessor rather than naming BirdNET.RangeFilter directly so the storage location
+// can move in a later phase without touching them. It returns nil for a nil
+// receiver. The pointer aliases the receiver's own field, so a write through it
+// mutates that Settings value; callers that must not disturb the published snapshot
+// take the accessor on a clone (clone-mutate-publish).
+func (s *Settings) RangeFilterConfig() *RangeFilterSettings {
+	if s == nil {
+		return nil
+	}
+	return &s.BirdNET.RangeFilter
+}
+
+// Location returns the configured recording coordinates and whether the user has
+// explicitly configured a location. It reads BirdNET.Latitude, BirdNET.Longitude and
+// BirdNET.LocationConfigured through one accessor so their storage location can change
+// without updating every caller. It returns (0, 0, false) for a nil receiver.
+func (s *Settings) Location() (lat, lon float64, configured bool) {
+	if s == nil {
+		return 0, 0, false
+	}
+	return s.BirdNET.Latitude, s.BirdNET.Longitude, s.BirdNET.LocationConfigured
 }
 
 // ResolveEQOverride returns the per-source or per-stream EQ override for the

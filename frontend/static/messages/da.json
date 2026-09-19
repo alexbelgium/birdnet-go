@@ -472,7 +472,13 @@
         "unreadableMessage": "Modelfilen, der er konfigureret til {modelName}, findes, men kunne ikke læses, så den installerede model på {modelPath} bruges i stedet. Din konfiguration blev ikke ændret. Kontrollér filens tilladelser, og at dens lager er monteret.",
         "builtinMessage": "Modelfilen, der er konfigureret til {modelName}, blev ikke fundet på disken, og der er ingen installeret model tilgængelig til at erstatte den, så den indbyggede model bruges i stedet. Din konfiguration blev ikke ændret.",
         "notRegisteredTitle": "Ingen model analyserer {sourceName}",
-        "notRegisteredMessage": "Ingen lyd når {models} på lydkilden \"{sourceName}\", så der produceres ingen detektioner. Åbn modelgalleriet i Indstillinger for at tjekke status."
+        "notRegisteredMessage": "Ingen lyd når {models} på lydkilden \"{sourceName}\", så der produceres ingen detektioner. Åbn System > AI-modeller for at tjekke dens status for hver kilde, og bekræft, at lydkilden er forbundet og sender lyd."
+      },
+      "acousticModels": {
+        "noneTitle": "Ingen akustisk model aktiveret",
+        "noneMessage": "Ingen akustisk model er indlæst, så lyd optages, men analyseres ikke. Aktiver en model i Indstillinger > Analyse, eller installer en fra modelgalleriet.",
+        "loadFailedTitle": "Akustisk model kunne ikke indlæses",
+        "loadFailedMessage": "En aktiveret akustisk model kunne ikke indlæses, så lyd optages, men analyseres ikke. Tjek modellen på siden System > AI-modeller."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -783,6 +789,14 @@
       "recentDetectionsFetch": "Kunne ikke hente seneste registreringer: {status}",
       "recentDetectionsLoad": "Kunne ikke indlæse seneste registreringer",
       "configFetch": "Kunne ikke hente instrumentpanelkonfiguration: {status}"
+    },
+    "acousticModels": {
+      "noneTitle": "Ingen akustisk model aktiveret",
+      "noneMessage": "Lyd optages, men analyseres ikke. Aktivér en model i modelgalleriet for at begynde at detektere arter.",
+      "noneAction": "Åbn modelgalleri",
+      "loadFailedTitle": "Akustisk model kunne ikke indlæses",
+      "loadFailedMessage": "En aktiveret model kunne ikke indlæses, så der analyseres ingen lyd. Siden AI-modeller viser, hvilken model der fejlede og hvorfor.",
+      "loadFailedAction": "Vis status for AI-modeller"
     },
     "banner": {
       "title": "Titel",
@@ -1813,7 +1827,10 @@
       "noSources": "Ingen kilder tilsluttet",
       "primaryFallback": "primær (fallback)",
       "sourceNotRunning": "analyserer ikke",
-      "sourceNotRunningTooltip": "Denne kilde er tildelt modellen i indstillingerne, men dens lyd når ikke modellen, så den producerer ingen detektioner. Åbn modelgalleriet i Indstillinger for at tjekke dens status.",
+      "sourceNotRunningTooltip": "Denne kilde er tildelt modellen i indstillingerne, men dens lyd når ikke modellen, så den producerer ingen detektioner. Kontrollér, at lydkilden er forbundet og sender lyd.",
+      "modelNotAnalyzingTooltip": "En eller flere lydkilder tildelt denne model sender ikke lyd til den, så den producerer ingen detektioner. Se kilderne anført nedenfor.",
+      "sourcesDegraded": "{count} af {total} kilder nede",
+      "sourcesDegradedTooltip": "Nogle, men ikke alle af denne models lydkilder er nede, så den analyserer stadig via de fungerende. Den specifikke kilde, der er nede, og hvordan det løses, er anført nedenfor.",
       "notMeasured": "n/a",
       "unitMs": "ms",
       "unitKhz": "kHz",
@@ -2371,7 +2388,7 @@
           "title": "Falsk positiv-filter",
           "description": "Reducer falske detektioner ved at kræve flere bekræftelser på tværs af overlappende lydsegmenter",
           "level": {
-            "label": "Filterniveau"
+            "label": "Styrke for falsk positiv-filter"
           },
           "detectionCount": "{count} bekræftelser krævet. {description}",
           "levels": {
@@ -2401,7 +2418,19 @@
           "description": "Begræns detektion til arter, der er sandsynlige i dit geografiske område",
           "stationLocation": {
             "label": "Stationsplacering",
-            "helpText": "Stationsplacering, bruges til vejrdata og til at begrænse fuglearter til dem, der er sandsynlige i området."
+            "helpText": "Stationsplacering, bruges til vejrdata og til at begrænse fuglearter til dem, der er sandsynlige i området.",
+            "automaticLocation": "Automatisk placering",
+            "useCurrentLocation": "Brug browserplacering",
+            "locationHelp": "Udfylder koordinaterne ved hjælp af denne browsers placering.",
+            "locating": "Finder placering...",
+            "accuracy": "Anslået nøjagtighed: inden for {accuracy} m",
+            "locationDetected": "Browserens placering blev fundet.",
+            "geolocationUnsupported": "Denne browser understøtter ikke enhedsplacering. Indtast koordinater manuelt, eller brug kortet.",
+            "geolocationRequiresHttps": "Browserplacering kræver HTTPS eller localhost. Indtast koordinater manuelt, eller brug kortet.",
+            "geolocationDenied": "Placeringstilladelse blev afvist. Indtast koordinater manuelt, eller brug kortet.",
+            "geolocationUnavailable": "Enheden kunne ikke bestemme sin placering. Indtast koordinater manuelt, eller brug kortet.",
+            "geolocationTimedOut": "Placeringsanmodningen fik timeout. Prøv igen, indtast koordinater manuelt, eller brug kortet.",
+            "geolocationFailed": "Enhedens placering kunne ikke bestemmes. Indtast koordinater manuelt, eller brug kortet."
           },
           "latitude": {
             "label": "Breddegrad",
@@ -2939,6 +2968,7 @@
             "shoutrrrDocs": "https://github.com/nicholas-fedor/shoutrrr?tab=readme-ov-file#supported-services"
           },
           "saveButton": "Gem udbyder",
+          "saveWaitingNtfyCheck": "Venter på, at ntfy-forbindelsestjekket bliver færdigt",
           "savingButton": "Gemmer...",
           "cancelButton": "Annullér",
           "testButton": "Test",
@@ -3010,6 +3040,7 @@
               "http": "HTTP fungerer - serveren bruger ikke HTTPS"
             },
             "connectionFailed": "Kunne ikke oprette forbindelse - kontrollér værtsnavn og serverstatus",
+            "checkError": "Kunne ikke verificere serveren - tjek adressen, eller genindlæs siden og prøv igen",
             "auth": {
               "label": "Godkendelse (valgfrit)",
               "username": {
@@ -3840,7 +3871,17 @@
       },
       "models": {
         "recommendBoth": "For bedste artsdækning anbefales det at køre både BirdNET og Perch sammen.",
-        "perchOnlyWarning": "Perch alene producerer færre detektioner. Sænk konfidenstærsklen til 0.50 for meningsfulde resultater, eller aktiver BirdNET ved siden af for bedste dækning."
+        "perchOnlyWarning": "Perch alene producerer færre detektioner. Sænk konfidenstærsklen til 0.50 for meningsfulde resultater, eller aktiver BirdNET ved siden af for bedste dækning.",
+        "loading": "Indlæser detektionsmodeller...",
+        "noneEnabledTitle": "Ingen detektionsmodel aktiveret.",
+        "noneEnabledHelp": "Du kan stadig gemme denne kilde. Dens lyd analyseres af standardmodellerne, så snart en er aktiveret.",
+        "noneEnabledLink": "Åbn modelgalleri",
+        "noneAvailable": "Ingen detektionsmodeller er aktiveret på denne server.",
+        "loadFailedWarning": "En detektionsmodel kunne ikke indlæses, så denne kilde analyseres ikke, før den kommer sig.",
+        "loadFailedLink": "Vis status for AI-modeller",
+        "defaultBadge": "{models} (standard)",
+        "defaultPendingBadge": "Standardmodeller",
+        "noneBadge": "Ingen model indlæst"
       }
     },
     "security": {
@@ -4386,7 +4427,7 @@
       "dynamicThreshold": {
         "tabLabel": "Indlærte",
         "title": "Indlærte tærskler",
-        "description": "Denne side viser kørselstidsdata for dynamiske tærskler. Når det er aktiveret under Hovedindstillinger → Registrering, justeres tærskler automatisk ved flere registreringer med høj tillid. Arter vist her antages at forekomme på denne placering.",
+        "description": "Denne side viser kørselstidsdata for dynamiske tærskler. Når det er aktiveret, justeres tærskler automatisk ved flere registreringer med høj tillid. Arter vist her antages at forekomme på denne placering.",
         "stats": {
           "active": "Aktive",
           "atMinimum": "Ved minimum",
@@ -5129,6 +5170,7 @@
       "notFound": "Notifikation ikke fundet",
       "hostRequired": "Host-parameter er påkrævet",
       "invalidHost": "Ugyldig host-parameter",
+      "invalidBody": "Ugyldigt anmodningsindhold",
       "rateLimit": "For mange forsøg på at oprette notifikationsstrøm, vent venligst før du prøver igen"
     },
     "streams": {

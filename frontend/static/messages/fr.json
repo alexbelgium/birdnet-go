@@ -472,7 +472,13 @@
         "unreadableMessage": "Le fichier de modèle configuré pour {modelName} existe mais n'a pas pu être lu, le modèle installé à l'emplacement {modelPath} est donc utilisé à la place. Votre configuration n'a pas été modifiée. Vérifiez les permissions du fichier et que son stockage est monté.",
         "builtinMessage": "Le fichier de modèle configuré pour {modelName} est introuvable sur le disque et aucun modèle installé n'est disponible pour le remplacer, le modèle intégré est donc utilisé à la place. Votre configuration n'a pas été modifiée.",
         "notRegisteredTitle": "Aucun modèle n'analyse {sourceName}",
-        "notRegisteredMessage": "Aucun audio ne parvient à {models} sur la source audio \"{sourceName}\", aucune détection n'est donc produite. Ouvrez la galerie de modèles dans les Paramètres pour vérifier l'état."
+        "notRegisteredMessage": "Aucun audio ne parvient à {models} sur la source audio \"{sourceName}\", aucune détection n'est donc produite. Ouvrez Système > Modèles IA pour vérifier son état par source et confirmer que la source audio est connectée et envoie de l'audio."
+      },
+      "acousticModels": {
+        "noneTitle": "Aucun modèle acoustique activé",
+        "noneMessage": "Aucun modèle acoustique n'est chargé, l'audio est donc capturé mais non analysé. Activez un modèle dans Paramètres > Analyse, ou installez-en un depuis la galerie de modèles.",
+        "loadFailedTitle": "Échec du chargement du modèle acoustique",
+        "loadFailedMessage": "Un modèle acoustique activé n'a pas pu être chargé, l'audio est donc capturé mais non analysé. Vérifiez le modèle sur la page Système > Modèles IA."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -783,6 +789,14 @@
       "recentDetectionsFetch": "Échec de la récupération des détections récentes : {status}",
       "recentDetectionsLoad": "Échec du chargement des détections récentes",
       "configFetch": "Échec de la récupération de la configuration du tableau de bord : {status}"
+    },
+    "acousticModels": {
+      "noneTitle": "Aucun modèle acoustique activé",
+      "noneMessage": "Le son est capturé mais non analysé. Activez un modèle dans la galerie de modèles pour commencer à détecter des espèces.",
+      "noneAction": "Ouvrir la galerie de modèles",
+      "loadFailedTitle": "Échec du chargement du modèle acoustique",
+      "loadFailedMessage": "Un modèle activé n'a pas pu être chargé, le son n'est donc pas analysé. La page Modèles IA montre quel modèle a échoué et pourquoi.",
+      "loadFailedAction": "Voir l'état des Modèles IA"
     },
     "banner": {
       "title": "Titre",
@@ -1813,7 +1827,10 @@
       "noSources": "Aucune source attachée",
       "primaryFallback": "primaire (secours)",
       "sourceNotRunning": "n'analyse pas",
-      "sourceNotRunningTooltip": "Cette source est assignée au modèle dans les paramètres, mais son audio ne parvient pas au modèle, elle ne produit donc aucune détection. Ouvrez la galerie de modèles dans les Paramètres pour vérifier son état.",
+      "sourceNotRunningTooltip": "Cette source est assignée au modèle dans les paramètres, mais son audio ne parvient pas au modèle, elle ne produit donc aucune détection. Vérifiez que la source audio est connectée et envoie de l'audio.",
+      "modelNotAnalyzingTooltip": "Une ou plusieurs sources audio assignées à ce modèle ne lui envoient pas d'audio, il ne produit donc aucune détection. Voir les sources listées ci-dessous.",
+      "sourcesDegraded": "{count} sur {total} sources hors service",
+      "sourcesDegradedTooltip": "Certaines sources audio de ce modèle, mais pas toutes, sont hors service, il continue donc d'analyser via celles qui fonctionnent. La source hors service spécifique et la façon d'y remédier sont listées ci-dessous.",
       "notMeasured": "n/d",
       "unitMs": "ms",
       "unitKhz": "kHz",
@@ -2371,7 +2388,7 @@
           "title": "Filtre de Faux Positifs",
           "description": "Réduit les fausses détections en exigeant plusieurs confirmations sur des segments audio qui se chevauchent",
           "level": {
-            "label": "Niveau du Filtre"
+            "label": "Intensité du Filtre de Faux Positifs"
           },
           "detectionCount": "{count} confirmations requises. {description}",
           "levels": {
@@ -2401,7 +2418,19 @@
           "description": "Limiter la détection aux espèces probables dans votre région géographique",
           "stationLocation": {
             "label": "Emplacement de la station",
-            "helpText": "Emplacement de la station, utilisé pour les données météorologiques et pour limiter les espèces d'oiseaux à celles probables dans la région."
+            "helpText": "Emplacement de la station, utilisé pour les données météorologiques et pour limiter les espèces d'oiseaux à celles probables dans la région.",
+            "automaticLocation": "Localisation automatique",
+            "useCurrentLocation": "Utiliser la position du navigateur",
+            "locationHelp": "Renseigne les coordonnées à partir de la position de ce navigateur.",
+            "locating": "Localisation en cours...",
+            "accuracy": "Précision estimée : dans un rayon de {accuracy} m",
+            "locationDetected": "Position du navigateur détectée.",
+            "geolocationUnsupported": "Ce navigateur ne prend pas en charge la localisation de l'appareil. Saisissez les coordonnées manuellement ou utilisez la carte.",
+            "geolocationRequiresHttps": "La localisation du navigateur nécessite HTTPS ou localhost. Saisissez les coordonnées manuellement ou utilisez la carte.",
+            "geolocationDenied": "L'autorisation d'accès à la position a été refusée. Saisissez les coordonnées manuellement ou utilisez la carte.",
+            "geolocationUnavailable": "Votre appareil n'a pas pu déterminer sa position. Saisissez les coordonnées manuellement ou utilisez la carte.",
+            "geolocationTimedOut": "La demande de localisation a expiré. Réessayez, saisissez les coordonnées manuellement ou utilisez la carte.",
+            "geolocationFailed": "Impossible de déterminer la position de votre appareil. Saisissez les coordonnées manuellement ou utilisez la carte."
           },
           "latitude": {
             "label": "Latitude",
@@ -2939,6 +2968,7 @@
             "shoutrrrDocs": "https://github.com/nicholas-fedor/shoutrrr?tab=readme-ov-file#supported-services"
           },
           "saveButton": "Enregistrer le fournisseur",
+          "saveWaitingNtfyCheck": "En attente de la fin de la vérification de la connexion ntfy",
           "savingButton": "Enregistrement...",
           "cancelButton": "Annuler",
           "testButton": "Tester",
@@ -3010,6 +3040,7 @@
               "http": "HTTP fonctionne - le serveur n'utilise pas HTTPS"
             },
             "connectionFailed": "Impossible de se connecter - vérifiez le nom d'hôte et l'état du serveur",
+            "checkError": "Impossible de vérifier le serveur - vérifiez l'adresse ou rechargez la page et réessayez",
             "auth": {
               "label": "Authentification (facultatif)",
               "username": {
@@ -3840,7 +3871,17 @@
       },
       "models": {
         "recommendBoth": "Pour une meilleure couverture de détection des espèces, il est recommandé d'exécuter BirdNET et Perch ensemble.",
-        "perchOnlyWarning": "Perch seul produit moins de détections. Abaissez le seuil de confiance à 0.50 pour des résultats significatifs, ou activez BirdNET en parallèle pour une meilleure couverture."
+        "perchOnlyWarning": "Perch seul produit moins de détections. Abaissez le seuil de confiance à 0.50 pour des résultats significatifs, ou activez BirdNET en parallèle pour une meilleure couverture.",
+        "loading": "Chargement des modèles de détection...",
+        "noneEnabledTitle": "Aucun modèle de détection activé.",
+        "noneEnabledHelp": "Vous pouvez toujours enregistrer cette source. Son audio sera analysé par les modèles par défaut dès qu'un modèle sera activé.",
+        "noneEnabledLink": "Ouvrir la galerie de modèles",
+        "noneAvailable": "Aucun modèle de détection n'est activé sur ce serveur.",
+        "loadFailedWarning": "Un modèle de détection n'a pas pu être chargé, cette source n'est donc pas analysée jusqu'à ce qu'il se rétablisse.",
+        "loadFailedLink": "Voir l'état des Modèles IA",
+        "defaultBadge": "{models} (par défaut)",
+        "defaultPendingBadge": "Modèles par défaut",
+        "noneBadge": "Aucun modèle chargé"
       }
     },
     "security": {
@@ -4386,7 +4427,7 @@
       "dynamicThreshold": {
         "tabLabel": "Appris",
         "title": "Seuils appris",
-        "description": "Cette page affiche les données d'exécution des seuils dynamiques. Lorsque activés dans Paramètres principaux → Détection, les seuils sont automatiquement ajustés par plusieurs détections à haute confiance. Les espèces affichées ici sont supposées exister à cet emplacement.",
+        "description": "Cette page affiche les données d'exécution des seuils dynamiques. Lorsque activés, les seuils sont automatiquement ajustés par plusieurs détections à haute confiance. Les espèces affichées ici sont supposées exister à cet emplacement.",
         "stats": {
           "active": "Actifs",
           "atMinimum": "Au minimum",
@@ -5129,6 +5170,7 @@
       "notFound": "Notification introuvable",
       "hostRequired": "Le paramètre host est requis",
       "invalidHost": "Paramètre host invalide",
+      "invalidBody": "Corps de requête invalide",
       "rateLimit": "Trop de tentatives de connexion au flux de notifications, veuillez patienter avant de réessayer"
     },
     "streams": {

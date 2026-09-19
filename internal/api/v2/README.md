@@ -218,7 +218,7 @@ reported to telemetry, since they are expected, self-resolving backpressure.
 | DELETE | `/notifications/:id`               | `DeleteNotification`               | ✅   | Delete notification                                                                                                 |
 | GET    | `/notifications/unread/count`      | `GetUnreadCount`                   | ❌   | Count unread notifications (public read-only). Used by dashboard NotificationBell.                                  |
 | POST   | `/notifications/test/new-species`  | `CreateTestNewSpeciesNotification` | ✅   | Create test new-species notification                                                                                |
-| GET    | `/notifications/check-ntfy-server` | `CheckNtfyServer`                  | ✅   | Probe NTFY host for HTTPS/HTTP connectivity (authenticated to prevent SSRF relay). Query: `host=<hostname[:port]>`. |
+| POST   | `/notifications/check-ntfy-server` | `CheckNtfyServer`                  | ✅   | Probe NTFY host for HTTPS/HTTP connectivity. POST (CSRF-protected) with JSON body `{"host":"<hostname[:port]>"}`; the probe is SSRF-guarded so it cannot relay to link-local/metadata targets. |
 
 ### Range Filter (`range/range.go`)
 
@@ -229,7 +229,7 @@ reported to telemetry, since they are expected, self-resolving backpressure.
 | GET    | `/range/species/count`  | `GetRangeFilterSpeciesCount`  | ❌   | Species count with range filter                             |
 | GET    | `/range/species/list`   | `GetRangeFilterSpeciesList`   | ❌   | Species list with taxonomy groups                           |
 | GET    | `/range/species/csv`    | `GetRangeFilterSpeciesCSV`    | ❌   | Export species as CSV; with custom params includes always-active secondary models (matches the test endpoint); no-param export returns the persisted filter |
-| POST   | `/range/species/test`   | `TestRangeFilter`             | ❌   | Test range filter; returns the active set (range-filtered birds plus always-active secondary models) |
+| POST   | `/range/species/test`   | `TestRangeFilter`             | ❌   | Test range filter; returns the active set (range-filtered birds plus always-active secondary models), `filterActive` (false at N=0, where the species list is empty), and never a null species array |
 | POST   | `/range/rebuild`        | `RebuildRangeFilter`          | ❌   | Rebuild range filter data                                   |
 
 ### Search (`detections/search.go`)
@@ -474,7 +474,7 @@ HLS playlist and segment routes use token-based authentication instead of standa
 | GET    | `/system/audio/sources`          | `ListAudioSources`        | ✅   | Active audio sources (all types)     |
 | GET    | `/system/network-interfaces`     | `GetNetworkInterfaces`    | ✅   | IPv4 network interfaces for binding  |
 | GET    | `/system/models`                 | `GetActiveModels`         | ✅   | Active model metadata                |
-| GET    | `/system/inference`              | `GetInferenceStatus`      | ✅   | Read-only snapshot of the inference subsystem: hardware, backends, loaded models with stats/RAM/source attachment, audio pipeline metrics, per-model error rate, load failures, last detection, and metric key names for time-series lookups. |
+| GET    | `/system/inference`              | `GetInferenceStatus`      | ✅   | Read-only snapshot of the inference subsystem: hardware, backends, loaded models with stats/RAM/source attachment, audio pipeline metrics, per-model error rate, load failures, last detection, metric key names for time-series lookups, the default target models (`defaultTargets`, empty at N=0) and the aggregate acoustic-model state (`acousticModelsState`: ok, none_installed or load_failed, or an empty string when the inference subsystem is not yet wired). |
 
 ### Events (`system/events.go`, `system/events_aggregation.go`)
 
@@ -558,14 +558,14 @@ Requires enhanced (v2) database. Returns 409 Conflict if not available.
 | DELETE | `/models/installed/:id`        | `UninstallModel`        | ✅   | Remove an installed model from disk                   |
 | GET    | `/models/install/:id/progress` | `StreamInstallProgress` | ❌   | SSE stream for install/reinstall progress             |
 
-**GET /api/v2/models** - Returns all classifier models registered in the model registry. Each entry includes a config alias (used in audio source configuration) and a human-readable display name.
+**GET /api/v2/models** - Returns all classifier models registered in the model registry. Each entry includes a config alias (`id`, used in audio source configuration), a human-readable display name, and the classifier `registryId` (e.g. `BirdNET_V2.4`) that joins against the registry-ID `defaultTargets` list served by `GET /api/v2/system/inference`.
 
 **Response:**
 
 ```json
 [
-  { "id": "birdnet", "name": "BirdNET GLOBAL 6K V2.4" },
-  { "id": "perch_v2", "name": "Google Perch V2" }
+  { "id": "birdnet", "name": "BirdNET GLOBAL 6K V2.4", "registryId": "BirdNET_V2.4", "category": "bird" },
+  { "id": "perch_v2", "name": "Google Perch V2", "registryId": "Perch_V2", "category": "bird" }
 ]
 ```
 
@@ -622,7 +622,7 @@ Requires enhanced (v2) database. Returns 409 Conflict if not available.
 
 **GET /api/v2/system/diagnostics/status** - Returns the overall health status and per-category breakdown from the most recent diagnostic run. Returns `{"status": "unknown"}` if no diagnostics have been run yet.
 
-**POST /api/v2/system/diagnostics/run** - Executes all registered health checks in parallel (31 checks across 8 categories: system, audio, analysis, streams, database, network, config, logs). Returns a full `DiagnosticsReport` with per-check results, timing, and summary.
+**POST /api/v2/system/diagnostics/run** - Executes all registered health checks in parallel (32 checks across 8 categories: system, audio, analysis, streams, database, network, config, logs). Returns a full `DiagnosticsReport` with per-check results, timing, and summary. Optional query params: `window` (analysis time window) and `refresh_integrity=true`, which clears the cached database integrity result so this run re-runs the SQLite `PRAGMA quick_check` instead of reusing a result cached up to 24h (a present but unparseable value returns 400). Leave `refresh_integrity` unset for the passive status page: `quick_check` runs on the single pinned SQLite connection and can stall writes on a large database. Forced refreshes are coalesced with a short cooldown, so repeated requests cannot re-trigger back-to-back scans.
 
 **GET /api/v2/system/diagnostics/report/:id** - Retrieves a previously completed diagnostics report by its UUID. Up to 10 reports are cached in memory.
 

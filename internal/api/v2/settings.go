@@ -2454,8 +2454,40 @@ const (
 // atomic stores that cannot fail and so need neither the controlChan queue nor
 // a toast. Anyone adding a diagnostics setting will look here first, hence this
 // pointer; the reasoning is at that call site.
+// modelsEnabledChanged reports whether the SET of known models named by models.enabled
+// changed. Registry IDs are compared (via classifier.ResolveConfigModelID), so order, case,
+// and entries that resolve to no known model are ignored. Since Phase 4 the list is
+// authoritative and N=0 is a valid runtime state, so a change must load or unload models at
+// runtime (via the reconcile_models signal) instead of waiting for a restart.
+func modelsEnabledChanged(oldSettings, currentSettings *conf.Settings) bool {
+	oldSet := knownModelIDSet(oldSettings.Models.Enabled)
+	curSet := knownModelIDSet(currentSettings.Models.Enabled)
+	if len(oldSet) != len(curSet) {
+		return true
+	}
+	for id := range oldSet {
+		if !curSet[id] {
+			return true
+		}
+	}
+	return false
+}
+
+// knownModelIDSet resolves the config entries to their registry IDs, dropping unknown
+// entries, so the comparison ignores order, case and models that do not exist.
+func knownModelIDSet(ids []string) map[string]bool {
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if registryID, known := classifier.ResolveConfigModelID(id); known {
+			set[registryID] = true
+		}
+	}
+	return set
+}
+
 var settingsChangeChecks = []settingsChangeCheck{
 	{"BirdNET", "reload_birdnet", birdnetSettingsChanged, "Reloading BirdNET model with new settings...", notification.MsgSettingsReloadingBirdnet, ToastTypeInfo, toastDurationLong},
+	{"Models.Enabled", "reconcile_models", modelsEnabledChanged, "Applying enabled model changes...", "", ToastTypeInfo, toastDurationLong},
 	{"Analysis overlap", actionRestartAudioCapture, analysisOverlapChanged, "Restarting audio capture to apply new overlap...", "", ToastTypeInfo, toastDurationMedium},
 	{"Range filter", "rebuild_range_filter", rangeFilterSettingsChanged, "Rebuilding species range filter...", notification.MsgSettingsRebuildingRangeFilter, ToastTypeInfo, toastDurationMedium},
 	{"Species interval", "update_detection_intervals", intervalSettingsChanged, "Updating detection intervals...", notification.MsgSettingsUpdatingIntervals, ToastTypeInfo, toastDurationShort},
@@ -2596,7 +2628,10 @@ func (c *Controller) handleSettingsChanges(oldSettings, currentSettings *conf.Se
 func (c *Controller) sendReconfigActions(actions []string, debugEnabled bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			c.LogWarnIfEnabled("Recovered from send on closed controlChan during shutdown",
+			// Use the system logger (c.log), not the access logger (c.LogWarnIfEnabled):
+			// this is a background/shutdown warning with no request context, and c.log()
+			// is never nil, so the warning is not silently dropped when APILogger is unset.
+			c.log().Warn("Recovered from send on closed controlChan during shutdown",
 				logger.Any("panic", r))
 		}
 	}()
@@ -2679,10 +2714,10 @@ func birdnetSettingsChanged(oldSettings, currentSettings *conf.Settings) bool {
 // the realtime analysis-buffer cadence (read/overlap size), so a change requires
 // reallocating the analysis buffers. Overlap is not a per-source audio property,
 // so the diff-based reconfigure_audio_sources cannot see it; instead this triggers
-// restart_audio_capture, a full teardown and rebuild that re-applies the primary
-// model dimensions and reallocates every source's analysis buffers with the new
-// overlap. This is separate from reload_birdnet (which rebuilds the model
-// instance, not the source buffers).
+// restart_audio_capture, a full teardown and rebuild that reallocates every source's
+// analysis buffers with the new overlap (the pipeline sizes each buffer from the model
+// spec in registerConsumersForSources). This is separate from reload_birdnet (which
+// rebuilds the model instance, not the source buffers).
 func analysisOverlapChanged(oldSettings, currentSettings *conf.Settings) bool {
 	return oldSettings.BirdNET.Overlap != currentSettings.BirdNET.Overlap
 }

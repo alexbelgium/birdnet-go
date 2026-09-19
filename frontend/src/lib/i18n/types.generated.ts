@@ -403,6 +403,10 @@ export type TranslationKey =
   | 'notifications.content.modelPath.builtinMessage' // params: modelName
   | 'notifications.content.modelPath.notRegisteredTitle' // params: sourceName
   | 'notifications.content.modelPath.notRegisteredMessage' // params: models, sourceName
+  | 'notifications.content.acousticModels.noneTitle'
+  | 'notifications.content.acousticModels.noneMessage'
+  | 'notifications.content.acousticModels.loadFailedTitle'
+  | 'notifications.content.acousticModels.loadFailedMessage'
   | 'notifications.content.alert.firedTitle' // params: rule_name
   | 'notifications.content.alert.metricExceeded' // params: value, threshold
   | 'notifications.content.alert.detectionOccurred' // params: species_name, confidence
@@ -628,6 +632,12 @@ export type TranslationKey =
   | 'dashboard.errors.recentDetectionsFetch' // params: status
   | 'dashboard.errors.recentDetectionsLoad'
   | 'dashboard.errors.configFetch' // params: status
+  | 'dashboard.acousticModels.noneTitle'
+  | 'dashboard.acousticModels.noneMessage'
+  | 'dashboard.acousticModels.noneAction'
+  | 'dashboard.acousticModels.loadFailedTitle'
+  | 'dashboard.acousticModels.loadFailedMessage'
+  | 'dashboard.acousticModels.loadFailedAction'
   | 'dashboard.banner.title'
   | 'dashboard.banner.titlePlaceholder'
   | 'dashboard.banner.description'
@@ -1405,6 +1415,9 @@ export type TranslationKey =
   | 'system.inference.primaryFallback'
   | 'system.inference.sourceNotRunning'
   | 'system.inference.sourceNotRunningTooltip'
+  | 'system.inference.modelNotAnalyzingTooltip'
+  | 'system.inference.sourcesDegraded' // params: count, total
+  | 'system.inference.sourcesDegradedTooltip'
   | 'system.inference.notMeasured'
   | 'system.inference.unitMs'
   | 'system.inference.unitKhz'
@@ -1852,6 +1865,18 @@ export type TranslationKey =
   | 'settings.main.sections.rangeFilter.description'
   | 'settings.main.sections.rangeFilter.stationLocation.label'
   | 'settings.main.sections.rangeFilter.stationLocation.helpText'
+  | 'settings.main.sections.rangeFilter.stationLocation.automaticLocation'
+  | 'settings.main.sections.rangeFilter.stationLocation.useCurrentLocation'
+  | 'settings.main.sections.rangeFilter.stationLocation.locationHelp'
+  | 'settings.main.sections.rangeFilter.stationLocation.locating'
+  | 'settings.main.sections.rangeFilter.stationLocation.accuracy' // params: accuracy
+  | 'settings.main.sections.rangeFilter.stationLocation.locationDetected'
+  | 'settings.main.sections.rangeFilter.stationLocation.geolocationUnsupported'
+  | 'settings.main.sections.rangeFilter.stationLocation.geolocationRequiresHttps'
+  | 'settings.main.sections.rangeFilter.stationLocation.geolocationDenied'
+  | 'settings.main.sections.rangeFilter.stationLocation.geolocationUnavailable'
+  | 'settings.main.sections.rangeFilter.stationLocation.geolocationTimedOut'
+  | 'settings.main.sections.rangeFilter.stationLocation.geolocationFailed'
   | 'settings.main.sections.rangeFilter.latitude.label'
   | 'settings.main.sections.rangeFilter.latitude.helpText'
   | 'settings.main.sections.rangeFilter.longitude.label'
@@ -2186,6 +2211,7 @@ export type TranslationKey =
   | 'settings.notifications.push.form.urlFormats.moreServices'
   | 'settings.notifications.push.form.urlFormats.shoutrrrDocs'
   | 'settings.notifications.push.form.saveButton'
+  | 'settings.notifications.push.form.saveWaitingNtfyCheck'
   | 'settings.notifications.push.form.savingButton'
   | 'settings.notifications.push.form.cancelButton'
   | 'settings.notifications.push.form.testButton'
@@ -2232,6 +2258,7 @@ export type TranslationKey =
   | 'settings.notifications.push.services.ntfy.connectionOk.https'
   | 'settings.notifications.push.services.ntfy.connectionOk.http'
   | 'settings.notifications.push.services.ntfy.connectionFailed'
+  | 'settings.notifications.push.services.ntfy.checkError'
   | 'settings.notifications.push.services.ntfy.auth.label'
   | 'settings.notifications.push.services.ntfy.auth.username.label'
   | 'settings.notifications.push.services.ntfy.auth.username.placeholder'
@@ -2813,6 +2840,16 @@ export type TranslationKey =
   | 'settings.audio.errors.invalidRetentionPolicy'
   | 'settings.audio.models.recommendBoth'
   | 'settings.audio.models.perchOnlyWarning'
+  | 'settings.audio.models.loading'
+  | 'settings.audio.models.noneEnabledTitle'
+  | 'settings.audio.models.noneEnabledHelp'
+  | 'settings.audio.models.noneEnabledLink'
+  | 'settings.audio.models.noneAvailable'
+  | 'settings.audio.models.loadFailedWarning'
+  | 'settings.audio.models.loadFailedLink'
+  | 'settings.audio.models.defaultBadge' // params: models
+  | 'settings.audio.models.defaultPendingBadge'
+  | 'settings.audio.models.noneBadge'
   | 'settings.security.pageLabel'
   | 'settings.security.baseUrlLabel'
   | 'settings.security.baseUrlHelp'
@@ -3756,6 +3793,7 @@ export type TranslationKey =
   | 'errors.notification.notFound'
   | 'errors.notification.hostRequired'
   | 'errors.notification.invalidHost'
+  | 'errors.notification.invalidBody'
   | 'errors.notification.rateLimit'
   | 'errors.streams.test.invalidBody'
   | 'errors.streams.test.urlRequired'
@@ -4566,6 +4604,7 @@ export type TranslationParams = {
   };
   'system.database.migration.prerequisites.criticalCount': { count: string | number };
   'system.database.migration.prerequisites.warningCount': { count: string | number };
+  'system.inference.sourcesDegraded': { count: string | number; total: string | number };
   'system.inference.coDetectedHelp': { seconds: string | number };
   'analytics.hub.card.notEnoughDataHint': { min: string | number };
   'analytics.advanced.speciesSelection': { count: string | number; max: string | number };
@@ -4630,6 +4669,7 @@ export type TranslationParams = {
   };
   'settings.main.sections.falsePositiveFilter.overlapAdjusted': { overlap: string | number };
   'settings.main.sections.falsePositiveFilter.overlapReduced': { overlap: string | number };
+  'settings.main.sections.rangeFilter.stationLocation.accuracy': { accuracy: string | number };
   'settings.support.supportReport.githubRequired.description': { createIssueLink: string | number };
   'settings.support.supportReport.githubIssue.helper': {
     viewIssuesLink: string | number;
@@ -4666,6 +4706,7 @@ export type TranslationParams = {
   'settings.audio.clipRecording.preCaptureHelp': { max: string | number };
   'settings.audio.clipRecording.bitrateHelp': { min: string | number; max: string | number };
   'settings.audio.fileSettings.bitrateHelp': { min: string | number; max: string | number };
+  'settings.audio.models.defaultBadge': { models: string | number };
   'settings.security.oauth.providers.deleteConfirm': { provider: string | number };
   'settings.security.oauth.getCredentialsLabel': { provider: string | number };
   'settings.security.tls.autoTLSPrivateTLD': { tld: string | number };
