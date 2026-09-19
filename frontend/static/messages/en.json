@@ -690,7 +690,41 @@
         "error": "Failed to load data",
         "complete": "Data loaded successfully"
       },
-      "noSpecies": "No species detected on this date"
+      "noSpecies": "No species detected on this date",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "{species} detection history",
+        "subtitle": "{count, plural, one {{formattedCount} detection} other {{formattedCount} detections}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detection} other {{formattedCount} detections}} · {range} (since {since})",
+        "loading": "Loading detection history…",
+        "unavailable": "History unavailable",
+        "loadFailed": "Failed to load history",
+        "retry": "Retry",
+        "empty": "No detections in this period",
+        "emptyHint": "Try a longer range",
+        "total": "Total",
+        "peak": "Peak",
+        "avgPerDay": "Avg/day",
+        "daily": "daily",
+        "movingAverage": "7-day avg",
+        "chartLabel": "{species}: {count, plural, one {{count} detection} other {{count} detections}} over {range}, peaking at {peak}",
+        "rangeGroup": "History range",
+        "allShort": "All",
+        "ranges": {
+          "last7d": "last 7 days",
+          "last30d": "last 30 days",
+          "last90d": "last 90 days",
+          "last1y": "last 12 months",
+          "last2y": "last 2 years",
+          "all": "all time"
+        }
+      }
     },
     "recentDetections": {
       "title": "Recent Detections",
@@ -5741,6 +5775,158 @@
       "patternNone": "None",
       "patternTransient": "Transient",
       "patternSustained": "Sustained"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Species workspace",
+    "subtitle": "Every species ever detected, with review and curation tools",
+    "refresh": "Reload data",
+    "search": {
+      "label": "Search species",
+      "placeholder": "Search by name…"
+    },
+    "sort": {
+      "label": "Sort by",
+      "sortBy": "Sort by {column}",
+      "toggleDirection": "Reverse sort order"
+    },
+    "edit": {
+      "edit": "Edit columns",
+      "done": "Done",
+      "reset": "Reset",
+      "panelTitle": "Columns",
+      "condensed": "Condensed view on phones",
+      "condensedHelp": "Shows each species in two compact lines.",
+      "show": "Show the {column} column",
+      "mandatory": "{column} is always shown",
+      "moveUp": "Move {column} up",
+      "moveDown": "Move {column} down",
+      "saveFailed": "The column layout could not be saved, so the previous layout was restored."
+    },
+    "condensed": {
+      "noRecording": "No recording available"
+    },
+    "columns": {
+      "species": "Species",
+      "count": "Detections",
+      "maxConfidence": "Max confidence",
+      "firstSeen": "First seen",
+      "lastSeen": "Last seen",
+      "range": "Range probability",
+      "verification": "Verified",
+      "excluded": "Excluded",
+      "included": "Included",
+      "confirmed": "Confirmed",
+      "bestRecording": "Best recording",
+      "actions": "Actions"
+    },
+    "columnHelp": {
+      "range": "Range filter probability for this location and week"
+    },
+    "groups": {
+      "inventory": "species",
+      "stats": "statistics",
+      "memberships": "species lists",
+      "range": "range probabilities",
+      "best": "best recordings",
+      "recordings": "recordings"
+    },
+    "states": {
+      "loading": "Loading…",
+      "loadFailed": "Could not load {what}.",
+      "retry": "Retry",
+      "empty": "No species have been detected yet.",
+      "noMatch": "No species match the search and filter.",
+      "notAvailable": "N/A",
+      "notFound": "No detections of this species are stored.",
+      "membershipLoading": "Loading species lists…",
+      "unknownModel": "Unknown",
+      "loginRequired": "Sign in to use the species workspace."
+    },
+    "verification": "{correct} correct, {falsePositive} false positive",
+    "membership": {
+      "confirmed": "Confirmed",
+      "included": "Include list",
+      "excluded": "Exclude list",
+      "yes": "Yes",
+      "no": "No",
+      "state": "{list} for {species}: {state}"
+    },
+    "actions": {
+      "menu": "Actions for {species}",
+      "toggle": {
+        "confirmed": "Toggle confirmed",
+        "included": "Toggle include list",
+        "excluded": "Toggle exclude list"
+      },
+      "delete": "Delete detections of {species}…",
+      "updateFailed": "Could not update the {list} for {species}."
+    },
+    "best": {
+      "title": "Best recording of {species}",
+      "play": "Play the best recording of {species}",
+      "locked": "Locked",
+      "confidence": "Confidence {value}",
+      "unavailable": "No recording available",
+      "unavailableHint": "No detection of this species has an audio clip on disk."
+    },
+    "delete": {
+      "title": "Delete detections of {species}",
+      "message": "Detections to delete: {deletable} of {total} (false positives included: {falsePositive}). Locked detections kept: {locked}.",
+      "nothing": "Every detection of this species is locked, so there is nothing to delete.",
+      "confirm": "Delete ({count})",
+      "running": "Deleting…",
+      "progressLabel": "Deletion progress",
+      "progress": "Deleted: {deleted} · locked kept: {locked}",
+      "done": "Deletion finished.",
+      "stop": "Stop",
+      "cancelled": "Deletion stopped. Detections already deleted stay deleted.",
+      "stalled": "Deletion stopped because the remaining detections could not be removed.",
+      "error": "Deletion failed. Detections already deleted stay deleted."
+    },
+    "detail": {
+      "back": "Back to the species workspace",
+      "title": "All recordings of {species}",
+      "detections": "Detections: {count}",
+      "maxConfidence": "max confidence {value}",
+      "lastDetected": "last detected {date}",
+      "bestRecording": "Best recording",
+      "quickGraph": "Quick graph",
+      "openExternal": "Open {species} on {site} (new tab)",
+      "select": "Select",
+      "cancelSelect": "Cancel selection",
+      "lockedOnly": "Locked only",
+      "toggleAria": "{list} for {species}"
+    },
+    "table": {
+      "dateTime": "Date & Time",
+      "weather": "Weather",
+      "source": "Source",
+      "confidence": "Confidence",
+      "model": "Model",
+      "status": "Status",
+      "recording": "Recording",
+      "actions": "Actions",
+      "selectAll": "Select all recordings on this page",
+      "selectRow": "Select the recording from {date}",
+      "selected": "Selected: {count}",
+      "bulkActions": "Actions for selected recordings",
+      "markCorrect": "Mark correct",
+      "markFalsePositive": "Mark false positive",
+      "lock": "Lock",
+      "unlock": "Unlock",
+      "deleteSelected": "Delete",
+      "deleteSelectedTitle": "Delete the selected recordings of {species} ({count})?",
+      "deleteSelectedMessage": "Locked recordings in the selection are kept.",
+      "bulkLockedHint": "Locked recordings cannot be reviewed or deleted.",
+      "bulkResult": "Updated: {processed} · skipped: {skipped}",
+      "bulkFailed": "The selected recordings could not be updated.",
+      "empty": "No recordings.",
+      "emptyLocked": "No locked recordings.",
+      "sortConfidenceDesc": "Highest confidence first",
+      "sortConfidenceAsc": "Lowest confidence first",
+      "sortDateDesc": "Newest first",
+      "sortDateAsc": "Oldest first"
     }
   }
 }

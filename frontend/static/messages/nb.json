@@ -690,7 +690,41 @@
         "error": "Innlasting av data mislyktes",
         "complete": "Data lastet"
       },
-      "noSpecies": "Ingen arter registrert denne datoen"
+      "noSpecies": "Ingen arter registrert denne datoen",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Deteksjonshistorikk for {species}",
+        "subtitle": "{count, plural, one {{formattedCount} deteksjon} other {{formattedCount} deteksjoner}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} deteksjon} other {{formattedCount} deteksjoner}} · {range} (siden {since})",
+        "loading": "Laster deteksjonshistorikk…",
+        "unavailable": "Historikk ikke tilgjengelig",
+        "loadFailed": "Kunne ikke laste historikk",
+        "retry": "Prøv igjen",
+        "empty": "Ingen deteksjoner i denne perioden",
+        "emptyHint": "Prøv en lengre periode",
+        "total": "Totalt",
+        "peak": "Topp",
+        "avgPerDay": "Snitt/dag",
+        "daily": "daglig",
+        "movingAverage": "7-dagers snitt",
+        "chartLabel": "{species}: {count, plural, one {{count} deteksjon} other {{count} deteksjoner}} {range}, topp på {peak}",
+        "rangeGroup": "Historikkperiode",
+        "allShort": "Alle",
+        "ranges": {
+          "last7d": "siste 7 dager",
+          "last30d": "siste 30 dager",
+          "last90d": "siste 90 dager",
+          "last1y": "siste 12 måneder",
+          "last2y": "siste 2 år",
+          "all": "hele perioden"
+        }
+      }
     },
     "recentDetections": {
       "title": "Siste registreringer",
@@ -5741,6 +5775,158 @@
       "patternNone": "Ingen",
       "patternTransient": "Forbigående",
       "patternSustained": "Vedvarende"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Artsarbeidsområde",
+    "subtitle": "Alle arter som noen gang er registrert, med verktøy for kontroll og vedlikehold",
+    "refresh": "Last inn data på nytt",
+    "search": {
+      "label": "Søk etter arter",
+      "placeholder": "Søk etter navn…"
+    },
+    "sort": {
+      "label": "Sorter etter",
+      "sortBy": "Sorter etter {column}",
+      "toggleDirection": "Snu sorteringsrekkefølgen"
+    },
+    "edit": {
+      "edit": "Rediger kolonner",
+      "done": "Ferdig",
+      "reset": "Tilbakestill",
+      "panelTitle": "Kolonner",
+      "condensed": "Kompakt visning på telefoner",
+      "condensedHelp": "Viser hver art på to kompakte linjer.",
+      "show": "Vis kolonnen {column}",
+      "mandatory": "{column} vises alltid",
+      "moveUp": "Flytt {column} opp",
+      "moveDown": "Flytt {column} ned",
+      "saveFailed": "Kolonneoppsettet kunne ikke lagres, så det forrige oppsettet ble gjenopprettet."
+    },
+    "condensed": {
+      "noRecording": "Ingen opptak tilgjengelig"
+    },
+    "columns": {
+      "species": "Art",
+      "count": "Registreringer",
+      "maxConfidence": "Maks. sikkerhet",
+      "firstSeen": "Først sett",
+      "lastSeen": "Sist sett",
+      "range": "Utbredelsessannsynlighet",
+      "verification": "Verifisert",
+      "excluded": "Ekskludert",
+      "included": "Inkludert",
+      "confirmed": "Bekreftet",
+      "bestRecording": "Beste opptak",
+      "actions": "Handlinger"
+    },
+    "columnHelp": {
+      "range": "Utbredelsesfilterets sannsynlighet for denne plasseringen og uken"
+    },
+    "groups": {
+      "inventory": "arter",
+      "stats": "statistikk",
+      "memberships": "artslister",
+      "range": "utbredelsessannsynligheter",
+      "best": "beste opptak",
+      "recordings": "opptak"
+    },
+    "states": {
+      "loading": "Laster…",
+      "loadFailed": "Kunne ikke laste {what}.",
+      "retry": "Prøv igjen",
+      "empty": "Ingen arter er registrert ennå.",
+      "noMatch": "Ingen arter samsvarer med søk og filter.",
+      "notAvailable": "I/T",
+      "notFound": "Det er ingen lagrede registreringer av denne arten.",
+      "membershipLoading": "Laster artslister…",
+      "unknownModel": "Ukjent",
+      "loginRequired": "Logg inn for å bruke artsarbeidsområdet."
+    },
+    "verification": "{correct} korrekte, {falsePositive} falskt positive",
+    "membership": {
+      "confirmed": "Bekreftet",
+      "included": "Inkluderingsliste",
+      "excluded": "Ekskluderingsliste",
+      "yes": "Ja",
+      "no": "Nei",
+      "state": "{list} for {species}: {state}"
+    },
+    "actions": {
+      "menu": "Handlinger for {species}",
+      "toggle": {
+        "confirmed": "Veksle bekreftet",
+        "included": "Veksle inkluderingsliste",
+        "excluded": "Veksle ekskluderingsliste"
+      },
+      "delete": "Slett registreringer av {species}…",
+      "updateFailed": "Kunne ikke oppdatere {list} for {species}."
+    },
+    "best": {
+      "title": "Beste opptak av {species}",
+      "play": "Spill av det beste opptaket av {species}",
+      "locked": "Låst",
+      "confidence": "Sikkerhet {value}",
+      "unavailable": "Ingen opptak tilgjengelig",
+      "unavailableHint": "Ingen registrering av denne arten har et lydklipp på disken."
+    },
+    "delete": {
+      "title": "Slett registreringer av {species}",
+      "message": "Registreringer som slettes: {deletable} av {total} (inkl. falskt positive: {falsePositive}). Låste registreringer beholdes: {locked}.",
+      "nothing": "Alle registreringer av denne arten er låst, så det er ingenting å slette.",
+      "confirm": "Slett ({count})",
+      "running": "Sletter…",
+      "progressLabel": "Sletteforløp",
+      "progress": "Slettet: {deleted} · låste beholdt: {locked}",
+      "done": "Sletting fullført.",
+      "stop": "Stopp",
+      "cancelled": "Sletting stoppet. Allerede slettede registreringer forblir slettet.",
+      "stalled": "Sletting stoppet fordi de gjenværende registreringene ikke kunne fjernes.",
+      "error": "Sletting mislyktes. Allerede slettede registreringer forblir slettet."
+    },
+    "detail": {
+      "back": "Tilbake til artsarbeidsområdet",
+      "title": "Alle opptak av {species}",
+      "detections": "Registreringer: {count}",
+      "maxConfidence": "maks. sikkerhet {value}",
+      "lastDetected": "sist registrert {date}",
+      "bestRecording": "Beste opptak",
+      "quickGraph": "Hurtiggraf",
+      "openExternal": "Åpne {species} på {site} (ny fane)",
+      "select": "Velg",
+      "cancelSelect": "Avbryt valg",
+      "lockedOnly": "Bare låste",
+      "toggleAria": "{list} for {species}"
+    },
+    "table": {
+      "dateTime": "Dato og tid",
+      "weather": "Vær",
+      "source": "Kilde",
+      "confidence": "Sikkerhet",
+      "model": "Modell",
+      "status": "Status",
+      "recording": "Opptak",
+      "actions": "Handlinger",
+      "selectAll": "Velg alle opptak på denne siden",
+      "selectRow": "Velg opptaket fra {date}",
+      "selected": "Valgt: {count}",
+      "bulkActions": "Handlinger for valgte opptak",
+      "markCorrect": "Merk som korrekt",
+      "markFalsePositive": "Merk som falskt positiv",
+      "lock": "Lås",
+      "unlock": "Lås opp",
+      "deleteSelected": "Slett",
+      "deleteSelectedTitle": "Slette de valgte opptakene av {species} ({count})?",
+      "deleteSelectedMessage": "Låste opptak i utvalget beholdes.",
+      "bulkLockedHint": "Låste opptak kan ikke kontrolleres eller slettes.",
+      "bulkResult": "Oppdatert: {processed} · hoppet over: {skipped}",
+      "bulkFailed": "De valgte opptakene kunne ikke oppdateres.",
+      "empty": "Ingen opptak.",
+      "emptyLocked": "Ingen låste opptak.",
+      "sortConfidenceDesc": "Høyeste sikkerhet først",
+      "sortConfidenceAsc": "Laveste sikkerhet først",
+      "sortDateDesc": "Nyeste først",
+      "sortDateAsc": "Eldste først"
     }
   }
 }

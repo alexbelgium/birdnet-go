@@ -690,7 +690,41 @@
         "error": "Kunde inte ladda data",
         "complete": "Data har laddats"
       },
-      "noSpecies": "Inga arter detekterade detta datum"
+      "noSpecies": "Inga arter detekterade detta datum",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Detektionshistorik för {species}",
+        "subtitle": "{count, plural, one {{formattedCount} detektion} other {{formattedCount} detektioner}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detektion} other {{formattedCount} detektioner}} · {range} (sedan {since})",
+        "loading": "Läser in detektionshistorik…",
+        "unavailable": "Historik inte tillgänglig",
+        "loadFailed": "Det gick inte att läsa in historiken",
+        "retry": "Försök igen",
+        "empty": "Inga detektioner under perioden",
+        "emptyHint": "Prova ett längre intervall",
+        "total": "Totalt",
+        "peak": "Topp",
+        "avgPerDay": "Snitt/dag",
+        "daily": "dagligen",
+        "movingAverage": "7-dagars snitt",
+        "chartLabel": "{species}: {count, plural, one {{count} detektion} other {{count} detektioner}} {range}, topp på {peak}",
+        "rangeGroup": "Historikintervall",
+        "allShort": "Alla",
+        "ranges": {
+          "last7d": "senaste 7 dagarna",
+          "last30d": "senaste 30 dagarna",
+          "last90d": "senaste 90 dagarna",
+          "last1y": "senaste 12 månaderna",
+          "last2y": "senaste 2 åren",
+          "all": "hela perioden"
+        }
+      }
     },
     "recentDetections": {
       "title": "Senaste detekteringar",
@@ -5741,6 +5775,158 @@
       "patternNone": "Inget",
       "patternTransient": "Övergående",
       "patternSustained": "Ihållande"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Artarbetsyta",
+    "subtitle": "Alla arter som någonsin har upptäckts, med verktyg för granskning och underhåll",
+    "refresh": "Läs in data igen",
+    "search": {
+      "label": "Sök arter",
+      "placeholder": "Sök efter namn…"
+    },
+    "sort": {
+      "label": "Sortera efter",
+      "sortBy": "Sortera efter {column}",
+      "toggleDirection": "Vänd sorteringsordningen"
+    },
+    "edit": {
+      "edit": "Redigera kolumner",
+      "done": "Klar",
+      "reset": "Återställ",
+      "panelTitle": "Kolumner",
+      "condensed": "Kompakt vy på telefoner",
+      "condensedHelp": "Visar varje art på två kompakta rader.",
+      "show": "Visa kolumnen {column}",
+      "mandatory": "{column} visas alltid",
+      "moveUp": "Flytta upp {column}",
+      "moveDown": "Flytta ned {column}",
+      "saveFailed": "Kolumnlayouten kunde inte sparas, så den tidigare layouten återställdes."
+    },
+    "condensed": {
+      "noRecording": "Ingen inspelning tillgänglig"
+    },
+    "columns": {
+      "species": "Art",
+      "count": "Detektioner",
+      "maxConfidence": "Max. säkerhet",
+      "firstSeen": "Först sedd",
+      "lastSeen": "Senast sedd",
+      "range": "Utbredningssannolikhet",
+      "verification": "Verifierade",
+      "excluded": "Exkluderad",
+      "included": "Inkluderad",
+      "confirmed": "Bekräftad",
+      "bestRecording": "Bästa inspelning",
+      "actions": "Åtgärder"
+    },
+    "columnHelp": {
+      "range": "Utbredningsfiltrets sannolikhet för den här platsen och veckan"
+    },
+    "groups": {
+      "inventory": "arter",
+      "stats": "statistik",
+      "memberships": "artlistor",
+      "range": "utbredningssannolikheter",
+      "best": "bästa inspelningar",
+      "recordings": "inspelningar"
+    },
+    "states": {
+      "loading": "Läser in…",
+      "loadFailed": "Det gick inte att läsa in {what}.",
+      "retry": "Försök igen",
+      "empty": "Inga arter har upptäckts ännu.",
+      "noMatch": "Inga arter matchar sökningen och filtret.",
+      "notAvailable": "Ej tillämpligt",
+      "notFound": "Det finns inga sparade detektioner av den här arten.",
+      "membershipLoading": "Läser in artlistor…",
+      "unknownModel": "Okänd",
+      "loginRequired": "Logga in för att använda artarbetsytan."
+    },
+    "verification": "{correct} korrekta, {falsePositive} falskt positiva",
+    "membership": {
+      "confirmed": "Bekräftad",
+      "included": "Inkluderingslista",
+      "excluded": "Exkluderingslista",
+      "yes": "Ja",
+      "no": "Nej",
+      "state": "{list} för {species}: {state}"
+    },
+    "actions": {
+      "menu": "Åtgärder för {species}",
+      "toggle": {
+        "confirmed": "Växla bekräftad",
+        "included": "Växla inkluderingslista",
+        "excluded": "Växla exkluderingslista"
+      },
+      "delete": "Ta bort detektioner av {species}…",
+      "updateFailed": "Det gick inte att uppdatera {list} för {species}."
+    },
+    "best": {
+      "title": "Bästa inspelning av {species}",
+      "play": "Spela upp den bästa inspelningen av {species}",
+      "locked": "Låst",
+      "confidence": "Säkerhet {value}",
+      "unavailable": "Ingen inspelning tillgänglig",
+      "unavailableHint": "Ingen detektion av den här arten har ett ljudklipp på disken."
+    },
+    "delete": {
+      "title": "Ta bort detektioner av {species}",
+      "message": "Detektioner som tas bort: {deletable} av {total} (varav falskt positiva: {falsePositive}). Låsta detektioner behålls: {locked}.",
+      "nothing": "Alla detektioner av den här arten är låsta, så det finns inget att ta bort.",
+      "confirm": "Ta bort ({count})",
+      "running": "Tar bort…",
+      "progressLabel": "Förlopp för borttagning",
+      "progress": "Borttagna: {deleted} · låsta behållna: {locked}",
+      "done": "Borttagningen är klar.",
+      "stop": "Stoppa",
+      "cancelled": "Borttagningen stoppades. Redan borttagna detektioner förblir borttagna.",
+      "stalled": "Borttagningen stoppades eftersom de återstående detektionerna inte kunde tas bort.",
+      "error": "Borttagningen misslyckades. Redan borttagna detektioner förblir borttagna."
+    },
+    "detail": {
+      "back": "Tillbaka till artarbetsytan",
+      "title": "Alla inspelningar av {species}",
+      "detections": "Detektioner: {count}",
+      "maxConfidence": "max. säkerhet {value}",
+      "lastDetected": "senast upptäckt {date}",
+      "bestRecording": "Bästa inspelning",
+      "quickGraph": "Snabbdiagram",
+      "openExternal": "Öppna {species} på {site} (ny flik)",
+      "select": "Välj",
+      "cancelSelect": "Avbryt val",
+      "lockedOnly": "Endast låsta",
+      "toggleAria": "{list} för {species}"
+    },
+    "table": {
+      "dateTime": "Datum och tid",
+      "weather": "Väder",
+      "source": "Källa",
+      "confidence": "Säkerhet",
+      "model": "Modell",
+      "status": "Status",
+      "recording": "Inspelning",
+      "actions": "Åtgärder",
+      "selectAll": "Välj alla inspelningar på den här sidan",
+      "selectRow": "Välj inspelningen från {date}",
+      "selected": "Valda: {count}",
+      "bulkActions": "Åtgärder för valda inspelningar",
+      "markCorrect": "Markera som korrekt",
+      "markFalsePositive": "Markera som falskt positiv",
+      "lock": "Lås",
+      "unlock": "Lås upp",
+      "deleteSelected": "Ta bort",
+      "deleteSelectedTitle": "Ta bort de valda inspelningarna av {species} ({count})?",
+      "deleteSelectedMessage": "Låsta inspelningar i urvalet behålls.",
+      "bulkLockedHint": "Låsta inspelningar kan inte granskas eller tas bort.",
+      "bulkResult": "Uppdaterade: {processed} · överhoppade: {skipped}",
+      "bulkFailed": "De valda inspelningarna kunde inte uppdateras.",
+      "empty": "Inga inspelningar.",
+      "emptyLocked": "Inga låsta inspelningar.",
+      "sortConfidenceDesc": "Högsta säkerhet först",
+      "sortConfidenceAsc": "Lägsta säkerhet först",
+      "sortDateDesc": "Nyaste först",
+      "sortDateAsc": "Äldsta först"
     }
   }
 }

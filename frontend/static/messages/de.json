@@ -690,7 +690,41 @@
         "error": "Fehler beim Laden der Daten",
         "complete": "Daten erfolgreich geladen"
       },
-      "noSpecies": "Keine Arten an diesem Datum erkannt"
+      "noSpecies": "Keine Arten an diesem Datum erkannt",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Erkennungsverlauf: {species}",
+        "subtitle": "{count, plural, one {{formattedCount} Erkennung} other {{formattedCount} Erkennungen}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} Erkennung} other {{formattedCount} Erkennungen}} · {range} (seit {since})",
+        "loading": "Erkennungsverlauf wird geladen…",
+        "unavailable": "Verlauf nicht verfügbar",
+        "loadFailed": "Verlauf konnte nicht geladen werden",
+        "retry": "Erneut versuchen",
+        "empty": "Keine Erkennungen in diesem Zeitraum",
+        "emptyHint": "Längeren Zeitraum wählen",
+        "total": "Gesamt",
+        "peak": "Spitze",
+        "avgPerDay": "Ø/Tag",
+        "daily": "täglich",
+        "movingAverage": "7-Tage-Ø",
+        "chartLabel": "{species}: {count, plural, one {{count} Erkennung} other {{count} Erkennungen}} in {range}, Spitze bei {peak}",
+        "rangeGroup": "Verlaufszeitraum",
+        "allShort": "Alle",
+        "ranges": {
+          "last7d": "letzte 7 Tage",
+          "last30d": "letzte 30 Tage",
+          "last90d": "letzte 90 Tage",
+          "last1y": "letzte 12 Monate",
+          "last2y": "letzte 2 Jahre",
+          "all": "gesamter Zeitraum"
+        }
+      }
     },
     "recentDetections": {
       "title": "Aktuelle Erkennungen",
@@ -5741,6 +5775,158 @@
       "patternNone": "Keines",
       "patternTransient": "Vorübergehend",
       "patternSustained": "Anhaltend"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Artenarbeitsbereich",
+    "subtitle": "Alle jemals erkannten Arten mit Werkzeugen zur Prüfung und Pflege",
+    "refresh": "Daten neu laden",
+    "search": {
+      "label": "Arten suchen",
+      "placeholder": "Nach Namen suchen…"
+    },
+    "sort": {
+      "label": "Sortieren nach",
+      "sortBy": "Nach {column} sortieren",
+      "toggleDirection": "Sortierreihenfolge umkehren"
+    },
+    "edit": {
+      "edit": "Spalten bearbeiten",
+      "done": "Fertig",
+      "reset": "Zurücksetzen",
+      "panelTitle": "Spalten",
+      "condensed": "Kompakte Ansicht auf Smartphones",
+      "condensedHelp": "Zeigt jede Art in zwei kompakten Zeilen.",
+      "show": "Spalte {column} anzeigen",
+      "mandatory": "{column} wird immer angezeigt",
+      "moveUp": "{column} nach oben verschieben",
+      "moveDown": "{column} nach unten verschieben",
+      "saveFailed": "Das Spaltenlayout konnte nicht gespeichert werden, daher wurde das vorherige Layout wiederhergestellt."
+    },
+    "condensed": {
+      "noRecording": "Keine Aufnahme verfügbar"
+    },
+    "columns": {
+      "species": "Art",
+      "count": "Erkennungen",
+      "maxConfidence": "Max. Konfidenz",
+      "firstSeen": "Zuerst erkannt",
+      "lastSeen": "Zuletzt erkannt",
+      "range": "Verbreitungswahrscheinlichkeit",
+      "verification": "Verifiziert",
+      "excluded": "Ausgeschlossen",
+      "included": "Eingeschlossen",
+      "confirmed": "Bestätigt",
+      "bestRecording": "Beste Aufnahme",
+      "actions": "Aktionen"
+    },
+    "columnHelp": {
+      "range": "Wahrscheinlichkeit des Bereichsfilters für diesen Standort und diese Woche"
+    },
+    "groups": {
+      "inventory": "Arten",
+      "stats": "Statistiken",
+      "memberships": "Artenlisten",
+      "range": "Verbreitungswahrscheinlichkeiten",
+      "best": "beste Aufnahmen",
+      "recordings": "Aufnahmen"
+    },
+    "states": {
+      "loading": "Wird geladen…",
+      "loadFailed": "{what} konnten nicht geladen werden.",
+      "retry": "Erneut versuchen",
+      "empty": "Bisher wurden keine Arten erkannt.",
+      "noMatch": "Keine Art entspricht Suche und Filter.",
+      "notAvailable": "k. A.",
+      "notFound": "Für diese Art sind keine Erkennungen gespeichert.",
+      "membershipLoading": "Artenlisten werden geladen…",
+      "unknownModel": "Unbekannt",
+      "loginRequired": "Melden Sie sich an, um den Artenarbeitsbereich zu nutzen."
+    },
+    "verification": "{correct} korrekt, {falsePositive} Fehlerkennung",
+    "membership": {
+      "confirmed": "Bestätigt",
+      "included": "Einschlussliste",
+      "excluded": "Ausschlussliste",
+      "yes": "Ja",
+      "no": "Nein",
+      "state": "{list} für {species}: {state}"
+    },
+    "actions": {
+      "menu": "Aktionen für {species}",
+      "toggle": {
+        "confirmed": "Bestätigt umschalten",
+        "included": "Einschlussliste umschalten",
+        "excluded": "Ausschlussliste umschalten"
+      },
+      "delete": "Erkennungen von {species} löschen…",
+      "updateFailed": "{list} für {species} konnte nicht aktualisiert werden."
+    },
+    "best": {
+      "title": "Beste Aufnahme von {species}",
+      "play": "Beste Aufnahme von {species} abspielen",
+      "locked": "Gesperrt",
+      "confidence": "Konfidenz {value}",
+      "unavailable": "Keine Aufnahme verfügbar",
+      "unavailableHint": "Keine Erkennung dieser Art hat einen Audioclip auf dem Datenträger."
+    },
+    "delete": {
+      "title": "Erkennungen von {species} löschen",
+      "message": "Zu löschende Erkennungen: {deletable} von {total} (davon Fehlerkennungen: {falsePositive}). Gesperrte Erkennungen bleiben erhalten: {locked}.",
+      "nothing": "Alle Erkennungen dieser Art sind gesperrt, es gibt also nichts zu löschen.",
+      "confirm": "Löschen ({count})",
+      "running": "Wird gelöscht…",
+      "progressLabel": "Löschfortschritt",
+      "progress": "Gelöscht: {deleted} · gesperrt behalten: {locked}",
+      "done": "Löschen abgeschlossen.",
+      "stop": "Stoppen",
+      "cancelled": "Löschen gestoppt. Bereits gelöschte Erkennungen bleiben gelöscht.",
+      "stalled": "Löschen gestoppt, weil die verbleibenden Erkennungen nicht entfernt werden konnten.",
+      "error": "Löschen fehlgeschlagen. Bereits gelöschte Erkennungen bleiben gelöscht."
+    },
+    "detail": {
+      "back": "Zurück zum Artenarbeitsbereich",
+      "title": "Alle Aufnahmen von {species}",
+      "detections": "Erkennungen: {count}",
+      "maxConfidence": "max. Konfidenz {value}",
+      "lastDetected": "zuletzt erkannt {date}",
+      "bestRecording": "Beste Aufnahme",
+      "quickGraph": "Schnellgrafik",
+      "openExternal": "{species} auf {site} öffnen (neuer Tab)",
+      "select": "Auswählen",
+      "cancelSelect": "Auswahl abbrechen",
+      "lockedOnly": "Nur gesperrte",
+      "toggleAria": "{list} für {species}"
+    },
+    "table": {
+      "dateTime": "Datum & Uhrzeit",
+      "weather": "Wetter",
+      "source": "Quelle",
+      "confidence": "Konfidenz",
+      "model": "Modell",
+      "status": "Status",
+      "recording": "Aufnahme",
+      "actions": "Aktionen",
+      "selectAll": "Alle Aufnahmen auf dieser Seite auswählen",
+      "selectRow": "Aufnahme vom {date} auswählen",
+      "selected": "Ausgewählt: {count}",
+      "bulkActions": "Aktionen für ausgewählte Aufnahmen",
+      "markCorrect": "Als korrekt markieren",
+      "markFalsePositive": "Als Fehlerkennung markieren",
+      "lock": "Sperren",
+      "unlock": "Entsperren",
+      "deleteSelected": "Löschen",
+      "deleteSelectedTitle": "Ausgewählte Aufnahmen von {species} löschen ({count})?",
+      "deleteSelectedMessage": "Gesperrte Aufnahmen in der Auswahl bleiben erhalten.",
+      "bulkLockedHint": "Gesperrte Aufnahmen können nicht geprüft oder gelöscht werden.",
+      "bulkResult": "Aktualisiert: {processed} · übersprungen: {skipped}",
+      "bulkFailed": "Die ausgewählten Aufnahmen konnten nicht aktualisiert werden.",
+      "empty": "Keine Aufnahmen.",
+      "emptyLocked": "Keine gesperrten Aufnahmen.",
+      "sortConfidenceDesc": "Höchste Konfidenz zuerst",
+      "sortConfidenceAsc": "Niedrigste Konfidenz zuerst",
+      "sortDateDesc": "Neueste zuerst",
+      "sortDateAsc": "Älteste zuerst"
     }
   }
 }

@@ -690,7 +690,41 @@
         "error": "Nepodařilo se načíst data",
         "complete": "Data úspěšně načtena"
       },
-      "noSpecies": "V tento den nebyly detekovány žádné druhy"
+      "noSpecies": "V tento den nebyly detekovány žádné druhy",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Historie detekcí: {species}",
+        "subtitle": "{count, plural, one {{formattedCount} detekce} few {{formattedCount} detekce} many {{formattedCount} detekce} other {{formattedCount} detekcí}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detekce} few {{formattedCount} detekce} many {{formattedCount} detekce} other {{formattedCount} detekcí}} · {range} (od {since})",
+        "loading": "Načítání historie detekcí…",
+        "unavailable": "Historie není k dispozici",
+        "loadFailed": "Historii se nepodařilo načíst",
+        "retry": "Zkusit znovu",
+        "empty": "V tomto období žádné detekce",
+        "emptyHint": "Zkuste delší rozsah",
+        "total": "Celkem",
+        "peak": "Maximum",
+        "avgPerDay": "Průměr/den",
+        "daily": "denně",
+        "movingAverage": "7denní průměr",
+        "chartLabel": "{species}: {count, plural, one {{count} detekce} few {{count} detekce} many {{count} detekce} other {{count} detekcí}} za {range}, maximum {peak}",
+        "rangeGroup": "Rozsah historie",
+        "allShort": "Vše",
+        "ranges": {
+          "last7d": "posledních 7 dní",
+          "last30d": "posledních 30 dní",
+          "last90d": "posledních 90 dní",
+          "last1y": "posledních 12 měsíců",
+          "last2y": "poslední 2 roky",
+          "all": "celou dobu"
+        }
+      }
     },
     "recentDetections": {
       "title": "Nedávné detekce",
@@ -5741,6 +5775,158 @@
       "patternNone": "Žádný",
       "patternTransient": "Přechodný",
       "patternSustained": "Trvalý"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Pracovní prostor druhů",
+    "subtitle": "Všechny kdy zjištěné druhy s nástroji pro kontrolu a správu",
+    "refresh": "Znovu načíst data",
+    "search": {
+      "label": "Hledat druhy",
+      "placeholder": "Hledat podle názvu…"
+    },
+    "sort": {
+      "label": "Řadit podle",
+      "sortBy": "Řadit podle: {column}",
+      "toggleDirection": "Obrátit pořadí"
+    },
+    "edit": {
+      "edit": "Upravit sloupce",
+      "done": "Hotovo",
+      "reset": "Obnovit výchozí",
+      "panelTitle": "Sloupce",
+      "condensed": "Zhuštěné zobrazení na telefonech",
+      "condensedHelp": "Zobrazí každý druh ve dvou kompaktních řádcích.",
+      "show": "Zobrazit sloupec {column}",
+      "mandatory": "{column} se zobrazuje vždy",
+      "moveUp": "Posunout {column} nahoru",
+      "moveDown": "Posunout {column} dolů",
+      "saveFailed": "Rozvržení sloupců se nepodařilo uložit, proto bylo obnoveno předchozí."
+    },
+    "condensed": {
+      "noRecording": "Nahrávka není k dispozici"
+    },
+    "columns": {
+      "species": "Druh",
+      "count": "Detekce",
+      "maxConfidence": "Max. spolehlivost",
+      "firstSeen": "Poprvé zjištěn",
+      "lastSeen": "Naposledy zjištěn",
+      "range": "Pravděpodobnost výskytu",
+      "verification": "Ověřeno",
+      "excluded": "Vyloučen",
+      "included": "Zahrnut",
+      "confirmed": "Potvrzen",
+      "bestRecording": "Nejlepší nahrávka",
+      "actions": "Akce"
+    },
+    "columnHelp": {
+      "range": "Pravděpodobnost podle filtru výskytu pro toto místo a týden"
+    },
+    "groups": {
+      "inventory": "druhy",
+      "stats": "statistiky",
+      "memberships": "seznamy druhů",
+      "range": "pravděpodobnosti výskytu",
+      "best": "nejlepší nahrávky",
+      "recordings": "nahrávky"
+    },
+    "states": {
+      "loading": "Načítání…",
+      "loadFailed": "Nepodařilo se načíst: {what}.",
+      "retry": "Zkusit znovu",
+      "empty": "Zatím nebyly zjištěny žádné druhy.",
+      "noMatch": "Hledání a filtru neodpovídá žádný druh.",
+      "notAvailable": "N/A",
+      "notFound": "Pro tento druh nejsou uloženy žádné detekce.",
+      "membershipLoading": "Načítání seznamů druhů…",
+      "unknownModel": "Neznámý",
+      "loginRequired": "Pro použití pracovního prostoru druhů se přihlaste."
+    },
+    "verification": "správně: {correct}, falešně pozitivní: {falsePositive}",
+    "membership": {
+      "confirmed": "Potvrzen",
+      "included": "Seznam zahrnutých",
+      "excluded": "Seznam vyloučených",
+      "yes": "Ano",
+      "no": "Ne",
+      "state": "{list} pro {species}: {state}"
+    },
+    "actions": {
+      "menu": "Akce pro {species}",
+      "toggle": {
+        "confirmed": "Přepnout potvrzení",
+        "included": "Přepnout seznam zahrnutých",
+        "excluded": "Přepnout seznam vyloučených"
+      },
+      "delete": "Smazat detekce druhu {species}…",
+      "updateFailed": "Nepodařilo se aktualizovat {list} pro {species}."
+    },
+    "best": {
+      "title": "Nejlepší nahrávka druhu {species}",
+      "play": "Přehrát nejlepší nahrávku druhu {species}",
+      "locked": "Zamčeno",
+      "confidence": "Spolehlivost {value}",
+      "unavailable": "Žádná nahrávka není k dispozici",
+      "unavailableHint": "Žádná detekce tohoto druhu nemá zvukový klip na disku."
+    },
+    "delete": {
+      "title": "Smazat detekce druhu {species}",
+      "message": "Detekce ke smazání: {deletable} z {total} (včetně falešně pozitivních: {falsePositive}). Zamčené detekce zůstanou: {locked}.",
+      "nothing": "Všechny detekce tohoto druhu jsou zamčené, není co mazat.",
+      "confirm": "Smazat ({count})",
+      "running": "Mazání…",
+      "progressLabel": "Průběh mazání",
+      "progress": "Smazáno: {deleted} · zamčené ponechány: {locked}",
+      "done": "Mazání dokončeno.",
+      "stop": "Zastavit",
+      "cancelled": "Mazání zastaveno. Již smazané detekce zůstávají smazané.",
+      "stalled": "Mazání zastaveno, protože zbývající detekce nelze odstranit.",
+      "error": "Mazání selhalo. Již smazané detekce zůstávají smazané."
+    },
+    "detail": {
+      "back": "Zpět do pracovního prostoru druhů",
+      "title": "Všechny nahrávky druhu {species}",
+      "detections": "Detekce: {count}",
+      "maxConfidence": "max. spolehlivost {value}",
+      "lastDetected": "naposledy zjištěn {date}",
+      "bestRecording": "Nejlepší nahrávka",
+      "quickGraph": "Rychlý graf",
+      "openExternal": "Otevřít {species} na {site} (nová karta)",
+      "select": "Vybrat",
+      "cancelSelect": "Zrušit výběr",
+      "lockedOnly": "Pouze zamčené",
+      "toggleAria": "{list} pro {species}"
+    },
+    "table": {
+      "dateTime": "Datum a čas",
+      "weather": "Počasí",
+      "source": "Zdroj",
+      "confidence": "Spolehlivost",
+      "model": "Model",
+      "status": "Stav",
+      "recording": "Nahrávka",
+      "actions": "Akce",
+      "selectAll": "Vybrat všechny nahrávky na této stránce",
+      "selectRow": "Vybrat nahrávku z {date}",
+      "selected": "Vybráno: {count}",
+      "bulkActions": "Akce pro vybrané nahrávky",
+      "markCorrect": "Označit jako správné",
+      "markFalsePositive": "Označit jako falešně pozitivní",
+      "lock": "Zamknout",
+      "unlock": "Odemknout",
+      "deleteSelected": "Smazat",
+      "deleteSelectedTitle": "Smazat vybrané nahrávky druhu {species} ({count})?",
+      "deleteSelectedMessage": "Zamčené nahrávky ve výběru zůstanou zachovány.",
+      "bulkLockedHint": "Zamčené nahrávky nelze kontrolovat ani mazat.",
+      "bulkResult": "Aktualizováno: {processed} · přeskočeno: {skipped}",
+      "bulkFailed": "Vybrané nahrávky se nepodařilo aktualizovat.",
+      "empty": "Žádné nahrávky.",
+      "emptyLocked": "Žádné zamčené nahrávky.",
+      "sortConfidenceDesc": "Nejvyšší spolehlivost první",
+      "sortConfidenceAsc": "Nejnižší spolehlivost první",
+      "sortDateDesc": "Nejnovější první",
+      "sortDateAsc": "Nejstarší první"
     }
   }
 }

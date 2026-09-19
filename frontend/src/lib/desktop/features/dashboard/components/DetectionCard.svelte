@@ -40,6 +40,13 @@
   const getDefaultAudioGain = () => get(dashboardSettings)?.defaultAudioGain ?? 0;
   const DEFAULT_AUDIO_FILTER_FREQ = 20;
 
+  // IntersectionObserver preload margins. Mobile uses a much smaller margin so
+  // far-offscreen cards don't all kick off spectrogram status/generation/image
+  // fetches at once, easing first-paint pressure on phones (HTTP/1.1 sockets).
+  const DESKTOP_PRELOAD_MARGIN = '200px 0px';
+  const MOBILE_PRELOAD_MARGIN = '50px 0px';
+  const MOBILE_VIEWPORT_QUERY = '(max-width: 767px)';
+
   interface Props {
     detection: Detection;
     isNew?: boolean;
@@ -171,6 +178,11 @@
   onMount(() => {
     if (!cardElement) return;
 
+    const isMobileViewport =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia(MOBILE_VIEWPORT_QUERY).matches
+        : false;
+
     // eslint-disable-next-line no-undef -- browser global
     observer = new IntersectionObserver(
       entries => {
@@ -178,7 +190,7 @@
           isVisible = entry.isIntersecting;
         }
       },
-      { rootMargin: '200px 0px' }
+      { rootMargin: isMobileViewport ? MOBILE_PRELOAD_MARGIN : DESKTOP_PRELOAD_MARGIN }
     );
     observer.observe(cardElement);
   });
@@ -195,7 +207,7 @@
   class={cn(
     'detection-card group relative rounded-xl',
     isNew && 'new-detection',
-    (isMenuOpen || isAudioSettingsOpen || isAudibleBatsOpen) && 'z-[60]'
+    (isMenuOpen || isAudioSettingsOpen || isAudibleBatsOpen) && 'z-[60] overlay-open'
   )}
 >
   <!-- Inner container with overflow-hidden for spectrogram clipping -->
@@ -329,6 +341,23 @@
 <style>
   .detection-card {
     background-color: var(--color-base-100);
+  }
+
+  /* On phones the dashboard stacks many of these cards below the fold; let the
+     browser skip layout/paint for off-screen ones. The card is a fixed 15rem tall
+     (.detection-card-inner), so the intrinsic size placeholder is exact and the
+     scrollbar stays stable. Must be lifted while the action menu or audio settings
+     overlay is open: content-visibility's paint containment would clip their
+     fixed-position popovers. */
+  @media (max-width: 767px) {
+    .detection-card {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 15rem;
+    }
+
+    .detection-card.overlay-open {
+      content-visibility: visible;
+    }
   }
 
   .detection-card-inner {

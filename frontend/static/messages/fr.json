@@ -690,7 +690,41 @@
         "error": "Échec du chargement des données",
         "complete": "Données chargées avec succès"
       },
-      "noSpecies": "Aucune espèce détectée à cette date"
+      "noSpecies": "Aucune espèce détectée à cette date",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Historique des détections : {species}",
+        "subtitle": "{count, plural, one {{formattedCount} détection} other {{formattedCount} détections}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} détection} other {{formattedCount} détections}} · {range} (depuis le {since})",
+        "loading": "Chargement de l’historique des détections…",
+        "unavailable": "Historique indisponible",
+        "loadFailed": "Échec du chargement de l’historique",
+        "retry": "Réessayer",
+        "empty": "Aucune détection sur cette période",
+        "emptyHint": "Essayez une période plus longue",
+        "total": "Total",
+        "peak": "Pic",
+        "avgPerDay": "Moy./jour",
+        "daily": "par jour",
+        "movingAverage": "moy. 7 jours",
+        "chartLabel": "{species} : {count, plural, one {{count} détection} other {{count} détections}} sur {range}, pic à {peak}",
+        "rangeGroup": "Période de l’historique",
+        "allShort": "Tout",
+        "ranges": {
+          "last7d": "7 derniers jours",
+          "last30d": "30 derniers jours",
+          "last90d": "90 derniers jours",
+          "last1y": "12 derniers mois",
+          "last2y": "2 dernières années",
+          "all": "toute la période"
+        }
+      }
     },
     "recentDetections": {
       "title": "Détections récentes",
@@ -5741,6 +5775,158 @@
       "patternNone": "Aucun",
       "patternTransient": "Transitoire",
       "patternSustained": "Persistant"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Espace espèces",
+    "subtitle": "Toutes les espèces détectées, avec des outils de vérification et de gestion",
+    "refresh": "Recharger les données",
+    "search": {
+      "label": "Rechercher une espèce",
+      "placeholder": "Rechercher par nom…"
+    },
+    "sort": {
+      "label": "Trier par",
+      "sortBy": "Trier par {column}",
+      "toggleDirection": "Inverser l’ordre de tri"
+    },
+    "edit": {
+      "edit": "Modifier les colonnes",
+      "done": "Terminé",
+      "reset": "Réinitialiser",
+      "panelTitle": "Colonnes",
+      "condensed": "Vue compacte sur téléphone",
+      "condensedHelp": "Affiche chaque espèce sur deux lignes compactes.",
+      "show": "Afficher la colonne {column}",
+      "mandatory": "{column} est toujours affichée",
+      "moveUp": "Monter {column}",
+      "moveDown": "Descendre {column}",
+      "saveFailed": "La disposition des colonnes n’a pas pu être enregistrée ; la disposition précédente a été rétablie."
+    },
+    "condensed": {
+      "noRecording": "Aucun enregistrement disponible"
+    },
+    "columns": {
+      "species": "Espèce",
+      "count": "Détections",
+      "maxConfidence": "Confiance max.",
+      "firstSeen": "Première détection",
+      "lastSeen": "Dernière détection",
+      "range": "Probabilité de présence",
+      "verification": "Vérifiées",
+      "excluded": "Exclue",
+      "included": "Incluse",
+      "confirmed": "Confirmée",
+      "bestRecording": "Meilleur enregistrement",
+      "actions": "Actions"
+    },
+    "columnHelp": {
+      "range": "Probabilité du filtre de répartition pour ce lieu et cette semaine"
+    },
+    "groups": {
+      "inventory": "les espèces",
+      "stats": "les statistiques",
+      "memberships": "les listes d’espèces",
+      "range": "les probabilités de présence",
+      "best": "les meilleurs enregistrements",
+      "recordings": "les enregistrements"
+    },
+    "states": {
+      "loading": "Chargement…",
+      "loadFailed": "Impossible de charger {what}.",
+      "retry": "Réessayer",
+      "empty": "Aucune espèce n’a encore été détectée.",
+      "noMatch": "Aucune espèce ne correspond à la recherche et au filtre.",
+      "notAvailable": "N/D",
+      "notFound": "Aucune détection de cette espèce n’est enregistrée.",
+      "membershipLoading": "Chargement des listes d’espèces…",
+      "unknownModel": "Inconnu",
+      "loginRequired": "Connectez-vous pour utiliser l’espace espèces."
+    },
+    "verification": "{correct} correctes, {falsePositive} faux positifs",
+    "membership": {
+      "confirmed": "Confirmée",
+      "included": "Liste d’inclusion",
+      "excluded": "Liste d’exclusion",
+      "yes": "Oui",
+      "no": "Non",
+      "state": "{list} pour {species} : {state}"
+    },
+    "actions": {
+      "menu": "Actions pour {species}",
+      "toggle": {
+        "confirmed": "Basculer confirmée",
+        "included": "Basculer la liste d’inclusion",
+        "excluded": "Basculer la liste d’exclusion"
+      },
+      "delete": "Supprimer les détections de {species}…",
+      "updateFailed": "Impossible de mettre à jour {list} pour {species}."
+    },
+    "best": {
+      "title": "Meilleur enregistrement de {species}",
+      "play": "Écouter le meilleur enregistrement de {species}",
+      "locked": "Verrouillé",
+      "confidence": "Confiance {value}",
+      "unavailable": "Aucun enregistrement disponible",
+      "unavailableHint": "Aucune détection de cette espèce n’a de clip audio sur le disque."
+    },
+    "delete": {
+      "title": "Supprimer les détections de {species}",
+      "message": "Détections à supprimer : {deletable} sur {total} (dont faux positifs : {falsePositive}). Détections verrouillées conservées : {locked}.",
+      "nothing": "Toutes les détections de cette espèce sont verrouillées ; il n’y a rien à supprimer.",
+      "confirm": "Supprimer ({count})",
+      "running": "Suppression…",
+      "progressLabel": "Progression de la suppression",
+      "progress": "Supprimées : {deleted} · verrouillées conservées : {locked}",
+      "done": "Suppression terminée.",
+      "stop": "Arrêter",
+      "cancelled": "Suppression arrêtée. Les détections déjà supprimées le restent.",
+      "stalled": "Suppression arrêtée, car les détections restantes n’ont pas pu être supprimées.",
+      "error": "Échec de la suppression. Les détections déjà supprimées le restent."
+    },
+    "detail": {
+      "back": "Retour à l’espace espèces",
+      "title": "Tous les enregistrements de {species}",
+      "detections": "Détections : {count}",
+      "maxConfidence": "confiance max. {value}",
+      "lastDetected": "dernière détection {date}",
+      "bestRecording": "Meilleur enregistrement",
+      "quickGraph": "Graphique rapide",
+      "openExternal": "Ouvrir {species} sur {site} (nouvel onglet)",
+      "select": "Sélectionner",
+      "cancelSelect": "Annuler la sélection",
+      "lockedOnly": "Verrouillés uniquement",
+      "toggleAria": "{list} pour {species}"
+    },
+    "table": {
+      "dateTime": "Date et heure",
+      "weather": "Météo",
+      "source": "Source",
+      "confidence": "Confiance",
+      "model": "Modèle",
+      "status": "Statut",
+      "recording": "Enregistrement",
+      "actions": "Actions",
+      "selectAll": "Sélectionner tous les enregistrements de cette page",
+      "selectRow": "Sélectionner l’enregistrement du {date}",
+      "selected": "Sélectionnés : {count}",
+      "bulkActions": "Actions pour les enregistrements sélectionnés",
+      "markCorrect": "Marquer correct",
+      "markFalsePositive": "Marquer faux positif",
+      "lock": "Verrouiller",
+      "unlock": "Déverrouiller",
+      "deleteSelected": "Supprimer",
+      "deleteSelectedTitle": "Supprimer les enregistrements sélectionnés de {species} ({count}) ?",
+      "deleteSelectedMessage": "Les enregistrements verrouillés de la sélection sont conservés.",
+      "bulkLockedHint": "Les enregistrements verrouillés ne peuvent être ni vérifiés ni supprimés.",
+      "bulkResult": "Mis à jour : {processed} · ignorés : {skipped}",
+      "bulkFailed": "Les enregistrements sélectionnés n’ont pas pu être mis à jour.",
+      "empty": "Aucun enregistrement.",
+      "emptyLocked": "Aucun enregistrement verrouillé.",
+      "sortConfidenceDesc": "Confiance la plus élevée d’abord",
+      "sortConfidenceAsc": "Confiance la plus faible d’abord",
+      "sortDateDesc": "Plus récents d’abord",
+      "sortDateAsc": "Plus anciens d’abord"
     }
   }
 }
