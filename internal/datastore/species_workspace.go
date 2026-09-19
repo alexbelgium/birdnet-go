@@ -192,8 +192,9 @@ func (ds *DataStore) SpeciesWorkspaceInventory(ctx context.Context, scientificNa
 	return rows, nil
 }
 
-// SpeciesWorkspaceStats returns review counts and max recording confidence per species.
-func (ds *DataStore) SpeciesWorkspaceStats(ctx context.Context) ([]SpeciesWorkspaceStats, error) {
+// SpeciesWorkspaceStats returns review counts and max recording confidence per
+// species, or only for scientificName when it is not empty.
+func (ds *DataStore) SpeciesWorkspaceStats(ctx context.Context, scientificName string) ([]SpeciesWorkspaceStats, error) {
 	type reviewRow struct {
 		ScientificName string
 		Verified       string
@@ -201,12 +202,19 @@ func (ds *DataStore) SpeciesWorkspaceStats(ctx context.Context) ([]SpeciesWorksp
 	}
 	var reviews []reviewRow
 	db := ds.DB.WithContext(ctx)
-	if err := db.Table("note_reviews r").Select("n.scientific_name, r.verified, COUNT(*) AS n").
-		Joins("JOIN notes n ON n.id = r.note_id").Group("n.scientific_name, r.verified").Scan(&reviews).Error; err != nil {
+	forSpecies := func(q *gorm.DB, column string) *gorm.DB {
+		if scientificName == "" {
+			return q
+		}
+		return q.Where(column+" = ?", scientificName)
+	}
+	if err := forSpecies(db.Table("note_reviews r").Select("n.scientific_name, r.verified, COUNT(*) AS n").
+		Joins("JOIN notes n ON n.id = r.note_id"), "n.scientific_name").
+		Group("n.scientific_name, r.verified").Scan(&reviews).Error; err != nil {
 		return nil, dbError(err, "species_workspace_stats", errors.PriorityMedium, "action", "load_review_counts")
 	}
 	var names []string
-	if err := db.Table("notes").Distinct("scientific_name").Pluck("scientific_name", &names).Error; err != nil {
+	if err := forSpecies(db.Table("notes"), "scientific_name").Distinct("scientific_name").Pluck("scientific_name", &names).Error; err != nil {
 		return nil, dbError(err, "species_workspace_stats", errors.PriorityMedium, "action", "load_species_names")
 	}
 	byName := make(map[string]*SpeciesWorkspaceStats, len(names))
@@ -220,7 +228,7 @@ func (ds *DataStore) SpeciesWorkspaceStats(ctx context.Context) ([]SpeciesWorksp
 			MaxConf        *float64
 		}
 		var maxes []maxRow
-		if err := db.Table("notes n").Select("n.scientific_name, MAX(n.confidence) AS max_conf").
+		if err := forSpecies(db.Table("notes n"), "n.scientific_name").Select("n.scientific_name, MAX(n.confidence) AS max_conf").
 			Joins("LEFT JOIN note_reviews r ON r.note_id = n.id").
 			Where("n.clip_name <> ''").
 			Where("r.verified IS NULL OR r.verified != ?", string(entities.VerificationFalsePositive)).

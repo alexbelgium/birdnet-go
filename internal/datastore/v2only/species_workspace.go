@@ -158,13 +158,21 @@ func (ds *Datastore) labelSpan(tx *gorm.DB, labelID uint) (first, last int64, er
 	return first, last, err
 }
 
-// SpeciesWorkspaceStats returns review counts and max recording confidence per species.
-func (ds *Datastore) SpeciesWorkspaceStats(ctx context.Context) ([]datastore.SpeciesWorkspaceStats, error) {
+// SpeciesWorkspaceStats returns review counts and max recording confidence per
+// species, or only for scientificName when it is not empty.
+func (ds *Datastore) SpeciesWorkspaceStats(ctx context.Context, scientificName string) ([]datastore.SpeciesWorkspaceStats, error) {
 	prefix := ds.manager.TablePrefix()
 	db := ds.manager.DB().WithContext(ctx)
 	labels, err := ds.labelsByScientificName(db)
 	if err != nil {
 		return nil, wsError(err, "load_labels")
+	}
+	// forLabels scopes a detections query to the requested species' labels.
+	forLabels := func(q *gorm.DB) *gorm.DB { return q }
+	if scientificName != "" {
+		ids := labels[scientificName]
+		labels = map[string][]uint{scientificName: ids}
+		forLabels = func(q *gorm.DB) *gorm.DB { return q.Where("d.label_id IN ?", append(ids, 0)) }
 	}
 	type reviewRow struct {
 		LabelID  uint
@@ -172,8 +180,8 @@ func (ds *Datastore) SpeciesWorkspaceStats(ctx context.Context) ([]datastore.Spe
 		N        int64
 	}
 	var reviews []reviewRow
-	if err := db.Table(prefix + "detection_reviews r").Select("d.label_id, r.verified, COUNT(*) AS n").
-		Joins(fmt.Sprintf("JOIN %sdetections d ON d.id = r.detection_id", prefix)).
+	if err := forLabels(db.Table(prefix+"detection_reviews r").Select("d.label_id, r.verified, COUNT(*) AS n").
+		Joins(fmt.Sprintf("JOIN %sdetections d ON d.id = r.detection_id", prefix))).
 		Group("d.label_id, r.verified").Scan(&reviews).Error; err != nil {
 		return nil, wsError(err, "load_review_counts")
 	}
@@ -208,7 +216,7 @@ func (ds *Datastore) SpeciesWorkspaceStats(ctx context.Context) ([]datastore.Spe
 			MaxConf *float64
 		}
 		var maxes []maxRow
-		if err := db.Table(prefix+"detections d").Select("d.label_id, MAX(d.confidence) AS max_conf").
+		if err := forLabels(db.Table(prefix+"detections d")).Select("d.label_id, MAX(d.confidence) AS max_conf").
 			Joins(fmt.Sprintf("LEFT JOIN %sdetection_reviews r ON r.detection_id = d.id", prefix)).
 			Where("d.clip_name IS NOT NULL AND d.clip_name <> ''").
 			Where("r.verified IS NULL OR r.verified != ?", string(entities.VerificationFalsePositive)).

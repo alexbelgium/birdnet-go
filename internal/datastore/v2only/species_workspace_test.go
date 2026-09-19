@@ -88,7 +88,7 @@ func TestSpeciesWorkspace_V2(t *testing.T) {
 	})
 
 	t.Run("stats ignore false positives and clip-less detections for max confidence", func(t *testing.T) {
-		stats, err := ds.SpeciesWorkspaceStats(ctx)
+		stats, err := ds.SpeciesWorkspaceStats(ctx, "")
 		require.NoError(t, err)
 		byName := map[string]datastore.SpeciesWorkspaceStats{}
 		for _, s := range stats {
@@ -100,6 +100,14 @@ func TestSpeciesWorkspace_V2(t *testing.T) {
 		require.NotNil(t, tm.MaxConfidence)
 		assert.InDelta(t, 0.80, *tm.MaxConfidence, 1e-9) // 0.95 is FP, 0.99 has no clip
 		assert.Nil(t, byName["Strix aluco"].MaxConfidence)
+
+		one, err := ds.SpeciesWorkspaceStats(ctx, "Turdus merula")
+		require.NoError(t, err)
+		require.Len(t, one, 1, "only the requested species")
+		assert.Equal(t, tm, one[0])
+		none, err := ds.SpeciesWorkspaceStats(ctx, "Motacilla")
+		require.NoError(t, err)
+		assert.Empty(t, none, "a prefix of another species matches nothing")
 	})
 
 	t.Run("candidates put locked first and skip false positives", func(t *testing.T) {

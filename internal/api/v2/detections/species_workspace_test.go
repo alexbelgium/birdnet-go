@@ -52,8 +52,17 @@ func (f *fakeWorkspaceStore) SpeciesWorkspaceInventory(_ context.Context, name s
 	return out, nil
 }
 
-func (f *fakeWorkspaceStore) SpeciesWorkspaceStats(context.Context) ([]datastore.SpeciesWorkspaceStats, error) {
-	return f.stats, nil
+func (f *fakeWorkspaceStore) SpeciesWorkspaceStats(_ context.Context, name string) ([]datastore.SpeciesWorkspaceStats, error) {
+	if name == "" {
+		return f.stats, nil
+	}
+	var out []datastore.SpeciesWorkspaceStats
+	for _, s := range f.stats {
+		if s.ScientificName == name {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeWorkspaceStore) SpeciesWorkspaceCandidates(_ context.Context, names []string, limit int) (map[string][]datastore.SpeciesRecordingCandidate, error) {
@@ -156,6 +165,28 @@ func TestGetWorkspaceSpecies(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
 	assert.Len(t, rows, 1)
+}
+
+func TestGetWorkspaceSpeciesStats(t *testing.T) {
+	t.Parallel()
+	store := &fakeWorkspaceStore{MockInterface: mocks.NewMockInterface(t), stats: []datastore.SpeciesWorkspaceStats{
+		{ScientificName: "Turdus merula", Correct: 3, FalsePositive: 1},
+		{ScientificName: "Strix aluco", FalsePositive: 2},
+	}}
+	e, _ := newWorkspaceTest(t, store)
+
+	var stats []WorkspaceSpeciesStatsResponse
+	rec := doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/species/stats", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &stats))
+	assert.Len(t, stats, 2)
+
+	stats = nil
+	rec = doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/species/stats?species=%20Strix%20aluco%20", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &stats))
+	require.Len(t, stats, 1, "the species filter reaches the store, trimmed")
+	assert.Equal(t, int64(2), stats[0].FalsePositive)
 }
 
 func TestGetWorkspaceBestRecordings(t *testing.T) {

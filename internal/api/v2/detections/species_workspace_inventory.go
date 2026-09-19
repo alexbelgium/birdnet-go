@@ -65,7 +65,7 @@ func (c *Handler) GetWorkspaceSpecies(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, out)
 }
 
-// GetWorkspaceSpeciesStats handles GET /api/v2/species-workspace/species/stats.
+// GetWorkspaceSpeciesStats handles GET /api/v2/species-workspace/species/stats[?species=].
 func (c *Handler) GetWorkspaceSpeciesStats(ctx echo.Context) error {
 	store, err := c.workspaceStore(ctx)
 	if store == nil {
@@ -73,7 +73,7 @@ func (c *Handler) GetWorkspaceSpeciesStats(ctx echo.Context) error {
 	}
 	queryCtx, cancel := workspaceContext(ctx)
 	defer cancel()
-	stats, err := store.SpeciesWorkspaceStats(queryCtx)
+	stats, err := store.SpeciesWorkspaceStats(queryCtx, strings.TrimSpace(ctx.QueryParam("species")))
 	if err != nil {
 		return c.HandleError(ctx, err, "Failed to load species statistics", http.StatusInternalServerError)
 	}

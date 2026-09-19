@@ -54,9 +54,16 @@ func TestSpeciesWorkspace_Legacy(t *testing.T) {
 	})
 
 	t.Run("stats and candidates", func(t *testing.T) {
-		stats, err := ds.SpeciesWorkspaceStats(ctx)
+		stats, err := ds.SpeciesWorkspaceStats(ctx, "")
 		require.NoError(t, err)
 		require.Len(t, stats, 2)
+		one, err := ds.SpeciesWorkspaceStats(ctx, "Turdus merula")
+		require.NoError(t, err)
+		require.Len(t, one, 1)
+		assert.Equal(t, int64(1), one[0].FalsePositive)
+		none, err := ds.SpeciesWorkspaceStats(ctx, "Nobody")
+		require.NoError(t, err)
+		assert.Empty(t, none)
 		for _, s := range stats {
 			if s.ScientificName == "Turdus merula" {
 				assert.Equal(t, int64(1), s.Correct)

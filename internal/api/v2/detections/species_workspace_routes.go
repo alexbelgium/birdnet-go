@@ -23,7 +23,7 @@ const speciesWorkspaceTimeout = 30 * time.Second
 // datastore.DataStore (legacy) and v2only.Datastore implement it.
 type speciesWorkspaceStore interface {
 	SpeciesWorkspaceInventory(ctx context.Context, scientificName string) ([]datastore.SpeciesWorkspaceRow, error)
-	SpeciesWorkspaceStats(ctx context.Context) ([]datastore.SpeciesWorkspaceStats, error)
+	SpeciesWorkspaceStats(ctx context.Context, scientificName string) ([]datastore.SpeciesWorkspaceStats, error)
 	SpeciesWorkspaceCandidates(ctx context.Context, names []string, limit int) (map[string][]datastore.SpeciesRecordingCandidate, error)
 	SpeciesWorkspaceRecordings(ctx context.Context, q datastore.SpeciesRecordingQuery) ([]datastore.SpeciesWorkspaceRecording, int64, error)
 	SpeciesWorkspaceDeleteChunk(ctx context.Context, scientificName string, limit int) (datastore.SpeciesDeleteChunk, error)
