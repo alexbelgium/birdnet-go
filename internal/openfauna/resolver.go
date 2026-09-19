@@ -284,10 +284,14 @@ func (r *Resolver) Resolve(scientificName, _ string) string {
 				return name, nil
 			}
 		}
-		name, ok := Lookup(scientificName, st.locale)
+		name, ok := lookupForward(scientificName, func(candidate string) (string, bool) {
+			return Lookup(candidate, st.locale)
+		})
 		if !ok && st.locale != localeFallback {
 			// Per-species fallback to English for species untranslated in the active locale.
-			name, ok = Lookup(scientificName, localeFallback)
+			name, ok = lookupForward(scientificName, func(candidate string) (string, bool) {
+				return Lookup(candidate, localeFallback)
+			})
 		}
 		if !ok {
 			name = ""

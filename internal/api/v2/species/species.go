@@ -391,14 +391,14 @@ func (c *Handler) getSpeciesInfo(ctx context.Context, scientificName string) (*S
 	// under each. Downstream lookups therefore try both rather than picking one.
 	matchedSci := detection.ExtractScientificName(matchedLabel)
 
-	// Secondary-model labels (bats, Perch) are scientific-only, so ParseSpeciesString
-	// reports CommonName == ScientificName for them. Treat that (and an empty common
-	// name) as "needs localizing" and resolve through the orchestrator's
-	// OpenFauna-authoritative resolver, passing the configured locale explicitly.
-	if commonName == "" || strings.EqualFold(commonName, matchedSci) {
-		if resolved := c.resolveEitherName(bn, matchedSci, scientificName); resolved != "" {
-			commonName = resolved
-		}
+	// Always prefer the orchestrator's OpenFauna-authoritative, locale-aware name over
+	// the label's own. Secondary-model labels (bats, Perch) are scientific-only, so they
+	// have no usable common name; and a legacy-named label such as BirdNET v2.4's
+	// "Accipiter gentilis" carries an English common name that would otherwise survive
+	// even though the locale has a translation under the current name ("Astur gentilis").
+	// The label's name is kept only when the resolver has nothing for either name.
+	if resolved := c.resolveEitherName(bn, matchedSci, scientificName); resolved != "" {
+		commonName = resolved
 	}
 
 	// Report the name the caller asked for. Echoing the matched label's name instead

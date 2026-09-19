@@ -109,6 +109,19 @@ func TestResolver_ResolvesFromSparseIndex_Embedded(t *testing.T) {
 		"fi and de must resolve to different names")
 }
 
+func TestResolver_CanonicalAliasUsesRequestedLocale_Embedded(t *testing.T) {
+	t.Parallel()
+
+	r := NewResolver()
+	require.NoError(t, r.Rebuild([]string{"Accipiter gentilis", "Astur gentilis"}, "fi"))
+	for _, scientific := range []string{"Accipiter gentilis", "Astur gentilis"} {
+		assert.Equal(t, "kanahaukka", r.Resolve(scientific, ""))
+		name, ok := r.ResolveLocal(scientific)
+		require.True(t, ok)
+		assert.Equal(t, "kanahaukka", name)
+	}
+}
+
 func TestResolver_OutOfSetSpecies_OnDemandFallback_Embedded(t *testing.T) {
 	t.Parallel()
 
