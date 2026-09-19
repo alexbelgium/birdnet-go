@@ -5753,11 +5753,16 @@
       "done": "Valmis",
       "reset": "Palauta",
       "panelTitle": "Sarakkeet",
+      "condensed": "Tiivis näkymä puhelimissa",
+      "condensedHelp": "Näyttää jokaisen lajin kahdella tiiviillä rivillä.",
       "show": "Näytä sarake {column}",
       "mandatory": "{column} näytetään aina",
       "moveUp": "Siirrä {column} ylös",
       "moveDown": "Siirrä {column} alas",
       "saveFailed": "Sarakeasettelua ei voitu tallentaa, joten edellinen asettelu palautettiin."
+    },
+    "condensed": {
+      "noRecording": "Tallennetta ei ole saatavilla"
     },
     "columns": {
       "species": "Laji",

@@ -5753,11 +5753,16 @@
       "done": "Fatto",
       "reset": "Ripristina",
       "panelTitle": "Colonne",
+      "condensed": "Vista compatta sui telefoni",
+      "condensedHelp": "Mostra ogni specie in due righe compatte.",
       "show": "Mostra la colonna {column}",
       "mandatory": "{column} è sempre visibile",
       "moveUp": "Sposta {column} in alto",
       "moveDown": "Sposta {column} in basso",
       "saveFailed": "Impossibile salvare la disposizione delle colonne: è stata ripristinata quella precedente."
+    },
+    "condensed": {
+      "noRecording": "Nessuna registrazione disponibile"
     },
     "columns": {
       "species": "Specie",

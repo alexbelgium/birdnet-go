@@ -24,13 +24,15 @@ func TestNormalizeSpeciesWorkspaceLayout(t *testing.T) {
 				{ID: "lastSeen", Visible: false},
 				{ID: "actions", Visible: false},
 			},
-			Sort: SpeciesWorkspaceSort{Column: "lastSeen", Direction: "asc"},
+			Sort:      SpeciesWorkspaceSort{Column: "lastSeen", Direction: "asc"},
+			Condensed: true,
 		})
 		assert.Equal(t, "lastSeen", got.Columns[0].ID)
 		assert.Equal(t, SpeciesWorkspaceColumn{ID: "species", Visible: true}, got.Columns[1])
 		assert.Equal(t, SpeciesWorkspaceColumn{ID: "actions", Visible: true}, got.Columns[2])
 		assert.Len(t, got.Columns, len(speciesWorkspaceColumns))
 		assert.Equal(t, SpeciesWorkspaceSort{Column: "lastSeen", Direction: "asc"}, got.Sort)
+		assert.True(t, got.Condensed)
 	})
 
 	t.Run("invalid sort falls back", func(t *testing.T) {

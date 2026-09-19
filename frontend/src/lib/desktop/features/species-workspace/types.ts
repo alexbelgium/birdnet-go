@@ -50,6 +50,7 @@ export interface LayoutColumn {
 export interface WorkspaceLayout {
   columns: LayoutColumn[];
   sort: { column: string; direction: 'asc' | 'desc' };
+  condensed: boolean;
 }
 
 export interface RangeScore {

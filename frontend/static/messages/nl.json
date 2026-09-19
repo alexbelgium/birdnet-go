@@ -5753,11 +5753,16 @@
       "done": "Klaar",
       "reset": "Herstellen",
       "panelTitle": "Kolommen",
+      "condensed": "Compacte weergave op telefoons",
+      "condensedHelp": "Toont elke soort op twee compacte regels.",
       "show": "Kolom {column} tonen",
       "mandatory": "{column} wordt altijd getoond",
       "moveUp": "{column} omhoog",
       "moveDown": "{column} omlaag",
       "saveFailed": "De kolomindeling kon niet worden opgeslagen, dus de vorige indeling is hersteld."
+    },
+    "condensed": {
+      "noRecording": "Geen opname beschikbaar"
     },
     "columns": {
       "species": "Soort",

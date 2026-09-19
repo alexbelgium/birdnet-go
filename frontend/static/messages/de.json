@@ -5753,11 +5753,16 @@
       "done": "Fertig",
       "reset": "Zurücksetzen",
       "panelTitle": "Spalten",
+      "condensed": "Kompakte Ansicht auf Smartphones",
+      "condensedHelp": "Zeigt jede Art in zwei kompakten Zeilen.",
       "show": "Spalte {column} anzeigen",
       "mandatory": "{column} wird immer angezeigt",
       "moveUp": "{column} nach oben verschieben",
       "moveDown": "{column} nach unten verschieben",
       "saveFailed": "Das Spaltenlayout konnte nicht gespeichert werden, daher wurde das vorherige Layout wiederhergestellt."
+    },
+    "condensed": {
+      "noRecording": "Keine Aufnahme verfügbar"
     },
     "columns": {
       "species": "Art",

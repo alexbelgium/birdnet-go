@@ -74,15 +74,21 @@ export function getColumn(id: string): ColumnDef | undefined {
 export const DEFAULT_LAYOUT: WorkspaceLayout = {
   columns: COLUMNS.map(c => ({ id: c.id, visible: c.visibleByDefault })),
   sort: { column: 'count', direction: 'desc' },
+  condensed: false,
 };
 
 /** Mirror of the server's NormalizeSpeciesWorkspaceLayout; also validates cached layouts. */
 export function normalizeLayout(input: unknown): WorkspaceLayout {
-  const out: WorkspaceLayout = { columns: [], sort: { ...DEFAULT_LAYOUT.sort } };
+  const out: WorkspaceLayout = {
+    columns: [],
+    sort: { ...DEFAULT_LAYOUT.sort },
+    condensed: false,
+  };
   // Cached or server data is untrusted: every field is checked before use.
   const source = (input ?? {}) as {
     columns?: unknown;
     sort?: { column?: unknown; direction?: unknown };
+    condensed?: unknown;
   };
   const seen = new Set<string>();
   const entries: unknown[] = Array.isArray(source.columns) ? source.columns : [];
@@ -100,6 +106,7 @@ export function normalizeLayout(input: unknown): WorkspaceLayout {
   if (typeof column === 'string' && byId.get(column)?.sortable) out.sort.column = column;
   const direction = source.sort?.direction;
   if (direction === 'asc' || direction === 'desc') out.sort.direction = direction;
+  out.condensed = source.condensed === true;
   return out;
 }
 

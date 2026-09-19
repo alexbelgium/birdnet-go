@@ -3,6 +3,7 @@ import { classifyTaxon } from '$lib/desktop/features/dashboard/utils/taxonFilter
 import { COLUMNS, DEFAULT_LAYOUT, neededGroups, normalizeLayout, visibleColumns } from './columns';
 import { deleteAllUnlocked } from './deleteSpecies';
 import { ebirdLanguage, ebirdSpeciesUrl } from './externalLinks';
+import { formatCompactCount } from './format';
 import { createRequestSlot, isAbortError } from './requestSlot';
 import { foldText, matchesSearch } from './search';
 import { sortRows } from './sort';
@@ -81,6 +82,7 @@ describe('taxon filter (shared classifier)', () => {
 describe('column layout', () => {
   it('defaults sort by count descending', () => {
     expect(DEFAULT_LAYOUT.sort).toEqual({ column: 'count', direction: 'desc' });
+    expect(DEFAULT_LAYOUT.condensed).toBe(false);
   });
 
   it('normalizes untrusted layouts like the server', () => {
@@ -92,11 +94,14 @@ describe('column layout', () => {
         { id: 'lastSeen', visible: false },
       ],
       sort: { column: 'bestRecording', direction: 'sideways' },
+      condensed: true,
     });
     expect(layout.columns[0]).toEqual({ id: 'lastSeen', visible: true });
     expect(layout.columns[1]).toEqual({ id: 'actions', visible: true });
     expect(layout.columns).toHaveLength(COLUMNS.length);
     expect(layout.sort).toEqual(DEFAULT_LAYOUT.sort);
+    expect(layout.condensed).toBe(true);
+    expect(normalizeLayout({ condensed: 'yes' }).condensed).toBe(false);
     expect(normalizeLayout('garbage')).toEqual(DEFAULT_LAYOUT);
   });
 
@@ -117,6 +122,13 @@ describe('column layout', () => {
     expect(neededGroups(withRange).has('range')).toBe(true);
     expect(neededGroups(withRange).has('stats')).toBe(false);
     expect(neededGroups(withRange).has('best')).toBe(false);
+  });
+});
+
+describe('formatCompactCount', () => {
+  it('uses a locale-aware compact value with one fractional digit', () => {
+    expect(formatCompactCount(64_000)).toBe('64K');
+    expect(formatCompactCount(1_200_000)).toBe('1.2M');
   });
 });
 

@@ -5,6 +5,7 @@
   import { ArrowLeft, ExternalLink, LineChart, ListChecks, Lock } from '@lucide/svelte';
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
   import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
+  import ReanalyzeModal from '$lib/desktop/components/modals/ReanalyzeModal.svelte';
   import SpeciesThumbnail from '$lib/desktop/components/modals/SpeciesThumbnail.svelte';
   import AudioPlayer from '$lib/desktop/components/media/AudioPlayer.svelte';
   import Pagination from '$lib/desktop/components/ui/Pagination.svelte';
@@ -132,6 +133,7 @@
     onMarkFalsePositive: r => void actions.handleMarkFalsePositive(r),
     onToggleLock: r => actions.handleToggleLock(r),
     onDelete: r => actions.handleDelete(r),
+    onReanalyze: r => actions.handleReanalyze(r),
   };
 
   function update(next: Partial<typeof view>, replace = false) {
@@ -534,6 +536,24 @@
     {displayName}
     selectedDate={getLocalDateString()}
     onClose={() => (showGraph = false)}
+  />
+{/if}
+
+<!-- Reanalysis runs in place (from #62); mounted only while open so the shared
+     Modal can move focus into it. A correction or deletion refreshes the page. -->
+{#if actions.reanalyzeTarget}
+  <ReanalyzeModal
+    isOpen={true}
+    detection={actions.reanalyzeTarget}
+    onClose={() => actions.closeReanalyze()}
+    onCorrected={() => {
+      actions.closeReanalyze();
+      refresh();
+    }}
+    onDeleted={() => {
+      actions.closeReanalyze();
+      refresh();
+    }}
   />
 {/if}
 
