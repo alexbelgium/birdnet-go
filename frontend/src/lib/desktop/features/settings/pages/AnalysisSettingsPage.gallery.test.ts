@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
+import type { Writable } from 'svelte/store';
 import type { CatalogEntry } from '$lib/types/models';
 import { CHANNEL_STABLE } from '$lib/utils/variantSelection';
 
@@ -83,7 +84,7 @@ vi.mock('$lib/utils/api', async () => {
 
 import AnalysisSettingsPage from './AnalysisSettingsPage.svelte';
 import * as modelsApi from '$lib/utils/modelsApi';
-import { settingsStore } from '$lib/stores/settings';
+import { settingsStore, settingsActions, realtimeSettings } from '$lib/stores/settings';
 import { toastActions } from '$lib/stores/toast';
 import { t } from '$lib/i18n';
 import { navigation } from '$lib/stores/navigation.svelte';
@@ -479,5 +480,43 @@ describe('AnalysisSettingsPage model gallery optimize + permanent card', () => {
     // built-in badge and the baseline hardware chip. (The review dialog, also in the
     // DOM, renders it again for the offer's from-variant, so assert a lower bound.)
     expect(screen.getAllByText('analysis.gallery.builtIn').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('AnalysisSettingsPage first-daily consensus whitelist', () => {
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.mocked(modelsApi.fetchCatalog).mockResolvedValue({ catalog: [] });
+    vi.mocked(modelsApi.fetchInstalled).mockResolvedValue([]);
+    vi.mocked(modelsApi.fetchModelRegions).mockRejectedValue(new Error('no regions in test'));
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: { enabled: true, whitelist: ['Great Tit'] },
+    });
+    settingsStore.update(s => ({
+      ...s,
+      originalData: {
+        ...s.originalData,
+        realtime: {
+          firstDailyConsensus: { enabled: true, whitelist: ['Great Tit'] },
+        },
+      },
+    }));
+  });
+
+  it('renders the saved whitelist and writes additions with the existing settings object', async () => {
+    render(AnalysisSettingsPage);
+
+    expect(await screen.findByText('Great Tit')).toBeInTheDocument();
+    const input = screen.getByLabelText('Add an exempt species');
+    await fireEvent.input(input, { target: { value: 'Parus major' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add species' }));
+
+    expect(settingsActions.updateSection).toHaveBeenCalledWith('realtime', {
+      firstDailyConsensus: {
+        enabled: true,
+        whitelist: ['Great Tit', 'Parus major'],
+      },
+    });
   });
 });

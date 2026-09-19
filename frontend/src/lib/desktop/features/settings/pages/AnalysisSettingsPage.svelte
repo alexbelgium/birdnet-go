@@ -57,6 +57,7 @@
     type FilterLevel,
   } from '$lib/desktop/components/forms/FalsePositiveFilterControl.svelte';
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import SpeciesListEditor from '$lib/desktop/components/forms/SpeciesListEditor.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import FlagIcon, { type FlagLocale } from '$lib/desktop/components/ui/FlagIcon.svelte';
@@ -91,6 +92,10 @@
   import { safeArrayAccess } from '$lib/utils/security';
   import { loggers } from '$lib/utils/logger';
   import { t } from '$lib/i18n';
+  import { normalizeForLookup } from '$lib/utils/speciesNames';
+  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
+  import { mapSpeciesListResponse, type SpeciesListResponse } from '$lib/utils/speciesPredictions';
+  import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import {
     Download,
     Trash2,
@@ -303,6 +308,10 @@
     }
   );
   let falsePositiveFilter = $derived($realtimeSettings?.falsePositiveFilter ?? { level: 0 });
+  let firstDailyConsensus = $derived({
+    enabled: $realtimeSettings?.firstDailyConsensus?.enabled ?? false,
+    whitelist: $realtimeSettings?.firstDailyConsensus?.whitelist ?? [],
+  });
   let bat = $derived(
     $batSettings ?? {
       enabled: false,
@@ -624,6 +633,53 @@
       );
     }
   }
+
+  function updateFirstDailyConsensusEnabled(enabled: boolean) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { ...firstDailyConsensus, enabled },
+    });
+  }
+
+  function updateFirstDailyConsensusWhitelist(whitelist: string[]) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { ...firstDailyConsensus, whitelist },
+    });
+  }
+
+  let speciesListLoading = $state(false);
+  let speciesListLoaded = false;
+  let speciesPredictions = $state<string[]>([]);
+  let speciesScientificMap = $state(new Map<string, string>());
+
+  function localizeSpeciesLabel(value: string): string {
+    return localizeSpeciesName(speciesScientificMap.get(normalizeForLookup(value)), value);
+  }
+
+  async function loadSpeciesPredictions() {
+    speciesListLoading = true;
+    try {
+      const data = await api.get<SpeciesListResponse>('/api/v2/range/species/list');
+      const mapped = mapSpeciesListResponse(data);
+      speciesPredictions = mapped.values;
+      speciesScientificMap = mapped.scientificNames;
+    } catch (err) {
+      logger.warn('Failed to load species list for first-daily consensus', err, {
+        component: 'AnalysisSettingsPage',
+        action: 'loadSpeciesPredictions',
+      });
+      speciesPredictions = [];
+      speciesScientificMap = new Map();
+    } finally {
+      speciesListLoading = false;
+      speciesListLoaded = true;
+    }
+  }
+
+  $effect(() => {
+    if (firstDailyConsensus.enabled && !speciesListLoaded && !speciesListLoading) {
+      loadSpeciesPredictions();
+    }
+  });
 
   // ── Range filter state and functions ──────────────────────────────────
   interface RangeFilterSpecies {
@@ -1491,11 +1547,16 @@
         threshold: store.originalData.birdnet?.threshold,
         locale: store.originalData.birdnet?.locale,
         fpFilter: store.originalData.realtime?.falsePositiveFilter?.level ?? 0,
+        firstDailyConsensus: store.originalData.realtime?.firstDailyConsensus?.enabled ?? false,
+        firstDailyConsensusWhitelist:
+          store.originalData.realtime?.firstDailyConsensus?.whitelist ?? [],
       }}
       currentData={{
         threshold: birdnet?.threshold,
         locale: birdnet?.locale,
         fpFilter: falsePositiveFilter.level,
+        firstDailyConsensus: firstDailyConsensus.enabled,
+        firstDailyConsensusWhitelist: firstDailyConsensus.whitelist,
       }}
     >
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1564,6 +1625,41 @@
           <span>{t('settings.main.sections.falsePositiveFilter.hardwareNote')}</span>
         </SettingsNote>
       {/if}
+
+      <!--
+        First Daily Detection Consensus. Copy is intentionally hard-coded English
+        rather than a t() key: this is a fork-local feature, and routing it through
+        i18n would mean editing en.json, all 15 other locale catalogues and the
+        generated types on every upstream sync. Keeping it self-contained trades
+        translation for a clean merge.
+      -->
+      <div class="mt-6">
+        <Checkbox
+          checked={firstDailyConsensus.enabled}
+          label="Require two models for a species' first detection of the day"
+          disabled={store.isLoading || store.isSaving}
+          helpText="Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting. Only applies to species that at least two active models analyzing an audio source can identify, except species on the whitelist. Non-bird species, non-animal sounds, species only one model knows, and setups running a single bird model are not affected."
+          onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
+        />
+
+        <SpeciesListEditor
+          species={firstDailyConsensus.whitelist}
+          disabled={!firstDailyConsensus.enabled || store.isLoading || store.isSaving}
+          predictions={speciesPredictions}
+          predictionsLoading={speciesListLoading}
+          localizeLabel={localizeSpeciesLabel}
+          listLabel="Species exempt from first-daily consensus"
+          addLabel="Add an exempt species"
+          addPlaceholder="Type a common or scientific name"
+          addHelpText="Whitelisted species always use the normal single-model threshold behavior."
+          addButtonText="Add species"
+          hasChanges={hasSettingsChanged(
+            store.originalData.realtime?.firstDailyConsensus?.whitelist ?? [],
+            firstDailyConsensus.whitelist
+          )}
+          onSpeciesChange={updateFirstDailyConsensusWhitelist}
+        />
+      </div>
     </SettingsSection>
 
     <!-- 2. Perch v2 threshold override (only when the Perch model is installed) -->
