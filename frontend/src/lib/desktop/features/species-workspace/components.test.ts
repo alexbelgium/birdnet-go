@@ -14,6 +14,7 @@ vi.mock('./api', () => ({
   fetchMemberships: vi.fn(),
   fetchRangeScores: vi.fn(),
   fetchBestRecordings: vi.fn(),
+  fetchDetection: vi.fn(),
   putMembership: vi.fn(),
   fetchRecordings: vi.fn(),
   fetchLayout: vi.fn(),
@@ -391,6 +392,31 @@ describe('SpeciesDetail', () => {
     expect(await screen.findByRole('dialog', { name: 'Reanalyze this clip' })).toBeInTheDocument();
     await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalled());
     expect(vi.mocked(reanalyzeDetection).mock.calls[0]?.[0]).toBe(1);
+  });
+
+  it('acts on the best recording from its own action menu', async () => {
+    const { reanalyzeDetection } = await import('$lib/utils/reanalyzeDetection');
+    vi.mocked(api.fetchBestRecordings).mockResolvedValue({
+      'Turdus merula': { id: 9, confidence: 0.95, locked: false },
+    });
+    vi.mocked(api.fetchDetection).mockResolvedValue(recording(9));
+    render(SpeciesDetail, {
+      props: {
+        scientificName: 'Turdus merula',
+        query: '',
+        onBack: vi.fn(),
+        onQueryChange: vi.fn(),
+      },
+    });
+    const section = await screen.findByRole('region', { name: 'speciesWorkspace.best.title' });
+    const menu = await within(section).findByRole('button', { name: /Actions/i });
+    expect(api.fetchDetection).toHaveBeenCalledWith(9, expect.anything());
+    await fireEvent.click(menu);
+    await fireEvent.click(
+      await screen.findByRole('menuitem', { name: 'dashboard.recentDetections.actions.reanalyze' })
+    );
+    await waitFor(() => expect(reanalyzeDetection).toHaveBeenCalled());
+    expect(vi.mocked(reanalyzeDetection).mock.calls.at(-1)?.[0]).toBe(9);
   });
 
   it('clears the selection when Locked only is toggled', async () => {

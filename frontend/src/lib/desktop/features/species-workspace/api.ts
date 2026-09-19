@@ -60,6 +60,11 @@ export async function fetchRangeScores(signal?: AbortSignal): Promise<Map<string
   return out;
 }
 
+/** One detection in the shared detection shape, for the action menu of the best recording. */
+export function fetchDetection(id: number, signal?: AbortSignal) {
+  return fetchWithCSRF<Detection>(`/api/v2/detections/${id}`, { signal });
+}
+
 export function fetchBestRecordings(names: string[], signal?: AbortSignal) {
   const query = new URLSearchParams();
   for (const name of names) query.append('species', name);

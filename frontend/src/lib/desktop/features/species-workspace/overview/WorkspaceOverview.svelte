@@ -400,9 +400,11 @@
 {/if}
 
 {#if deleteTarget}
+  {@const deletedName = deleteTarget.scientificName}
+  <!-- Only the deleted species changed: patch its row instead of reloading every tier. -->
   <DeleteSpeciesModal
     target={deleteTarget}
     onClose={() => (deleteTarget = null)}
-    onChanged={refresh}
+    onChanged={() => void data.refreshSpecies(deletedName)}
   />
 {/if}

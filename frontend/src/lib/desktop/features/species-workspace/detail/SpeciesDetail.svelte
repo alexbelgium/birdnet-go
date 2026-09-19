@@ -1,6 +1,6 @@
 <!-- Page 2: all recordings of one species. -->
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { ArrowLeft, ExternalLink, LineChart, ListChecks, Lock } from '@lucide/svelte';
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
@@ -8,6 +8,7 @@
   import ReanalyzeModal from '$lib/desktop/components/modals/ReanalyzeModal.svelte';
   import SpeciesThumbnail from '$lib/desktop/components/modals/SpeciesThumbnail.svelte';
   import AudioPlayer from '$lib/desktop/components/media/AudioPlayer.svelte';
+  import ActionMenu from '$lib/desktop/components/ui/ActionMenu.svelte';
   import Pagination from '$lib/desktop/components/ui/Pagination.svelte';
   import SpeciesHistoryModal from '$lib/desktop/features/dashboard/components/daily-summary/SpeciesHistoryModal.svelte';
   import { useDetectionActions } from '$lib/desktop/features/detections/composables/useDetectionActions.svelte';
@@ -18,6 +19,7 @@
     setExcluded,
   } from '$lib/stores/excludedSpecies.svelte';
   import { toastActions } from '$lib/stores/toast';
+  import type { Detection } from '$lib/types/detection.types';
   import { getLocalDateString } from '$lib/utils/date';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
@@ -45,6 +47,7 @@
   const data = createWorkspaceData();
   const listSlot = createRequestSlot();
   const infoSlot = createRequestSlot();
+  const bestSlot = createRequestSlot();
 
   const view = $derived(parseDetailQuery(query));
   let info = $state<WorkspaceSpecies | null>(null);
@@ -56,17 +59,37 @@
   const selected = new SvelteSet<number>();
   let showGraph = $state(false);
   let observationsHref = $state('');
+  // Full detection behind the best recording, for its action menu.
+  let bestDetection = $state<Detection | null>(null);
 
   const displayName = $derived(localizeSpeciesName(scientificName, info?.commonName));
   const stat = $derived(data.stats.get(scientificName));
   const best = $derived(data.best.get(scientificName));
   const ebirdHref = $derived(info ? ebirdSpeciesUrl(info.speciesCode, getLocale()) : null);
 
+  // Stats are loaded for this species only; the whole-database stats are not needed here.
   $effect(() => {
     const name = scientificName;
-    data.ensure(new Set(['stats', 'memberships']));
-    data.requestBest([name]);
+    data.ensure(new Set(['memberships']));
+    // Untracked: the refresh reads and writes the stores this effect must not follow.
+    untrack(() => void data.refreshSpecies(name));
     void observationsUrl(name).then(url => (observationsHref = url));
+  });
+
+  $effect(() => {
+    const id = best?.id;
+    bestDetection = null;
+    if (id == null) {
+      bestSlot.abort();
+      return;
+    }
+    bestSlot
+      .run(signal => api.fetchDetection(id, signal))
+      .then(detection => (bestDetection = detection))
+      .catch(error => {
+        // Without the detection the best recording stays playable, just without actions.
+        if (!isAbortError(error)) bestDetection = null;
+      });
   });
 
   $effect(() => {
@@ -108,15 +131,15 @@
   onDestroy(() => {
     listSlot.abort();
     infoSlot.abort();
+    bestSlot.abort();
     data.dispose();
   });
 
   void hydrateExcludedSpecies();
 
   function refresh() {
-    data.invalidate();
-    data.ensure(new Set(['stats', 'memberships']));
-    data.requestBest([scientificName]);
+    void data.refreshSpecies(scientificName);
+    data.retry('memberships');
     selected.clear();
     refreshToken++;
   }
@@ -281,6 +304,19 @@
             >
           {/if}
           <span>{formatPercent(best.confidence)}</span>
+          {#if bestDetection}
+            <ActionMenu
+              className="ml-auto"
+              detection={bestDetection}
+              onReview={() => bestDetection && handlers.onReview(bestDetection)}
+              onReanalyze={() => bestDetection && handlers.onReanalyze(bestDetection)}
+              onMarkCorrect={() => bestDetection && handlers.onMarkCorrect(bestDetection)}
+              onMarkFalsePositive={() =>
+                bestDetection && handlers.onMarkFalsePositive(bestDetection)}
+              onToggleLock={() => bestDetection && handlers.onToggleLock(bestDetection)}
+              onDelete={() => bestDetection && handlers.onDelete(bestDetection)}
+            />
+          {/if}
         </p>
         <AudioPlayer
           audioUrl={buildAppUrl(`/api/v2/audio/${best.id}`)}

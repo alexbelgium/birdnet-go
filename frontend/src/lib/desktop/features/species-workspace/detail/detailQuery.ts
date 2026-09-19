@@ -1,5 +1,5 @@
 /** URL state of the species page: page, sort and the locked-only filter. */
-import type { WorkspaceRecording } from '../api';
+import type { Detection } from '$lib/types/detection.types';
 import type { WorkspaceSort } from '../types';
 
 export const DEFAULT_RECORDING_SORT: WorkspaceSort = 'confidence_desc';
@@ -38,10 +38,10 @@ export function detailParams(q: DetailQuery): Record<string, string | undefined>
 
 /** Row action callbacks for a recording. */
 export interface RecordingHandlers {
-  onReview: (_r: WorkspaceRecording) => void;
-  onReanalyze: (_r: WorkspaceRecording) => void;
-  onMarkCorrect: (_r: WorkspaceRecording) => void;
-  onMarkFalsePositive: (_r: WorkspaceRecording) => void;
-  onToggleLock: (_r: WorkspaceRecording) => void;
-  onDelete: (_r: WorkspaceRecording) => void;
+  onReview: (_r: Detection) => void;
+  onReanalyze: (_r: Detection) => void;
+  onMarkCorrect: (_r: Detection) => void;
+  onMarkFalsePositive: (_r: Detection) => void;
+  onToggleLock: (_r: Detection) => void;
+  onDelete: (_r: Detection) => void;
 }

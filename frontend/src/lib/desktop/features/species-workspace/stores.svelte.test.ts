@@ -158,6 +158,93 @@ describe('workspace data tiers', () => {
   });
 });
 
+describe('single-species refresh', () => {
+  const row = (name: string, total: number) => ({
+    scientificName: name,
+    commonName: name,
+    speciesCode: '',
+    total,
+    locked: 0,
+    firstSeen: '',
+    lastSeen: '',
+  });
+
+  it('patches only the changed species and skips unaffected groups', async () => {
+    const api = fakeApi({
+      fetchSpecies: vi.fn(async (_signal?: AbortSignal, name?: string) =>
+        name ? [row(name, 1)] : [row('Turdus merula', 3), row('Strix aluco', 5)]
+      ),
+      fetchStats: vi.fn(async (_signal?: AbortSignal, name?: string) =>
+        name
+          ? [{ scientificName: name, correct: 0, falsePositive: 0, maxConfidence: null }]
+          : [{ scientificName: 'Strix aluco', correct: 2, falsePositive: 1, maxConfidence: 0.9 }]
+      ),
+    });
+    const data = createWorkspaceData(api);
+    data.ensure(new Set(['inventory', 'stats', 'memberships', 'range']));
+    data.requestBest(['Turdus merula', 'Strix aluco']);
+    await tick();
+    vi.mocked(api.fetchBestRecordings).mockClear();
+
+    await data.refreshSpecies('Turdus merula');
+    await tick();
+    expect(api.fetchSpecies).toHaveBeenLastCalledWith(expect.anything(), 'Turdus merula');
+    expect(api.fetchStats).toHaveBeenLastCalledWith(expect.anything(), 'Turdus merula');
+    expect(api.fetchMemberships).toHaveBeenCalledOnce();
+    expect(api.fetchRangeScores).toHaveBeenCalledOnce();
+    expect(api.fetchBestRecordings).toHaveBeenCalledExactlyOnceWith(
+      ['Turdus merula'],
+      expect.anything()
+    );
+    expect(data.species.map(s => [s.scientificName, s.total])).toEqual([
+      ['Turdus merula', 1],
+      ['Strix aluco', 5],
+    ]);
+    expect(data.stats.get('Strix aluco')?.falsePositive).toBe(1);
+    expect(data.status.inventory).toBe('ready');
+  });
+
+  it('drops a species whose detections are all gone', async () => {
+    const api = fakeApi();
+    const data = createWorkspaceData(api);
+    data.ensure(new Set(['inventory']));
+    await tick();
+    vi.mocked(api.fetchSpecies).mockResolvedValueOnce([]);
+    await data.refreshSpecies('Turdus merula');
+    expect(data.species).toEqual([]);
+  });
+
+  it('refetches a best recording whose lookup was in flight', async () => {
+    const first = deferred<Record<string, null>>();
+    const api = fakeApi({
+      fetchBestRecordings: vi
+        .fn()
+        .mockReturnValueOnce(first.promise)
+        .mockResolvedValue({ 'Turdus merula': { id: 7, confidence: 0.8, locked: false } }),
+    });
+    const data = createWorkspaceData(api);
+    data.requestBest(['Turdus merula']);
+    await data.refreshSpecies('Turdus merula');
+    first.resolve({ 'Turdus merula': null });
+    await tick();
+    await tick();
+    expect(api.fetchBestRecordings).toHaveBeenCalledTimes(2);
+    expect(data.best.get('Turdus merula')).toEqual({ id: 7, confidence: 0.8, locked: false });
+  });
+
+  it('falls back to a full reload when the scoped request fails', async () => {
+    const api = fakeApi();
+    const data = createWorkspaceData(api);
+    data.ensure(new Set(['stats']));
+    await tick();
+    vi.mocked(api.fetchStats).mockRejectedValueOnce(new Error('boom'));
+    await data.refreshSpecies('Turdus merula');
+    await tick();
+    expect(api.fetchStats).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(api.fetchStats).mock.calls[2]).toEqual([expect.anything()]);
+  });
+});
+
 describe('layout store', () => {
   const custom: WorkspaceLayout = {
     columns: DEFAULT_LAYOUT.columns.map(c => (c.id === 'range' ? { ...c, visible: true } : c)),
