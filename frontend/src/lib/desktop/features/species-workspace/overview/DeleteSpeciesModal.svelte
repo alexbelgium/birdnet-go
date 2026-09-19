@@ -40,7 +40,10 @@
     falsePositive = null;
     progress = null;
     errorMessage = '';
-    Promise.all([fetchSpecies(loadController.signal, name), fetchStats(loadController.signal)])
+    Promise.all([
+      fetchSpecies(loadController.signal, name),
+      fetchStats(loadController.signal, name),
+    ])
       .then(([rows, stats]) => {
         row = rows[0] ?? null;
         falsePositive = stats.find(s => s.scientificName === name)?.falsePositive ?? 0;
