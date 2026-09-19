@@ -284,6 +284,7 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 		// the per-detection filter and the detection-card toggle match. Idempotent for
 		// an already-canonical list, so this does not spuriously trigger a rebuild.
 		updated.Realtime.Species.Exclude = c.canonicalizeExcludeList(updated.Realtime.Species.Exclude)
+		updated.Realtime.FirstDailyConsensus.Whitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.Whitelist)
 
 		// Ensure LocationConfigured is set when birdnet coordinates are present.
 		// Backward compatibility with older frontends that don't send the flag.
@@ -488,6 +489,7 @@ func (c *Controller) UpdateSectionSettings(ctx echo.Context) error {
 		// range-filter rebuild via rangeFilterSettingsChanged.
 		if strings.EqualFold(section, SettingsSectionRealtime) || strings.EqualFold(section, SettingsSectionSpecies) {
 			updated.Realtime.Species.Exclude = c.canonicalizeExcludeList(updated.Realtime.Species.Exclude)
+		updated.Realtime.FirstDailyConsensus.Whitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.Whitelist)
 		}
 
 		// Validate the clone before publishing. No rollback needed on validation
