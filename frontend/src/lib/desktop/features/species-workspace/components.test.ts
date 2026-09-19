@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import WorkspaceOverview from './overview/WorkspaceOverview.svelte';
 import ColumnEditor from './overview/ColumnEditor.svelte';
 import SpeciesDetail from './detail/SpeciesDetail.svelte';
+import DeleteSpeciesModal from './overview/DeleteSpeciesModal.svelte';
 import * as api from './api';
 import { DEFAULT_LAYOUT } from './columns';
 import { LAYOUT_CACHE_KEY } from './layout.svelte';
@@ -272,6 +273,38 @@ describe('WorkspaceOverview', () => {
     const table = screen.getByRole('table');
     await fireEvent.click(within(table).getAllByRole('link')[0] as HTMLElement);
     expect(onOpenSpecies).toHaveBeenCalledWith('Pipistrellus pipistrellus');
+  });
+});
+
+describe('DeleteSpeciesModal', () => {
+  it('shows a progress bar from the start and advances it per chunk', async () => {
+    vi.mocked(api.fetchSpecies).mockResolvedValue([SPECIES[0] as (typeof SPECIES)[number]]);
+    let release: (_v: Awaited<ReturnType<typeof api.deleteSpeciesChunk>>) => void = () => {};
+    vi.mocked(api.deleteSpeciesChunk)
+      .mockImplementationOnce(() => new Promise(resolve => (release = resolve)))
+      .mockResolvedValueOnce({ deleted: 24, locked: 0, reassigned: 0, remaining: 0 });
+    const onChanged = vi.fn();
+    render(DeleteSpeciesModal, {
+      props: {
+        target: { scientificName: 'Turdus merula', displayName: 'Blackbird' },
+        onClose: vi.fn(),
+        onChanged,
+      },
+    });
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'speciesWorkspace.delete.confirm' })
+    );
+    // 48 deletable (50 total, 2 locked): the bar is there before the first chunk returns.
+    const bar = await screen.findByRole('progressbar');
+    expect(bar).toHaveAttribute('value', '0');
+    expect(bar).toHaveAttribute('max', '48');
+    expect(screen.getByText('0%')).toBeInTheDocument();
+
+    release({ deleted: 24, locked: 0, reassigned: 0, remaining: 24 });
+    await waitFor(() => expect(screen.getByRole('progressbar')).toHaveAttribute('value', '48'));
+    expect(screen.getByText('100%')).toBeInTheDocument();
+    expect(await screen.findByText('speciesWorkspace.delete.done')).toBeInTheDocument();
+    expect(onChanged).toHaveBeenCalledOnce();
   });
 });
 

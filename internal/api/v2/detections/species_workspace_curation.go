@@ -175,13 +175,13 @@ func (c *Handler) DeleteWorkspaceSpeciesChunk(ctx echo.Context) error {
 	if resp.Deleted > 0 {
 		c.invalidateDetectionCache()
 	}
-	if c.SFS != nil {
-		for _, d := range chunk.Deleted {
-			if d.ClipName != "" {
-				c.removeDetectionFiles(d.ClipName)
-			}
+	clipNames := make([]string, 0, len(chunk.Deleted))
+	for _, d := range chunk.Deleted {
+		if d.ClipName != "" {
+			clipNames = append(clipNames, d.ClipName)
 		}
 	}
+	c.removeClipFiles(clipNames)
 	c.LogInfoIfEnabled("Species workspace delete chunk",
 		logger.String("species", req.ScientificName), logger.Int("deleted", resp.Deleted),
 		logger.Int("locked", resp.Locked), logger.Int("reassigned", resp.Reassigned),

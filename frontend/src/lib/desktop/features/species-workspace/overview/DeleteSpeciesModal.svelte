@@ -8,7 +8,7 @@
   import { t } from '$lib/i18n';
   import { fetchSpecies, fetchStats } from '../api';
   import { deleteAllUnlocked, SpeciesDeleteError, type DeleteProgress } from '../deleteSpecies';
-  import { formatCount } from '../format';
+  import { formatCount, formatPercent } from '../format';
   import { isAbortError } from '../requestSlot';
   import type { WorkspaceSpecies } from '../types';
 
@@ -30,6 +30,10 @@
   let controller: AbortController | null = null;
 
   const deletable = $derived(row ? Math.max(row.total - row.locked, 0) : 0);
+  // The bar's end: the confirmed count, grown if more detections arrived meanwhile.
+  const progressMax = $derived(
+    progress ? Math.max(deletable, progress.deleted + progress.remaining, 1) : 1
+  );
 
   $effect(() => {
     if (!target) return;
@@ -63,6 +67,8 @@
     if (!target) return;
     controller = new AbortController();
     phase = 'running';
+    // Show the bar at 0% right away instead of waiting for the first chunk.
+    progress = { deleted: 0, locked: 0, reassigned: 0, remaining: deletable };
     try {
       progress = await deleteAllUnlocked(target.scientificName, {
         signal: controller.signal,
@@ -117,22 +123,26 @@
     {/if}
 
     {#if progress && (phase === 'running' || phase === 'done' || phase === 'error')}
-      <div aria-live="polite">
+      <div class="space-y-1">
+        <div class="flex items-baseline justify-between gap-2 text-sm">
+          <span role="status" aria-live="polite">
+            {phase === 'running' ? t('speciesWorkspace.delete.running') : ''}
+            {t('speciesWorkspace.delete.progress', {
+              deleted: formatCount(progress.deleted),
+              locked: formatCount(progress.locked + (row?.locked ?? 0)),
+            })}
+          </span>
+          <span class="font-medium tabular-nums"
+            >{formatPercent(Math.min(progress.deleted / progressMax, 1))}</span
+          >
+        </div>
         <progress
           class="progress progress-error w-full"
           value={progress.deleted}
-          max={Math.max(deletable, progress.deleted + progress.remaining, 1)}
+          max={progressMax}
           aria-label={t('speciesWorkspace.delete.progressLabel')}
         ></progress>
-        <p class="text-sm">
-          {t('speciesWorkspace.delete.progress', {
-            deleted: formatCount(progress.deleted),
-            locked: formatCount(progress.locked + (row?.locked ?? 0)),
-          })}
-        </p>
       </div>
-    {:else if phase === 'running'}
-      <p role="status" aria-live="polite">{t('speciesWorkspace.delete.running')}</p>
     {/if}
 
     {#if phase === 'done'}

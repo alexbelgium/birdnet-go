@@ -362,3 +362,47 @@ func TestWorkspaceLayout(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 	assert.True(t, response.Condensed)
 }
+
+func TestRemoveClipFiles(t *testing.T) {
+	t.Parallel()
+	_, h := newWorkspaceTest(t, mocks.NewMockInterface(t))
+	exportDir := h.CurrentSettings().Realtime.Audio.Export.Path
+	sfs, err := securefs.New(exportDir)
+	require.NoError(t, err)
+	h.SFS = sfs
+	day := filepath.Join(exportDir, "2025", "05")
+	other := filepath.Join(exportDir, "2025", "06")
+	require.NoError(t, os.MkdirAll(day, 0o750))
+	require.NoError(t, os.MkdirAll(other, 0o750))
+	files := map[string]bool{ // path -> removed
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z.wav"):               true,
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_514px.png"):         true,
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_1026px-bat-v2.png"): true,
+		filepath.Join(other, "strix_aluco_70p_20250601T220000Z.wav"):               true,
+		filepath.Join(other, "strix_aluco_70p_20250601T220000Z_258px.png"):         true,
+		// A clip whose name only shares the deleted clip's prefix stays.
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_2.wav"):       false,
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_2_514px.png"): false,
+		// An unknown width is not a spectrogram render.
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_123px.png"): false,
+	}
+	for path := range files {
+		require.NoError(t, os.WriteFile(path, []byte("x"), 0o600))
+	}
+
+	h.removeClipFiles([]string{
+		"2025/05/turdus_merula_80p_20250501T060000Z.wav",
+		"2025/06/strix_aluco_70p_20250601T220000Z.wav",
+		"2025/07/already_gone.wav",
+		"../escape.wav",
+	})
+
+	for path, removed := range files {
+		_, err := os.Stat(path)
+		if removed {
+			assert.True(t, os.IsNotExist(err), "%s should be removed", path)
+		} else {
+			assert.NoError(t, err, "%s should be kept", path)
+		}
+	}
+}
