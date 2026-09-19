@@ -32,8 +32,9 @@ export function fetchSpecies(signal?: AbortSignal, scientificName?: string) {
   return fetchWithCSRF<WorkspaceSpecies[]>(`${BASE}/species${query}`, { signal });
 }
 
-export function fetchStats(signal?: AbortSignal) {
-  return fetchWithCSRF<WorkspaceSpeciesStats[]>(`${BASE}/species/stats`, { signal });
+export function fetchStats(signal?: AbortSignal, scientificName?: string) {
+  const query = scientificName ? `?species=${encodeURIComponent(scientificName)}` : '';
+  return fetchWithCSRF<WorkspaceSpeciesStats[]>(`${BASE}/species/stats${query}`, { signal });
 }
 
 export function fetchMemberships(signal?: AbortSignal) {
