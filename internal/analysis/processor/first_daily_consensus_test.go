@@ -2,10 +2,12 @@ package processor
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/conf"
@@ -201,6 +203,21 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 	}
 }
 
+func TestCountConfirmingModels_ActionOnlyConfigUsesGlobalThreshold(t *testing.T) {
+	t.Parallel()
+
+	settings := newConsensusSettings()
+	settings.Realtime.Species.Config = map[string]conf.SpeciesConfig{
+		"great tit": {Actions: []conf.SpeciesAction{{Type: "ExecuteCommand"}}},
+	}
+	item := newConsensusDetection(birdNETModel, "", map[string]float64{
+		birdNETModel:                 0.8,
+		classifier.RegistryIDPerchV2: 0.3,
+	})
+
+	assert.Equal(t, 1, (&Processor{}).countConfirmingModels(settings, item))
+}
+
 func TestShouldDiscardFirstDailyDetection_Whitelist(t *testing.T) {
 	t.Parallel()
 
@@ -274,21 +291,28 @@ func TestShouldDiscardFirstDailyDetection_DynamicThreshold(t *testing.T) {
 	}
 }
 
-// TestNoteAcceptedDetection verifies that an approved detection is remembered
-// immediately, so the next detection of that species skips the rule without
-// waiting for asynchronous persistence.
-func TestNoteAcceptedDetection(t *testing.T) {
-	t.Parallel()
+func TestFirstDailyConsensusDefersApprovalUntilNextCycle(t *testing.T) {
+	for _, approvalFirst := range []bool{false, true} {
+		t.Run(map[bool]string{false: "gate first", true: "approval first"}[approvalFirst], func(t *testing.T) {
+			p := &Processor{Ds: mocks.NewMockInterface(t)}
+			markSpeciesShared(p, true)
+			markMemo(p, false)
+			item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
 
-	p := &Processor{}
-	markSpeciesShared(p, true)
-	item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
-	markMemo(p, false)
+			if approvalFirst {
+				p.noteAcceptedDetection(item)
+			}
+			discard, _ := p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
+			if !approvalFirst {
+				p.noteAcceptedDetection(item)
+			}
+			assert.True(t, discard, "same-cycle verdict must not depend on map iteration order")
 
-	p.noteAcceptedDetection(item)
-
-	discard, _ := p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
-	assert.False(t, discard, "the species was already accepted today")
+			p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+			discard, _ = p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
+			assert.False(t, discard, "the approval must become visible next cycle")
+		})
+	}
 }
 
 // TestFirstDailyConsensusRetainsTwoDays pins the midnight behaviour. Detections
@@ -444,8 +468,6 @@ func TestFirstDailyConsensusRechecksEligibilityAgainstStaleMemo(t *testing.T) {
 // memo from the datastore off the lock, and the gate then decides from memory
 // alone. The mock's Once() proves the later gate call issues no second query.
 func TestWarmFirstDailyAcceptance(t *testing.T) {
-	t.Parallel()
-
 	settings := newConsensusSettings()
 	p := &Processor{
 		Ds:                expectSpeciesCount(t, &dbResult{count: 0}),
@@ -453,6 +475,10 @@ func TestWarmFirstDailyAcceptance(t *testing.T) {
 	}
 	markSpeciesShared(p, true)
 
+	p.warmFirstDailyAcceptance(consensusAt, settings)
+	require.Eventually(t, func() bool { return len(p.firstDaily.lookups) == 1 }, time.Second, time.Millisecond)
+	_, settled := p.firstDaily.acceptedToday(consensusDay, consensusSpecies)
+	assert.False(t, settled, "a background result is applied only by a later warm pass")
 	p.warmFirstDailyAcceptance(consensusAt, settings)
 
 	discard, reason := p.shouldDiscardFirstDailyDetection(
@@ -466,8 +492,6 @@ func TestWarmFirstDailyAcceptance(t *testing.T) {
 // a species already logged today settles the memo as accepted, so the gate lets
 // the detection through.
 func TestWarmFirstDailyAcceptance_AcceptedSpecies(t *testing.T) {
-	t.Parallel()
-
 	settings := newConsensusSettings()
 	p := &Processor{
 		Ds:                expectSpeciesCount(t, &dbResult{count: 3}),
@@ -476,6 +500,11 @@ func TestWarmFirstDailyAcceptance_AcceptedSpecies(t *testing.T) {
 	markSpeciesShared(p, true)
 
 	p.warmFirstDailyAcceptance(consensusAt, settings)
+	require.Eventually(t, func() bool {
+		p.warmFirstDailyAcceptance(consensusAt, settings)
+		accepted, settled := p.firstDaily.acceptedToday(consensusDay, consensusSpecies)
+		return settled && accepted
+	}, time.Second, time.Millisecond)
 
 	discard, _ := p.shouldDiscardFirstDailyDetection(
 		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
@@ -487,8 +516,6 @@ func TestWarmFirstDailyAcceptance_AcceptedSpecies(t *testing.T) {
 // error leaves the memo unresolved, and the gate accepts rather than retrying the
 // query under flushPendingDetections's exclusive lock.
 func TestWarmFirstDailyAcceptance_DatastoreErrorFailsOpen(t *testing.T) {
-	t.Parallel()
-
 	settings := newConsensusSettings()
 	p := &Processor{
 		Ds:                expectSpeciesCount(t, &dbResult{err: errors.New("database is locked")}),
@@ -496,6 +523,13 @@ func TestWarmFirstDailyAcceptance_DatastoreErrorFailsOpen(t *testing.T) {
 	}
 	markSpeciesShared(p, true)
 
+	p.warmFirstDailyAcceptance(consensusAt, settings)
+	require.Eventually(t, func() bool {
+		p.firstDaily.mu.Lock()
+		defer p.firstDaily.mu.Unlock()
+		return len(p.firstDaily.inFlight) == 0 || len(p.firstDaily.lookups) > 0
+	}, time.Second, time.Millisecond)
+	p.pendingDetections = nil
 	p.warmFirstDailyAcceptance(consensusAt, settings)
 
 	discard, _ := p.shouldDiscardFirstDailyDetection(
@@ -527,18 +561,12 @@ func TestWarmFirstDailyAcceptance_SkipsWhenDisabled(t *testing.T) {
 	assert.False(t, discard, "the rule must be inert until enabled")
 }
 
-// TestWarmFirstDailyAcceptance_SkipsNotYetDue pins the deadline filter: warming a
-// detection that will not flush for another ~12 ticks would re-derive the same
-// verdict every second and query for detections the min-count filter may still
-// discard.
-func TestWarmFirstDailyAcceptance_SkipsNotYetDue(t *testing.T) {
-	t.Parallel()
-
+func TestWarmFirstDailyAcceptance_StartsBeforeDeadline(t *testing.T) {
 	item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
-	item.FlushDeadline = consensusAt.Add(time.Minute)
+	item.FlushDeadline = time.Now().Add(time.Minute)
 
 	p := &Processor{
-		Ds: mocks.NewMockInterface(t), // no expectation: a query fails the test
+		Ds: expectSpeciesCount(t, &dbResult{count: 0}),
 		pendingDetections: map[string]PendingDetection{
 			pendingKeyForDetection(consensusSource, &item.Detection): *item,
 		},
@@ -546,6 +574,73 @@ func TestWarmFirstDailyAcceptance_SkipsNotYetDue(t *testing.T) {
 	markSpeciesShared(p, true)
 
 	p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+	require.Eventually(t, func() bool { return len(p.firstDaily.lookups) == 1 }, time.Second, time.Millisecond)
+}
+
+func TestWarmFirstDailyAcceptance_DedupesInFlightAndDoesNotBlock(t *testing.T) {
+	settings := newConsensusSettings()
+	release := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
+	ds := mocks.NewMockInterface(t)
+	ds.EXPECT().CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).
+		Run(func(string, string, string, int) { once.Do(func() { close(started) }); <-release }).
+		Return(int64(0), nil).Once()
+	p := &Processor{Ds: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
+	markSpeciesShared(p, true)
+
+	done := make(chan struct{})
+	go func() { p.warmFirstDailyAcceptance(consensusAt, settings); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		t.Fatal("warm pass blocked on datastore lookup")
+	}
+	<-started
+	p.warmFirstDailyAcceptance(consensusAt, settings)
+	time.Sleep(20 * time.Millisecond)
+	ds.AssertNumberOfCalls(t, "CountSpeciesDetections", 1)
+	close(release)
+}
+
+func TestWarmFirstDailyAcceptance_DropsStaleGeneration(t *testing.T) {
+	settings := newConsensusSettings()
+	release := make(chan struct{})
+	started := make(chan struct{})
+	ds := mocks.NewMockInterface(t)
+	ds.EXPECT().CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).
+		Run(func(string, string, string, int) { close(started); <-release }).Return(int64(2), nil).Once()
+	ds.EXPECT().CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).Return(int64(0), nil).Once()
+	p := &Processor{Ds: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
+	markSpeciesShared(p, true)
+
+	p.warmFirstDailyAcceptance(consensusAt, settings)
+	<-started
+	settings.Realtime.FirstDailyConsensus.Enabled = false
+	p.warmFirstDailyAcceptance(consensusAt, settings)
+	settings.Realtime.FirstDailyConsensus.Enabled = true
+	close(release)
+
+	require.Eventually(t, func() bool {
+		p.warmFirstDailyAcceptance(consensusAt, settings)
+		accepted, settled := p.firstDaily.acceptedToday(consensusDay, consensusSpecies)
+		return settled && !accepted
+	}, time.Second, time.Millisecond)
+}
+
+func TestWarmFirstDailyAcceptance_PanicClearsInFlight(t *testing.T) {
+	ds := mocks.NewMockInterface(t)
+	ds.EXPECT().CountSpeciesDetections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Panic("boom").Once()
+	p := &Processor{Ds: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
+	markSpeciesShared(p, true)
+	p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+	require.Eventually(t, func() bool {
+		p.firstDaily.applyCompletedLookups()
+		p.firstDaily.mu.Lock()
+		defer p.firstDaily.mu.Unlock()
+		return len(p.firstDaily.inFlight) == 0
+	}, time.Second, time.Millisecond)
 }
 
 // TestWarmFirstDailyAcceptance_SkipsIneligibleDetections verifies the pass shares

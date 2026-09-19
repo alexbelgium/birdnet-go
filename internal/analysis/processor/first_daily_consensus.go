@@ -26,6 +26,7 @@
 package processor
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -65,6 +66,11 @@ const (
 	// deliberate action, so the TTL only needs to be short enough that such a
 	// change is picked up within one operator session, not on every lookup.
 	firstDailySupportTTL = 10 * time.Minute
+
+	// firstDailyMaxConcurrentLookups bounds datastore work started by one or
+	// more warm passes. Completed results remain in-flight until the next pass
+	// applies them, so this also bounds the result channel.
+	firstDailyMaxConcurrentLookups = 4
 )
 
 // firstDailyConsensus is the small amount of state the rule keeps. The zero
@@ -98,6 +104,19 @@ type firstDailyConsensus struct {
 	// has no calendar semantics and survives the day roll — re-deriving it every
 	// midnight would reload every label set during the dawn chorus.
 	support map[string]supportEntry
+
+	// approvals made during one flush cycle are committed at the next warm pass,
+	// so every entry in the cycle observes the same accepted set.
+	approved map[firstDailyCandidate]struct{}
+
+	// lookups carries datastore answers back to the flusher. inFlight prevents
+	// duplicate queries for the same day and species.
+	lookups  chan firstDailyLookupResult
+	inFlight map[firstDailyCandidate]struct{}
+
+	// generation advances while the rule is disabled. Results from an earlier
+	// generation are ignored after re-enabling.
+	generation uint64
 }
 
 type supportEntry struct {
@@ -193,6 +212,13 @@ func (c *firstDailyConsensus) dayLocked(day string) map[string]bool {
 type firstDailyCandidate struct {
 	day            string
 	scientificName string
+}
+
+type firstDailyLookupResult struct {
+	firstDailyCandidate
+	count      int64
+	err        error
+	generation uint64
 }
 
 // firstDailyVerdict is what firstDailyGateApplies decided using only in-memory
@@ -322,40 +348,34 @@ func (p *Processor) shouldDiscardFirstDailyDetection(item *PendingDetection, set
 	return true, reasonFirstDailyConsensus
 }
 
-// warmFirstDailyAcceptance resolves "already accepted today" for the detections
-// flushPendingDetections is about to evaluate, running the queries after
-// releasing a brief read lock on p.pendingDetections. That is what keeps the
-// rule's database I/O off the exclusive lock the rest of the flush cycle holds,
-// which detection ingestion also contends for.
-//
-// It considers exactly the set the flush loop will: entries past their
-// FlushDeadline. Sweeping every pending entry instead would re-derive the same
-// verdict on each of the ~12 ticks an entry waits out its detection window, and
-// would issue queries for detections the min-count filter goes on to discard.
-//
-// Whatever this pass leaves unresolved (a failed query, or the feature being
-// switched on mid-cycle) is failed open by shouldDiscardFirstDailyDetection
-// rather than retried under the lock.
+// warmFirstDailyAcceptance applies completed datastore answers and approvals
+// from the previous flush cycle, then starts bounded background lookups for
+// unsettled pending species. Looking at entries before their deadline normally
+// gives the query the detection window in which to finish. Anything still
+// unresolved when due fails open in shouldDiscardFirstDailyDetection.
 //
 // It is the datastore I/O specifically that this keeps off the lock. The
 // model-support lookup the gate also performs still runs under the read lock
 // here, and can walk every active model's label set when its memo misses; that
 // is bounded by firstDailySupportTTL and is the same work the flush path would
 // otherwise do under the exclusive lock.
-func (p *Processor) warmFirstDailyAcceptance(now time.Time, settings *conf.Settings) {
+func (p *Processor) warmFirstDailyAcceptance(_ time.Time, settings *conf.Settings) {
 	// The feature boundary sits here, not in the per-item predicate: shipped off
 	// by default, this must cost one branch per tick, not a lock plus a sweep.
-	if p.Ds == nil || !settings.Realtime.FirstDailyConsensus.Enabled {
+	if !settings.Realtime.FirstDailyConsensus.Enabled {
+		p.firstDaily.disable()
 		return
 	}
+	if p.Ds == nil {
+		return
+	}
+	p.firstDaily.applyCompletedLookups()
+	p.firstDaily.commitApprovals()
 
 	var candidates []firstDailyCandidate
 	p.pendingMutex.RLock()
 	for mapKey := range p.pendingDetections {
 		item := p.pendingDetections[mapKey]
-		if !now.After(item.FlushDeadline) {
-			continue
-		}
 		if verdict, candidate := p.firstDailyGateApplies(&item, settings); verdict == firstDailyNeedsCheck {
 			candidates = append(candidates, candidate)
 		}
@@ -363,13 +383,12 @@ func (p *Processor) warmFirstDailyAcceptance(now time.Time, settings *conf.Setti
 	p.pendingMutex.RUnlock()
 
 	for _, candidate := range candidates {
-		p.speciesAcceptedInDatastore(candidate.day, candidate.scientificName)
+		p.startFirstDailyLookup(candidate)
 	}
 }
 
-// noteAcceptedDetection records an approved detection so later detections of the
-// same species today bypass the rule without waiting for asynchronous
-// persistence to land.
+// noteAcceptedDetection records an approval for the next warm pass. Deferring the
+// commit makes every pending entry in this flush cycle observe the same memo.
 func (p *Processor) noteAcceptedDetection(item *PendingDetection) {
 	if item == nil {
 		return
@@ -378,7 +397,7 @@ func (p *Processor) noteAcceptedDetection(item *PendingDetection) {
 	if result.Timestamp.IsZero() {
 		return
 	}
-	p.firstDaily.markAccepted(result.Date(), result.Species.ScientificName)
+	p.firstDaily.queueApproval(firstDailyCandidate{day: result.Date(), scientificName: result.Species.ScientificName})
 }
 
 // countConfirmingModels counts the bird-capable models whose best score for this
@@ -393,6 +412,9 @@ func (p *Processor) countConfirmingModels(settings *conf.Settings, item *Pending
 			continue
 		}
 		normal := p.getBaseConfidenceThreshold(settings, species.CommonName, species.ScientificName, modelID)
+		if normal <= 0 {
+			normal = modelGlobalConfidenceThreshold(settings, modelID)
+		}
 		if float32(contrib.MaxConfidence) >= normal {
 			count++
 		}
@@ -492,35 +514,94 @@ func firstDailySupportKey(modelIDs []string, scientificName string) string {
 	return strings.Join(modelIDs, ",") + "|" + scientificName
 }
 
-// speciesAcceptedInDatastore asks the datastore whether the species already has a
-// detection today, memoizing both answers so the question costs at most one query
-// per species per day. Called only from warmFirstDailyAcceptance.
-//
-// The memo is re-checked up front because one warm pass can collect the same
-// species from several sources; that check is what stops them issuing duplicate
-// queries for one answer.
-func (p *Processor) speciesAcceptedInDatastore(day, scientificName string) (accepted, ok bool) {
-	if p.Ds == nil {
-		return false, false
-	}
-	if accepted, settled := p.firstDaily.acceptedToday(day, scientificName); settled {
-		return accepted, true
-	}
+func (c *firstDailyConsensus) disable() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Re-enabling must query again because detections accepted while the rule was
+	// off were never queued as approvals here.
+	c.checked = nil
+	c.approved = nil
+	c.generation++
+}
 
-	count, err := p.Ds.CountSpeciesDetections(scientificName, day, "", 0)
-	if err != nil {
-		GetLogger().Debug("first daily consensus: species lookup failed, accepting detection",
-			logger.String("scientific_name", scientificName),
-			logger.String("day", day),
-			logger.Error(err),
-			logger.String("operation", "first_daily_consensus"))
-		return false, false
+func (c *firstDailyConsensus) queueApproval(candidate firstDailyCandidate) {
+	if candidate.day == "" || candidate.scientificName == "" {
+		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.approved == nil {
+		c.approved = make(map[firstDailyCandidate]struct{})
+	}
+	c.approved[candidate] = struct{}{}
+}
 
-	if count > 0 {
-		p.firstDaily.markAccepted(day, scientificName)
-		return true, true
+func (c *firstDailyConsensus) commitApprovals() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for candidate := range c.approved {
+		c.dayLocked(candidate.day)[candidate.scientificName] = true
 	}
-	p.firstDaily.markAbsent(day, scientificName)
-	return false, true
+	c.approved = nil
+}
+
+func (p *Processor) startFirstDailyLookup(candidate firstDailyCandidate) {
+	c := &p.firstDaily
+	c.mu.Lock()
+	if c.lookups == nil {
+		c.lookups = make(chan firstDailyLookupResult, firstDailyMaxConcurrentLookups)
+	}
+	if c.inFlight == nil {
+		c.inFlight = make(map[firstDailyCandidate]struct{})
+	}
+	if _, settled := c.checked[candidate.day][candidate.scientificName]; settled || len(c.inFlight) >= firstDailyMaxConcurrentLookups {
+		c.mu.Unlock()
+		return
+	}
+	if _, running := c.inFlight[candidate]; running {
+		c.mu.Unlock()
+		return
+	}
+	c.inFlight[candidate] = struct{}{}
+	generation, results, ds := c.generation, c.lookups, p.Ds
+	c.mu.Unlock()
+
+	go func() {
+		result := firstDailyLookupResult{firstDailyCandidate: candidate, generation: generation}
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				result.err = fmt.Errorf("first daily consensus lookup panicked: %v", recovered)
+			}
+			results <- result
+		}()
+		result.count, result.err = ds.CountSpeciesDetections(candidate.scientificName, candidate.day, "", 0)
+	}()
+}
+
+func (c *firstDailyConsensus) applyCompletedLookups() {
+	for {
+		select {
+		case result := <-c.lookups:
+			c.mu.Lock()
+			delete(c.inFlight, result.firstDailyCandidate)
+			current := result.generation == c.generation
+			c.mu.Unlock()
+			if !current {
+				continue
+			}
+			if result.err != nil {
+				GetLogger().Debug("first daily consensus: species lookup failed, accepting detection",
+					logger.String("scientific_name", result.scientificName), logger.String("day", result.day),
+					logger.Error(result.err), logger.String("operation", "first_daily_consensus"))
+				continue
+			}
+			if result.count > 0 {
+				c.markAccepted(result.day, result.scientificName)
+			} else {
+				c.markAbsent(result.day, result.scientificName)
+			}
+		default:
+			return
+		}
+	}
 }
