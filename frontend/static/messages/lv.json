@@ -690,7 +690,41 @@
         "error": "Neizdevās ielādēt datus",
         "complete": "Dati veiksmīgi ielādēti"
       },
-      "noSpecies": "Šajā datumā nav atklāta neviena suga"
+      "noSpecies": "Šajā datumā nav atklāta neviena suga",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Noteikšanas vēsture: {species}",
+        "subtitle": "{count, plural, zero {{formattedCount} noteikšanu} one {{formattedCount} noteikšana} other {{formattedCount} noteikšanas}} · {range}",
+        "subtitleSince": "{count, plural, zero {{formattedCount} noteikšanu} one {{formattedCount} noteikšana} other {{formattedCount} noteikšanas}} · {range} (kopš {since})",
+        "loading": "Ielādē noteikšanas vēsturi…",
+        "unavailable": "Vēsture nav pieejama",
+        "loadFailed": "Neizdevās ielādēt vēsturi",
+        "retry": "Mēģināt vēlreiz",
+        "empty": "Šajā periodā nav noteikšanu",
+        "emptyHint": "Izvēlieties garāku periodu",
+        "total": "Kopā",
+        "peak": "Maksimums",
+        "avgPerDay": "Vid./dienā",
+        "daily": "dienā",
+        "movingAverage": "7 dienu vid.",
+        "chartLabel": "{species}: {count, plural, zero {{count} noteikšanu} one {{count} noteikšana} other {{count} noteikšanas}} ({range}), maksimums {peak}",
+        "rangeGroup": "Vēstures periods",
+        "allShort": "Visi",
+        "ranges": {
+          "last7d": "pēdējās 7 dienas",
+          "last30d": "pēdējās 30 dienas",
+          "last90d": "pēdējās 90 dienas",
+          "last1y": "pēdējie 12 mēneši",
+          "last2y": "pēdējie 2 gadi",
+          "all": "viss laiks"
+        }
+      }
     },
     "recentDetections": {
       "title": "Nesenās atklāšanas",
@@ -5743,6 +5777,158 @@
       "patternNone": "Nav",
       "patternTransient": "Īslaicīgs",
       "patternSustained": "Ilgstošs"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Sugu darba vieta",
+    "subtitle": "Visas jebkad konstatētās sugas ar pārbaudes un pārvaldības rīkiem",
+    "refresh": "Pārlādēt datus",
+    "search": {
+      "label": "Meklēt sugas",
+      "placeholder": "Meklēt pēc nosaukuma…"
+    },
+    "sort": {
+      "label": "Kārtot pēc",
+      "sortBy": "Kārtot pēc: {column}",
+      "toggleDirection": "Mainīt kārtošanas secību"
+    },
+    "edit": {
+      "edit": "Rediģēt kolonnas",
+      "done": "Gatavs",
+      "reset": "Atiestatīt",
+      "panelTitle": "Kolonnas",
+      "condensed": "Kompakts skats tālruņos",
+      "condensedHelp": "Parāda katru sugu divās kompaktās rindās.",
+      "show": "Rādīt kolonnu {column}",
+      "mandatory": "{column} tiek rādīta vienmēr",
+      "moveUp": "Pārvietot {column} uz augšu",
+      "moveDown": "Pārvietot {column} uz leju",
+      "saveFailed": "Kolonnu izkārtojumu neizdevās saglabāt, tāpēc tika atjaunots iepriekšējais."
+    },
+    "condensed": {
+      "noRecording": "Ieraksts nav pieejams"
+    },
+    "columns": {
+      "species": "Suga",
+      "count": "Noteikšanas",
+      "maxConfidence": "Maks. ticamība",
+      "firstSeen": "Pirmoreiz novērota",
+      "lastSeen": "Pēdējoreiz novērota",
+      "range": "Izplatības varbūtība",
+      "verification": "Pārbaudītas",
+      "excluded": "Izslēgta",
+      "included": "Iekļauta",
+      "confirmed": "Apstiprināta",
+      "bestRecording": "Labākais ieraksts",
+      "actions": "Darbības"
+    },
+    "columnHelp": {
+      "range": "Izplatības filtra varbūtība šai vietai un nedēļai"
+    },
+    "groups": {
+      "inventory": "sugas",
+      "stats": "statistiku",
+      "memberships": "sugu sarakstus",
+      "range": "izplatības varbūtības",
+      "best": "labākos ierakstus",
+      "recordings": "ierakstus"
+    },
+    "states": {
+      "loading": "Ielādē…",
+      "loadFailed": "Neizdevās ielādēt {what}.",
+      "retry": "Mēģināt vēlreiz",
+      "empty": "Vēl nav konstatēta neviena suga.",
+      "noMatch": "Meklēšanai un filtram neatbilst neviena suga.",
+      "notAvailable": "N/A",
+      "notFound": "Šai sugai nav saglabātu noteikšanu.",
+      "membershipLoading": "Ielādē sugu sarakstus…",
+      "unknownModel": "Nezināms",
+      "loginRequired": "Piesakieties, lai izmantotu sugu darba vietu."
+    },
+    "verification": "pareizas: {correct}, kļūdaini pozitīvas: {falsePositive}",
+    "membership": {
+      "confirmed": "Apstiprināta",
+      "included": "Iekļaušanas saraksts",
+      "excluded": "Izslēgšanas saraksts",
+      "yes": "Jā",
+      "no": "Nē",
+      "state": "{list} sugai {species}: {state}"
+    },
+    "actions": {
+      "menu": "Darbības: {species}",
+      "toggle": {
+        "confirmed": "Pārslēgt apstiprinājumu",
+        "included": "Pārslēgt iekļaušanas sarakstu",
+        "excluded": "Pārslēgt izslēgšanas sarakstu"
+      },
+      "delete": "Dzēst sugas {species} noteikšanas…",
+      "updateFailed": "Neizdevās atjaunināt {list} sugai {species}."
+    },
+    "best": {
+      "title": "Sugas {species} labākais ieraksts",
+      "play": "Atskaņot sugas {species} labāko ierakstu",
+      "locked": "Bloķēts",
+      "confidence": "Ticamība {value}",
+      "unavailable": "Nav pieejama ieraksta",
+      "unavailableHint": "Nevienai šīs sugas noteikšanai diskā nav audio klipa."
+    },
+    "delete": {
+      "title": "Dzēst sugas {species} noteikšanas",
+      "message": "Dzēšamās noteikšanas: {deletable} no {total} (ieskaitot kļūdaini pozitīvās: {falsePositive}). Saglabātās bloķētās noteikšanas: {locked}.",
+      "nothing": "Visas šīs sugas noteikšanas ir bloķētas, tāpēc nav ko dzēst.",
+      "confirm": "Dzēst ({count})",
+      "running": "Dzēš…",
+      "progressLabel": "Dzēšanas gaita",
+      "progress": "Izdzēstas: {deleted} · bloķētas saglabātas: {locked}",
+      "done": "Dzēšana pabeigta.",
+      "stop": "Apturēt",
+      "cancelled": "Dzēšana apturēta. Jau izdzēstās noteikšanas paliek izdzēstas.",
+      "stalled": "Dzēšana apturēta, jo atlikušās noteikšanas nevarēja noņemt.",
+      "error": "Dzēšana neizdevās. Jau izdzēstās noteikšanas paliek izdzēstas."
+    },
+    "detail": {
+      "back": "Atpakaļ uz sugu darba vietu",
+      "title": "Visi sugas {species} ieraksti",
+      "detections": "Noteikšanas: {count}",
+      "maxConfidence": "maks. ticamība {value}",
+      "lastDetected": "pēdējoreiz konstatēta {date}",
+      "bestRecording": "Labākais ieraksts",
+      "quickGraph": "Ātrais grafiks",
+      "openExternal": "Atvērt {species} vietnē {site} (jaunā cilnē)",
+      "select": "Atlasīt",
+      "cancelSelect": "Atcelt atlasi",
+      "lockedOnly": "Tikai bloķētie",
+      "toggleAria": "{list} sugai {species}"
+    },
+    "table": {
+      "dateTime": "Datums un laiks",
+      "weather": "Laikapstākļi",
+      "source": "Avots",
+      "confidence": "Ticamība",
+      "model": "Modelis",
+      "status": "Statuss",
+      "recording": "Ieraksts",
+      "actions": "Darbības",
+      "selectAll": "Atlasīt visus šīs lapas ierakstus",
+      "selectRow": "Atlasīt ierakstu no {date}",
+      "selected": "Atlasīti: {count}",
+      "bulkActions": "Darbības ar atlasītajiem ierakstiem",
+      "markCorrect": "Atzīmēt kā pareizu",
+      "markFalsePositive": "Atzīmēt kā kļūdaini pozitīvu",
+      "lock": "Bloķēt",
+      "unlock": "Atbloķēt",
+      "deleteSelected": "Dzēst",
+      "deleteSelectedTitle": "Dzēst atlasītos sugas {species} ierakstus ({count})?",
+      "deleteSelectedMessage": "Bloķētie ieraksti atlasē tiek saglabāti.",
+      "bulkLockedHint": "Bloķētos ierakstus nevar pārbaudīt vai dzēst.",
+      "bulkResult": "Atjaunināti: {processed} · izlaisti: {skipped}",
+      "bulkFailed": "Atlasītos ierakstus neizdevās atjaunināt.",
+      "empty": "Nav ierakstu.",
+      "emptyLocked": "Nav bloķētu ierakstu.",
+      "sortConfidenceDesc": "Augstākā ticamība vispirms",
+      "sortConfidenceAsc": "Zemākā ticamība vispirms",
+      "sortDateDesc": "Jaunākie vispirms",
+      "sortDateAsc": "Vecākie vispirms"
     }
   }
 }

@@ -690,7 +690,41 @@
         "error": "Tietojen lataus epäonnistui",
         "complete": "Tiedot ladattu onnistuneesti"
       },
-      "noSpecies": "Ei havaintoja tänä päivänä"
+      "noSpecies": "Ei havaintoja tänä päivänä",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Havaintohistoria: {species}",
+        "subtitle": "{count, plural, one {{formattedCount} havainto} other {{formattedCount} havaintoa}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} havainto} other {{formattedCount} havaintoa}} · {range} (alkaen {since})",
+        "loading": "Ladataan havaintohistoriaa…",
+        "unavailable": "Historia ei saatavilla",
+        "loadFailed": "Historian lataus epäonnistui",
+        "retry": "Yritä uudelleen",
+        "empty": "Ei havaintoja tällä jaksolla",
+        "emptyHint": "Kokeile pidempää jaksoa",
+        "total": "Yhteensä",
+        "peak": "Huippu",
+        "avgPerDay": "Ka./päivä",
+        "daily": "päivittäin",
+        "movingAverage": "7 päivän ka.",
+        "chartLabel": "{species}: {count, plural, one {{count} havainto} other {{count} havaintoa}} ({range}), huippu {peak}",
+        "rangeGroup": "Historian jakso",
+        "allShort": "Kaikki",
+        "ranges": {
+          "last7d": "viimeiset 7 päivää",
+          "last30d": "viimeiset 30 päivää",
+          "last90d": "viimeiset 90 päivää",
+          "last1y": "viimeiset 12 kuukautta",
+          "last2y": "viimeiset 2 vuotta",
+          "all": "koko ajalta"
+        }
+      }
     },
     "recentDetections": {
       "title": "Viimeisimmät havainnot",
@@ -5743,6 +5777,158 @@
       "patternNone": "Ei mitään",
       "patternTransient": "Ohimenevä",
       "patternSustained": "Jatkuva"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Lajityötila",
+    "subtitle": "Kaikki koskaan havaitut lajit sekä tarkistus- ja ylläpitotyökalut",
+    "refresh": "Lataa tiedot uudelleen",
+    "search": {
+      "label": "Hae lajeja",
+      "placeholder": "Hae nimellä…"
+    },
+    "sort": {
+      "label": "Lajitteluperuste",
+      "sortBy": "Lajittele: {column}",
+      "toggleDirection": "Käännä lajittelujärjestys"
+    },
+    "edit": {
+      "edit": "Muokkaa sarakkeita",
+      "done": "Valmis",
+      "reset": "Palauta",
+      "panelTitle": "Sarakkeet",
+      "condensed": "Tiivis näkymä puhelimissa",
+      "condensedHelp": "Näyttää jokaisen lajin kahdella tiiviillä rivillä.",
+      "show": "Näytä sarake {column}",
+      "mandatory": "{column} näytetään aina",
+      "moveUp": "Siirrä {column} ylös",
+      "moveDown": "Siirrä {column} alas",
+      "saveFailed": "Sarakeasettelua ei voitu tallentaa, joten edellinen asettelu palautettiin."
+    },
+    "condensed": {
+      "noRecording": "Tallennetta ei ole saatavilla"
+    },
+    "columns": {
+      "species": "Laji",
+      "count": "Havainnot",
+      "maxConfidence": "Suurin varmuus",
+      "firstSeen": "Ensimmäinen havainto",
+      "lastSeen": "Viimeisin havainto",
+      "range": "Esiintymistodennäköisyys",
+      "verification": "Vahvistettu tarkistus",
+      "excluded": "Poissuljettu",
+      "included": "Sisällytetty",
+      "confirmed": "Vahvistettu",
+      "bestRecording": "Paras tallenne",
+      "actions": "Toiminnot"
+    },
+    "columnHelp": {
+      "range": "Levinneisyyssuodattimen todennäköisyys tälle sijainnille ja viikolle"
+    },
+    "groups": {
+      "inventory": "lajeja",
+      "stats": "tilastoja",
+      "memberships": "lajilistoja",
+      "range": "esiintymistodennäköisyyksiä",
+      "best": "parhaita tallenteita",
+      "recordings": "tallenteita"
+    },
+    "states": {
+      "loading": "Ladataan…",
+      "loadFailed": "Tietoja ei voitu ladata: {what}.",
+      "retry": "Yritä uudelleen",
+      "empty": "Lajeja ei ole vielä havaittu.",
+      "noMatch": "Mikään laji ei vastaa hakua ja suodatinta.",
+      "notAvailable": "Ei saatavilla",
+      "notFound": "Tästä lajista ei ole tallennettuja havaintoja.",
+      "membershipLoading": "Ladataan lajilistoja…",
+      "unknownModel": "Tuntematon",
+      "loginRequired": "Kirjaudu sisään käyttääksesi lajityötilaa."
+    },
+    "verification": "oikein: {correct}, väärä positiivinen: {falsePositive}",
+    "membership": {
+      "confirmed": "Vahvistettu",
+      "included": "Sisällytyslista",
+      "excluded": "Poissulkulista",
+      "yes": "Kyllä",
+      "no": "Ei",
+      "state": "{list} lajille {species}: {state}"
+    },
+    "actions": {
+      "menu": "Toiminnot: {species}",
+      "toggle": {
+        "confirmed": "Vaihda vahvistus",
+        "included": "Vaihda sisällytyslista",
+        "excluded": "Vaihda poissulkulista"
+      },
+      "delete": "Poista lajin {species} havainnot…",
+      "updateFailed": "Listaa {list} ei voitu päivittää lajille {species}."
+    },
+    "best": {
+      "title": "Lajin {species} paras tallenne",
+      "play": "Toista lajin {species} paras tallenne",
+      "locked": "Lukittu",
+      "confidence": "Varmuus {value}",
+      "unavailable": "Tallennetta ei ole saatavilla",
+      "unavailableHint": "Millään tämän lajin havainnolla ei ole äänileikettä levyllä."
+    },
+    "delete": {
+      "title": "Poista lajin {species} havainnot",
+      "message": "Poistettavat havainnot: {deletable}/{total} (sisältää vääriä positiivisia: {falsePositive}). Lukitut havainnot säilytetään: {locked}.",
+      "nothing": "Kaikki tämän lajin havainnot ovat lukittuja, joten poistettavaa ei ole.",
+      "confirm": "Poista ({count})",
+      "running": "Poistetaan…",
+      "progressLabel": "Poiston edistyminen",
+      "progress": "Poistettu: {deleted} · lukittuja säilytetty: {locked}",
+      "done": "Poisto valmis.",
+      "stop": "Pysäytä",
+      "cancelled": "Poisto pysäytettiin. Jo poistetut havainnot pysyvät poistettuina.",
+      "stalled": "Poisto pysäytettiin, koska jäljellä olevia havaintoja ei voitu poistaa.",
+      "error": "Poisto epäonnistui. Jo poistetut havainnot pysyvät poistettuina."
+    },
+    "detail": {
+      "back": "Takaisin lajityötilaan",
+      "title": "Lajin {species} kaikki tallenteet",
+      "detections": "Havainnot: {count}",
+      "maxConfidence": "suurin varmuus {value}",
+      "lastDetected": "viimeksi havaittu {date}",
+      "bestRecording": "Paras tallenne",
+      "quickGraph": "Pikakaavio",
+      "openExternal": "Avaa {species} sivustolla {site} (uusi välilehti)",
+      "select": "Valitse",
+      "cancelSelect": "Peruuta valinta",
+      "lockedOnly": "Vain lukitut",
+      "toggleAria": "{list} lajille {species}"
+    },
+    "table": {
+      "dateTime": "Päivä ja aika",
+      "weather": "Sää",
+      "source": "Lähde",
+      "confidence": "Varmuus",
+      "model": "Malli",
+      "status": "Tila",
+      "recording": "Tallenne",
+      "actions": "Toiminnot",
+      "selectAll": "Valitse kaikki tämän sivun tallenteet",
+      "selectRow": "Valitse tallenne ajalta {date}",
+      "selected": "Valittu: {count}",
+      "bulkActions": "Toiminnot valituille tallenteille",
+      "markCorrect": "Merkitse oikeaksi",
+      "markFalsePositive": "Merkitse vääräksi positiiviseksi",
+      "lock": "Lukitse",
+      "unlock": "Avaa lukitus",
+      "deleteSelected": "Poista",
+      "deleteSelectedTitle": "Poistetaanko lajin {species} valitut tallenteet ({count})?",
+      "deleteSelectedMessage": "Valinnan lukitut tallenteet säilytetään.",
+      "bulkLockedHint": "Lukittuja tallenteita ei voi tarkistaa eikä poistaa.",
+      "bulkResult": "Päivitetty: {processed} · ohitettu: {skipped}",
+      "bulkFailed": "Valittuja tallenteita ei voitu päivittää.",
+      "empty": "Ei tallenteita.",
+      "emptyLocked": "Ei lukittuja tallenteita.",
+      "sortConfidenceDesc": "Suurin varmuus ensin",
+      "sortConfidenceAsc": "Pienin varmuus ensin",
+      "sortDateDesc": "Uusimmat ensin",
+      "sortDateAsc": "Vanhimmat ensin"
     }
   }
 }

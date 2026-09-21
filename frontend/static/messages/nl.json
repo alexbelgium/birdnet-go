@@ -690,7 +690,41 @@
         "error": "Gegevens inlezen is mislukt",
         "complete": "Gegevens zijn succesvol ingelezen"
       },
-      "noSpecies": "Geen soorten herkend op deze datum"
+      "noSpecies": "Geen soorten herkend op deze datum",
+      "taxonFilter": {
+        "all": "All",
+        "bird": "Birds",
+        "bat": "Bats",
+        "other": "Others",
+        "ariaLabel": "Filter species by group (currently {current})"
+      },
+      "history": {
+        "title": "Detectiegeschiedenis van {species}",
+        "subtitle": "{count, plural, one {{formattedCount} detectie} other {{formattedCount} detecties}} · {range}",
+        "subtitleSince": "{count, plural, one {{formattedCount} detectie} other {{formattedCount} detecties}} · {range} (sinds {since})",
+        "loading": "Detectiegeschiedenis laden…",
+        "unavailable": "Geschiedenis niet beschikbaar",
+        "loadFailed": "Geschiedenis laden mislukt",
+        "retry": "Opnieuw proberen",
+        "empty": "Geen detecties in deze periode",
+        "emptyHint": "Probeer een langere periode",
+        "total": "Totaal",
+        "peak": "Piek",
+        "avgPerDay": "Gem./dag",
+        "daily": "dagelijks",
+        "movingAverage": "7-daags gem.",
+        "chartLabel": "{species}: {count, plural, one {{count} detectie} other {{count} detecties}} in {range}, piek van {peak}",
+        "rangeGroup": "Periode geschiedenis",
+        "allShort": "Alles",
+        "ranges": {
+          "last7d": "laatste 7 dagen",
+          "last30d": "laatste 30 dagen",
+          "last90d": "laatste 90 dagen",
+          "last1y": "laatste 12 maanden",
+          "last2y": "laatste 2 jaar",
+          "all": "hele periode"
+        }
+      }
     },
     "recentDetections": {
       "title": "Recent herkend",
@@ -5743,6 +5777,158 @@
       "patternNone": "Geen",
       "patternTransient": "Voorbijgaand",
       "patternSustained": "Aanhoudend"
+    }
+  },
+  "speciesWorkspace": {
+    "title": "Soortenwerkruimte",
+    "subtitle": "Alle ooit gedetecteerde soorten, met hulpmiddelen voor controle en beheer",
+    "refresh": "Gegevens opnieuw laden",
+    "search": {
+      "label": "Soorten zoeken",
+      "placeholder": "Zoeken op naam…"
+    },
+    "sort": {
+      "label": "Sorteren op",
+      "sortBy": "Sorteren op {column}",
+      "toggleDirection": "Sorteervolgorde omkeren"
+    },
+    "edit": {
+      "edit": "Kolommen bewerken",
+      "done": "Klaar",
+      "reset": "Herstellen",
+      "panelTitle": "Kolommen",
+      "condensed": "Compacte weergave op telefoons",
+      "condensedHelp": "Toont elke soort op twee compacte regels.",
+      "show": "Kolom {column} tonen",
+      "mandatory": "{column} wordt altijd getoond",
+      "moveUp": "{column} omhoog",
+      "moveDown": "{column} omlaag",
+      "saveFailed": "De kolomindeling kon niet worden opgeslagen, dus de vorige indeling is hersteld."
+    },
+    "condensed": {
+      "noRecording": "Geen opname beschikbaar"
+    },
+    "columns": {
+      "species": "Soort",
+      "count": "Detecties",
+      "maxConfidence": "Max. betrouwbaarheid",
+      "firstSeen": "Eerst gezien",
+      "lastSeen": "Laatst gezien",
+      "range": "Verspreidingskans",
+      "verification": "Geverifieerd",
+      "excluded": "Uitgesloten",
+      "included": "Opgenomen",
+      "confirmed": "Bevestigd",
+      "bestRecording": "Beste opname",
+      "actions": "Acties"
+    },
+    "columnHelp": {
+      "range": "Kans volgens het verspreidingsfilter voor deze locatie en week"
+    },
+    "groups": {
+      "inventory": "soorten",
+      "stats": "statistieken",
+      "memberships": "soortenlijsten",
+      "range": "verspreidingskansen",
+      "best": "beste opnames",
+      "recordings": "opnames"
+    },
+    "states": {
+      "loading": "Laden…",
+      "loadFailed": "Kon {what} niet laden.",
+      "retry": "Opnieuw proberen",
+      "empty": "Er zijn nog geen soorten gedetecteerd.",
+      "noMatch": "Geen soorten komen overeen met zoekopdracht en filter.",
+      "notAvailable": "n.v.t.",
+      "notFound": "Er zijn geen detecties van deze soort opgeslagen.",
+      "membershipLoading": "Soortenlijsten laden…",
+      "unknownModel": "Onbekend",
+      "loginRequired": "Meld u aan om de soortenwerkruimte te gebruiken."
+    },
+    "verification": "{correct} juist, {falsePositive} fout-positief",
+    "membership": {
+      "confirmed": "Bevestigd",
+      "included": "Insluitlijst",
+      "excluded": "Uitsluitlijst",
+      "yes": "Ja",
+      "no": "Nee",
+      "state": "{list} voor {species}: {state}"
+    },
+    "actions": {
+      "menu": "Acties voor {species}",
+      "toggle": {
+        "confirmed": "Bevestigd omschakelen",
+        "included": "Insluitlijst omschakelen",
+        "excluded": "Uitsluitlijst omschakelen"
+      },
+      "delete": "Detecties van {species} verwijderen…",
+      "updateFailed": "Kon {list} voor {species} niet bijwerken."
+    },
+    "best": {
+      "title": "Beste opname van {species}",
+      "play": "Beste opname van {species} afspelen",
+      "locked": "Vergrendeld",
+      "confidence": "Betrouwbaarheid {value}",
+      "unavailable": "Geen opname beschikbaar",
+      "unavailableHint": "Geen enkele detectie van deze soort heeft een audiofragment op schijf."
+    },
+    "delete": {
+      "title": "Detecties van {species} verwijderen",
+      "message": "Te verwijderen detecties: {deletable} van {total} (inclusief fout-positieven: {falsePositive}). Vergrendelde detecties blijven behouden: {locked}.",
+      "nothing": "Alle detecties van deze soort zijn vergrendeld, er is dus niets te verwijderen.",
+      "confirm": "Verwijderen ({count})",
+      "running": "Verwijderen…",
+      "progressLabel": "Voortgang verwijderen",
+      "progress": "Verwijderd: {deleted} · vergrendeld behouden: {locked}",
+      "done": "Verwijderen voltooid.",
+      "stop": "Stoppen",
+      "cancelled": "Verwijderen gestopt. Reeds verwijderde detecties blijven verwijderd.",
+      "stalled": "Verwijderen gestopt omdat de resterende detecties niet verwijderd konden worden.",
+      "error": "Verwijderen mislukt. Reeds verwijderde detecties blijven verwijderd."
+    },
+    "detail": {
+      "back": "Terug naar de soortenwerkruimte",
+      "title": "Alle opnames van {species}",
+      "detections": "Detecties: {count}",
+      "maxConfidence": "max. betrouwbaarheid {value}",
+      "lastDetected": "laatst gedetecteerd {date}",
+      "bestRecording": "Beste opname",
+      "quickGraph": "Snelle grafiek",
+      "openExternal": "{species} openen op {site} (nieuw tabblad)",
+      "select": "Selecteren",
+      "cancelSelect": "Selectie annuleren",
+      "lockedOnly": "Alleen vergrendeld",
+      "toggleAria": "{list} voor {species}"
+    },
+    "table": {
+      "dateTime": "Datum en tijd",
+      "weather": "Weer",
+      "source": "Bron",
+      "confidence": "Betrouwbaarheid",
+      "model": "Model",
+      "status": "Status",
+      "recording": "Opname",
+      "actions": "Acties",
+      "selectAll": "Alle opnames op deze pagina selecteren",
+      "selectRow": "Opname van {date} selecteren",
+      "selected": "Geselecteerd: {count}",
+      "bulkActions": "Acties voor geselecteerde opnames",
+      "markCorrect": "Markeren als juist",
+      "markFalsePositive": "Markeren als fout-positief",
+      "lock": "Vergrendelen",
+      "unlock": "Ontgrendelen",
+      "deleteSelected": "Verwijderen",
+      "deleteSelectedTitle": "Geselecteerde opnames van {species} verwijderen ({count})?",
+      "deleteSelectedMessage": "Vergrendelde opnames in de selectie blijven behouden.",
+      "bulkLockedHint": "Vergrendelde opnames kunnen niet worden beoordeeld of verwijderd.",
+      "bulkResult": "Bijgewerkt: {processed} · overgeslagen: {skipped}",
+      "bulkFailed": "De geselecteerde opnames konden niet worden bijgewerkt.",
+      "empty": "Geen opnames.",
+      "emptyLocked": "Geen vergrendelde opnames.",
+      "sortConfidenceDesc": "Hoogste betrouwbaarheid eerst",
+      "sortConfidenceAsc": "Laagste betrouwbaarheid eerst",
+      "sortDateDesc": "Nieuwste eerst",
+      "sortDateAsc": "Oudste eerst"
     }
   }
 }

@@ -939,6 +939,9 @@ type SpeciesSettings struct {
 	Include []string                 `yaml:"include" json:"include"`                     // Always include these species
 	Exclude []string                 `yaml:"exclude" json:"exclude"`                     // Always exclude these species
 	Config  map[string]SpeciesConfig `yaml:"config" json:"config" jsonschema:"nullable"` // Per-species configuration (keys normalized to lowercase)
+
+	Confirmed        []string               `yaml:"confirmed" json:"confirmed"`               // Species marked confirmed in the species workspace (analytics only; does not affect detection)
+	SpeciesWorkspace SpeciesWorkspaceLayout `yaml:"speciesworkspace" json:"speciesWorkspace"` // Species workspace column layout and sort
 }
 
 // LogDeduplicationSettings contains settings for log deduplication
