@@ -590,6 +590,7 @@ export type TranslationKey =
   | 'dashboard.recentDetections.actions.markCorrect'
   | 'dashboard.recentDetections.actions.markFalsePositive'
   | 'dashboard.recentDetections.actions.review'
+  | 'dashboard.recentDetections.actions.reanalyze'
   | 'dashboard.recentDetections.actions.showSpecies'
   | 'dashboard.recentDetections.actions.ignoreSpecies'
   | 'dashboard.recentDetections.actions.lockDetection'
