@@ -1111,6 +1111,17 @@
       "muted": "Gedempt",
       "level": "Versterking: {value} dB"
     },
+    "static": {
+      "toggle": "Statisch spectrogram",
+      "recording": "Opname bezig…",
+      "generatedAt": "Gegenereerd om {time}",
+      "captureFailed": "Opname van statisch spectrogram mislukt. Opnieuw proberen…",
+      "sessionExpired": "De sessie voor het statische spectrogram van twee minuten is beëindigd.",
+      "restart": "Sessie opnieuw starten",
+      "fullRange": "Volledig frequentiebereik van de invoer",
+      "frequencyAxis": "Frequentie in kilohertz",
+      "imageAlt": "Statisch spectrogram voor {source}"
+    },
     "page": {
       "title": "Live audio",
       "sourceLabel": "Audiobron",

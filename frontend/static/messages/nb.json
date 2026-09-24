@@ -1111,6 +1111,17 @@
       "muted": "Dempet",
       "level": "Forsterkning: {value} dB"
     },
+    "static": {
+      "toggle": "Statisk spektrogram",
+      "recording": "Tar opp…",
+      "generatedAt": "Generert kl. {time}",
+      "captureFailed": "Opptak av statisk spektrogram mislyktes. Prøver på nytt…",
+      "sessionExpired": "Den to minutter lange økten med statisk spektrogram er avsluttet.",
+      "restart": "Start økten på nytt",
+      "fullRange": "Hele frekvensområdet til inngangen",
+      "frequencyAxis": "Frekvens i kilohertz",
+      "imageAlt": "Statisk spektrogram for {source}"
+    },
     "page": {
       "title": "Direkte lyd",
       "sourceLabel": "Lydkilde",

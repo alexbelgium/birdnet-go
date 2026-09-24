@@ -1111,6 +1111,17 @@
       "muted": "Wyciszony",
       "level": "Wzmocnienie: {value} dB"
     },
+    "static": {
+      "toggle": "Spektrogram statyczny",
+      "recording": "Nagrywanie…",
+      "generatedAt": "Wygenerowano o {time}",
+      "captureFailed": "Nie udało się zarejestrować spektrogramu statycznego. Ponawianie…",
+      "sessionExpired": "Dwuminutowa sesja spektrogramu statycznego dobiegła końca.",
+      "restart": "Uruchom sesję ponownie",
+      "fullRange": "Pełny zakres częstotliwości wejścia",
+      "frequencyAxis": "Częstotliwość w kilohercach",
+      "imageAlt": "Spektrogram statyczny dla {source}"
+    },
     "page": {
       "title": "Audio na żywo",
       "sourceLabel": "Źródło audio",

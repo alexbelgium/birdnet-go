@@ -1111,6 +1111,17 @@
       "muted": "Silenciado",
       "level": "Ganancia: {value} dB"
     },
+    "static": {
+      "toggle": "Espectrograma estático",
+      "recording": "Grabando…",
+      "generatedAt": "Generado a las {time}",
+      "captureFailed": "Error al capturar el espectrograma estático. Reintentando…",
+      "sessionExpired": "La sesión de espectrograma estático de dos minutos ha finalizado.",
+      "restart": "Reiniciar sesión",
+      "fullRange": "Rango de frecuencia completo de la entrada",
+      "frequencyAxis": "Frecuencia en kilohercios",
+      "imageAlt": "Espectrograma estático de {source}"
+    },
     "page": {
       "title": "Audio en vivo",
       "sourceLabel": "Fuente de audio",

@@ -1111,6 +1111,17 @@
       "muted": "Muet",
       "level": "Gain : {value} dB"
     },
+    "static": {
+      "toggle": "Spectrogramme statique",
+      "recording": "Enregistrement…",
+      "generatedAt": "Généré à {time}",
+      "captureFailed": "Échec de la capture du spectrogramme statique. Nouvelle tentative…",
+      "sessionExpired": "La session de spectrogramme statique de deux minutes est terminée.",
+      "restart": "Redémarrer la session",
+      "fullRange": "Plage de fréquences complète de l’entrée",
+      "frequencyAxis": "Fréquence en kilohertz",
+      "imageAlt": "Spectrogramme statique pour {source}"
+    },
     "page": {
       "title": "Audio en direct",
       "sourceLabel": "Source audio",
