@@ -19,6 +19,7 @@
   import SpectrogramCanvas from '$lib/desktop/components/media/SpectrogramCanvas.svelte';
   import SpectrogramControls from '$lib/desktop/components/media/SpectrogramControls.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
+  import StaticSpectrogramView from '../components/StaticSpectrogramView.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import { fetchWithCSRF } from '$lib/utils/api';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
@@ -46,6 +47,7 @@
   const LABEL_POLL_INTERVAL_MS = 200;
   /** Maximum label age (ms) before pruning from overlay */
   const LABEL_MAX_AGE_MS = 60000;
+  const STATIC_MODE_STORAGE_KEY = 'liveAudioStaticSpectrogram';
 
   const sessionId = generateSessionId();
 
@@ -63,6 +65,10 @@
   let sources = $state<Array<{ id: string; name: string }>>([]);
   let selectedSourceId = $state<string>('');
   let sourceDiscoveryDone = $state(false);
+  let staticSpectrogram = $state(false);
+  let selectedSourceName = $derived(
+    sources.find(source => source.id === selectedSourceId)?.name ?? ''
+  );
 
   // Connection state
   let connectionError = $state<string | null>(null);
@@ -555,8 +561,18 @@
     const newId = Array.isArray(value) ? value[0] : value;
     if (newId && newId !== selectedSourceId) {
       selectedSourceId = newId;
-      startStream();
+      if (!staticSpectrogram) startStream();
     }
+  }
+
+  function handleStaticSpectrogramToggle() {
+    staticSpectrogram = !staticSpectrogram;
+    try {
+      globalThis.localStorage?.setItem(STATIC_MODE_STORAGE_KEY, String(staticSpectrogram));
+    } catch {
+      // localStorage may be unavailable in restrictive browsing modes.
+    }
+    if (staticSpectrogram) void stopStream();
   }
 
   function handleAudioOutputToggle() {
@@ -572,6 +588,11 @@
   // Use onMount (NOT $effect) to avoid reactive dependency loops.
   // See MiniSpectrogram.svelte for detailed explanation.
   onMount(() => {
+    try {
+      staticSpectrogram = globalThis.localStorage?.getItem(STATIC_MODE_STORAGE_KEY) === 'true';
+    } catch {
+      // localStorage may be unavailable in restrictive browsing modes.
+    }
     if (hasLiveAudioAccess()) {
       connectSSE();
     }
@@ -798,13 +819,35 @@
         />
       </div>
 
+      <div class="flex items-center gap-2">
+        <span class="text-sm text-[var(--color-base-content)]/70">
+          {t('spectrogram.static.toggle')}
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={staticSpectrogram}
+          aria-label={t('spectrogram.static.toggle')}
+          onclick={handleStaticSpectrogramToggle}
+          class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors {staticSpectrogram
+            ? 'bg-[var(--color-primary)]'
+            : 'bg-[var(--color-base-content)]/20'}"
+        >
+          <span
+            class="pointer-events-none inline-block size-5 rounded-full bg-white shadow-lg transition-transform {staticSpectrogram
+              ? 'translate-x-5'
+              : 'translate-x-0'}"
+          ></span>
+        </button>
+      </div>
+
       <!-- Connection status indicator -->
-      {#if isConnecting}
+      {#if !staticSpectrogram && isConnecting}
         <div class="flex items-center gap-1 text-sm text-[var(--color-base-content)]/60">
           <Loader2 class="size-4 animate-spin" />
           <span>{t('common.loading')}</span>
         </div>
-      {:else if isStreaming}
+      {:else if !staticSpectrogram && isStreaming}
         <div class="flex items-center gap-1 text-sm text-[var(--color-success)]">
           <span class="inline-block size-2 rounded-full bg-[var(--color-success)]"></span>
           <span>{t('spectrogram.page.connected')}</span>
@@ -833,8 +876,14 @@
       </button>
     </div>
 
+    {#if staticSpectrogram}
+      <div class="min-h-0 flex-1">
+        <StaticSpectrogramView sourceId={selectedSourceId} sourceName={selectedSourceName} />
+      </div>
+    {/if}
+
     <!-- Error alert -->
-    {#if connectionError}
+    {#if connectionError && !staticSpectrogram}
       <div
         role="alert"
         class="m-4 flex items-center gap-2 rounded-lg bg-[var(--color-error)]/10 p-3 text-sm text-[var(--color-error)]"
@@ -845,7 +894,7 @@
     {/if}
 
     <!-- Spectrogram canvas (fills remaining space) -->
-    <div class="min-h-0 flex-1">
+    <div class="min-h-0 flex-1" class:hidden={staticSpectrogram}>
       {#if isStreaming || isConnecting}
         <SpectrogramCanvas
           analyser={spectro.analyser}
@@ -882,7 +931,10 @@
     </div>
 
     <!-- Controls bar -->
-    <div class="flex-none border-t border-[var(--color-base-200)] px-4 py-2">
+    <div
+      class="flex-none border-t border-[var(--color-base-200)] px-4 py-2"
+      class:hidden={staticSpectrogram}
+    >
       <SpectrogramControls
         {frequencyRange}
         {colorMap}
