@@ -1,0 +1,408 @@
+package detections
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
+	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/datastore"
+	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
+	"github.com/tphakala/birdnet-go/internal/errors"
+	"github.com/tphakala/birdnet-go/internal/securefs"
+)
+
+// fakeWorkspaceStore is a datastore mock that also implements the workspace capability.
+type fakeWorkspaceStore struct {
+	*mocks.MockInterface
+	inventory   []datastore.SpeciesWorkspaceRow
+	stats       []datastore.SpeciesWorkspaceStats
+	candidates  map[string][]datastore.SpeciesRecordingCandidate
+	recordings  []datastore.SpeciesWorkspaceRecording
+	recTotal    int64
+	lastQuery   datastore.SpeciesRecordingQuery
+	chunk       datastore.SpeciesDeleteChunk
+	chunkErr    error
+	candidateQs [][]string
+}
+
+func (f *fakeWorkspaceStore) SpeciesWorkspaceInventory(_ context.Context, name string) ([]datastore.SpeciesWorkspaceRow, error) {
+	if name == "" {
+		return f.inventory, nil
+	}
+	var out []datastore.SpeciesWorkspaceRow
+	for _, r := range f.inventory {
+		if r.ScientificName == name {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeWorkspaceStore) SpeciesWorkspaceStats(_ context.Context, name string) ([]datastore.SpeciesWorkspaceStats, error) {
+	if name == "" {
+		return f.stats, nil
+	}
+	var out []datastore.SpeciesWorkspaceStats
+	for _, s := range f.stats {
+		if s.ScientificName == name {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeWorkspaceStore) SpeciesWorkspaceCandidates(_ context.Context, names []string, limit int) (map[string][]datastore.SpeciesRecordingCandidate, error) {
+	f.candidateQs = append(f.candidateQs, names)
+	out := make(map[string][]datastore.SpeciesRecordingCandidate, len(names))
+	for _, n := range names {
+		out[n] = f.candidates[n][:min(limit, len(f.candidates[n]))]
+	}
+	return out, nil
+}
+
+func (f *fakeWorkspaceStore) SpeciesWorkspaceRecordings(_ context.Context, q datastore.SpeciesRecordingQuery) ([]datastore.SpeciesWorkspaceRecording, int64, error) {
+	f.lastQuery = q
+	return f.recordings, f.recTotal, nil
+}
+
+func (f *fakeWorkspaceStore) SpeciesWorkspaceDeleteChunk(context.Context, string, int) (datastore.SpeciesDeleteChunk, error) {
+	return f.chunk, f.chunkErr
+}
+
+// newWorkspaceTest wires a handler around store with the workspace routes registered.
+func newWorkspaceTest(t *testing.T, store datastore.Interface, opts ...apitest.CoreOption) (*echo.Echo, *Handler) {
+	t.Helper()
+	e := echo.New()
+	core := apitest.NewCore(t, append([]apitest.CoreOption{apitest.WithEcho(e), apitest.WithDatastore(store)}, opts...)...)
+	core.AuthMiddleware = func(next echo.HandlerFunc) echo.HandlerFunc { return next }
+	h := buildTestHandler(t, core,
+		map[string]string{"blackbird": "Turdus merula"},
+		map[string]string{"Turdus merula": "Blackbird"})
+	h.RegisterSpeciesWorkspaceRoutes(core.Group)
+	return e, h
+}
+
+func doWorkspace(t *testing.T, e *echo.Echo, method, target, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	var req *http.Request
+	if body == "" {
+		req = httptest.NewRequest(method, target, http.NoBody)
+	} else {
+		req = httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	}
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestSpeciesWorkspaceRoutesRequireAuth(t *testing.T) {
+	t.Parallel()
+	e := echo.New()
+	core := apitest.NewCore(t, apitest.WithEcho(e))
+	core.AuthMiddleware = func(echo.HandlerFunc) echo.HandlerFunc {
+		return func(ctx echo.Context) error { return ctx.NoContent(http.StatusUnauthorized) }
+	}
+	h := buildTestHandler(t, core, nil, nil)
+	h.RegisterSpeciesWorkspaceRoutes(core.Group)
+
+	count := 0
+	for _, r := range e.Routes() {
+		// Echo adds a catch-all route for groups with middleware; skip it.
+		if !strings.HasPrefix(r.Path, "/api/v2/species-workspace/") || strings.HasSuffix(r.Path, "*") {
+			continue
+		}
+		count++
+		path := strings.ReplaceAll(r.Path, ":kind", "confirmed")
+		rec := doWorkspace(t, e, r.Method, path, "")
+		assert.Equal(t, http.StatusUnauthorized, rec.Code, "%s %s must be protected", r.Method, r.Path)
+	}
+	assert.Equal(t, 9, count)
+}
+
+func TestSpeciesWorkspaceNotImplementedWithoutCapability(t *testing.T) {
+	t.Parallel()
+	e, _ := newWorkspaceTest(t, mocks.NewMockInterface(t))
+	for _, target := range []string{"/api/v2/species-workspace/species", "/api/v2/species-workspace/species/stats",
+		"/api/v2/species-workspace/best-recordings?species=A", "/api/v2/species-workspace/recordings?species=A"} {
+		assert.Equal(t, http.StatusNotImplemented, doWorkspace(t, e, http.MethodGet, target, "").Code, target)
+	}
+}
+
+func TestGetWorkspaceSpecies(t *testing.T) {
+	t.Parallel()
+	seen := time.Date(2025, 5, 1, 6, 30, 0, 0, time.UTC)
+	store := &fakeWorkspaceStore{MockInterface: mocks.NewMockInterface(t), inventory: []datastore.SpeciesWorkspaceRow{
+		{ScientificName: "Turdus merula", CommonName: "Blackbird", SpeciesCode: "eurbla", Total: 12, Locked: 2, FirstSeen: seen, LastSeen: seen},
+		{ScientificName: "Strix aluco", Total: 1},
+	}}
+	e, _ := newWorkspaceTest(t, store)
+
+	rec := doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/species", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var rows []WorkspaceSpeciesResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	require.Len(t, rows, 2)
+	assert.Equal(t, WorkspaceSpeciesResponse{ScientificName: "Turdus merula", CommonName: "Blackbird", SpeciesCode: "eurbla",
+		Total: 12, Locked: 2, FirstSeen: "2025-05-01T06:30:00Z", LastSeen: "2025-05-01T06:30:00Z"}, rows[0])
+	assert.Empty(t, rows[1].FirstSeen)
+
+	rec = doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/species?species=Strix%20aluco", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rows))
+	assert.Len(t, rows, 1)
+}
+
+func TestGetWorkspaceSpeciesStats(t *testing.T) {
+	t.Parallel()
+	store := &fakeWorkspaceStore{MockInterface: mocks.NewMockInterface(t), stats: []datastore.SpeciesWorkspaceStats{
+		{ScientificName: "Turdus merula", Correct: 3, FalsePositive: 1},
+		{ScientificName: "Strix aluco", FalsePositive: 2},
+	}}
+	e, _ := newWorkspaceTest(t, store)
+
+	var stats []WorkspaceSpeciesStatsResponse
+	rec := doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/species/stats", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &stats))
+	assert.Len(t, stats, 2)
+
+	stats = nil
+	rec = doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/species/stats?species=%20Strix%20aluco%20", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &stats))
+	require.Len(t, stats, 1, "the species filter reaches the store, trimmed")
+	assert.Equal(t, int64(2), stats[0].FalsePositive)
+}
+
+func TestGetWorkspaceBestRecordings(t *testing.T) {
+	t.Parallel()
+	store := &fakeWorkspaceStore{MockInterface: mocks.NewMockInterface(t), candidates: map[string][]datastore.SpeciesRecordingCandidate{
+		"Turdus merula": {
+			{ID: 1, Confidence: 0.7, ClipName: "missing.wav", Locked: true},
+			{ID: 2, Confidence: 0.9, ClipName: "present.wav"},
+		},
+		"Strix aluco": {{ID: 3, Confidence: 0.5, ClipName: "gone.wav"}},
+	}}
+	e, h := newWorkspaceTest(t, store)
+	exportDir := h.CurrentSettings().Realtime.Audio.Export.Path
+	require.NoError(t, os.WriteFile(filepath.Join(exportDir, "present.wav"), []byte("RIFF"), 0o600))
+	sfs, err := securefs.New(exportDir)
+	require.NoError(t, err)
+	h.SFS = sfs
+
+	rec := doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/best-recordings?species=Turdus%20merula&species=Strix%20aluco&species=Nobody", "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got map[string]*WorkspaceBestRecording
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.NotNil(t, got["Turdus merula"])
+	assert.Equal(t, uint(2), got["Turdus merula"].ID, "a missing locked clip falls through to the next available one")
+	assert.Nil(t, got["Strix aluco"])
+	assert.Contains(t, got, "Nobody")
+	assert.Nil(t, got["Nobody"])
+	assert.Len(t, store.candidateQs, 1, "all species of a batch are resolved in one datastore call")
+
+	// A species whose first candidates all lack a clip is looked up further.
+	deep := make([]datastore.SpeciesRecordingCandidate, 0, 30)
+	for i := range 25 {
+		deep = append(deep, datastore.SpeciesRecordingCandidate{ID: uint(100 + i), ClipName: "missing.wav"})
+	}
+	deep = append(deep, datastore.SpeciesRecordingCandidate{ID: 999, Confidence: 0.4, ClipName: "present.wav"})
+	store.candidates["Parus major"] = deep
+	store.candidateQs = nil
+	rec = doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/best-recordings?species=Parus%20major", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	got = nil
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.NotNil(t, got["Parus major"])
+	assert.Equal(t, uint(999), got["Parus major"].ID)
+	assert.Len(t, store.candidateQs, 2)
+
+	assert.Equal(t, http.StatusBadRequest, doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/best-recordings", "").Code)
+	params := make([]string, 0, maxBestRecordingSpecies+1)
+	for i := range maxBestRecordingSpecies + 1 {
+		params = append(params, "species=S"+strconv.Itoa(i))
+	}
+	tooMany := "/api/v2/species-workspace/best-recordings?" + strings.Join(params, "&")
+	assert.Equal(t, http.StatusBadRequest, doWorkspace(t, e, http.MethodGet, tooMany, "").Code)
+}
+
+func TestGetWorkspaceRecordings(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2025, 5, 2, 5, 14, 0, 0, time.UTC)
+	store := &fakeWorkspaceStore{MockInterface: mocks.NewMockInterface(t), recTotal: 51, recordings: []datastore.SpeciesWorkspaceRecording{
+		{Note: datastore.Note{ID: 7, ScientificName: "Turdus merula", Date: "2025-05-02", Time: "05:14:00", Confidence: 0.9}, DetectedAt: at, ModelName: "BirdNET"},
+		{Note: datastore.Note{ID: 8, ScientificName: "Turdus merula", Date: "2025-05-01", Time: "05:00:00", Confidence: 0.8}},
+	}}
+	store.On("GetHourlyWeather", mock.Anything).Return([]datastore.HourlyWeather{}, nil).Maybe()
+	e, _ := newWorkspaceTest(t, store)
+
+	rec := doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/recordings?species=Turdus%20merula&page=3&perPage=25&sort=date_asc&locked=true", "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, datastore.SpeciesRecordingQuery{ScientificName: "Turdus merula", SortBy: "date_asc", LockedOnly: true, Limit: 25, Offset: 50}, store.lastQuery)
+
+	var got struct {
+		Data []struct {
+			ID        uint    `json:"id"`
+			Timestamp string  `json:"timestamp"`
+			ModelName *string `json:"modelName"`
+		} `json:"data"`
+		Total      int64 `json:"total"`
+		Page       int   `json:"page"`
+		TotalPages int   `json:"totalPages"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, int64(51), got.Total)
+	assert.Equal(t, 3, got.Page)
+	assert.Equal(t, 3, got.TotalPages)
+	require.Len(t, got.Data, 2)
+	assert.Equal(t, "2025-05-02T05:14:00Z", got.Data[0].Timestamp)
+	require.NotNil(t, got.Data[0].ModelName)
+	assert.Equal(t, "BirdNET", *got.Data[0].ModelName)
+	assert.Nil(t, got.Data[1].ModelName, "an unknown model is null, not a guessed name")
+
+	for _, bad := range []string{"", "?species=A&sort=random", "?species=A&page=0", "?species=A&perPage=500"} {
+		assert.Equal(t, http.StatusBadRequest, doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/recordings"+bad, "").Code, bad)
+	}
+
+	rec = doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/recordings?species=A", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, datastore.SpeciesSortConfidenceDesc, store.lastQuery.SortBy, "default sort is confidence descending")
+}
+
+func TestDeleteWorkspaceSpeciesChunk(t *testing.T) {
+	t.Parallel()
+	store := &fakeWorkspaceStore{
+		MockInterface: mocks.NewMockInterface(t),
+		chunk: datastore.SpeciesDeleteChunk{
+			Deleted:    []datastore.DeletedDetection{{ID: 1}, {ID: 4, ClipName: "a.wav"}},
+			Locked:     1,
+			Reassigned: 1,
+			Remaining:  2,
+		},
+	}
+	e, _ := newWorkspaceTest(t, store)
+
+	rec := doWorkspace(t, e, http.MethodPost, "/api/v2/species-workspace/species/delete", `{"scientificName":"Turdus merula"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got WorkspaceDeleteResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, WorkspaceDeleteResponse{Deleted: 2, Locked: 1, Reassigned: 1, Remaining: 2}, got)
+
+	assert.Equal(t, http.StatusBadRequest, doWorkspace(t, e, http.MethodPost, "/api/v2/species-workspace/species/delete", `{"scientificName":"  "}`).Code)
+
+	store.chunkErr = errors.NewStd("database is locked")
+	assert.Equal(t, http.StatusInternalServerError,
+		doWorkspace(t, e, http.MethodPost, "/api/v2/species-workspace/species/delete", `{"scientificName":"Turdus merula"}`).Code,
+		"a datastore failure fails the request so the client can retry")
+}
+
+func TestWorkspaceMemberships(t *testing.T) {
+	t.Parallel()
+	e, h := newWorkspaceTest(t, mocks.NewMockInterface(t), apitest.WithSettingsFunc(func(s *conf.Settings) {
+		s.Realtime.Species.Include = []string{"Blackbird"}
+		s.Realtime.Species.Confirmed = nil
+	}))
+
+	rec := doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/memberships", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var lists WorkspaceMembershipsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &lists))
+	assert.Equal(t, []string{"Turdus merula"}, lists.Included, "stored common names are reported by scientific name")
+	assert.Empty(t, lists.Confirmed)
+
+	put := func(kind, body string) *httptest.ResponseRecorder {
+		return doWorkspace(t, e, http.MethodPut, "/api/v2/species-workspace/memberships/"+kind, body)
+	}
+	require.Equal(t, http.StatusOK, put("confirmed", `{"scientificName":"Turdus merula","present":true}`).Code)
+	require.Equal(t, http.StatusOK, put("confirmed", `{"scientificName":"Turdus merula","present":true}`).Code)
+	assert.Equal(t, []string{"Turdus merula"}, h.getSettingsOrFallback().Realtime.Species.Confirmed, "setting the same state twice is idempotent")
+
+	require.Equal(t, http.StatusOK, put("included", `{"scientificName":"Turdus merula","present":false}`).Code)
+	assert.Empty(t, h.getSettingsOrFallback().Realtime.Species.Include, "removal matches the stored common-name alias")
+
+	assert.Equal(t, http.StatusBadRequest, put("favourites", `{"scientificName":"Turdus merula","present":true}`).Code)
+	assert.Equal(t, http.StatusBadRequest, put("confirmed", `{"scientificName":"","present":true}`).Code)
+}
+
+func TestWorkspaceLayout(t *testing.T) {
+	t.Parallel()
+	e, h := newWorkspaceTest(t, mocks.NewMockInterface(t))
+
+	rec := doWorkspace(t, e, http.MethodGet, "/api/v2/species-workspace/layout", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	var layout conf.SpeciesWorkspaceLayout
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &layout))
+	assert.Equal(t, conf.DefaultSpeciesWorkspaceLayout(), layout)
+
+	rec = doWorkspace(t, e, http.MethodPut, "/api/v2/species-workspace/layout",
+		`{"columns":[{"id":"lastSeen","visible":true},{"id":"species","visible":false},{"id":"nope","visible":true}],"sort":{"column":"lastSeen","direction":"asc"},"condensed":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	saved := h.getSettingsOrFallback().Realtime.Species.SpeciesWorkspace
+	assert.Equal(t, conf.SpeciesWorkspaceColumn{ID: "lastSeen", Visible: true}, saved.Columns[0])
+	assert.Equal(t, conf.SpeciesWorkspaceColumn{ID: "species", Visible: true}, saved.Columns[1])
+	assert.Equal(t, conf.SpeciesWorkspaceSort{Column: "lastSeen", Direction: "asc"}, saved.Sort)
+	assert.True(t, saved.Condensed)
+
+	var response conf.SpeciesWorkspaceLayout
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	assert.True(t, response.Condensed)
+}
+
+func TestRemoveClipFiles(t *testing.T) {
+	t.Parallel()
+	_, h := newWorkspaceTest(t, mocks.NewMockInterface(t))
+	exportDir := h.CurrentSettings().Realtime.Audio.Export.Path
+	sfs, err := securefs.New(exportDir)
+	require.NoError(t, err)
+	h.SFS = sfs
+	day := filepath.Join(exportDir, "2025", "05")
+	other := filepath.Join(exportDir, "2025", "06")
+	require.NoError(t, os.MkdirAll(day, 0o750))
+	require.NoError(t, os.MkdirAll(other, 0o750))
+	files := map[string]bool{ // path -> removed
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z.wav"):               true,
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_514px.png"):         true,
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_1026px-bat-v2.png"): true,
+		filepath.Join(other, "strix_aluco_70p_20250601T220000Z.wav"):               true,
+		filepath.Join(other, "strix_aluco_70p_20250601T220000Z_258px.png"):         true,
+		// A clip whose name only shares the deleted clip's prefix stays.
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_2.wav"):       false,
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_2_514px.png"): false,
+		// An unknown width is not a spectrogram render.
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_123px.png"): false,
+	}
+	for path := range files {
+		require.NoError(t, os.WriteFile(path, []byte("x"), 0o600))
+	}
+
+	h.removeClipFiles([]string{
+		"2025/05/turdus_merula_80p_20250501T060000Z.wav",
+		"2025/06/strix_aluco_70p_20250601T220000Z.wav",
+		"2025/07/already_gone.wav",
+		"../escape.wav",
+	})
+
+	for path, removed := range files {
+		_, err := os.Stat(path)
+		if removed {
+			assert.True(t, os.IsNotExist(err), "%s should be removed", path)
+		} else {
+			assert.NoError(t, err, "%s should be kept", path)
+		}
+	}
+}
