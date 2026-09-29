@@ -75,6 +75,9 @@ type FileInfo struct {
 type Interface interface {
 	GetLockedNotesClipPaths() ([]string, error)
 	ClearNoteClipPathsByNames(clipNames []string) (int64, error)
+	// RetainNoteSpectrogramsByClipNames clears clip_name like ClearNoteClipPathsByNames
+	// and records the name as the clip a kept spectrogram render belongs to.
+	RetainNoteSpectrogramsByClipNames(clipNames []string) (int64, error)
 }
 
 // LoadPolicy loads the cleanup policies from a CSV file
@@ -465,14 +468,13 @@ func parseFileInfo(path string, info os.FileInfo, allowedExts []string) (FileInf
 // end of a filename (without extension). Duration suffixes are added by extended
 // capture mode and follow the pattern _<digits>s.
 func StripDurationSuffix(name string) string {
-	lastUnderscore := strings.LastIndex(name, "_")
-	if lastUnderscore < 0 {
+	base, suffix, found := strings.CutLast(name, "_")
+	if !found {
 		return name
 	}
-	suffix := name[lastUnderscore+1:]
 	if len(suffix) >= 2 && suffix[len(suffix)-1] == 's' {
 		if _, err := strconv.ParseUint(suffix[:len(suffix)-1], 10, 64); err == nil {
-			return name[:lastUnderscore]
+			return base
 		}
 	}
 	return name

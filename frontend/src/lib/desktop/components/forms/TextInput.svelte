@@ -1,6 +1,7 @@
 <script lang="ts">
   import { cn } from '$lib/utils/cn.js';
   import { safeGet } from '$lib/utils/security';
+  import type { HTMLInputAttributes } from 'svelte/elements';
 
   interface Props {
     value: string;
@@ -21,8 +22,12 @@
     validationMessage?: string;
     /** Links the input to an external description element for screen readers. */
     'aria-describedby'?: string;
+    /** Marks the native input invalid for assistive technology; omitted when unset. */
+    'aria-invalid'?: HTMLInputAttributes['aria-invalid'];
     onchange?: (_value: string) => void;
     oninput?: (_value: string) => void;
+    /** Called when the input loses focus, with the current value. */
+    onblur?: (_value: string) => void;
   }
 
   let {
@@ -43,8 +48,10 @@
     size = 'sm',
     validationMessage,
     'aria-describedby': ariaDescribedBy,
+    'aria-invalid': ariaInvalid,
     onchange,
     oninput,
+    onblur,
     ...rest
   }: Props = $props();
 
@@ -61,6 +68,9 @@
     return inputElement.validity.valid;
   });
 
+  // Callers that validate in JS mark the field with aria-invalid; show the error border too
+  let isMarkedInvalid = $derived(ariaInvalid === true || ariaInvalid === 'true');
+
   function handleChange(event: Event) {
     const target = event.currentTarget as HTMLInputElement;
     value = target.value;
@@ -76,6 +86,7 @@
 
   function handleBlur() {
     touched = true;
+    onblur?.(value);
   }
 
   function handleInvalid() {
@@ -130,7 +141,12 @@
     {minlength}
     {maxlength}
     aria-describedby={ariaDescribedBy}
-    class={cn('input  w-full', safeGet(sizeClasses, size, ''), !isValid && 'input-error')}
+    aria-invalid={ariaInvalid}
+    class={cn(
+      'input  w-full',
+      safeGet(sizeClasses, size, ''),
+      (!isValid || isMarkedInvalid) && 'input-error'
+    )}
     onchange={handleChange}
     oninput={handleInput}
     onblur={handleBlur}

@@ -44,6 +44,7 @@
     uninstallModel,
     subscribeInstallProgress,
     isNetworkDownloadError,
+    MODEL_OPERATION_IN_PROGRESS_KEY,
   } from '$lib/utils/modelsApi';
   import { invalidateModels } from '$lib/stores/models.svelte';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
@@ -61,6 +62,7 @@
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import FlagIcon, { type FlagLocale } from '$lib/desktop/components/ui/FlagIcon.svelte';
   import TextInput from '$lib/desktop/components/forms/TextInput.svelte';
+  import LoadingSpinner from '$lib/desktop/components/ui/LoadingSpinner.svelte';
   import {
     settingsStore,
     settingsActions,
@@ -89,6 +91,7 @@
   } from '$lib/utils/variantSelection';
   import OptimizeReviewDialog from '$lib/desktop/features/settings/components/OptimizeReviewDialog.svelte';
   import { safeArrayAccess } from '$lib/utils/security';
+  import { generateId } from '$lib/utils/uuid';
   import { loggers } from '$lib/utils/logger';
   import { t } from '$lib/i18n';
   import {
@@ -168,6 +171,9 @@
   // so switching tabs cannot strand it. Carries enough to offer a real Retry and,
   // for a download-reachability failure, a pointer to the Download Source setting.
   type GalleryActionKind = 'install' | 'reinstall' | 'remove';
+  // HTTP status the models API returns when a remove is refused because
+  // installed models still depend on the target.
+  const HTTP_STATUS_CONFLICT = 409;
   interface GalleryActionError {
     modelId: string;
     modelName: string;
@@ -175,6 +181,7 @@
     message: string; // raw backend/SSE/ApiError text, kept inspectable
     variantId?: string; // reused when retrying an install
     network: boolean; // download could not reach the model host
+    blocked: boolean; // the server refused the action and sent a translated reason (models still need it, or another model operation is running)
   }
   let installError = $state<GalleryActionError | null>(null);
 
@@ -233,6 +240,8 @@
   const installBlocked = $derived(
     licenseSelectedVariant != null && !licenseSelectedVariant.compatible
   );
+  // Links the blocked (aria-disabled) Install button to the visible reason.
+  const INSTALL_BLOCKED_HELP_ID = generateId('install-blocked-help');
   let removeConfirmModel = $state<CatalogEntry | null>(null);
 
   // Element bindings should NOT use $state - causes showModal() to fail
@@ -343,7 +352,7 @@
   const offerByEntry = $derived(new Map(offers.map(o => [o.entry.id, o])));
 
   // Session-scoped banner dismissal, guarded so a private-window/blocked
-  // sessionStorage never throws (see frontend/CLAUDE.md).
+  // sessionStorage never throws (see frontend/AGENTS.md).
   const OPTIMIZE_BANNER_DISMISS_KEY = 'birdnet.optimizeBannerDismissed';
   function readOptimizeDismissed(): boolean {
     try {
@@ -1216,7 +1225,8 @@
   function handleInstall() {
     if (!licenseModel) return;
     // Never install a variant the recommender flagged incompatible with this host
-    // (the button is disabled in this state; this guards a programmatic call too).
+    // (the button is only aria-disabled so it stays focusable, which makes this
+    // guard what actually blocks the click and keyboard activation).
     if (installBlocked) return;
     // Do not start an install while any gallery action is in flight; they share
     // the single downloadProgress state and SSE subscription.
@@ -1278,9 +1288,23 @@
       );
     } catch (e) {
       const message = e instanceof Error ? e.message : t('analysis.gallery.errors.installFailed');
-      installError = reportActionError(modelId, modelName, 'install', message, variantId);
+      installError = reportActionError(
+        modelId,
+        modelName,
+        'install',
+        message,
+        variantId,
+        isOperationInProgress(e)
+      );
       installingId = null;
     }
+  }
+
+  // True when the server refused an install or reinstall because another model
+  // operation holds its single operation slot. Classified by error_key, not status:
+  // install also answers 409 without a key (ONNX unavailable, incompatible hardware).
+  function isOperationInProgress(e: unknown): boolean {
+    return e instanceof ApiError && e.errorKey === MODEL_OPERATION_IN_PROGRESS_KEY;
   }
 
   // Build a GalleryActionError, classifying whether a mirror endpoint could help.
@@ -1289,7 +1313,8 @@
     modelName: string,
     kind: GalleryActionKind,
     message: string,
-    variantId?: string
+    variantId?: string,
+    blocked = false
   ): GalleryActionError {
     return {
       modelId,
@@ -1301,6 +1326,7 @@
       // enforce that structurally rather than trusting the delete error's text not
       // to contain a download-error substring.
       network: kind !== 'remove' && isNetworkDownloadError(message),
+      blocked,
     };
   }
 
@@ -1331,8 +1357,12 @@
       toastActions.success(t('analysis.gallery.removeSuccess', { name: modelName }));
     } catch (e) {
       const message = e instanceof Error ? e.message : t('analysis.gallery.errors.removeFailed');
+      // A 409 means installed models still depend on this one, or another model
+      // operation is running. Both carry a translated reason, so the banner shows it
+      // instead of the retry hint.
+      const blocked = e instanceof ApiError && e.status === HTTP_STATUS_CONFLICT;
       // A remove failure never involves a download, so it is never network-shaped.
-      installError = reportActionError(modelId, modelName, 'remove', message);
+      installError = reportActionError(modelId, modelName, 'remove', message, undefined, blocked);
     } finally {
       deletingId = null;
     }
@@ -1389,7 +1419,14 @@
       );
     } catch (e) {
       const message = e instanceof Error ? e.message : t('analysis.gallery.errors.installFailed');
-      installError = reportActionError(modelId, modelName, 'reinstall', message);
+      installError = reportActionError(
+        modelId,
+        modelName,
+        'reinstall',
+        message,
+        undefined,
+        isOperationInProgress(e)
+      );
       reinstallingId = null;
     }
   }
@@ -1705,10 +1742,17 @@
                 : '-'}
             </div>
             {#if rangeFilterState.testing}
-              <span
-                class="inline-block w-4 h-4 border-2 border-[var(--color-base-300)] border-t-[var(--color-primary)] rounded-full animate-spin"
-              ></span>
+              <!-- Decorative: the status region below announces the state. -->
+              <LoadingSpinner size="sm" aria-hidden="true" />
             {/if}
+            <!-- Always rendered so screen readers hear loading and the new count. -->
+            <span class="sr-only" role="status">
+              {rangeFilterState.testing
+                ? t('settings.main.sections.rangeFilter.speciesCount.loading')
+                : rangeFilterState.speciesCount !== null
+                  ? `${t('settings.main.sections.rangeFilter.speciesCount.label')}: ${formatNumber(rangeFilterState.speciesCount)}`
+                  : ''}
+            </span>
           </div>
           <div class="flex gap-2 mt-2">
             <button
@@ -1731,7 +1775,6 @@
                 rangeFilterState.downloading ||
                 !birdnet?.locationConfigured}
               onclick={downloadSpeciesCSV}
-              aria-label={t('common.aria.downloadCsv')}
             >
               <Download class="size-4" />
               {t('analytics.filters.exportCsv')}
@@ -1997,6 +2040,14 @@
                 <p class="mt-1 text-[var(--color-base-content)]/80">
                   {t('analysis.gallery.errors.downloadSourceHint')}
                 </p>
+              {:else if installError.blocked}
+                <!-- An action the server refused with a translated reason (a remove
+                     that other models need, or another model operation running): the
+                     server's translated reason is the whole story, so show it in
+                     place of the retry hint and skip the raw-details disclosure. -->
+                <p class="mt-1 text-[var(--color-base-content)]/80">
+                  {installError.message}
+                </p>
               {:else if installError.kind === 'remove'}
                 <!-- A remove failure has no in-banner Retry (removes are not
                      re-run from here); point the user back to the card's own
@@ -2008,16 +2059,18 @@
               <!-- Raw backend/SSE/ApiError text is often long and technical; lead
                    with the plain-English title (and hint where classifiable) and
                    keep the raw message one disclosure click away. -->
-              <details class="mt-1">
-                <summary
-                  class="cursor-pointer text-[var(--color-base-content)]/70 hover:text-[var(--color-base-content)]"
-                >
-                  {t('analysis.gallery.errors.details')}
-                </summary>
-                <p class="mt-1 break-words text-[var(--color-base-content)]/80">
-                  {installError.message}
-                </p>
-              </details>
+              {#if !installError.blocked}
+                <details class="mt-1">
+                  <summary
+                    class="cursor-pointer text-[var(--color-base-content)]/70 hover:text-[var(--color-base-content)]"
+                  >
+                    {t('analysis.gallery.errors.details')}
+                  </summary>
+                  <p class="mt-1 break-words text-[var(--color-base-content)]/80">
+                    {installError.message}
+                  </p>
+                </details>
+              {/if}
             </div>
             <button
               type="button"
@@ -2471,7 +2524,7 @@
                   aria-label="{t('analysis.gallery.reinstall')} {entry.name}"
                 >
                   {#if isReinstalling}
-                    <Loader2 class="size-3.5 animate-spin" />
+                    <Loader2 class="size-3.5 animate-spin motion-reduce:animate-none" />
                     {t('analysis.gallery.reinstalling')}
                   {:else}
                     <RefreshCw class="size-3.5" />
@@ -2499,7 +2552,7 @@
                   aria-label="{t('analysis.gallery.remove')} {entry.name}"
                 >
                   {#if isDeleting}
-                    <Loader2 class="size-3.5 animate-spin" />
+                    <Loader2 class="size-3.5 animate-spin motion-reduce:animate-none" />
                     {t('analysis.gallery.removing')}
                   {:else}
                     <Trash2 class="size-3.5" />
@@ -2721,7 +2774,7 @@
         aria-label="{t('analysis.gallery.install')} {entry.name}"
       >
         {#if isInstalling}
-          <Loader2 class="size-3.5 animate-spin" />
+          <Loader2 class="size-3.5 animate-spin motion-reduce:animate-none" />
           {t('analysis.gallery.installing')}
         {:else}
           <Download class="size-3.5" />
@@ -2960,7 +3013,7 @@
       </div>
 
       {#if installBlocked}
-        <p class="mt-4 text-sm text-[var(--color-error)]" role="alert">
+        <p id={INSTALL_BLOCKED_HELP_ID} class="mt-4 text-sm text-[var(--color-error)]" role="alert">
           {t('analysis.gallery.variants.incompatible')}
         </p>
       {/if}
@@ -2975,9 +3028,10 @@
         <button
           type="button"
           onclick={handleInstall}
-          disabled={installBlocked}
+          aria-disabled={installBlocked ? 'true' : undefined}
+          aria-describedby={installBlocked ? INSTALL_BLOCKED_HELP_ID : undefined}
           title={installBlocked ? t('analysis.gallery.variants.incompatible') : undefined}
-          class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--color-primary-content)] hover:bg-[var(--color-primary)]/80 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--color-primary-content)] hover:bg-[var(--color-primary)]/80 transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-[var(--color-primary)]"
         >
           <Download class="size-4" />
           {t('analysis.gallery.license.acceptAndInstall')}
@@ -3127,9 +3181,7 @@
       <div class="flex-1 overflow-auto">
         {#if rangeFilterState.loading}
           <div class="text-center py-12">
-            <span
-              class="inline-block w-8 h-8 border-4 border-[var(--color-base-300)] border-t-[var(--color-primary)] rounded-full animate-spin"
-            ></span>
+            <LoadingSpinner size="lg" aria-hidden="true" />
             <p class="mt-3 text-[var(--color-base-content)] opacity-90">
               {t('settings.main.sections.rangeFilter.modal.loadingSpecies')}
             </p>
@@ -3162,7 +3214,6 @@
           disabled={rangeFilterState.loading ||
             rangeFilterState.downloading ||
             !rangeFilterState.speciesCount}
-          aria-label={t('common.aria.downloadCsv')}
         >
           <Download class="size-4" />
           {t('analytics.filters.exportCsv')}

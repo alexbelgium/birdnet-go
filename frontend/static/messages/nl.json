@@ -109,6 +109,14 @@
       "closeModal": "Alles sluiten",
       "dismissAlert": "Negeer melding",
       "closeNotification": "Sluit melding",
+      "toastRegion": {
+        "topLeft": "Meldingen, linksboven",
+        "topCenter": "Meldingen, middenboven",
+        "topRight": "Meldingen, rechtsboven",
+        "bottomLeft": "Meldingen, linksonder",
+        "bottomCenter": "Meldingen, middenonder",
+        "bottomRight": "Meldingen, rechtsonder"
+      },
       "toggleDropdown": "Open/sluit keuzelijst",
       "sortAscending": "Oplopend sorteren",
       "selectLanguage": "Kies de taal",
@@ -130,7 +138,6 @@
       "selectToday": "Selecteer vandaag",
       "dateSelected": "Datum geselecteerd: {date}",
       "calendarNavigation": "Navigeer met pijl toetsen door de kalender, Enter om te selecteren, Esc om te sluiten",
-      "downloadCsv": "Soorten lijst als CSV ophalen",
       "visitEbirdLink": "Open eBird.org in een nieuwe tab",
       "learnEbirdTaxonomyLink": "Open eBird Taxonomy in een nieuwe tab",
       "resizeHandle": "Sleep om te vergroten/verkleinen",
@@ -452,7 +459,7 @@
       },
       "buffer": {
         "overloadTitle": "Audio-analyse overbelast",
-        "overloadMessage": "Uw systeem verliest {dropRate} % van de audiosamples van bron ''{sourceName}'' omdat het de analyse niet kan bijhouden. Verlaag de BirdNET-overlappingswaarde in de detectie-instellingen of overweeg een snellere CPU."
+        "overloadMessage": "Uw systeem verliest {dropRate} % van de audiosamples van bron '{sourceName}' omdat het de analyse niet kan bijhouden. Verlaag de BirdNET-overlappingswaarde in de detectie-instellingen of overweeg een snellere CPU."
       },
       "ort": {
         "unavailableTitle": "ONNX Runtime niet beschikbaar",
@@ -480,6 +487,10 @@
         "loadFailedTitle": "Akoestisch model kon niet worden geladen",
         "loadFailedMessage": "Een ingeschakeld akoestisch model kon niet worden geladen, dus audio wordt opgenomen maar niet geanalyseerd. Controleer het model op de pagina Systeem > AI-modellen."
       },
+      "modelOptimize": {
+        "title": "{count, plural, one {# model heeft een betere versie voor dit systeem} other {# modellen hebben betere versies voor dit systeem}}",
+        "message": "Er is een versie beschikbaar die beter past bij de hardware of locatie van dit systeem, voor: {models}. Open Instellingen > Analyse > Modellen en kies Optimaliseren om over te schakelen."
+      },
       "alert": {
         "firedTitle": "{rule_name}",
         "metricExceeded": "Huidige waarde: {value}% (drempelwaarde: {threshold}%)",
@@ -499,6 +510,11 @@
           "diskFull": "Schijf vol - maak ruimte vrij",
           "permissionDenied": "Toegang geweigerd - controleer bestands- of servicemachtigingen"
         }
+      },
+      "inferenceFailing": {
+        "title": "{modelName} faalt bij elke analyse",
+        "message": "{modelName} is geladen, maar de laatste {failures} analyses op rij zijn mislukt op {runtime}: de inferentie gaf een fout. Audio wordt opgenomen, maar dit model detecteert niets. Controleer het model op de pagina Systeem > AI-modellen.",
+        "nonFiniteMessage": "{modelName} is geladen, maar de laatste {failures} analyses op rij zijn mislukt op {runtime}: het model gaf ongeldige scores (NaN of oneindig). Audio wordt opgenomen, maar dit model detecteert niets. Controleer het model op de pagina Systeem > AI-modellen."
       }
     },
     "loading": "Meldingen laden..."
@@ -796,7 +812,9 @@
       "noneAction": "Modellengalerij openen",
       "loadFailedTitle": "Akoestisch model kon niet worden geladen",
       "loadFailedMessage": "Een ingeschakeld model kon niet worden geladen, waardoor er geen audio wordt geanalyseerd. De pagina AI-modellen toont welk model is mislukt en waarom.",
-      "loadFailedAction": "Bekijk de status van AI-modellen"
+      "loadFailedAction": "Bekijk de status van AI-modellen",
+      "failingTitle": "{count, plural, one {Een model faalt bij elke analyse} other {# modellen falen bij elke analyse}}",
+      "failingMessage": "{count, plural, one {{models} is geladen, maar elke analyse mislukt, dus het detecteert niets.} other {{models} zijn geladen, maar elke analyse mislukt, dus ze detecteren niets.}} De pagina AI-modellen toont de backend en de fout."
     },
     "banner": {
       "title": "Titel",
@@ -1872,7 +1890,14 @@
       "fp16Help": "16-bit floating point.",
       "invocationsHelp": "Totaal aantal geanalyseerde segmenten.",
       "noModelsHint": "Nog geen audiobron geconfigureerd?",
-      "noModelsHintLink": "Audiobronnen configureren"
+      "noModelsHintLink": "Audiobronnen configureren",
+      "modelFailing": "elke analyse mislukt",
+      "lastSuccess": "Laatste succes",
+      "lastSuccessHelp": "Wanneer dit model voor het laatst audio zonder fout analyseerde.",
+      "lastSuccessNever": "Geen sinds het model is geladen",
+      "modelFailingHelp": "{reason} Probeer een andere versie van dit model via Instellingen > Analyse > Modellen, of controleer de backend en precisie hierboven.",
+      "modelFailingReasonNonFinite": "Alle recente analyses zijn mislukt omdat het model ongeldige scores gaf (NaN of oneindig), dus het detecteert niets.",
+      "modelFailingReasonError": "Alle recente analyses zijn mislukt omdat de inferentie een fout gaf, dus het model detecteert niets."
     },
     "metrics": {
       "cpu": "CPU",
@@ -3219,7 +3244,11 @@
         "enable": "Schakel BirdWeather Uploads in",
         "token": {
           "label": "BirdWeather-token",
-          "helpText": "Jouw unieke BirdWeather token."
+          "helpText": "Jouw unieke BirdWeather token.",
+          "errors": {
+            "required": "Voer je BirdWeather-token in of zet BirdWeather uit.",
+            "format": "Een BirdWeather-token bestaat uit 24 letters en cijfers."
+          }
         },
         "threshold": {
           "label": "Upload Drempelwaarde",
@@ -3295,7 +3324,7 @@
             "label": "Apparaatnaam",
             "helpText": "De basisnaam voor apparaten zoals ze verschijnen in Home Assistant. Elke audiobron heeft zijn eigen apparaat gekoppeld aan dit hoofd BirdNET-Go apparaat."
           },
-          "sensorsNote": "<strong>Aangemaakte Sensoren:</strong> Voor elke audiobron ontvangt Home Assistant: Laatste Soort, Betrouwbaarheid, Wetenschappelijke Naam en Geluidsniveau (indien ingeschakeld). Het bridge apparaat bevat online/offline beschikbaarheidsstatus.",
+          "sensorsNote": "<strong>Aangemaakte Sensoren:</strong> Voor elke audiobron ontvangt Home Assistant: Laatste Soort, Betrouwbaarheid, Wetenschappelijke Naam en Geluidsniveau (indien ingeschakeld). Het bridge apparaat bevat online/offline beschikbaarheidsstatus. De detectiesensoren van elke bron lezen het eigen MQTT-topic van die bron, &lt;base_topic&gt;/sources/&lt;source_id&gt;, en de Geluidsniveau-sensor leest het subtopic &lt;base_topic&gt;/sources/&lt;source_id&gt;/soundlevel, zodat een detectie van één bron nooit de sensoren van een andere bron reset.",
           "discovery": {
             "button": "Verstuur Discovery",
             "success": "Discovery berichten verzonden naar Home Assistant",
@@ -3341,7 +3370,8 @@
             "none": "Geen",
             "yrno": "Yr.no",
             "openweather": "OpenWeather",
-            "wunderground": "Weather Underground"
+            "wunderground": "Weather Underground",
+            "pirateweather": "Pirate Weather"
           }
         },
         "wunderground": {
@@ -3362,6 +3392,16 @@
             "helpText": "Selecteer eenheden voor temperatuur en wind snelheid (m = Metrisch, e = Imperial, h = UK Hybrid)."
           }
         },
+        "pirateweather": {
+          "apiKey": {
+            "label": "Pirate Weather API Sleutel",
+            "helpText": "Voer jouw Pirate Weather API sleutel in. Vereist voor weer gegevens."
+          },
+          "endpoint": {
+            "label": "API-eindpunt",
+            "helpText": "Overschrijf het standaard Pirate Weather API endpoint indien nodig. Standaard https://api.pirateweather.net/forecast indien leeg gelaten."
+          }
+        },
         "notes": {
           "none": "Geen weer gegevens worden opgehaald.",
           "yrno": {
@@ -3369,7 +3409,8 @@
             "freeService": "Yr is een gratis weer gegevens service. Voor meer informatie, bezoek <a href=\"https://hjelp.yr.no/hc/en-us/articles/206550539-Facts-about-Yr\" class=\"link link-primary\" target=\"_blank\" rel=\"noopener noreferrer\">Yr.no</a>."
           },
           "openweather": "Gebruik van OpenWeather vereist een API sleutel, registreer voor een gratis API sleutel bij <a href=\"https://home.openweathermap.org/users/sign_up\" class=\"link link-primary\" target=\"_blank\" rel=\"noopener noreferrer\">OpenWeather</a>.",
-          "wunderground": "Vereist een Weather Underground API sleutel en een geldig PWS station ID. Zie <a href=\"https://www.wunderground.com/member/devices\" class=\"link link-primary\" target=\"_blank\" rel=\"noopener noreferrer\">Weather Underground</a> voor details."
+          "wunderground": "Vereist een Weather Underground API sleutel en een geldig PWS station ID. Zie <a href=\"https://www.wunderground.com/member/devices\" class=\"link link-primary\" target=\"_blank\" rel=\"noopener noreferrer\">Weather Underground</a> voor details.",
+          "pirateweather": "Gebruik van Pirate Weather vereist een API sleutel, registreer bij <a href=\"https://pirateweather.net/\" class=\"link link-primary\" target=\"_blank\" rel=\"noopener noreferrer\">Pirate Weather</a>."
         },
         "apiKey": {
           "label": "API Sleutel",
@@ -3742,6 +3783,7 @@
         "dataOutputTitle": "Geluidsniveau Gegevens Output",
         "dataOutputDescription": "Wanneer ingeschakeld, worden geluidsniveau metingen gepubliceerd via:",
         "mqttTopic": "MQTT-topic:",
+        "mqttSourceTopic": "MQTT-topic per bron (met Home Assistant discovery):",
         "sseEndpoint": "SSE-eindpunt:",
         "prometheusMetrics": "Prometheus-metrics:"
       },
@@ -3803,6 +3845,8 @@
         "pathHelp": "Map waar audio clips worden opgeslagen. Relatieve paden zijn vanaf de applicatie map. Voorbeeld: 'clips/' of '/var/audio/birds/'",
         "typeLabel": "Audio Formaat",
         "typeHelp": "Audio formaat voor opgeslagen clips. WAV en FLAC zijn lossless (beste kwaliteit, grotere bestanden). MP3, AAC, en Opus zijn lossy (kleinere bestanden, lichte kwaliteitsverlies).",
+        "ultrasonicTypeLabel": "Ultrasoon Formaat",
+        "ultrasonicTypeHelp": "Lossless formaat (WAV of FLAC) dat alleen wordt gebruikt voor vleermuis- en ultrasone opnames boven 48 kHz. Deze worden opgeslagen op hun volledige bronsamplerate in plaats van het bovenstaande formaat, zodat er geen ultrasone details verloren gaan.",
         "bitrateLabel": "Bitrate",
         "bitrateHelp": "Audio compressie bitrate voor lossy formaten. Bereik: {min}-{max} kbps. Hogere waarden geven betere kwaliteit maar grotere bestanden.",
         "losslessBitrateValue": "N.v.t. - Verliesvrij",
@@ -5161,6 +5205,7 @@
       "birdweatherClientFailed": "Kan BirdWeather-client niet aanmaken",
       "noWeatherProvider": "Geen weerprovider geselecteerd",
       "openWeatherKeyRequired": "OpenWeather API-sleutel is vereist",
+      "pirateWeatherKeyRequired": "Pirate Weather API-sleutel is vereist",
       "processorUnavailable": "Processor niet beschikbaar",
       "discoveryFailed": "Kan Home Assistant-detectie niet activeren"
     },
@@ -5225,12 +5270,34 @@
     }
   },
   "wizard": {
+    "actions": {
+      "reloadPage": "Pagina opnieuw laden"
+    },
     "skip": "Overslaan",
     "back": "Terug",
     "next": "Volgende",
     "done": "Gereed",
     "progress": "Stap {current} van {total}",
     "progressLabel": "Wizard-voortgang",
+    "status": {
+      "saving": "Opslaan...",
+      "loadingStep": "Stap laden..."
+    },
+    "errors": {
+      "saveFailed": "Deze stap kon niet worden opgeslagen. Controleer de verbinding en probeer het opnieuw, of sla de installatie over en wijzig dit later in Instellingen.",
+      "saveRejected": "De instellingen in deze stap zijn niet geaccepteerd. Controleer de waarden en probeer het opnieuw, of sla de installatie over en wijzig dit later in Instellingen.",
+      "stepLoadFailed": "Deze stap kon niet worden geladen. Druk op Opnieuw proberen of laad de pagina opnieuw.",
+      "stepLoadFailedReload": "Deze stap kon nog steeds niet worden geladen. Laad de pagina opnieuw om het nogmaals te proberen; keuzes die in eerdere stappen zijn opgeslagen blijven behouden."
+    },
+    "reasons": {
+      "completeStep": "Voltooi deze stap om verder te gaan."
+    },
+    "leaveConfirm": {
+      "title": "Installatie verlaten?",
+      "message": "De installatie wordt niet opnieuw geopend. Keuzes die in eerdere stappen zijn opgeslagen blijven behouden; wijzigingen in deze stap worden niet opgeslagen. Je kunt later alles wijzigen in Instellingen.",
+      "stay": "Doorgaan met installatie",
+      "leave": "Installatie verlaten"
+    },
     "whatsNew": {
       "title": "Nieuw in {version}"
     },
@@ -5275,7 +5342,19 @@
         "rtspUrlPlaceholder": "rtsp://user:password@host:port/stream",
         "rtspUrlHelp": "Voer de URL van je RTSP-audiostream in",
         "additionalSourcesHint": "Je kunt later meer audiobronnen toevoegen in Instellingen.",
-        "configureLater": "Overslaan - later configureren"
+        "devicesLoadFailed": "De audioapparaten van dit systeem konden niet worden opgesomd.",
+        "useStreamInstead": "Gebruik in plaats daarvan een RTSP-stream",
+        "setUpLater": "Audio later instellen",
+        "setUpLaterChosen": "Audio wordt nu niet ingesteld. Voeg later in Instellingen een geluidskaart of stream toe.",
+        "streamReplacesSoundCards": "Geluidskaarten nemen niet meer op wanneer je een stream gebruikt. Je kunt ze opnieuw toevoegen in Instellingen.",
+        "soundCardReplacesStream": "De stream die bij de streamoptie wordt getoond, wordt uitgeschakeld wanneer je een geluidskaart gebruikt. Je kunt hem opnieuw inschakelen in Instellingen.",
+        "reasons": {
+          "chooseDevice": "Kies een audioapparaat, of stel audio later in.",
+          "devicesFailed": "De audioapparaten konden niet worden opgesomd. Probeer opnieuw, gebruik een stream, of stel audio later in.",
+          "noDevices": "Geen audioapparaat gevonden. Gebruik een stream, of stel audio later in.",
+          "enterUrl": "Voer de stream-URL in, of stel audio later in.",
+          "urlScheme": "Voer een volledige stream-URL in die begint met rtsp:// of rtsps:// en geen spaties bevat."
+        }
       },
       "detection": {
         "title": "Detectiedrempel",
@@ -5287,6 +5366,7 @@
         "highAccuracyDesc": "Minder fout-positieven, kan sommige vogels missen",
         "highSensitivity": "Hoge gevoeligheid",
         "highSensitivityDesc": "Meer detecties, meer fout-positieven",
+        "descriptionStored": "Kies hoe streng de vogelidentificatie moet zijn. Huidig: {threshold}, geen preset.",
         "threshold": "Betrouwbaarheidsdrempel",
         "fpFilterNote": "Zodra je systeem draait en bewezen is, kun je het fout-positievenfilter inschakelen in Instellingen om onjuiste detecties verder te verminderen."
       },
@@ -5296,10 +5376,12 @@
         "privacyFilterHelp": "Filtert detecties uit wanneer menselijke stemmen worden gedetecteerd bij de microfoon",
         "birdweatherLabel": "Detecties delen met BirdWeather",
         "birdweatherHelp": "Draag je vogeldetecties bij aan het BirdWeather-gemeenschapsnetwerk",
-        "birdweatherIdLabel": "BirdWeather Station-ID",
-        "birdweatherIdPlaceholder": "Voer je BirdWeather station-ID in",
         "errorReportingLabel": "Anonieme foutrapporten verzenden",
-        "errorReportingHelp": "Help BirdNET-Go te verbeteren door anonieme foutrapporten te verzenden wanneer er iets misgaat"
+        "errorReportingHelp": "Help BirdNET-Go te verbeteren door anonieme foutrapporten te verzenden wanneer er iets misgaat",
+        "reasons": {
+          "enterToken": "Voer het BirdWeather-token in of schakel het delen met BirdWeather uit.",
+          "tokenFormat": "Een BirdWeather-token bestaat uit 24 letters en cijfers."
+        }
       },
       "responsibleUse": {
         "title": "Verantwoord gebruik van BirdNET-Go",
@@ -5538,6 +5620,8 @@
         "catalogLoadFailed": "Kan modelcatalogus niet laden",
         "installFailed": "Kan modelinstallatie niet starten",
         "removeFailed": "Kan model niet verwijderen",
+        "removeHasDependents": "{name} is nodig voor {models}. Verwijder eerst die modellen.",
+        "operationInProgress": "Er wordt al een model geïnstalleerd, opnieuw geïnstalleerd of verwijderd ({name}). Probeer het opnieuw wanneer dit klaar is.",
         "actionFailed": "Er is een probleem opgetreden met {name}",
         "downloadSourceHint": "Als huggingface.co geblokkeerd of traag is op uw netwerk, stel dan een spiegelserver in bij de sectie Downloadbron hieronder.",
         "goToDownloadSource": "Ga naar Downloadbron",

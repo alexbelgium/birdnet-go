@@ -9,9 +9,11 @@
   interface Props {
     className?: string;
     id?: string;
+    /** Space-separated ids of elements that describe the selector */
+    'aria-describedby'?: string;
   }
 
-  let { className = '', id }: Props = $props();
+  let { className = '', id, 'aria-describedby': ariaDescribedBy }: Props = $props();
 
   // Extended option type for locale with typed locale code
   interface LocaleOption extends SelectOption {
@@ -39,13 +41,8 @@
 
     if (newLocale === currentLocale) return;
 
-    // Update the locale in the store
+    // Update the locale in the store; setLocale also persists it to localStorage
     setLocale(newLocale);
-
-    // Store preference in localStorage
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('birdnet-locale', newLocale);
-    }
   }
 </script>
 
@@ -57,6 +54,7 @@
   groupBy={false}
   {className}
   {id}
+  aria-describedby={ariaDescribedBy}
   onChange={handleLanguageChange}
 >
   {#snippet renderOption(option)}

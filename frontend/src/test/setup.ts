@@ -429,6 +429,7 @@ vi.mock('$lib/utils/settingsApi.js', () => {
     settingsAPI: {
       load: vi.fn().mockResolvedValue(defaultSettings),
       save: vi.fn().mockResolvedValue({ success: true }),
+      patchSection: vi.fn().mockResolvedValue({}),
       test: {
         birdweather: vi.fn().mockResolvedValue({ success: true, message: 'Test successful' }),
         mqtt: vi.fn().mockResolvedValue({ success: true, message: 'Test successful' }),
@@ -606,7 +607,7 @@ class MockResizeObserver {
   unobserve = vi.fn();
   disconnect = vi.fn();
 }
-globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;
+globalThis.ResizeObserver = MockResizeObserver;
 
 // Mock HTMLCanvasElement.getContext for axe-core accessibility tests
 HTMLCanvasElement.prototype.getContext = vi.fn().mockImplementation(function (contextType: string) {
@@ -662,7 +663,7 @@ window.getComputedStyle = vi.fn().mockImplementation(function () {
   const style = {
     ...DEFAULT_COMPUTED_STYLES,
     getPropertyValue: vi.fn().mockImplementation(function (property: string) {
-      const computedStyle = { ...DEFAULT_COMPUTED_STYLES } as Record<string, string>;
+      const computedStyle: Record<string, string> = { ...DEFAULT_COMPUTED_STYLES };
       return (
         // eslint-disable-next-line security/detect-object-injection -- intentional property access in test mock
         computedStyle[property] ||
@@ -754,7 +755,10 @@ Object.defineProperty(window, 'location', {
 });
 
 // Mock security utilities - consolidated mock for consistent test behavior
-vi.mock('$lib/utils/security', () => ({
+// Real exports pass through (isPlainObject, maskUrlCredentials, ...); only the
+// functions below are overridden.
+vi.mock('$lib/utils/security', async importOriginal => ({
+  ...(await importOriginal<typeof import('$lib/utils/security')>()),
   safeGet: vi.fn(
     (
       obj: Record<string, unknown> | null | undefined,
@@ -788,15 +792,12 @@ vi.mock('$lib/utils/security', () => ({
   // Mock safeSpread to just spread objects without security validation for tests
   safeSpread: vi.fn(
     (...objects: Array<Record<string, unknown> | null | undefined>): Record<string, unknown> => {
-      return objects.reduce(
-        (result: Record<string, unknown>, obj) => {
-          if (obj != null && typeof obj === 'object') {
-            return { ...result, ...obj };
-          }
-          return result;
-        },
-        {} as Record<string, unknown>
-      );
+      return objects.reduce<Record<string, unknown>>((result, obj) => {
+        if (obj != null && typeof obj === 'object') {
+          return { ...result, ...obj };
+        }
+        return result;
+      }, {});
     }
   ),
   // Mock URL validation for RTSP and other protocols
@@ -945,8 +946,8 @@ vi.mock('$lib/utils/security', () => ({
 
 // Global test utilities
 export const testUtils = {
-  // Helper to reset all mocked functions
-  resetAllMocks: () => {
+  // Clears call history only (vi.clearAllMocks); mock implementations are kept
+  clearAllMocks: () => {
     vi.clearAllMocks();
   },
 

@@ -57,7 +57,11 @@
   import { loggers } from '$lib/utils/logger';
   import { safeArrayAccess } from '$lib/utils/security';
   import { formatBytes } from '$lib/utils/formatters';
-  import { wundergroundDefaults, weatherDefaults } from '$lib/utils/weatherDefaults';
+  import {
+    wundergroundDefaults,
+    pirateWeatherDefaults,
+    weatherDefaults,
+  } from '$lib/utils/weatherDefaults';
   import {
     MAP_CONFIG,
     createMapStyle as createMapStyleFromConfig,
@@ -210,7 +214,7 @@
   // failure (dynamic import network error, MapLibre constructor throw) so the
   // effect below does NOT infinite-retry on every reactive cycle. The flag is
   // automatically reset when the user leaves the Location tab so the next
-  // visit gets a fresh attempt — making transient failures user-recoverable
+  // visit gets a fresh attempt, making transient failures user-recoverable
   // by toggling away and back, instead of permanently stuck until reload.
   // Recoverable failures (container detached during import) intentionally do
   // NOT set this and naturally retry on the next reactive cycle.
@@ -222,7 +226,7 @@
   // SettingsTabs.svelte, so the `bind:this={mapElement}` target may not be
   // attached to the DOM in the same reactive round that flips `activeTab`.
   // Await a tick so the DOM settles, then double-check the container is
-  // actually connected before handing it to MapLibre — otherwise MapLibre's
+  // actually connected before handing it to MapLibre, otherwise MapLibre's
   // internal `_resolveContainer` throws on a null/undefined element.
   $effect(() => {
     const isLocationTab = activeTab === 'location';
@@ -259,8 +263,8 @@
 
     // Synchronous read so Svelte tracks `mapElement` as a reactive dependency
     // of this effect. Without this, the `mapElement` access inside the
-    // `tick().then(...)` microtask callback below is NOT tracked — effects
-    // only pick up dependencies read synchronously during the effect body —
+    // `tick().then(...)` microtask callback below is NOT tracked (effects
+    // only pick up dependencies read synchronously during the effect body),
     // and the effect would never re-run when `bind:this` populates
     // `mapElement` after the conditional `{#if isActive}` mounts the tab.
     const el = mapElement;
@@ -296,9 +300,9 @@
 
       clearTimeout(coordinateUpdateTimer);
       coordinateUpdateTimer = setTimeout(() => {
-        if (lat !== undefined && lng !== undefined && !isNaN(lat) && !isNaN(lng)) {
-          const currentZoom = map!.getZoom();
-          map!.easeTo({
+        if (map && lat !== undefined && lng !== undefined && !isNaN(lat) && !isNaN(lng)) {
+          const currentZoom = map.getZoom();
+          map.easeTo({
             center: [lng, lat],
             zoom: currentZoom,
             duration: 300,
@@ -307,11 +311,14 @@
           if (marker) {
             marker.setLngLat([lng, lat]);
           } else if (maplibregl && settings.birdnet.locationConfigured) {
-            marker = new maplibregl.Marker({ draggable: true }).setLngLat([lng, lat]).addTo(map!);
-            marker.on('dragend', () => {
-              const lngLat = marker!.getLngLat();
+            const newMarker = new maplibregl.Marker({ draggable: true })
+              .setLngLat([lng, lat])
+              .addTo(map);
+            newMarker.on('dragend', () => {
+              const lngLat = newMarker.getLngLat();
               updateMarker(lngLat.lat, lngLat.lng);
             });
+            marker = newMarker;
           }
         }
       }, 500);
@@ -501,14 +508,15 @@
       mapElement.addEventListener('wheel', handleWheel as globalThis.EventListener, false);
 
       if ($birdnetSettings?.locationConfigured && maplibregl) {
-        marker = new maplibregl.Marker({ draggable: true })
+        const newMarker = new maplibregl.Marker({ draggable: true })
           .setLngLat([initialLng, initialLat])
           .addTo(map);
 
-        marker.on('dragend', () => {
-          const lngLat = marker!.getLngLat();
+        newMarker.on('dragend', () => {
+          const lngLat = newMarker.getLngLat();
           updateMarker(lngLat.lat, lngLat.lng);
         });
+        marker = newMarker;
       }
 
       if (map) {
@@ -584,11 +592,12 @@
     if (marker) {
       marker.setLngLat([lng, lat]);
     } else if (maplibregl) {
-      marker = new maplibregl.Marker({ draggable: true }).setLngLat([lng, lat]).addTo(map);
-      marker.on('dragend', () => {
-        const lngLat = marker!.getLngLat();
+      const newMarker = new maplibregl.Marker({ draggable: true }).setLngLat([lng, lat]).addTo(map);
+      newMarker.on('dragend', () => {
+        const lngLat = newMarker.getLngLat();
         updateMarker(lngLat.lat, lngLat.lng);
       });
+      marker = newMarker;
     }
 
     if (modalMap) {
@@ -601,12 +610,13 @@
       if (modalMarker) {
         modalMarker.setLngLat([lng, lat]);
       } else if (maplibregl) {
-        modalMarker = new maplibregl.Marker({ draggable: true })
+        const newMarker = new maplibregl.Marker({ draggable: true })
           .setLngLat([lng, lat])
           .addTo(modalMap);
+        modalMarker = newMarker;
 
-        modalMarker.on('dragend', () => {
-          const lngLat = modalMarker!.getLngLat();
+        newMarker.on('dragend', () => {
+          const lngLat = newMarker.getLngLat();
           const roundedLat = parseFloat(lngLat.lat.toFixed(3));
           const roundedLng = parseFloat(lngLat.lng.toFixed(3));
 
@@ -668,13 +678,14 @@
         false
       );
 
-      if ($birdnetSettings?.locationConfigured) {
-        modalMarker = new maplibregl!.Marker({ draggable: true })
+      if ($birdnetSettings?.locationConfigured && maplibregl) {
+        const newMarker = new maplibregl.Marker({ draggable: true })
           .setLngLat([currentLng, currentLat])
           .addTo(modalMap);
+        modalMarker = newMarker;
 
-        modalMarker.on('dragend', () => {
-          const lngLat = modalMarker!.getLngLat();
+        newMarker.on('dragend', () => {
+          const lngLat = newMarker.getLngLat();
           const roundedLat = parseFloat(lngLat.lat.toFixed(3));
           const roundedLng = parseFloat(lngLat.lng.toFixed(3));
 
@@ -806,7 +817,7 @@
     settingsActions.updateSection('realtime', {
       weather: {
         ...settings.weather,
-        provider: provider as 'none' | 'yrno' | 'openweather' | 'wunderground',
+        provider: provider as 'none' | 'yrno' | 'openweather' | 'wunderground' | 'pirateweather',
       },
     });
   }
@@ -823,6 +834,18 @@
         ...settings.weather,
         wunderground: {
           ...(settings.weather?.wunderground ?? wundergroundDefaults),
+          [key]: value,
+        },
+      },
+    });
+  }
+
+  function updatePirateWeatherSetting(key: keyof typeof pirateWeatherDefaults, value: string) {
+    settingsActions.updateSection('realtime', {
+      weather: {
+        ...settings.weather,
+        pirateWeather: {
+          ...(settings.weather?.pirateWeather ?? pirateWeatherDefaults),
           [key]: value,
         },
       },
@@ -854,6 +877,10 @@
           stationId: currentWeather.wunderground?.stationId ?? '',
           endpoint: currentWeather.wunderground?.endpoint ?? '',
           units: currentWeather.wunderground?.units ?? 'm',
+        },
+        pirateWeather: {
+          apiKey: currentWeather.pirateWeather?.apiKey ?? '',
+          endpoint: currentWeather.pirateWeather?.endpoint ?? '',
         },
       };
 
@@ -1212,6 +1239,11 @@
               label: t('settings.integration.weather.provider.options.wunderground'),
               providerCode: 'wunderground',
             },
+            {
+              value: 'pirateweather',
+              label: t('settings.integration.weather.provider.options.pirateweather'),
+              providerCode: 'pirateweather',
+            },
           ] as WeatherOption[]}
           value={settings.weather.provider}
           label={t('settings.integration.weather.provider.label')}
@@ -1300,6 +1332,31 @@
               disabled={store.isLoading || store.isSaving}
             />
           </div>
+        {:else if settings.weather.provider === 'pirateweather'}
+          <SettingsNote>
+            <span>{@html t('settings.integration.weather.notes.pirateweather')}</span>
+          </SettingsNote>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <PasswordField
+              label={t('settings.integration.weather.pirateweather.apiKey.label')}
+              value={settings.weather.pirateWeather?.apiKey ?? ''}
+              onUpdate={apiKey => updatePirateWeatherSetting('apiKey', apiKey)}
+              placeholder=""
+              helpText={t('settings.integration.weather.pirateweather.apiKey.helpText')}
+              disabled={store.isLoading || store.isSaving}
+              allowReveal={true}
+            />
+
+            <TextInput
+              label={t('settings.integration.weather.pirateweather.endpoint.label')}
+              value={settings.weather.pirateWeather?.endpoint ?? ''}
+              onchange={endpoint => updatePirateWeatherSetting('endpoint', endpoint)}
+              placeholder={pirateWeatherDefaults.endpoint}
+              helpText={t('settings.integration.weather.pirateweather.endpoint.helpText')}
+              disabled={store.isLoading || store.isSaving}
+            />
+          </div>
         {/if}
 
         {#if settings.weather.provider !== 'none'}
@@ -1315,6 +1372,8 @@
                   (settings.weather.provider === 'wunderground' &&
                     (!settings.weather.wunderground?.apiKey ||
                       !settings.weather.wunderground?.stationId)) ||
+                  (settings.weather.provider === 'pirateweather' &&
+                    !settings.weather.pirateWeather?.apiKey) ||
                   weatherTestState.isRunning}
               >
                 {t('settings.integration.weather.test.button')}
@@ -1323,6 +1382,8 @@
                 {#if settings.weather.provider === 'openweather' && !settings.weather.openWeather?.apiKey}
                   {t('settings.integration.weather.test.apiKeyRequired')}
                 {:else if settings.weather.provider === 'wunderground' && (!settings.weather.wunderground?.apiKey || !settings.weather.wunderground?.stationId)}
+                  {t('settings.integration.weather.test.apiKeyRequired')}
+                {:else if settings.weather.provider === 'pirateweather' && !settings.weather.pirateWeather?.apiKey}
                   {t('settings.integration.weather.test.apiKeyRequired')}
                 {:else if weatherTestState.isRunning}
                   {t('settings.integration.weather.test.inProgress')}
