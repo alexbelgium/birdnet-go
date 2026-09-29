@@ -12,6 +12,14 @@ superpowers/
 docs/plans/
 docs/specs/
 docs/superpowers/
+docs/research/
+docs/design/
+# Design specs and implementation plans are kept out of the repository.
+SPEC.md
+PLAN.md
+*-spec.md
+*-plan.md
+*-design.md
 db/
 cache/
 spectrograms/
@@ -57,9 +65,7 @@ REFACTOR_CHANGELOG.md
 .worktrees/
 .leann/
 .codegraph/
-# Track the shared Serena project config; ignore caches, logs, memories, and local overrides
-.serena/*
-!.serena/project.yml
+.serena/
 
 # Python bytecode caches (db-doctor and other tools/ scripts)
 __pycache__/
