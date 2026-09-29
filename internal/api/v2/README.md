@@ -133,21 +133,23 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 
 ### Detections (`detections/detections.go`)
 
-| Method | Route                         | Handler                  | Auth | Description                                                                                                                |
-| ------ | ----------------------------- | ------------------------ | ---- | -------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/detections`                 | `GetDetections`          | ❌   | List bird detections; `source` (id from `/analytics/sources`, display name, node name or URI) restricts to an audio source |
-| GET    | `/detections/:id`             | `GetDetection`           | ❌   | Get specific detection                                                                                                     |
-| GET    | `/detections/recent`          | `GetRecentDetections`    | ❌   | Recent detections                                                                                                          |
-| GET    | `/detections/:id/time-of-day` | `GetDetectionTimeOfDay`  | ❌   | Detection time context                                                                                                     |
-| DELETE | `/detections/:id`             | `DeleteDetection`        | ✅   | Delete detection record                                                                                                    |
-| POST   | `/detections/:id/review`      | `ReviewDetection`        | ✅   | Review/verify detection                                                                                                    |
-| POST   | `/detections/:id/lock`        | `LockDetection`          | ✅   | Lock detection from changes                                                                                                |
-| POST   | `/detections/ignore`          | `IgnoreSpecies`          | ✅   | Toggle species in ignore list (add/remove)                                                                                 |
-| GET    | `/detections/ignored`         | `GetExcludedSpecies`     | ✅   | Get list of excluded species                                                                                               |
-| POST   | `/detections/batch/delete`    | `BatchDeleteDetections`  | ✅   | Bulk delete detections by ID                                                                                               |
-| POST   | `/detections/batch/review`    | `BatchReviewDetections`  | ✅   | Bulk set verification status                                                                                               |
-| POST   | `/detections/batch/lock`      | `BatchLockDetections`    | ✅   | Bulk lock or unlock detections                                                                                             |
-| POST   | `/detections/batch/resolve`   | `BatchResolveDetections` | ✅   | Resolve query params to detection IDs                                                                                      |
+| Method | Route                             | Handler                   | Auth | Description                                                                                                                |
+| ------ | --------------------------------- | ------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/detections`                     | `GetDetections`           | ❌    | List bird detections; `source` (id from `/analytics/sources`, display name, node name or URI) restricts to an audio source |
+| GET    | `/detections/:id`                 | `GetDetection`            | ❌    | Get specific detection                                                                                                     |
+| GET    | `/detections/recent`              | `GetRecentDetections`     | ❌    | Recent detections                                                                                                          |
+| GET    | `/detections/:id/time-of-day`     | `GetDetectionTimeOfDay`   | ❌    | Detection time context                                                                                                     |
+| DELETE | `/detections/:id`                 | `DeleteDetection`         | ✅    | Delete detection record                                                                                                    |
+| POST   | `/detections/:id/review`          | `ReviewDetection`         | ✅    | Review/verify detection                                                                                                    |
+| POST   | `/detections/:id/lock`            | `LockDetection`           | ✅    | Lock detection from changes                                                                                                |
+| POST   | `/detections/:id/reanalyze`       | `ReanalyzeDetection`      | ✅    | Re-run every loaded classifier over the saved clip; read-only (`reanalyze/`)                                               |
+| POST   | `/detections/:id/correct-species` | `CorrectDetectionSpecies` | ✅    | Apply a reanalysis result as the detection's species and mark it verified (`reanalyze/`)                                   |
+| POST   | `/detections/ignore`              | `IgnoreSpecies`           | ✅    | Toggle species in ignore list (add/remove)                                                                                 |
+| GET    | `/detections/ignored`             | `GetExcludedSpecies`      | ✅    | Get list of excluded species                                                                                               |
+| POST   | `/detections/batch/delete`        | `BatchDeleteDetections`   | ✅    | Bulk delete detections by ID                                                                                               |
+| POST   | `/detections/batch/review`        | `BatchReviewDetections`   | ✅    | Bulk set verification status                                                                                               |
+| POST   | `/detections/batch/lock`          | `BatchLockDetections`     | ✅    | Bulk lock or unlock detections                                                                                             |
+| POST   | `/detections/batch/resolve`       | `BatchResolveDetections`  | ✅    | Resolve query params to detection IDs                                                                                      |
 
 ### Integrations (`integrations/integrations.go`)
 
