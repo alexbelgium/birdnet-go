@@ -1,3 +1,5 @@
+import { formatLocalDateTime } from '$lib/utils/date';
+import { t } from '$lib/i18n';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { waitFor, cleanup } from '@testing-library/svelte';
 import { createComponentTestFactory } from '../../../test/render-helpers';
@@ -113,6 +115,10 @@ function makeSnapshot(
       metricKeys: { queueDepth: 'audio.queue_depth' },
     },
     snapshotAtUnix: 1750000000,
+    // Registry IDs of the default targets and the classifier verdict; the page
+    // under test ignores both, so a neutral pairing keeps the fixture valid.
+    defaultTargets: [],
+    acousticModelsState: models.length > 0 ? 'ok' : 'none_installed',
   };
 }
 
@@ -423,6 +429,139 @@ describe('SystemInference', () => {
       );
       expect(header).not.toBeNull();
       expect(container.textContent).not.toContain('system.inference.activityIdle');
+    });
+
+    it('does NOT flap the header to not-analyzing when only some sources are down', async () => {
+      // One healthy source + one down source, no throughput (silence => isActive false).
+      // The model can still analyze via the healthy source, so the dominant header must
+      // read idle, not the red "not analyzing" attention state that used to appear
+      // whenever ANY source was down and then flip back to active on the next detection.
+      const model = makeModel({
+        paused: false,
+        sources: [
+          { id: 'a', name: 'Front Yard', type: 'soundcard', fallback: false },
+          { id: 'b', name: 'Back Yard', type: 'rtsp', fallback: false, notRunning: true },
+        ],
+      });
+      installApi(makeSnapshot([model]));
+
+      const { container } = inferenceTest.render({});
+
+      await waitFor(() => {
+        expect(container.textContent).toContain('Back Yard');
+      });
+
+      // Header shows idle, not the model-level not-analyzing alarm.
+      expect(
+        container.querySelector('[aria-label="system.inference.modelNotAnalyzingTooltip"]')
+      ).toBeNull();
+      expect(
+        container.querySelector('[aria-label="system.inference.activityIdle"]')
+      ).not.toBeNull();
+
+      // The specific down source is still flagged, and its help text still renders so the
+      // badge's aria-describedby resolves (no dangling reference).
+      const badges = notRunningBadges(container);
+      expect(badges).toHaveLength(1);
+      const helpId = badges[0].getAttribute('aria-describedby');
+      expect(helpId).toBeTruthy();
+      expect(container.querySelector(`[id="${helpId}"]`)).not.toBeNull();
+    });
+
+    it('still shows the header not-analyzing state when ALL sources are down', async () => {
+      // Every assigned source down + silence => genuinely not analyzing, so the alarm stays.
+      const model = makeModel({
+        paused: false,
+        sources: [
+          { id: 'a', name: 'Front Yard', type: 'soundcard', fallback: false, notRunning: true },
+          { id: 'b', name: 'Back Yard', type: 'rtsp', fallback: false, notRunning: true },
+        ],
+      });
+      installApi(makeSnapshot([model]));
+
+      const { container } = inferenceTest.render({});
+
+      await waitFor(() => {
+        expect(container.textContent).toContain('Back Yard');
+      });
+
+      expect(
+        container.querySelector('[aria-label="system.inference.modelNotAnalyzingTooltip"]')
+      ).not.toBeNull();
+      expect(container.textContent).not.toContain('system.inference.activityIdle');
+    });
+  });
+
+  // A persistent amber chip surfaces partial multi-source degradation in the header (some
+  // but not all sources down), driven purely by source health so it never flaps as
+  // detections come and go. Mutually exclusive with the red all-sources-down alarm.
+  describe('partial degradation header chip', () => {
+    const DEGRADED_CHIP = '[title="system.inference.sourcesDegradedTooltip"]';
+    const NOT_ANALYZING_HEADER = '[aria-label="system.inference.modelNotAnalyzingTooltip"]';
+
+    it('shows the amber degraded chip when some but not all sources are down', async () => {
+      const model = makeModel({
+        paused: false,
+        sources: [
+          { id: 'a', name: 'Front Yard', type: 'soundcard', fallback: false },
+          { id: 'b', name: 'Back Yard', type: 'rtsp', fallback: false, notRunning: true },
+        ],
+      });
+      installApi(makeSnapshot([model]));
+
+      const { container } = inferenceTest.render({});
+
+      await waitFor(() => {
+        expect(container.textContent).toContain('Back Yard');
+      });
+
+      // The persistent degraded chip is present ...
+      expect(container.querySelector(DEGRADED_CHIP)).not.toBeNull();
+      expect(container.textContent).toContain('system.inference.sourcesDegraded');
+      // ... and it does NOT escalate to the red all-sources-down alarm.
+      expect(container.querySelector(NOT_ANALYZING_HEADER)).toBeNull();
+    });
+
+    it('hides the degraded chip when every source is healthy', async () => {
+      const model = makeModel({
+        paused: false,
+        sources: [
+          { id: 'a', name: 'Front Yard', type: 'soundcard', fallback: false },
+          { id: 'b', name: 'Back Yard', type: 'rtsp', fallback: false },
+        ],
+      });
+      installApi(makeSnapshot([model]));
+
+      const { container } = inferenceTest.render({});
+
+      await waitFor(() => {
+        expect(container.textContent).toContain('Back Yard');
+      });
+
+      expect(container.querySelector(DEGRADED_CHIP)).toBeNull();
+      expect(container.textContent).not.toContain('system.inference.sourcesDegraded');
+    });
+
+    it('hides the degraded chip when ALL sources are down (yields to the not-analyzing alarm)', async () => {
+      const model = makeModel({
+        paused: false,
+        sources: [
+          { id: 'a', name: 'Front Yard', type: 'soundcard', fallback: false, notRunning: true },
+          { id: 'b', name: 'Back Yard', type: 'rtsp', fallback: false, notRunning: true },
+        ],
+      });
+      installApi(makeSnapshot([model]));
+
+      const { container } = inferenceTest.render({});
+
+      await waitFor(() => {
+        expect(container.textContent).toContain('Back Yard');
+      });
+
+      // The degraded chip is suppressed; the red not-analyzing header owns the state.
+      expect(container.querySelector(DEGRADED_CHIP)).toBeNull();
+      expect(container.textContent).not.toContain('system.inference.sourcesDegraded');
+      expect(container.querySelector(NOT_ANALYZING_HEADER)).not.toBeNull();
     });
   });
 
@@ -1052,6 +1191,109 @@ describe('SystemInference', () => {
     expect(container.textContent).toContain('GPU');
     // The device chip carries the device help as a tooltip.
     expect(container.querySelector('[title="system.inference.deviceHelp"]')).not.toBeNull();
+  });
+
+  it('shows a failing chip and the last success when every analysis fails', async () => {
+    const model = makeModel({
+      paused: true, // failing takes precedence over paused
+      health: {
+        state: 'failing',
+        consecutiveFailures: 42,
+        failureThreshold: 10,
+        inferenceCount: 60,
+        lastInferenceAtUnix: 1750000000,
+        errorClass: 'non_finite_output',
+      },
+    });
+    installApi(makeSnapshot([model]));
+
+    const { container } = inferenceTest.render({});
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="model-failing"]')).not.toBeNull();
+    });
+    expect(container.textContent).toContain('system.inference.modelFailing');
+    expect(container.querySelector('[aria-label="system.inference.activityPaused"]')).toBeNull();
+    // The reason and remedy are visible, not only in a tooltip.
+    const help = container.querySelector('[data-testid="model-failing-help"]');
+    expect(help).not.toBeNull();
+    expect(help?.textContent).toContain('system.inference.modelFailingHelp');
+    expect(
+      container.querySelector('[data-testid="model-failing"]')?.getAttribute('aria-describedby')
+    ).toBe(help?.id);
+    // The reason matches the error class.
+    expect(t).toHaveBeenCalledWith('system.inference.modelFailingHelp', {
+      reason: 'system.inference.modelFailingReasonNonFinite',
+    });
+    // Never succeeded since the instance loaded.
+    expect(container.textContent).toContain('system.inference.lastSuccess');
+    expect(container.textContent).toContain('system.inference.lastSuccessNever');
+  });
+
+  it('names an inference error as the reason for any other error class', async () => {
+    const model = makeModel({
+      health: {
+        state: 'failing',
+        consecutiveFailures: 10,
+        failureThreshold: 10,
+        inferenceCount: 10,
+        errorClass: 'inference_error',
+      },
+    });
+    installApi(makeSnapshot([model]));
+
+    const { container } = inferenceTest.render({});
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="model-failing-help"]')).not.toBeNull();
+    });
+    expect(t).toHaveBeenCalledWith('system.inference.modelFailingHelp', {
+      reason: 'system.inference.modelFailingReasonError',
+    });
+    expect(t).not.toHaveBeenCalledWith('system.inference.modelFailingHelp', {
+      reason: 'system.inference.modelFailingReasonNonFinite',
+    });
+  });
+
+  it('shows the date and time of the last success once a model has succeeded', async () => {
+    const lastSuccessAtUnix = 1750000000;
+    const model = makeModel({
+      health: {
+        state: 'ok',
+        consecutiveFailures: 0,
+        failureThreshold: 10,
+        inferenceCount: 5,
+        lastInferenceAtUnix: lastSuccessAtUnix,
+        lastSuccessAtUnix,
+      },
+    });
+    installApi(makeSnapshot([model]));
+
+    const { container } = inferenceTest.render({});
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('system.inference.lastSuccess');
+    });
+    expect(container.textContent).not.toContain('system.inference.lastSuccessNever');
+    expect(container.textContent).toContain(
+      formatLocalDateTime(new Date(lastSuccessAtUnix * 1000))
+    );
+    expect(container.querySelector('[data-testid="model-failing-help"]')).toBeNull();
+  });
+
+  it('shows no failing chip or last success for a healthy model that has not run', async () => {
+    const model = makeModel({
+      health: { state: 'idle', consecutiveFailures: 0, failureThreshold: 10, inferenceCount: 0 },
+    });
+    installApi(makeSnapshot([model]));
+
+    const { container } = inferenceTest.render({});
+
+    await waitFor(() => {
+      expect(container.textContent).toContain(model.name);
+    });
+    expect(container.querySelector('[data-testid="model-failing"]')).toBeNull();
+    expect(container.textContent).not.toContain('system.inference.lastSuccess');
   });
 
   it('shows a Paused indicator with the schedule label when the model is paused', async () => {

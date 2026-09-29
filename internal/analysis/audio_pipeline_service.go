@@ -59,6 +59,10 @@ type AudioPipelineService struct {
 	apiService *APIServerService
 	engine     *engine.AudioEngine
 
+	// haEntityForgetter overrides the Home Assistant entity cleanup target in
+	// tests; production resolves the processor lazily (see haForgetter).
+	haEntityForgetter haEntityForgetter
+
 	watchdog            *audiocore.LivenessWatchdog
 	bufferMgr           *BufferManager
 	ctrlMonitor         *ControlMonitor
@@ -96,9 +100,11 @@ type AudioPipelineService struct {
 	// during a reconfigure is not reported as "not analyzing" on its first
 	// occurrence, only if the route is still down on the next reconfigure pass. An
 	// entry is dropped when a source's route recovers and the whole map is cleared
-	// when all sources are torn down (removeAllSources). Accessed only from
-	// registerConsumersForSources, which runs single-threaded on the startup pass and
-	// under sourcesMu on every later pass, so it needs no lock of its own.
+	// when all sources are torn down (removeAllSources). Every access is either on the
+	// startup pass (single-threaded) or under sourcesMu: the writes in
+	// reportSourceRegistration and the reads/deletes in retryPersistentRouteFailures,
+	// RestartSource and the reconfigure removal loop all hold it, so it needs no lock of
+	// its own.
 	routeFailedLastPass map[string]bool
 }
 
@@ -194,11 +200,6 @@ func (p *AudioPipelineService) Start(_ context.Context) error {
 	dataStore := p.dbService.DataStore()
 	metrics := p.apiService.Metrics()
 
-	// Set the primary model ID and buffer dimensions on the engine so that
-	// analysis buffers are allocated from the model's spec, not hardcoded
-	// constants. This matches the secondary model allocation path.
-	p.applyPrimaryModelDims()
-
 	// Register all loaded models in the ai_models database table so they
 	// appear even before any detections are saved.
 	log := GetLogger()
@@ -257,7 +258,7 @@ func (p *AudioPipelineService) Start(_ context.Context) error {
 
 	// Add audio sources, register consumers, and start buffer monitors.
 	apiAudioLevelChan := p.apiService.AudioLevelChan()
-	sourceIDs := p.setupAudioSources(apiAudioLevelChan, operationStart)
+	sourceIDs := p.setupAudioSources(apiAudioLevelChan, operationStart, nil)
 
 	if len(sourceIDs) == 0 {
 		audiocore.GetLogger().Warn("starting without active audio sources",
@@ -530,36 +531,19 @@ func (p *AudioPipelineService) restartAudioCapture() {
 	audiocore.GetLogger().Info("restarting audio capture",
 		logger.String("operation", "restart_audio_capture"))
 
+	// Snapshot every running source's last known rate/channels before removal, so
+	// a transient probe failure during the re-probe below does not collapse a
+	// high-rate source to the 48 kHz target or downmix a channel-selected source
+	// (#4350). removeAllSources empties the registry, so the rebuilt configs can
+	// no longer consult it.
+	fallbackSources := p.captureAllStreamFallbacks()
+
 	// Remove all existing sources.
 	p.removeAllSources(operationRestart)
 
-	// Re-resolve the primary model's buffer dimensions from current settings
-	// before re-adding sources, so a hot-reloaded birdnet.overlap takes effect
-	// (engine.AddSource allocates the primary buffer from these cached dims).
-	p.applyPrimaryModelDims()
-
 	// Re-add sources, register consumers, and update buffer monitors.
 	audioLevelChan := p.apiService.AudioLevelChan()
-	p.setupAudioSources(audioLevelChan, operationRestart)
-}
-
-// applyPrimaryModelDims resolves the primary model's analysis-buffer dimensions
-// from the current settings (honoring birdnet.overlap; the bat model stays fixed
-// at 50%) and pushes them to the engine, so subsequent AddSource calls allocate
-// the primary buffer at the current cadence. Called at startup and on every
-// audio-capture restart, so an overlap change routed through a restart
-// reallocates the primary buffer with the new dimensions.
-func (p *AudioPipelineService) applyPrimaryModelDims() {
-	if p.bnAnalyzer == nil {
-		return
-	}
-	bn := p.bnAnalyzer.BirdNET()
-	if bn == nil {
-		return
-	}
-	primaryInfo := bn.PrimaryModelInfo()
-	clipBytes, overlapBytes, readSize := primaryInfo.Spec.BufferDimensions(primaryInfo.Overlap)
-	p.engine.SetPrimaryModel(primaryInfo.ID, clipBytes, overlapBytes, readSize)
+	p.setupAudioSources(audioLevelChan, operationRestart, fallbackSources)
 }
 
 // RestartSource tears down and reinitializes a single audio source.
@@ -583,6 +567,14 @@ func (p *AudioPipelineService) RestartSource(sourceID string) error {
 	if !ok {
 		return fmt.Errorf("restart source: source %s not found in registry", sourceID)
 	}
+
+	// Capture the running source's last known probed parameters before removal.
+	// The source is removed below before buildSourceConfigsWithModels re-probes,
+	// so a transient probe failure during the restart would otherwise collapse a
+	// high-rate source to the 48 kHz target and silently resample it, and zero the
+	// channel count so a left/right selection silently downmixes (#4350). Passing
+	// the captured parameters lets the rebuilt config retain the true values.
+	fallbackSources := p.captureStreamFallback(connStr)
 
 	// 1. Clean up overrun tracker state.
 	RemoveOverrunTrackers(sourceID)
@@ -608,8 +600,24 @@ func (p *AudioPipelineService) RestartSource(sourceID string) error {
 		return fmt.Errorf("restart source: remove failed: %w", err)
 	}
 
-	// 5. Rebuild source config from current settings.
-	sourceConfigs := p.buildSourceConfigsWithModels()
+	// Tear down the old source's analysis-buffer monitors. engine.RemoveSource
+	// deallocated its buffers but does not touch the buffer-monitor goroutines, and
+	// RestartSource re-adds the source under a fresh ID via AddMonitor rather than
+	// reconciling the old one through UpdateMonitors. Since the allocation grace no
+	// longer lets a monitor self-terminate promptly on a missing buffer, remove the
+	// old monitors explicitly here so they do not poll out the grace before stopping.
+	if monErr := p.bufferMgr.RemoveMonitor(sourceID); monErr != nil {
+		log.Warn("failed to remove old source monitors during restart",
+			logger.String("source_id", sourceID),
+			logger.Error(monErr),
+			logger.String("operation", operationRestartSource))
+	}
+
+	// 5. Rebuild source config from current settings. Pass the captured parameters
+	// as a fallback: the source was removed above, so buildSourceConfigsWithModels
+	// can no longer read them from the registry when the reconnect-time re-probe
+	// fails.
+	sourceConfigs := p.buildSourceConfigsWithModels(fallbackSources)
 	var targetConfig *sourceConfigWithModels
 	for i := range sourceConfigs {
 		if sourceConfigs[i].config.ConnectionString == connStr {
@@ -624,21 +632,16 @@ func (p *AudioPipelineService) RestartSource(sourceID string) error {
 		return fmt.Errorf("restart source: config for %s no longer exists in settings", sourceID)
 	}
 
-	// 6. Re-add source via engine.
-	if err := p.engine.AddSource(targetConfig.config); err != nil {
+	// 6. Re-add source via engine, using the registry-assigned ID it returns (the
+	// source may get a new ID).
+	newSourceID, err := p.engine.AddSource(targetConfig.config)
+	if err != nil {
 		log.Error("failed to re-add source during restart",
 			logger.String("source_id", sourceID),
 			logger.Error(err),
 			logger.String("operation", operationRestartSource))
 		return fmt.Errorf("restart source: add failed: %w", err)
 	}
-
-	// The source may get a new ID from the registry. Look it up.
-	newSrc, found := registry.GetByConnection(connStr)
-	if !found {
-		return fmt.Errorf("restart source: source re-added but not found in registry")
-	}
-	newSourceID := newSrc.ID
 
 	// 7. Re-register consumers and monitors.
 	audioLevelChan := p.apiService.AudioLevelChan()
@@ -697,16 +700,20 @@ func (p *AudioPipelineService) removeAllSources(operation string) {
 // updates buffer monitors. Returns the IDs of successfully added sources.
 // The audioLevelChan receives bridged audio level data for the API SSE endpoint.
 // The operation parameter is used in log messages to distinguish callers.
-func (p *AudioPipelineService) setupAudioSources(audioLevelChan chan audiocore.AudioLevelData, operation string) []string {
+func (p *AudioPipelineService) setupAudioSources(audioLevelChan chan audiocore.AudioLevelData, operation string, fallbackSources map[string]streamFallback) []string {
 	log := audiocore.GetLogger()
 
 	// Add audio sources via engine: this registers sources, allocates buffers,
-	// and starts capture (FFmpeg streams or device capture).
-	sourceConfigs := p.buildSourceConfigsWithModels()
+	// and starts capture (FFmpeg streams or device capture). fallbackSources is
+	// nil on initial startup (no prior rate to fall back on) and carries the
+	// pre-removal snapshot on a full restart so a probe failure does not collapse
+	// a high-rate source (#4350).
+	sourceConfigs := p.buildSourceConfigsWithModels(fallbackSources)
 	sourceModelMap := make(map[string][]string, len(sourceConfigs))
 	var sourceIDs []string
 	for _, scm := range sourceConfigs {
-		if addErr := p.engine.AddSource(scm.config); addErr != nil {
+		sid, addErr := p.engine.AddSource(scm.config)
+		if addErr != nil {
 			log.Error("failed to add audio source",
 				logger.String("source_id", scm.config.ID),
 				logger.String("source_type", string(scm.config.Type)),
@@ -715,30 +722,26 @@ func (p *AudioPipelineService) setupAudioSources(audioLevelChan chan audiocore.A
 				logger.String("operation", operation))
 			continue
 		}
-		if src, ok := p.engine.Registry().GetByConnection(scm.config.ConnectionString); ok {
-			sourceIDs = append(sourceIDs, src.ID)
-			sourceModelMap[src.ID] = scm.modelIDs
-		} else {
-			log.Warn("source added but not found in registry by connection string",
-				logger.String("connection", privacy.SanitizeStreamUrl(scm.config.ConnectionString)),
-				logger.String("operation", operation))
-		}
+		sourceIDs = append(sourceIDs, sid)
+		sourceModelMap[sid] = scm.modelIDs
 	}
 
 	// Register buffer, audio level, and sound level consumers for all sources.
 	p.registerConsumersForSources(sourceIDs, sourceModelMap, audioLevelChan, operation)
 	p.registerSoundLevelConsumers(sourceIDs, operation)
 
-	// Update buffer monitors for the new sources.
-	if len(sourceIDs) > 0 {
-		sourceMonitorConfigs := p.buildMonitorConfigs(sourceModelMap, sourceIDs)
-		if monErr := p.bufferMgr.UpdateMonitors(sourceMonitorConfigs); monErr != nil {
-			log.Warn("buffer monitor update completed with errors",
-				logger.Error(monErr),
-				logger.Int("source_count", len(sourceIDs)),
-				logger.String("component", "analysis.audio_pipeline"),
-				logger.String("operation", operation))
-		}
+	// Reconcile buffer monitors to exactly the successfully-added sources. Call
+	// UpdateMonitors unconditionally (even when sourceIDs is empty because every
+	// AddSource failed) so it closes any monitors left over from before the restart
+	// instead of leaving them to poll out the allocation grace, mirroring
+	// reconfigureChangedSources.
+	sourceMonitorConfigs := p.buildMonitorConfigs(sourceModelMap, sourceIDs)
+	if monErr := p.bufferMgr.UpdateMonitors(sourceMonitorConfigs); monErr != nil {
+		log.Warn("buffer monitor update completed with errors",
+			logger.Error(monErr),
+			logger.Int("source_count", len(sourceIDs)),
+			logger.String("component", "analysis.audio_pipeline"),
+			logger.String("operation", operation))
 	}
 
 	return sourceIDs
@@ -999,6 +1002,16 @@ func (p *AudioPipelineService) wireSourceBufferRoute(sid, sourceName string, sou
 	return true, true
 }
 
+// routeReportInputs names the three booleans routeReportDecision weighs. Grouping them
+// in a struct with explicit field names keeps a call site from silently inverting the
+// not-analyzing decision by passing them in the wrong order, since positionally they are
+// three adjacent, interchangeable bools.
+type routeReportInputs struct {
+	bufferRouteOK     bool // the source's buffer (analysis) route came up this pass
+	failedLastPass    bool // the route was already down on the previous reconfigure pass
+	suppressTransient bool // this pass is a reconfigure, where a first transient failure is expected
+}
+
 // routeReportDecision returns the allocated-model set that reportUnregisteredModels
 // should treat as registered for a source, given whether its buffer route came up
 // this pass (bufferRouteOK), whether that route was already down on the previous
@@ -1016,11 +1029,11 @@ func (p *AudioPipelineService) wireSourceBufferRoute(sid, sourceName string, sou
 // stable config no later pass revisits it, so suppressing it there would silence a
 // permanent model outage forever (the #4201/#4204 class). Pure, so the policy is
 // unit-tested without standing up the audio engine.
-func routeReportDecision(bufferRouteOK, failedLastPass, suppressTransient bool, allocated map[string]bool) map[string]bool {
-	if bufferRouteOK {
+func routeReportDecision(in routeReportInputs, allocated map[string]bool) map[string]bool {
+	if in.bufferRouteOK {
 		return allocated
 	}
-	if suppressTransient && !failedLastPass {
+	if in.suppressTransient && !in.failedLastPass {
 		return allocated // first transient reconfigure failure: suppress the alarm this pass
 	}
 	return nil // report the resolved models as not-analyzing
@@ -1037,6 +1050,7 @@ const (
 	operationReconfigureParams = "reconfigure_params"
 	operationGainChange        = "gain_change"
 	operationModelChange       = "model_change"
+	operationRouteRetry        = "route_retry"
 )
 
 // isReconfigureOperation reports whether a registerConsumersForSources pass was
@@ -1044,13 +1058,35 @@ const (
 // occur and is repaired by the next pass, as opposed to a start or explicit restart
 // where a route failure is a genuine outage to report immediately (see
 // routeReportDecision, #4208). These operations originate in reconfigureChangedSources.
+// operationRouteRetry is included: it is the pass that re-wires a route left down by an
+// earlier reconfigure, so it keeps the reconfigure semantics (a route still down on the
+// retry has failedLastPass set and is reported, not suppressed forever).
 func isReconfigureOperation(operation string) bool {
 	switch operation {
-	case operationReconfigureDiff, operationReconfigureParams, operationGainChange, operationModelChange:
+	case operationReconfigureDiff, operationReconfigureParams, operationGainChange, operationModelChange, operationRouteRetry:
 		return true
 	default:
 		return false
 	}
+}
+
+// sourcesNeedingRouteRetry returns the kept source IDs whose buffer route was still down
+// after a prior reconfigure (failed[id]) and that are not already being re-registered
+// this pass (reRegistering[id]). reconfigureChangedSources re-registers only sources
+// whose config changed, so without this a route that fails on a source later left
+// untouched is never retried, never surfaces its models as not-analyzing, and keeps a
+// stale routeFailedLastPass entry forever (#4208 follow-up). The result is sorted so the
+// retry order and its logs are deterministic. Pure, so the selection is unit-tested
+// without standing up the audio engine.
+func sourcesNeedingRouteRetry(kept []string, failed, reRegistering map[string]bool) []string {
+	var retry []string
+	for _, id := range kept {
+		if failed[id] && !reRegistering[id] {
+			retry = append(retry, id)
+		}
+	}
+	slices.Sort(retry)
+	return retry
 }
 
 // reportSourceRegistration reports the models that will not analyze sourceName and
@@ -1072,7 +1108,11 @@ func (p *AudioPipelineService) reportSourceRegistration(mm *classifier.ModelMana
 	// would see failedLastPass=true and be reported instead of suppressed (#4208). So
 	// only a reconfigure failure records state; every other pass clears it.
 	reconfigure := isReconfigureOperation(operation)
-	registered := routeReportDecision(bufferRouteOK, reconfigure && p.routeFailedLastPass[sid], reconfigure, allocated)
+	registered := routeReportDecision(routeReportInputs{
+		bufferRouteOK:     bufferRouteOK,
+		failedLastPass:    reconfigure && p.routeFailedLastPass[sid],
+		suppressTransient: reconfigure,
+	}, allocated)
 	if bufferRouteOK || !reconfigure {
 		delete(p.routeFailedLastPass, sid)
 	} else {
@@ -1090,8 +1130,9 @@ func (p *AudioPipelineService) reportSourceRegistration(mm *classifier.ModelMana
 // registerConsumersForSources registers BufferConsumer and AudioLevelConsumer
 // on the AudioRouter for each source ID. The sourceModelMap carries the
 // config-level model IDs for each source so that buffer consumers fan out to
-// only the models assigned to that source. When a source has no configured
-// models (empty slice), the primary model is used as a fallback.
+// only the models assigned to that source. When a source has no configured models
+// the default targets are the fallback: every default for an empty list, the first
+// default only for a misconfigured (all-unresolvable) list.
 func (p *AudioPipelineService) registerConsumersForSources(sourceIDs []string, sourceModelMap map[string][]string, audioLevelChan chan audiocore.AudioLevelData, operation string) {
 	log := audiocore.GetLogger()
 
@@ -1102,8 +1143,9 @@ func (p *AudioPipelineService) registerConsumersForSources(sourceIDs []string, s
 		allModelInfos[modelInfoSlice[i].ID] = modelInfoSlice[i]
 	}
 
-	// Primary model fallback targets for sources with no model config.
-	primaryTargets := []classifier.ModelInfo{p.bnAnalyzer.BirdNET().PrimaryModelInfo()}
+	// Default-target fallback for sources with no model config (the loaded v2.4
+	// entry, or empty when none is loaded).
+	defaultTargets := p.bnAnalyzer.BirdNET().DefaultTargets()
 
 	bufMgr := p.engine.BufferManager()
 	currentSettings := conf.Setting()
@@ -1125,19 +1167,20 @@ func (p *AudioPipelineService) registerConsumersForSources(sourceIDs []string, s
 			sourceName = src.DisplayName
 		}
 
-		// Resolve per-source model targets. Fall back to primary if the
-		// source has no configured models or none could be resolved.
+		// Resolve per-source model targets. Fall back to the default targets when the
+		// source has no configured models or none resolve: every default for an empty
+		// list, the first default only for a misconfigured (unresolvable) list.
 		modelInfos, skippedModels := resolveModelTargets(sourceModelMap[sid], allModelInfos)
-		usedPrimaryFallback := len(modelInfos) == 0
-		if usedPrimaryFallback {
-			modelInfos = primaryTargets
+		usedDefaultTargets := len(modelInfos) == 0
+		if usedDefaultTargets {
+			modelInfos = fallbackTargets(sourceModelMap[sid], defaultTargets)
 		}
 
-		// Ensure analysis buffers exist for all target models. The engine
-		// pre-allocates the primary model's buffer in AddSource(), so it
-		// usually exists already. Use HasAnalysis for all models uniformly
-		// to handle the case where a prior model-change reconfigure
-		// deallocated a buffer that is now needed again.
+		// Ensure analysis buffers exist for all target models. This loop is the
+		// sole analysis-buffer allocation path: the engine allocates only the
+		// capture buffer in AddSource(). Use HasAnalysis for all models uniformly
+		// so a model already allocated is skipped and one a prior model-change
+		// reconfigure deallocated is reallocated when needed again.
 		allocatedModels := make(map[string]bool, len(modelInfos))
 		for i := range modelInfos {
 			if bufMgr.HasAnalysis(sid, modelInfos[i].ID) {
@@ -1193,13 +1236,12 @@ func (p *AudioPipelineService) registerConsumersForSources(sourceIDs []string, s
 			sid, sourceName, sourceSampleRate, gainDB, targets, currentSettings, operation)
 
 		// Report only models the configuration actually assigns. When the source
-		// resolved to no loaded target and fell back to the primary, the user
-		// assigned nothing here, so naming the built-in primary as "assigned to this
-		// source" would be false, and it points the user at a gallery entry that
-		// offers no action for a permanent model. Genuinely assigned but unresolvable
-		// models still reach the user through skippedModels.
+		// resolved to no loaded target and fell back to the default targets, the user
+		// assigned nothing here, so naming a default target as "assigned to this source"
+		// would be false. Genuinely assigned but unresolvable models still reach the
+		// user through skippedModels.
 		assigned := modelInfos
-		if usedPrimaryFallback {
+		if usedDefaultTargets {
 			assigned = nil
 		}
 		// Report models that will not analyze this source, AFTER the buffer consumer
@@ -1270,6 +1312,14 @@ func sourceNeedsReconfigure(running *audiocore.AudioSource, desired *audiocore.S
 	// global, which can be "udp", and hardcoding "tcp" would mask a real
 	// udp->tcp change (issue #4240 hot-reload path).
 	transportChanged := running.Transport != desired.Transport
+	// A source running on a fallback estimate must reconfigure once a fresh probe
+	// confirms the rate (estimated true -> false), so ReconfigureSource restarts it
+	// and SyncReconfiguredParams clears the marker; otherwise a same-rate
+	// confirmation leaves the stale estimate in place and FFmpeg keeps force-
+	// resampling (#4350). The check is deliberately one-directional: a false -> true
+	// transition (a probe blipping during an unrelated hot-reload) must NOT restart
+	// a healthy stream, which is the reconfigure churn this fix otherwise avoids.
+	estimateConfirmed := running.SourceSampleRateEstimated && !desired.SourceSampleRateEstimated
 	return running.SampleRate != desired.SampleRate ||
 		sourceSampleRateChanged ||
 		running.BitDepth != desired.BitDepth ||
@@ -1277,7 +1327,8 @@ func sourceNeedsReconfigure(running *audiocore.AudioSource, desired *audiocore.S
 		channelModeChanged ||
 		mediaModeChanged ||
 		transportChanged ||
-		sourceChannelsChanged
+		sourceChannelsChanged ||
+		estimateConfirmed
 }
 
 // rtspStreamTransport resolves the concrete transport for an rtsp.streams entry:
@@ -1293,10 +1344,10 @@ func rtspStreamTransport(stream *conf.StreamConfig, rtsp *conf.RTSPSettings) str
 }
 
 // resolveDesiredModelSet resolves config-level model IDs to registry IDs,
-// filtering out models that are unknown or not loaded. When the resolved set
-// is empty the primary model is used as a fallback, matching the behavior of
-// registerConsumersForSources.
-func resolveDesiredModelSet(desiredConfigIDs []string, loadedModels map[string]classifier.ModelInfo, primaryModelID string) map[string]bool {
+// filtering out models that are unknown or not loaded. When the resolved set is
+// empty the default targets are used as a fallback, matching the behavior of
+// registerConsumersForSources. defaultIDs is empty at N = 0, leaving the set empty.
+func resolveDesiredModelSet(desiredConfigIDs []string, loadedModels map[string]classifier.ModelInfo, defaultIDs []string) map[string]bool {
 	set := make(map[string]bool, len(desiredConfigIDs))
 	for _, configID := range desiredConfigIDs {
 		registryID, known := classifier.ResolveConfigModelID(configID)
@@ -1308,7 +1359,17 @@ func resolveDesiredModelSet(desiredConfigIDs []string, loadedModels map[string]c
 		}
 	}
 	if len(set) == 0 {
-		set[primaryModelID] = true
+		// A source that named no models falls back to every default target. A source
+		// whose named models are all unknown or unloaded falls back to the first
+		// default only (v2.4 when loaded), preserving pre-Phase-4 behavior so an
+		// upgrade never adds a model to a misconfigured source.
+		fallback := defaultIDs
+		if len(desiredConfigIDs) > 0 && len(defaultIDs) > 0 {
+			fallback = defaultIDs[:1]
+		}
+		for _, id := range fallback {
+			set[id] = true
+		}
 	}
 	return set
 }
@@ -1319,9 +1380,9 @@ func resolveDesiredModelSet(desiredConfigIDs []string, loadedModels map[string]c
 // considered; unknown or unloaded config IDs are ignored so that a model
 // appearing in the config but not yet installed does not trigger a spurious
 // rebuild on every hot-reload cycle.
-func sourceModelsChanged(bufMgr *buffer.Manager, sourceID string, desiredConfigIDs []string, loadedModels map[string]classifier.ModelInfo, primaryModelID string) bool {
+func sourceModelsChanged(bufMgr *buffer.Manager, sourceID string, desiredConfigIDs []string, loadedModels map[string]classifier.ModelInfo, defaultIDs []string) bool {
 	currentBuffers := bufMgr.AnalysisBuffers(sourceID)
-	desiredSet := resolveDesiredModelSet(desiredConfigIDs, loadedModels, primaryModelID)
+	desiredSet := resolveDesiredModelSet(desiredConfigIDs, loadedModels, defaultIDs)
 
 	if len(currentBuffers) != len(desiredSet) {
 		return true
@@ -1332,6 +1393,57 @@ func sourceModelsChanged(bufMgr *buffer.Manager, sourceID string, desiredConfigI
 		}
 	}
 	return false
+}
+
+// haEntityForgetter queues removal of Home Assistant entities for sources the
+// user deleted or renamed. The processor implements it; the calls only queue
+// work, so they are safe while holding sourcesMu.
+type haEntityForgetter interface {
+	ForgetHomeAssistantSource(source datastore.AudioSource)
+	ForgetHomeAssistantEntityName(previous datastore.AudioSource)
+}
+
+// haForgetter returns the HA entity cleanup target, or nil when there is none.
+func (p *AudioPipelineService) haForgetter() haEntityForgetter {
+	if p.haEntityForgetter != nil {
+		return p.haEntityForgetter
+	}
+	if p.apiService == nil {
+		return nil
+	}
+	if proc := p.apiService.Processor(); proc != nil {
+		return proc
+	}
+	return nil
+}
+
+// forgetRenamedSourceHAEntities queues removal of the HA entities a source had
+// under oldName after it was renamed. Entities are keyed by name; the source
+// republishes under its new name.
+func (p *AudioPipelineService) forgetRenamedSourceHAEntities(sourceID, oldName string) {
+	if f := p.haForgetter(); f != nil {
+		f.ForgetHomeAssistantEntityName(datastore.AudioSource{ID: sourceID, DisplayName: oldName})
+	}
+}
+
+// forgetDeletedSourceHAEntities queues removal of the HA entities of a source
+// that left the configuration. A stream that is only disabled is still in the
+// configuration under the same name and keeps its entities, so they resume when
+// it is enabled again.
+func (p *AudioPipelineService) forgetDeletedSourceHAEntities(src *audiocore.AudioSource) {
+	f := p.haForgetter()
+	if f == nil {
+		return
+	}
+	if settings := conf.Setting(); settings != nil {
+		for i := range settings.Realtime.RTSP.Streams {
+			stream := &settings.Realtime.RTSP.Streams[i]
+			if !stream.Enabled && stream.Name == src.DisplayName {
+				return
+			}
+		}
+	}
+	f.ForgetHomeAssistantSource(datastore.AudioSource{ID: src.ID, DisplayName: src.DisplayName})
 }
 
 // reconfigureChangedSources diffs the currently running sources against the
@@ -1345,7 +1457,10 @@ func (p *AudioPipelineService) reconfigureChangedSources(audioLevelChan chan aud
 	log := audiocore.GetLogger()
 
 	// Build desired config keyed by connection string, including model IDs.
-	desiredConfigs := p.buildSourceConfigsWithModels()
+	// Sources are still registered here, so buildSourceConfigsWithModels consults
+	// the live registry for a fallback rate when a probe fails; no explicit map
+	// is needed.
+	desiredConfigs := p.buildSourceConfigsWithModels(nil)
 	desired := make(map[string]sourceConfigWithModels, len(desiredConfigs))
 	for _, scm := range desiredConfigs {
 		desired[scm.config.ConnectionString] = scm
@@ -1355,14 +1470,14 @@ func (p *AudioPipelineService) reconfigureChangedSources(audioLevelChan chan aud
 	// The bnAnalyzer may be nil in minimal test setups that only exercise
 	// the add/remove paths; model-change detection is skipped in that case.
 	var loadedModels map[string]classifier.ModelInfo
-	var primaryModelID string
+	var defaultIDs []string
 	if p.bnAnalyzer != nil {
 		modelInfoSlice := p.bnAnalyzer.BirdNET().ModelInfos()
 		loadedModels = make(map[string]classifier.ModelInfo, len(modelInfoSlice))
 		for i := range modelInfoSlice {
 			loadedModels[modelInfoSlice[i].ID] = modelInfoSlice[i]
 		}
-		primaryModelID = p.bnAnalyzer.BirdNET().PrimaryModelID()
+		defaultIDs = defaultTargetIDs(p.bnAnalyzer.BirdNET())
 	}
 	bufMgr := p.engine.BufferManager()
 
@@ -1420,7 +1535,7 @@ func (p *AudioPipelineService) reconfigureChangedSources(audioLevelChan chan aud
 					reconfiguredIDs = append(reconfiguredIDs, src.ID)
 				}
 
-			case loadedModels != nil && sourceModelsChanged(bufMgr, src.ID, scm.modelIDs, loadedModels, primaryModelID):
+			case loadedModels != nil && sourceModelsChanged(bufMgr, src.ID, scm.modelIDs, loadedModels, defaultIDs):
 				// Model assignment changed (e.g., Perch added/removed):
 				// rebuild the consumer/buffer/monitor layer, keep capture running.
 				// Also pick up any simultaneous gain change.
@@ -1445,23 +1560,27 @@ func (p *AudioPipelineService) reconfigureChangedSources(audioLevelChan chan aud
 
 			// Sync display name if the config name changed (e.g., stream renamed in UI).
 			if src.DisplayName != scm.config.DisplayName {
+				// Update the registry before queueing the old name's removal, so
+				// a discovery publish that runs in between already sees the new
+				// name and does not treat the old one as live.
+				oldName := src.DisplayName
 				registry.UpdateDisplayName(src.ID, scm.config.DisplayName)
+				p.forgetRenamedSourceHAEntities(src.ID, oldName)
 			}
 		} else {
 			// New source - add it.
 			log.Info("adding new stream from config",
 				logger.String("connection", privacy.SanitizeStreamUrl(connStr)),
 				logger.String("operation", operationReconfigureDiff))
-			if err := p.engine.AddSource(scm.config); err != nil {
+			sid, addErr := p.engine.AddSource(scm.config)
+			if addErr != nil {
 				log.Warn("failed to add source during reconfigure",
 					logger.String("connection", privacy.SanitizeStreamUrl(connStr)),
-					logger.Error(err))
+					logger.Error(addErr))
 				continue
 			}
-			if src, ok := registry.GetByConnection(connStr); ok {
-				newSourceIDs = append(newSourceIDs, src.ID)
-				sourceModelMap[src.ID] = scm.modelIDs
-			}
+			newSourceIDs = append(newSourceIDs, sid)
+			sourceModelMap[sid] = scm.modelIDs
 		}
 	}
 
@@ -1488,6 +1607,8 @@ func (p *AudioPipelineService) reconfigureChangedSources(audioLevelChan chan aud
 			log.Warn("failed to remove source during reconfigure",
 				logger.String("source_id", src.ID),
 				logger.Error(err))
+		} else {
+			p.forgetDeletedSourceHAEntities(src)
 		}
 		// engine.RemoveSource also removes the soundlevel route. Drop the
 		// tracking entry so the idempotency check in
@@ -1520,16 +1641,7 @@ func (p *AudioPipelineService) reconfigureChangedSources(audioLevelChan chan aud
 	// stays running; only the routes are torn down and re-created so
 	// drainRoute picks up the new gainLinear value.
 	if len(gainChangedIDs) > 0 {
-		for _, sid := range gainChangedIDs {
-			p.engine.Router().RemoveAllRoutes(sid)
-			// RemoveAllRoutes also removes the soundlevel route, so drop the
-			// tracking entry. Without this, the registerSoundLevelConsumers
-			// call below would skip the source (idempotency check) and leave
-			// it permanently without sound level monitoring.
-			p.untrackSoundLevelConsumer(sid)
-		}
-		p.registerConsumersForSources(gainChangedIDs, sourceModelMap, audioLevelChan, operationGainChange)
-		p.registerSoundLevelConsumers(gainChangedIDs, operationGainChange)
+		p.rebuildRoutesForSources(gainChangedIDs, sourceModelMap, audioLevelChan, operationGainChange)
 	}
 
 	// Rebuild routes for sources whose model assignment changed (e.g.,
@@ -1540,12 +1652,21 @@ func (p *AudioPipelineService) reconfigureChangedSources(audioLevelChan chan aud
 		for _, sid := range modelChangedIDs {
 			p.engine.Router().RemoveAllRoutes(sid)
 			p.untrackSoundLevelConsumer(sid)
-			desiredSet := resolveDesiredModelSet(sourceModelMap[sid], loadedModels, primaryModelID)
+			desiredSet := resolveDesiredModelSet(sourceModelMap[sid], loadedModels, defaultIDs)
 			deallocateStaleAnalysisBuffers(bufMgr, sid, desiredSet)
 		}
 		p.registerConsumersForSources(modelChangedIDs, sourceModelMap, audioLevelChan, operationModelChange)
 		p.registerSoundLevelConsumers(modelChangedIDs, operationModelChange)
 	}
+
+	// Retry sources whose buffer route stayed down after a prior reconfigure but whose
+	// config did not change this pass, so the re-register blocks above skipped them.
+	// Without this a route that fails on a source later left untouched is never retried
+	// and its models never surface as not-analyzing (#4208 follow-up).
+	routeRetryIDs := p.retryPersistentRouteFailures(
+		alreadyRunning,
+		[][]string{newSourceIDs, reconfiguredIDs, gainChangedIDs, modelChangedIDs},
+		sourceModelMap, audioLevelChan)
 
 	// Sync monitors for ALL active sources (kept + new) so UpdateMonitors
 	// receives the full desired state and removes stale monitors correctly.
@@ -1566,7 +1687,54 @@ func (p *AudioPipelineService) reconfigureChangedSources(audioLevelChan chan aud
 		logger.Int("removed", removedCount),
 		logger.Int("gain_changed", len(gainChangedIDs)),
 		logger.Int("model_changed", len(modelChangedIDs)),
+		logger.Int("route_retried", len(routeRetryIDs)),
 		logger.String("operation", operationReconfigureDiff))
+}
+
+// rebuildRoutesForSources tears down and re-creates the buffer, audio-level and
+// soundlevel routes for the given kept sources WITHOUT restarting capture:
+// Router().RemoveAllRoutes touches only the router, so the capture device keeps running.
+// Shared by the reconfigure paths that keep a source running but must rewire it (gain
+// change and persistent-route-failure retry), so the teardown+re-register sequence lives
+// in one place.
+func (p *AudioPipelineService) rebuildRoutesForSources(ids []string, sourceModelMap map[string][]string, audioLevelChan chan audiocore.AudioLevelData, operation string) {
+	for _, sid := range ids {
+		p.engine.Router().RemoveAllRoutes(sid)
+		// RemoveAllRoutes also removes the soundlevel route, so drop the tracking entry.
+		// Without this, the registerSoundLevelConsumers call below would skip the source
+		// (idempotency check) and leave it permanently without sound level monitoring.
+		p.untrackSoundLevelConsumer(sid)
+	}
+	p.registerConsumersForSources(ids, sourceModelMap, audioLevelChan, operation)
+	p.registerSoundLevelConsumers(ids, operation)
+}
+
+// retryPersistentRouteFailures re-wires the buffer route for kept sources whose route
+// stayed down after an earlier reconfigure (routeFailedLastPass) and that were not
+// already re-registered this pass. reconfigureChangedSources re-registers only sources
+// whose config changed, so without this a route that fails on a source later left
+// untouched is never retried, its models never surface as not-analyzing, and the failure
+// memory keeps a stale entry forever (#4208 follow-up). reRegistered lists the ID slices
+// already handled this pass so a source is not rebuilt twice; the rebuild clears the
+// failure memory on recovery or reports the models as not-analyzing when the route is
+// still down. Returns the retried IDs for the completion log. Runs under sourcesMu (held
+// by the caller), which serialises the routeFailedLastPass read.
+func (p *AudioPipelineService) retryPersistentRouteFailures(alreadyRunning map[string]string, reRegistered [][]string, sourceModelMap map[string][]string, audioLevelChan chan audiocore.AudioLevelData) []string {
+	reRegistering := make(map[string]bool)
+	for _, ids := range reRegistered {
+		for _, id := range ids {
+			reRegistering[id] = true
+		}
+	}
+	routeRetryIDs := sourcesNeedingRouteRetry(slices.Collect(maps.Values(alreadyRunning)), p.routeFailedLastPass, reRegistering)
+	if len(routeRetryIDs) == 0 {
+		return nil
+	}
+	audiocore.GetLogger().Info("retrying buffer route for sources with a persistent route failure",
+		logger.Int("count", len(routeRetryIDs)),
+		logger.String("operation", operationRouteRetry))
+	p.rebuildRoutesForSources(routeRetryIDs, sourceModelMap, audioLevelChan, operationRouteRetry)
+	return routeRetryIDs
 }
 
 // sourceConfigWithModels pairs an audiocore.SourceConfig with the config-level
@@ -1577,9 +1745,96 @@ type sourceConfigWithModels struct {
 	modelIDs []string // config-level IDs, e.g., ["birdnet", "perch_v2"]
 }
 
+// streamFallback carries a stream's last known probed parameters, reused to
+// preserve them across a transient probe failure on reconnect (#4350). The
+// sample rate and channel count are recovered independently, so known() reports
+// whether either value is usable.
+type streamFallback struct {
+	sampleRate int
+	channels   int
+}
+
+// known reports whether the fallback carries any usable value.
+func (f streamFallback) known() bool { return f.sampleRate > 0 || f.channels > 0 }
+
+// registrySourceByConnection looks up a running source by its connection string,
+// returning (nil, false) when the engine or its registry is not yet wired (for
+// example a minimal service constructed in a unit test). It lets the probe
+// fallback consult the live registry without assuming the engine is present.
+func (p *AudioPipelineService) registrySourceByConnection(connStr string) (*audiocore.AudioSource, bool) {
+	if p.engine == nil {
+		return nil, false
+	}
+	registry := p.engine.Registry()
+	if registry == nil {
+		return nil, false
+	}
+	return registry.GetByConnection(connStr)
+}
+
+// captureStreamFallback snapshots a running source's last known probed sample
+// rate and channel count, keyed by its connection string, for use as a
+// probe-failure fallback. RestartSource must call it BEFORE removing the source,
+// because buildSourceConfigsWithModels re-probes after the source is gone from
+// the registry and would otherwise lose the true rate on a transient
+// reconnect-time probe failure (#4350). Returns a non-nil map that is empty when
+// the source is unknown or carries no usable values.
+func (p *AudioPipelineService) captureStreamFallback(connStr string) map[string]streamFallback {
+	fallback := make(map[string]streamFallback, 1)
+	if src, ok := p.registrySourceByConnection(connStr); ok {
+		if fb := (streamFallback{sampleRate: src.SourceSampleRate, channels: src.SourceChannels}); fb.known() {
+			fallback[connStr] = fb
+		}
+	}
+	return fallback
+}
+
+// captureAllStreamFallbacks snapshots the last known probed parameters of every
+// currently registered source, keyed by connection string. restartAudioCapture
+// must call it BEFORE removeAllSources, because the full restart empties the
+// registry before setupAudioSources re-probes; without the snapshot a transient
+// probe failure during the restart would collapse every high-rate source to the
+// 48 kHz target and downmix channel-selected sources (#4350). Returns a non-nil
+// map that omits sources with no usable values.
+func (p *AudioPipelineService) captureAllStreamFallbacks() map[string]streamFallback {
+	if p.engine == nil {
+		return make(map[string]streamFallback)
+	}
+	registry := p.engine.Registry()
+	if registry == nil {
+		return make(map[string]streamFallback)
+	}
+	sources := registry.List()
+	fallback := make(map[string]streamFallback, len(sources))
+	for _, src := range sources {
+		fb := streamFallback{sampleRate: src.SourceSampleRate, channels: src.SourceChannels}
+		if !fb.known() {
+			continue
+		}
+		// List() returns safe copies with the connection string cleared, so read
+		// the raw string by ID to key the fallback the way the rebuilt configs
+		// look it up.
+		if connStr, ok := registry.ConnectionStringByID(src.ID); ok {
+			fallback[connStr] = fb
+		}
+	}
+	return fallback
+}
+
 // buildSourceConfigsWithModels constructs audiocore.SourceConfig entries from
 // the current settings, paired with their configured model IDs.
-func (p *AudioPipelineService) buildSourceConfigsWithModels() []sourceConfigWithModels {
+//
+// fallbackSources maps a stream connection string to that stream's previously
+// known probed parameters, consulted only when a fresh probe fails (returns 0).
+// RTSP probes transiently fail while the upstream is mid-reconnect; without a
+// fallback the config would collapse to the 48 kHz target and silently resample
+// away a high-rate source (e.g. an ultrasonic bat mic), and would zero the source
+// channel count so a left/right channel selection silently downmixes, until a
+// full container restart (#4350). Callers that still have the running source in
+// the registry may pass nil, in which case the live registry supplies the
+// fallback; RestartSource removes the source before building, so it captures the
+// parameters first and passes them here.
+func (p *AudioPipelineService) buildSourceConfigsWithModels(fallbackSources map[string]streamFallback) []sourceConfigWithModels {
 	settings := conf.Setting()
 	var result []sourceConfigWithModels
 
@@ -1600,33 +1855,81 @@ func (p *AudioPipelineService) buildSourceConfigsWithModels() []sourceConfigWith
 	// RTSP streams.
 	for _, stream := range enabledStreams {
 		probe := probeResults[stream.URL]
-		sampleRate := conf.SampleRate
-		if hasBatModel(stream.Models) {
-			if probe.sampleRate > conf.SampleRate {
-				sampleRate = probe.sampleRate
-			}
-			if probe.sampleRate > 0 && probe.sampleRate < ffmpeg.MinBatSampleRate {
-				GetLogger().Warn("stream sample rate below bat model minimum",
-					logger.String("stream", stream.Name),
-					logger.Int("sample_rate", probe.sampleRate),
-					logger.Int("minimum", ffmpeg.MinBatSampleRate),
-					logger.String("operation", "probe_stream"))
+		isBat := hasBatModel(stream.Models)
+
+		// On a failed or partial probe fall back to this connection's last known
+		// parameters so a transient reconnect-time probe failure does not silently
+		// drop the stream to the 48 kHz target and resample away its high-frequency
+		// content, nor zero the channel count so a left/right selection silently
+		// downmixes (#4350). The sample rate and channel count are recovered
+		// independently: a probe reporting a valid rate but no channel count still
+		// recovers the channels, and vice versa. The caller-supplied map (used by
+		// RestartSource and restartAudioCapture, which remove sources before
+		// building) takes precedence over the live registry (used by
+		// reconfigure/startup while sources are still registered).
+		var fb streamFallback
+		if probe.sampleRate == 0 || probe.channels == 0 {
+			fb = fallbackSources[stream.URL]
+			if !fb.known() {
+				if src, ok := p.registrySourceByConnection(stream.URL); ok {
+					fb = streamFallback{sampleRate: src.SourceSampleRate, channels: src.SourceChannels}
+				}
 			}
 		}
+
+		sourceSampleRate, sampleRate, retained, escalate := resolveStreamSampleRates(
+			probe.sampleRate, fb.sampleRate, conf.SampleRate, isBat)
+
+		sourceChannels, channelsRetained := resolveStreamChannels(probe.channels, fb.channels)
+
+		// Emit the escalation error first: it is the "no known rate for a high
+		// sample rate model" alarm and must not be masked by a channel-only
+		// retention warning. escalate requires no rate fallback, so it never
+		// coincides with a retained rate.
+		switch {
+		case escalate:
+			// Carry the channel-retention state even on the escalation path: the
+			// rate is lost, but a channel count may still have been recovered, and
+			// that recovery must not be silent (the exact class of hidden behavior
+			// this change surfaces).
+			GetLogger().Error("stream probe failed with no previously known sample rate; high sample rate model audio will be resampled to the target rate until the source is re-probed",
+				logger.String("stream", stream.Name),
+				logger.Int("target_sample_rate", conf.SampleRate),
+				logger.Int("channels", sourceChannels),
+				logger.Bool("channels_retained", channelsRetained),
+				logger.String("operation", "probe_stream"))
+		case retained || channelsRetained:
+			GetLogger().Warn("stream probe failed on reconnect; retaining last known stream parameters to avoid silent resampling",
+				logger.String("stream", stream.Name),
+				logger.Int("sample_rate", sourceSampleRate),
+				logger.Bool("sample_rate_retained", retained),
+				logger.Int("channels", sourceChannels),
+				logger.Bool("channels_retained", channelsRetained),
+				logger.String("operation", "probe_stream"))
+		}
+		if isBat && sourceSampleRate > 0 && sourceSampleRate < ffmpeg.MinBatSampleRate {
+			GetLogger().Warn("stream sample rate below bat model minimum",
+				logger.String("stream", stream.Name),
+				logger.Int("sample_rate", sourceSampleRate),
+				logger.Int("minimum", ffmpeg.MinBatSampleRate),
+				logger.String("operation", "probe_stream"))
+		}
+
 		result = append(result, sourceConfigWithModels{
 			config: &audiocore.SourceConfig{
-				DisplayName:      stream.Name,
-				Type:             audiocore.StreamTypeToSourceType(stream.Type),
-				ConnectionString: stream.URL,
-				SampleRate:       sampleRate,
-				SourceSampleRate: probe.sampleRate,
-				BitDepth:         conf.BitDepth,
-				Channels:         1,
-				SourceChannels:   probe.channels,
-				ChannelMode:      string(stream.ChannelMode),
-				MediaMode:        string(stream.MediaMode),
-				Transport:        rtspStreamTransport(stream, &settings.Realtime.RTSP),
-				Gain:             stream.Gain,
+				DisplayName:               stream.Name,
+				Type:                      audiocore.StreamTypeToSourceType(stream.Type),
+				ConnectionString:          stream.URL,
+				SampleRate:                sampleRate,
+				SourceSampleRate:          sourceSampleRate,
+				SourceSampleRateEstimated: retained,
+				BitDepth:                  conf.BitDepth,
+				Channels:                  1,
+				SourceChannels:            sourceChannels,
+				ChannelMode:               string(stream.ChannelMode),
+				MediaMode:                 string(stream.MediaMode),
+				Transport:                 rtspStreamTransport(stream, &settings.Realtime.RTSP),
+				Gain:                      stream.Gain,
 			},
 			modelIDs: stream.Models,
 		})
@@ -1714,6 +2017,53 @@ func hasBatModel(modelIDs []string) bool {
 		}
 	}
 	return false
+}
+
+// resolveStreamSampleRates decides the source and output sample rates for a
+// stream config from a fresh probe result and a fallback rate to use when the
+// probe failed.
+//
+// A probe returns probeRate 0 on failure. RTSP probes transiently fail while the
+// upstream is mid-reconnect; falling back to targetRate would silently resample a
+// high-rate source (e.g. a 250 kHz ultrasonic bat mic) down to 48 kHz and keep it
+// there across restarts until a full container restart (#4350). When the probe
+// failed and a positive fallbackRate is known, that rate is reused so the
+// pipeline keeps the correct geometry (retained=true).
+//
+// outputRate is the target rate, raised to the source rate only for bat models,
+// which analyse at the source's native high rate; other models always analyse at
+// targetRate and rely on downstream resampling.
+//
+// escalate reports a genuine loss: the probe failed, no fallback was available,
+// and the stream uses a high-sample-rate (bat) model, so its audio will be
+// resampled to targetRate until a successful re-probe. Callers should log this.
+func resolveStreamSampleRates(probeRate, fallbackRate, targetRate int, isBatModel bool) (sourceRate, outputRate int, retained, escalate bool) {
+	sourceRate = probeRate
+	if sourceRate == 0 && fallbackRate > 0 {
+		sourceRate = fallbackRate
+		retained = true
+	}
+	outputRate = targetRate
+	if isBatModel && sourceRate > targetRate {
+		outputRate = sourceRate
+	}
+	escalate = probeRate == 0 && !retained && isBatModel
+	return sourceRate, outputRate, retained, escalate
+}
+
+// resolveStreamChannels decides the source channel count for a stream config
+// from a fresh probe result and a fallback count to use when the probe reported
+// no channels. Recovering the channel count on a probe failure keeps a left/right
+// channel selection from silently downmixing, because appendChannelArgs only
+// applies the pan filter when the source has more than one channel (#4350).
+// channelsRetained reports whether the fallback was used.
+func resolveStreamChannels(probeChannels, fallbackChannels int) (sourceChannels int, channelsRetained bool) {
+	sourceChannels = probeChannels
+	if sourceChannels == 0 && fallbackChannels > 0 {
+		sourceChannels = fallbackChannels
+		channelsRetained = true
+	}
+	return sourceChannels, channelsRetained
 }
 
 // probeAllStreams probes all streams concurrently to discover their actual
@@ -1807,7 +2157,7 @@ func (p *AudioPipelineService) buildMonitorConfigs(sourceModelMap map[string][]s
 		loadedModels[modelInfoSlice[i].ID] = modelInfoSlice[i]
 	}
 
-	primaryInfo := p.bnAnalyzer.BirdNET().PrimaryModelInfo()
+	defaultTargets := p.bnAnalyzer.BirdNET().DefaultTargets()
 	result := make(map[string][]monitorConfig, len(sourceIDs))
 
 	for _, sid := range sourceIDs {
@@ -1823,7 +2173,7 @@ func (p *AudioPipelineService) buildMonitorConfigs(sourceModelMap map[string][]s
 			}
 		}
 		if len(infos) == 0 {
-			infos = []classifier.ModelInfo{primaryInfo}
+			infos = fallbackTargets(sourceModelMap[sid], defaultTargets)
 		}
 
 		configs := make([]monitorConfig, len(infos))
