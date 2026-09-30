@@ -6,6 +6,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func TestIsAuthRequiredHomeAssistantIngress(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		supervisor   bool
+		optedIn      bool
 		remoteAddr   string
 		ingressPath  string
 		forwardedFor string
@@ -46,16 +47,12 @@ func TestIsAuthRequiredHomeAssistantIngress(t *testing.T) {
 		{"direct port from LAN with forged header", true, "192.168.1.50:51000", testIngressPath, "", true},
 		{"direct port with forged header and forged XFF", true, "192.168.1.50:51000", testIngressPath, "127.0.0.1", true},
 		{"loopback without ingress header", true, "127.0.0.1:41234", "", "", true},
-		{"not a Home Assistant add-on", false, "127.0.0.1:41234", testIngressPath, "", true},
+		{"option off", false, "127.0.0.1:41234", testIngressPath, "", true},
 		{"unparseable peer address", true, "127.0.0.1", testIngressPath, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			token := ""
-			if tt.supervisor {
-				token = "supervisor-token"
-			}
-			t.Setenv(supervisorTokenEnv, token)
+			t.Setenv(ingressSkipAuthEnv, strconv.FormatBool(tt.optedIn))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v2/settings", http.NoBody)
 			req.RemoteAddr = tt.remoteAddr
