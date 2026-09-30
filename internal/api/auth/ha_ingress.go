@@ -6,13 +6,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 const (
-	// supervisorTokenEnv is set by the Home Assistant Supervisor in every add-on
-	// container, and nowhere else. Its presence is what limits the ingress
-	// bypass to the add-on deployment.
-	supervisorTokenEnv = "SUPERVISOR_TOKEN"
+	// ingressSkipAuthEnv opts in to the ingress bypass. The Home Assistant
+	// add-on exports it from its INGRESS_SKIP_AUTH option; it is off unless set
+	// to a true value.
+	ingressSkipAuthEnv = "INGRESS_SKIP_AUTH"
 
 	// headerIngressPath carries the ingress URL prefix. The add-on's ingress
 	// proxy always sets it, overwriting any value the client sent.
@@ -23,7 +24,7 @@ const (
 // ingress, which the Supervisor has already authenticated and authorized.
 //
 // All three conditions must hold:
-//   - the process runs as a Home Assistant add-on (SUPERVISOR_TOKEN is set);
+//   - the operator opted in (INGRESS_SKIP_AUTH is true);
 //   - the X-Ingress-Path header is present;
 //   - the TCP peer is loopback: in the add-on, ingress traffic reaches this
 //     server through the add-on's own nginx on localhost, while the published
@@ -33,7 +34,7 @@ const (
 // echo's RealIP, which honors X-Forwarded-For from private-network peers and so
 // can be forged by any LAN client.
 func isHomeAssistantIngress(r *http.Request) bool {
-	if os.Getenv(supervisorTokenEnv) == "" || r.Header.Get(headerIngressPath) == "" {
+	if skip, _ := strconv.ParseBool(os.Getenv(ingressSkipAuthEnv)); !skip || r.Header.Get(headerIngressPath) == "" {
 		return false
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
