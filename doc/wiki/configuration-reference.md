@@ -273,9 +273,9 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.daylightfilter.species` | string[] | species, families, orders, or genera to filter during daylight |
 | `realtime.firstdailyconsensus.enabled` | boolean | true to require a second model to confirm a species' first detection each day |
 | `realtime.firstdailyconsensus.whitelist` | string[] | species exempt from the first-daily consensus rule, by common or scientific name |
-| `realtime.rtsp.streams` | stream-config[] | Stream configurations |
-| `realtime.rtsp.urls` | string[] | Legacy: accepts old format, migrated on load |
-| `realtime.rtsp.transport` | string | Legacy: global default, migrated on load |
+| `realtime.rtsp.streams` | stream-config[] | Streams to analyze. Each entry has name (required, unique), url (required), enabled, type (rtsp, http, hls, rtmp or udp), transport (tcp or udp, RTSP and RTMP only; empty uses the global transport), mediaMode (auto, audio-only or full-stream, RTSP only; default full-stream), channelMode (downmix, left or right; default downmix) and gain (dB) |
+| `realtime.rtsp.urls` | string[] | Legacy: a urls list in an older config is converted to streams on startup and saved; not read once streams has entries |
+| `realtime.rtsp.transport` | string | Global default transport (tcp or udp): read as the engine-wide default and copied into streams that set none; kept after the urls migration |
 | `realtime.rtsp.health.healthydatathreshold` | integer | seconds before stream considered unhealthy (default: 60) |
 | `realtime.rtsp.health.monitoringinterval` | integer | health check interval in seconds (default: 30) |
 | `realtime.rtsp.ffmpegParameters` | string[] | Custom FFmpeg parameters |

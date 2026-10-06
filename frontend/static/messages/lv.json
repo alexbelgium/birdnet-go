@@ -3210,7 +3210,11 @@
         "enable": "Iespējot BirdWeather augšupielādes",
         "token": {
           "label": "BirdWeather tokens",
-          "helpText": "Jūsu unikālais BirdWeather tokens."
+          "helpText": "Jūsu unikālais BirdWeather tokens.",
+          "errors": {
+            "required": "Ievadiet savu BirdWeather tokenu vai izslēdziet BirdWeather.",
+            "format": "BirdWeather tokens sastāv no 24 burtiem un cipariem."
+          }
         },
         "threshold": {
           "label": "Augšupielādes slieksnis",
@@ -5232,12 +5236,34 @@
     }
   },
   "wizard": {
+    "actions": {
+      "reloadPage": "Pārlādēt lapu"
+    },
     "skip": "Izlaist",
     "back": "Atpakaļ",
     "next": "Tālāk",
     "done": "Gatavs",
     "progress": "Solis {current} no {total}",
     "progressLabel": "Vedņa progress",
+    "status": {
+      "saving": "Saglabā...",
+      "loadingStep": "Ielādē soli..."
+    },
+    "errors": {
+      "saveFailed": "Šo soli neizdevās saglabāt. Pārbaudiet savienojumu un mēģiniet vēlreiz vai izlaidiet iestatīšanu un mainiet to vēlāk Iestatījumos.",
+      "saveRejected": "Šī soļa iestatījumi netika pieņemti. Pārbaudiet vērtības un mēģiniet vēlreiz vai izlaidiet iestatīšanu un mainiet to vēlāk Iestatījumos.",
+      "stepLoadFailed": "Šo soli neizdevās ielādēt. Nospiediet Mēģināt vēlreiz vai pārlādējiet lapu.",
+      "stepLoadFailedReload": "Šo soli joprojām neizdevās ielādēt. Pārlādējiet lapu, lai mēģinātu vēlreiz; iepriekšējos soļos saglabātās izvēles tiek paturētas."
+    },
+    "reasons": {
+      "completeStep": "Lai turpinātu, pabeidziet šo soli."
+    },
+    "leaveConfirm": {
+      "title": "Pamest iestatīšanu?",
+      "message": "Iestatīšana vairs netiks atvērta. Iepriekšējos soļos saglabātās izvēles tiek paturētas; šī soļa izmaiņas netiek saglabātas. Visu varat mainīt vēlāk Iestatījumos.",
+      "stay": "Turpināt iestatīšanu",
+      "leave": "Pamest iestatīšanu"
+    },
     "whatsNew": {
       "title": "Jaunumi versijā {version}"
     },
@@ -5282,7 +5308,19 @@
         "rtspUrlPlaceholder": "rtsp://user:password@host:port/stream",
         "rtspUrlHelp": "Ievadiet RTSP audio straumes URL",
         "additionalSourcesHint": "Papildu audio avotus varēsiet pievienot vēlāk iestatījumos.",
-        "configureLater": "Izlaist - konfigurēt vēlāk"
+        "devicesLoadFailed": "Neizdevās uzskaitīt šīs sistēmas audio ierīces.",
+        "useStreamInstead": "Tā vietā izmantot RTSP straumi",
+        "setUpLater": "Konfigurēt audio vēlāk",
+        "setUpLaterChosen": "Audio tagad netiks konfigurēts. Skaņas karti vai straumi varat pievienot vēlāk iestatījumos.",
+        "streamReplacesSoundCards": "Skaņas kartes pārstāj ierakstīt, kad izmantojat straumi. Tās varat pievienot atkal iestatījumos.",
+        "soundCardReplacesStream": "Straume, kas redzama straumes opcijā, tiek izslēgta, kad izmantojat skaņas karti. To varat ieslēgt atkal iestatījumos.",
+        "reasons": {
+          "chooseDevice": "Izvēlieties audio ierīci vai konfigurējiet audio vēlāk.",
+          "devicesFailed": "Audio ierīces neizdevās uzskaitīt. Mēģiniet vēlreiz, izmantojiet straumi vai konfigurējiet audio vēlāk.",
+          "noDevices": "Nav atrasta neviena audio ierīce. Izmantojiet straumi vai konfigurējiet audio vēlāk.",
+          "enterUrl": "Ievadiet straumes URL vai konfigurējiet audio vēlāk.",
+          "urlScheme": "Ievadiet pilnu straumes URL, kas sākas ar rtsp:// vai rtsps:// un nesatur atstarpes."
+        }
       },
       "detection": {
         "title": "Noteikšanas slieksnis",
@@ -5294,6 +5332,7 @@
         "highAccuracyDesc": "Mazāk kļūdaini pozitīvu, var palaist garām dažus putnus",
         "highSensitivity": "Augsts jutīgums",
         "highSensitivityDesc": "Vairāk noteikšanu, vairāk kļūdaini pozitīvu",
+        "descriptionStored": "Izvēlieties, cik stingrai jābūt putnu identificēšanai. Pašlaik: {threshold}, nav sakritības.",
         "threshold": "Ticamības slieksnis",
         "fpFilterNote": "Kad sistēma darbojas un ir pierādījusi sevi, varat ieslēgt kļūdaini pozitīvo filtru iestatījumos, lai vēl vairāk samazinātu nepareizas noteikšanas."
       },
@@ -5303,10 +5342,12 @@
         "privacyFilterHelp": "Filtrē noteikšanas, kad pie mikrofona tiek noteiktas cilvēku balsis",
         "birdweatherLabel": "Dalīties ar noteikšanām BirdWeather",
         "birdweatherHelp": "Sniedziet savu putnu noteikšanu ieguldījumu BirdWeather kopienas tīklā",
-        "birdweatherIdLabel": "BirdWeather stacijas ID",
-        "birdweatherIdPlaceholder": "Ievadiet savu BirdWeather stacijas ID",
         "errorReportingLabel": "Sūtīt anonīmus kļūdu ziņojumus",
-        "errorReportingHelp": "Palīdziet uzlabot BirdNET-Go, sūtot anonīmus kļūdu ziņojumus, kad kaut kas noiet greizi"
+        "errorReportingHelp": "Palīdziet uzlabot BirdNET-Go, sūtot anonīmus kļūdu ziņojumus, kad kaut kas noiet greizi",
+        "reasons": {
+          "enterToken": "Ievadiet savu BirdWeather tokenu vai izslēdziet kopīgošanu ar BirdWeather.",
+          "tokenFormat": "BirdWeather tokens sastāv no 24 burtiem un cipariem."
+        }
       },
       "responsibleUse": {
         "title": "BirdNET-Go atbildīga lietošana",
@@ -5545,6 +5586,8 @@
         "catalogLoadFailed": "Neizdevās ielādēt modeļu katalogu",
         "installFailed": "Neizdevās sākt modeļa instalēšanu",
         "removeFailed": "Neizdevās noņemt modeli",
+        "removeHasDependents": "{name} ir nepieciešams modeļiem {models}. Vispirms noņemiet šos modeļus.",
+        "operationInProgress": "Jau notiek modeļa instalēšana, pārinstalēšana vai noņemšana ({name}). Mēģiniet vēlreiz, kad tā būs pabeigta.",
         "actionFailed": "Radās problēma ar {name}",
         "downloadSourceHint": "Ja jūsu tīklā huggingface.co ir bloķēts vai lēns, iestatiet spoguļvietni zemāk esošajā sadaļā Lejupielādes avots.",
         "goToDownloadSource": "Doties uz Lejupielādes avots",

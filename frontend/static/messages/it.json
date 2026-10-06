@@ -3210,7 +3210,11 @@
         "enable": "Abilita Caricamenti BirdWeather",
         "token": {
           "label": "Token BirdWeather",
-          "helpText": "Il tuo token BirdWeather univoco."
+          "helpText": "Il tuo token BirdWeather univoco.",
+          "errors": {
+            "required": "Inserisci il tuo token BirdWeather oppure disattiva BirdWeather.",
+            "format": "Un token BirdWeather è composto da 24 lettere e cifre."
+          }
         },
         "threshold": {
           "label": "Soglia Caricamento",
@@ -5232,12 +5236,34 @@
     }
   },
   "wizard": {
+    "actions": {
+      "reloadPage": "Ricarica la pagina"
+    },
     "skip": "Salta",
     "back": "Indietro",
     "next": "Avanti",
     "done": "Fine",
     "progress": "Passo {current} di {total}",
     "progressLabel": "Avanzamento procedura guidata",
+    "status": {
+      "saving": "Salvataggio...",
+      "loadingStep": "Caricamento del passaggio..."
+    },
+    "errors": {
+      "saveFailed": "Impossibile salvare questo passaggio. Controlla la connessione e riprova, oppure salta la configurazione e modificalo più tardi nelle Impostazioni.",
+      "saveRejected": "Le impostazioni di questo passaggio non sono state accettate. Controlla i valori e riprova, oppure salta la configurazione e modificalo più tardi nelle Impostazioni.",
+      "stepLoadFailed": "Impossibile caricare questo passaggio. Premi Riprova o ricarica la pagina.",
+      "stepLoadFailedReload": "Ancora impossibile caricare questo passaggio. Ricarica la pagina per riprovare; le scelte salvate nei passaggi precedenti vengono mantenute."
+    },
+    "reasons": {
+      "completeStep": "Completa questo passaggio per continuare."
+    },
+    "leaveConfirm": {
+      "title": "Uscire dalla configurazione?",
+      "message": "La configurazione non verrà riaperta. Le scelte salvate nei passaggi precedenti vengono mantenute; le modifiche di questo passaggio non vengono salvate. Potrai cambiare tutto più tardi nelle Impostazioni.",
+      "stay": "Continua la configurazione",
+      "leave": "Esci dalla configurazione"
+    },
     "whatsNew": {
       "title": "Novità nella {version}"
     },
@@ -5282,7 +5308,19 @@
         "rtspUrlPlaceholder": "rtsp://user:password@host:port/stream",
         "rtspUrlHelp": "Inserisci l'URL del tuo stream audio RTSP",
         "additionalSourcesHint": "Puoi aggiungere altre sorgenti audio successivamente nelle Impostazioni.",
-        "configureLater": "Salta - configura più tardi"
+        "devicesLoadFailed": "Impossibile elencare i dispositivi audio di questo sistema.",
+        "useStreamInstead": "Usa invece uno stream RTSP",
+        "setUpLater": "Configura l'audio più tardi",
+        "setUpLaterChosen": "L'audio non verrà configurato ora. Aggiungi una scheda audio o uno stream più tardi nelle Impostazioni.",
+        "streamReplacesSoundCards": "Le schede audio smettono di acquisire quando usi uno stream. Puoi aggiungerle di nuovo nelle Impostazioni.",
+        "soundCardReplacesStream": "Lo stream mostrato nell'opzione stream viene disattivato quando usi una scheda audio. Puoi riattivarlo nelle Impostazioni.",
+        "reasons": {
+          "chooseDevice": "Scegli un dispositivo audio oppure configura l'audio più tardi.",
+          "devicesFailed": "Impossibile elencare i dispositivi audio. Riprova, usa uno stream oppure configura l'audio più tardi.",
+          "noDevices": "Nessun dispositivo audio trovato. Usa uno stream oppure configura l'audio più tardi.",
+          "enterUrl": "Inserisci l'URL dello stream oppure configura l'audio più tardi.",
+          "urlScheme": "Inserisci un URL dello stream completo che inizi con rtsp:// o rtsps:// e non contenga spazi."
+        }
       },
       "detection": {
         "title": "Soglia di rilevamento",
@@ -5294,6 +5332,7 @@
         "highAccuracyDesc": "Meno falsi positivi, potrebbe non rilevare alcuni uccelli",
         "highSensitivity": "Alta sensibilità",
         "highSensitivityDesc": "Più rilevamenti, più falsi positivi",
+        "descriptionStored": "Scegli quanto deve essere rigorosa l'identificazione degli uccelli. Attuale: {threshold}, nessun preset.",
         "threshold": "Soglia di confidenza",
         "fpFilterNote": "Una volta che il tuo sistema è funzionante e collaudato, puoi abilitare il filtro dei falsi positivi nelle Impostazioni per ridurre ulteriormente i rilevamenti errati."
       },
@@ -5303,10 +5342,12 @@
         "privacyFilterHelp": "Filtra i rilevamenti quando vengono rilevate voci umane vicino al microfono",
         "birdweatherLabel": "Condividi rilevamenti con BirdWeather",
         "birdweatherHelp": "Contribuisci con i tuoi rilevamenti alla rete comunitaria BirdWeather",
-        "birdweatherIdLabel": "ID stazione BirdWeather",
-        "birdweatherIdPlaceholder": "Inserisci l'ID della tua stazione BirdWeather",
         "errorReportingLabel": "Invia segnalazioni di errore anonime",
-        "errorReportingHelp": "Aiuta a migliorare BirdNET-Go inviando segnalazioni di errore anonime quando qualcosa va storto"
+        "errorReportingHelp": "Aiuta a migliorare BirdNET-Go inviando segnalazioni di errore anonime quando qualcosa va storto",
+        "reasons": {
+          "enterToken": "Inserisci il tuo token BirdWeather oppure disattiva la condivisione con BirdWeather.",
+          "tokenFormat": "Un token BirdWeather è composto da 24 lettere e cifre."
+        }
       },
       "responsibleUse": {
         "title": "Usare BirdNET-Go in modo responsabile",
@@ -5545,6 +5586,8 @@
         "catalogLoadFailed": "Impossibile caricare il catalogo dei modelli",
         "installFailed": "Impossibile avviare l'installazione del modello",
         "removeFailed": "Impossibile rimuovere il modello",
+        "removeHasDependents": "{name} è richiesto da {models}. Rimuovi prima questi modelli.",
+        "operationInProgress": "È già in corso un'installazione, reinstallazione o rimozione di un modello ({name}). Riprova al termine.",
         "actionFailed": "Si è verificato un problema con {name}",
         "downloadSourceHint": "Se huggingface.co è bloccato o lento sulla tua rete, imposta un mirror nella sezione Sorgente di download sottostante.",
         "goToDownloadSource": "Vai a Sorgente di download",

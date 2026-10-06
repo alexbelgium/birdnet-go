@@ -2358,6 +2358,8 @@ export type TranslationKey =
   | 'settings.integration.birdweather.enable'
   | 'settings.integration.birdweather.token.label'
   | 'settings.integration.birdweather.token.helpText'
+  | 'settings.integration.birdweather.token.errors.required'
+  | 'settings.integration.birdweather.token.errors.format'
   | 'settings.integration.birdweather.threshold.label'
   | 'settings.integration.birdweather.threshold.helpText'
   | 'settings.integration.birdweather.test.button'
@@ -3830,12 +3832,24 @@ export type TranslationKey =
   | 'weather.birding.excellent'
   | 'weather.birding.moderate'
   | 'weather.birding.poor'
+  | 'wizard.actions.reloadPage'
   | 'wizard.skip'
   | 'wizard.back'
   | 'wizard.next'
   | 'wizard.done'
   | 'wizard.progress' // params: current, total
   | 'wizard.progressLabel'
+  | 'wizard.status.saving'
+  | 'wizard.status.loadingStep'
+  | 'wizard.errors.saveFailed'
+  | 'wizard.errors.saveRejected'
+  | 'wizard.errors.stepLoadFailed'
+  | 'wizard.errors.stepLoadFailedReload'
+  | 'wizard.reasons.completeStep'
+  | 'wizard.leaveConfirm.title'
+  | 'wizard.leaveConfirm.message'
+  | 'wizard.leaveConfirm.stay'
+  | 'wizard.leaveConfirm.leave'
   | 'wizard.whatsNew.title' // params: version
   | 'wizard.steps.welcome.title'
   | 'wizard.steps.welcome.heading'
@@ -3872,7 +3886,17 @@ export type TranslationKey =
   | 'wizard.steps.audioSource.rtspUrlPlaceholder'
   | 'wizard.steps.audioSource.rtspUrlHelp'
   | 'wizard.steps.audioSource.additionalSourcesHint'
-  | 'wizard.steps.audioSource.configureLater'
+  | 'wizard.steps.audioSource.devicesLoadFailed'
+  | 'wizard.steps.audioSource.useStreamInstead'
+  | 'wizard.steps.audioSource.setUpLater'
+  | 'wizard.steps.audioSource.setUpLaterChosen'
+  | 'wizard.steps.audioSource.streamReplacesSoundCards'
+  | 'wizard.steps.audioSource.soundCardReplacesStream'
+  | 'wizard.steps.audioSource.reasons.chooseDevice'
+  | 'wizard.steps.audioSource.reasons.devicesFailed'
+  | 'wizard.steps.audioSource.reasons.noDevices'
+  | 'wizard.steps.audioSource.reasons.enterUrl'
+  | 'wizard.steps.audioSource.reasons.urlScheme'
   | 'wizard.steps.detection.title'
   | 'wizard.steps.detection.description'
   | 'wizard.steps.detection.balanced'
@@ -3882,6 +3906,7 @@ export type TranslationKey =
   | 'wizard.steps.detection.highAccuracyDesc'
   | 'wizard.steps.detection.highSensitivity'
   | 'wizard.steps.detection.highSensitivityDesc'
+  | 'wizard.steps.detection.descriptionStored' // params: threshold
   | 'wizard.steps.detection.threshold'
   | 'wizard.steps.detection.fpFilterNote'
   | 'wizard.steps.integration.title'
@@ -3889,10 +3914,10 @@ export type TranslationKey =
   | 'wizard.steps.integration.privacyFilterHelp'
   | 'wizard.steps.integration.birdweatherLabel'
   | 'wizard.steps.integration.birdweatherHelp'
-  | 'wizard.steps.integration.birdweatherIdLabel'
-  | 'wizard.steps.integration.birdweatherIdPlaceholder'
   | 'wizard.steps.integration.errorReportingLabel'
   | 'wizard.steps.integration.errorReportingHelp'
+  | 'wizard.steps.integration.reasons.enterToken'
+  | 'wizard.steps.integration.reasons.tokenFormat'
   | 'wizard.steps.responsibleUse.title'
   | 'wizard.steps.responsibleUse.intro'
   | 'wizard.steps.responsibleUse.point1'
@@ -4063,6 +4088,8 @@ export type TranslationKey =
   | 'analysis.gallery.errors.catalogLoadFailed'
   | 'analysis.gallery.errors.installFailed'
   | 'analysis.gallery.errors.removeFailed'
+  | 'analysis.gallery.errors.removeHasDependents' // params: name, models
+  | 'analysis.gallery.errors.operationInProgress' // params: name
   | 'analysis.gallery.errors.actionFailed' // params: name
   | 'analysis.gallery.errors.downloadSourceHint'
   | 'analysis.gallery.errors.goToDownloadSource'
@@ -4656,6 +4683,7 @@ export type TranslationParams = {
   'errors.streams.test.unsupportedScheme': { scheme: string | number };
   'wizard.progress': { current: string | number; total: string | number };
   'wizard.whatsNew.title': { version: string | number };
+  'wizard.steps.detection.descriptionStored': { threshold: string | number };
   'analysis.detection.batFalsePositiveFilter.detectionCount': {
     count: string | number;
     description: string | number;
@@ -4690,6 +4718,8 @@ export type TranslationParams = {
   'analysis.gallery.reasons.hardwareExcluded': { token: string | number };
   'analysis.gallery.species': { count: string | number };
   'analysis.gallery.removeDialog.title': { name: string | number };
+  'analysis.gallery.errors.removeHasDependents': { name: string | number; models: string | number };
+  'analysis.gallery.errors.operationInProgress': { name: string | number };
   'analysis.gallery.errors.actionFailed': { name: string | number };
   'analysis.gallery.preview.buildLabel': { version: string | number; build: string | number };
   'analysis.gallery.preview.dialogNotice': { build: string | number };
