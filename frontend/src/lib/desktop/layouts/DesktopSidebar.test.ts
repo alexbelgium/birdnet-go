@@ -162,6 +162,7 @@ describe('DesktopSidebar - flat task-grouped sections', () => {
     const expectations: Array<[string, string]> = [
       ['analytics.hub.tabs.summary', '/analytics/summary'],
       ['analytics.species.title', '/analytics/species'],
+      ['speciesWorkspace.title', '/analytics/species-workspace'],
       ['navigation.search', '/search'],
       ['analytics.hub.tabs.patterns', '/analytics/activity'],
       ['analytics.hub.tabs.trends', '/analytics/trends'],
@@ -231,6 +232,25 @@ describe('DesktopSidebar - flat task-grouped sections', () => {
     expect(helpContainer?.contains(aboutBtn)).toBe(true);
   });
 
+  it('hides the species workspace from guests when security is enabled', () => {
+    sidebarTest.render({
+      currentRoute: '/ui/dashboard',
+      securityEnabled: true,
+      accessAllowed: false,
+      authConfig: { basicEnabled: true, enabledProviders: [] },
+    });
+    expect(screen.queryByText('speciesWorkspace.title')).not.toBeInTheDocument();
+    expect(screen.getByText('analytics.species.title')).toBeInTheDocument();
+  });
+
+  it('links the species workspace without the analytics filter query', async () => {
+    const onNavigate = vi.fn();
+    analyticsControls.applyParams({ range: 'year' });
+    sidebarTest.render({ currentRoute: '/ui/dashboard', onNavigate });
+    await fireEvent.click(getBtn('speciesWorkspace.title'));
+    expect(onNavigate).toHaveBeenCalledWith('/analytics/species-workspace');
+  });
+
   it('renders analytics items within their sections in spec order', () => {
     const { container } = sidebarTest.render({ currentRoute: '/ui/dashboard' });
 
@@ -240,7 +260,8 @@ describe('DesktopSidebar - flat task-grouped sections', () => {
     const exploreLabels = exploreButtons.map(b => b.textContent.trim()).filter(Boolean);
     expect(exploreLabels[0]).toContain('analytics.hub.tabs.summary');
     expect(exploreLabels[1]).toContain('analytics.species.title');
-    expect(exploreLabels[2]).toContain('navigation.search');
+    expect(exploreLabels[2]).toContain('speciesWorkspace.title');
+    expect(exploreLabels[3]).toContain('navigation.search');
 
     // PATTERNS: Activity, Trends, Nocturnal, Biodiversity
     const patternsGroup = container

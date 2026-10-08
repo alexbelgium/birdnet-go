@@ -61,6 +61,7 @@
   let SoundscapePage = $state<Component | null>(null);
   let ReviewPage = $state<Component | null>(null);
   let Species = $state<Component | null>(null);
+  let SpeciesWorkspace = $state<Component | null>(null);
   let Search = $state<Component | null>(null);
   let About = $state<Component | null>(null);
   let Help = $state<Component | null>(null);
@@ -149,6 +150,12 @@
       page: 'analytics/species',
       titleKey: 'pageTitle.speciesAnalytics',
       component: 'species',
+    },
+    {
+      route: 'species-workspace',
+      page: 'analytics/species-workspace',
+      titleKey: 'speciesWorkspace.title',
+      component: 'species-workspace',
     },
     {
       route: 'analytics-summary',
@@ -324,6 +331,13 @@
             Species = module.default;
           }
           break;
+        case 'species-workspace':
+          if (!SpeciesWorkspace) {
+            const module =
+              await import('./lib/desktop/features/species-workspace/SpeciesWorkspacePage.svelte');
+            SpeciesWorkspace = module.default;
+          }
+          break;
         case 'search':
           if (!Search) {
             const module = await import('./lib/desktop/views/Search.svelte');
@@ -463,6 +477,7 @@
     [uiPath('analytics')]: findRouteConfig('analytics-summary'),
     [uiPath('analytics', 'advanced')]: findRouteConfig('analytics-activity'),
     [uiPath('analytics', 'species')]: findRouteConfig('species'),
+    [uiPath('analytics', 'species-workspace')]: findRouteConfig('species-workspace'),
     [uiPath('analytics', 'summary')]: findRouteConfig('analytics-summary'),
     [uiPath('analytics', 'activity')]: findRouteConfig('analytics-activity'),
     [uiPath('analytics', 'trends')]: findRouteConfig('analytics-trends'),
@@ -834,6 +849,8 @@
       {@render renderRoute(ReviewPage)}
     {:else if currentRoute === 'species'}
       {@render renderRoute(Species)}
+    {:else if currentRoute === 'species-workspace'}
+      {@render renderRoute(SpeciesWorkspace)}
     {:else if currentRoute === 'search'}
       {@render renderRoute(Search)}
     {:else if currentRoute === 'about'}
