@@ -42,8 +42,13 @@ func (a *SecurityAdapter) CheckAccess(c echo.Context) error {
 	return ErrSessionNotFound // Failure
 }
 
-// IsAuthRequired checks if authentication is required for this request
+// IsAuthRequired checks if authentication is required for this request.
+// Home Assistant ingress requests are exempt: the Supervisor has already
+// authenticated them (see isHomeAssistantIngress).
 func (a *SecurityAdapter) IsAuthRequired(c echo.Context) bool {
+	if isHomeAssistantIngress(c.Request()) {
+		return false
+	}
 	return a.OAuth2Server.IsAuthenticationEnabled(c.RealIP())
 }
 
