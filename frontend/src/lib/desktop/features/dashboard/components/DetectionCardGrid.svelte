@@ -24,6 +24,7 @@
 <script lang="ts">
   import DetectionCard from './DetectionCard.svelte';
   import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
+  import ReanalyzeModal from '$lib/desktop/components/modals/ReanalyzeModal.svelte';
   import type { Detection } from '$lib/types/detection.types';
   import { RefreshCw, XCircle, ChevronDown, Check } from '@lucide/svelte';
   import { dropdown } from '$lib/utils/transitions';
@@ -297,6 +298,7 @@
               onMarkCorrect={() => actions.handleMarkCorrect(detection)}
               onMarkFalsePositive={() => actions.handleMarkFalsePositive(detection)}
               onReview={() => actions.handleReview(detection)}
+              onReanalyze={() => actions.handleReanalyze(detection)}
               onToggleSpecies={() => actions.handleToggleSpecies(detection)}
               onToggleLock={() => actions.handleToggleLock(detection)}
               onDelete={() => actions.handleDelete(detection)}
@@ -325,6 +327,23 @@
     onConfirm={actions.confirmModal}
   />
 {/if}
+
+<!-- Reanalysis runs in place: the action is on the row, so being navigated to the
+     detail page to read it would lose the list the operator is working through.
+     Mounted from the shared composable, the same way ConfirmModal is. -->
+<ReanalyzeModal
+  isOpen={actions.reanalyzeTarget !== null}
+  detection={actions.reanalyzeTarget}
+  onClose={() => actions.closeReanalyze()}
+  onCorrected={() => {
+    actions.closeReanalyze();
+    onRefresh?.();
+  }}
+  onDeleted={() => {
+    actions.closeReanalyze();
+    onRefresh?.();
+  }}
+/>
 
 <style>
   /* ========================================================================

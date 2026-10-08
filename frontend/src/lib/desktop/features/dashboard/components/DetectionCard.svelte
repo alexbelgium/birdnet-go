@@ -10,6 +10,7 @@
   - onFreezeStart?: () => void - Callback when interaction starts
   - onFreezeEnd?: () => void - Callback when interaction ends
   - onReview?: () => void - Callback for review action
+  - onReanalyze?: () => void - Callback for the reanalyze action
   - onToggleSpecies?: () => void - Callback for toggle species action
   - onToggleLock?: () => void - Callback for toggle lock action
   - onDelete?: () => void - Callback for delete action
@@ -48,6 +49,7 @@
     onFreezeStart?: () => void;
     onFreezeEnd?: () => void;
     onReview?: () => void;
+    onReanalyze?: () => void;
     onMarkCorrect?: () => void;
     onMarkFalsePositive?: () => void;
     onToggleSpecies?: () => void;
@@ -62,6 +64,7 @@
     onFreezeStart,
     onFreezeEnd,
     onReview,
+    onReanalyze,
     onMarkCorrect,
     onMarkFalsePositive,
     onToggleSpecies,
@@ -333,6 +336,7 @@
       {onMarkCorrect}
       {onMarkFalsePositive}
       {onReview}
+      {onReanalyze}
       {onToggleSpecies}
       {onToggleLock}
       {onDelete}
