@@ -97,7 +97,11 @@
   let activeSourceId: string | null = null;
 
   // Initialize composable during component init (registers cleanup $effect)
-  const spectro = useSpectrogramAnalyser({ fftSize: FFT_SIZE, audioOutput: true });
+  const spectro = useSpectrogramAnalyser({
+    fftSize: FFT_SIZE,
+    audioOutput: true,
+    getPlayingDate: () => hls?.playingDate ?? null,
+  });
 
   // Source discovery via SSE
   function connectSSE() {
@@ -331,7 +335,7 @@
           if (signal.aborted) return;
           // Connect the spectrogram analyser once manifest is ready
           if (audioElement) {
-            await spectro.connect(audioElement);
+            await spectro.connect(audioElement, activeSourceId);
           }
           if (signal.aborted) {
             spectro.disconnect();
@@ -402,7 +406,7 @@
           }
         }
         if (signal.aborted || !audioElement) return;
-        await spectro.connect(audioElement);
+        await spectro.connect(audioElement, activeSourceId);
         if (signal.aborted) {
           spectro.disconnect();
           return;
@@ -851,6 +855,7 @@
         <SpectrogramCanvas
           analyser={spectro.analyser}
           frequencyData={spectro.frequencyData}
+          externalFrequencyData={spectro.usingServerSpectrum}
           sampleRate={spectro.sampleRate}
           fftSize={spectro.fftSize}
           {frequencyRange}
