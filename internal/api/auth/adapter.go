@@ -49,7 +49,7 @@ func (a *SecurityAdapter) IsAuthRequired(c echo.Context) bool {
 	if isHomeAssistantIngress(c.Request()) {
 		return false
 	}
-	return a.OAuth2Server.IsAuthenticationEnabled(c.RealIP())
+	return a.OAuth2Server.IsAuthenticationEnabled(c.Request())
 }
 
 // GetUsername retrieves the username of the authenticated user (if available)
@@ -108,7 +108,7 @@ func (a *SecurityAdapter) GetAuthMethod(c echo.Context) AuthMethod {
 	}
 
 	// 2. Check subnet bypass (if context wasn't set or middleware didn't handle)
-	if a.OAuth2Server.IsRequestFromAllowedSubnet(c.RealIP()) {
+	if a.OAuth2Server.IsRequestFromAllowedSubnet(c.Request()) {
 		return AuthMethodLocalSubnet // Changed from AuthMethodUnknown
 	}
 
