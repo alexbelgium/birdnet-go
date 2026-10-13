@@ -8,11 +8,12 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"github.com/tphakala/birdnet-go/internal/spectrogram/specfile"
 )
 
-// spectrogramBaseRe captures the clip base name of a spectrogram render,
+// spectrogramBaseRe captures the clip base name of a sized spectrogram render,
 // "<base>_<width>px.png" or "<base>_<width>px-<suffix>.png". The greedy base
-// takes the last "_<width>px"; isSpectrogramFileFor then confirms the match.
+// takes the last "_<width>px"; specfile.IsRenderFor then confirms the match.
 var spectrogramBaseRe = regexp.MustCompile(`^(.+)_\d+px(?:-.*)?\.png$`)
 
 // removeClipFiles removes the audio clips and spectrogram renders of deleted
@@ -60,8 +61,15 @@ func (c *Handler) removeClipFiles(clipNames []string) {
 				continue
 			}
 			name := entry.Name()
-			m := spectrogramBaseRe.FindStringSubmatch(name)
-			if len(m) < 2 || !bases[m[1]] || !isSpectrogramFileFor(name, m[1]) {
+			// The regex narrows a sized render to one candidate base. An unsized
+			// prerender, "<base>.png", has no width to cut at, so fall back to the
+			// stem. specfile.IsRenderFor then holds the candidate to the same
+			// filename grammar removeDetectionFiles applies through specfile.Matching.
+			base := strings.TrimSuffix(name, filepath.Ext(name))
+			if m := spectrogramBaseRe.FindStringSubmatch(name); len(m) >= 2 {
+				base = m[1]
+			}
+			if !bases[base] || !specfile.IsRenderFor(name, base) {
 				continue
 			}
 			path := filepath.Join(baseDir, dir, name)

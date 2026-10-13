@@ -383,8 +383,13 @@ func TestRemoveClipFiles(t *testing.T) {
 		// A clip whose name only shares the deleted clip's prefix stays.
 		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_2.wav"):       false,
 		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_2_514px.png"): false,
-		// An unknown width is not a spectrogram render.
-		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_123px.png"): false,
+		// Any pixel width is a render, as specfile's grammar accepts: a width no
+		// longer configured still belongs to the deleted clip.
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_123px.png"): true,
+		// The prerenderer's unsized render goes too.
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z.png"): true,
+		// A file that is not a render of the clip stays.
+		filepath.Join(day, "turdus_merula_80p_20250501T060000Z_notes.txt"): false,
 	}
 	for path := range files {
 		require.NoError(t, os.WriteFile(path, []byte("x"), 0o600))
