@@ -424,7 +424,7 @@ Source: MIT
 
 ### github.com/tphakala/go-flac
 
-License: https://github.com/tphakala/go-flac/blob/v1.1.0/LICENSE
+License: https://github.com/tphakala/go-flac/blob/v1.2.0/LICENSE
 Source: MIT
 
 ### github.com/tphakala/go-hls
@@ -524,7 +524,7 @@ Source: BSD-3-Clause
 
 ### golang.org/x/net
 
-License: https://cs.opensource.google/go/x/net/+/v0.59.0:LICENSE
+License: https://cs.opensource.google/go/x/net/+/v0.60.0:LICENSE
 Source: BSD-3-Clause
 
 ### golang.org/x/oauth2
@@ -539,7 +539,7 @@ Source: BSD-3-Clause
 
 ### golang.org/x/sys
 
-License: https://cs.opensource.google/go/x/sys/+/v0.48.0:LICENSE
+License: https://cs.opensource.google/go/x/sys/+/v0.49.0:LICENSE
 Source: BSD-3-Clause
 
 ### golang.org/x/term
