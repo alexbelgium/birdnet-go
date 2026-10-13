@@ -228,12 +228,12 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 		}
 	}
 
-	// Flush the detection cache so list and dashboard queries reflect the new
+	// Invalidate the detection cache so list and dashboard queries reflect the new
 	// label immediately. Without this the 5-minute cache keeps serving the
 	// pre-correction species: the operator sees the correction stick on the detail
 	// page while the parent list still shows the old name. Same thing the delete,
 	// review and lock handlers do.
-	c.DetectionCache.Flush()
+	c.DetectionCache.Invalidate()
 
 	// Record what changed in the detection's notes, so the correction leaves an
 	// audit trail next to the detection rather than only in the server log.
