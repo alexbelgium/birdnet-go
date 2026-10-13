@@ -174,7 +174,8 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.audio.export.debug` | boolean | true to enable audio export debug |
 | `realtime.audio.export.enabled` | boolean | export audio clips containing indentified bird calls |
 | `realtime.audio.export.path` | string | path to audio clip export directory |
-| `realtime.audio.export.type` | string | audio file type, wav, mp3 or flac |
+| `realtime.audio.export.type` | string | audio file type: wav, flac, aac, opus or mp3 |
+| `realtime.audio.export.ultrasonictype` | string | wav or flac only; used for bat/ultrasonic captures above 48 kHz |
 | `realtime.audio.export.bitrate` | string | bitrate for audio export |
 | `realtime.audio.export.retention.debug` | boolean | true to enable retention debug |
 | `realtime.audio.export.retention.policy` | string | retention policy, "none", "age" or "usage" |
@@ -270,9 +271,9 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.daylightfilter.enabled` | boolean | true to enable daylight filter |
 | `realtime.daylightfilter.offset` | integer | hours to adjust daylight window; positive = shrink (lenient), negative = expand (strict) |
 | `realtime.daylightfilter.species` | string[] | species, families, orders, or genera to filter during daylight |
-| `realtime.rtsp.streams` | stream-config[] | Stream configurations |
-| `realtime.rtsp.urls` | string[] | Legacy: accepts old format, migrated on load |
-| `realtime.rtsp.transport` | string | Legacy: global default, migrated on load |
+| `realtime.rtsp.streams` | stream-config[] | Streams to analyze. Each entry has name (required, unique), url (required), enabled, type (rtsp, http, hls, rtmp or udp), transport (tcp or udp, RTSP and RTMP only; empty uses the global transport), mediaMode (auto, audio-only or full-stream, RTSP only; default full-stream), channelMode (downmix, left or right; default downmix) and gain (dB) |
+| `realtime.rtsp.urls` | string[] | Legacy: a urls list in an older config is converted to streams on startup and saved; not read once streams has entries |
+| `realtime.rtsp.transport` | string | Global default transport (tcp or udp): read as the engine-wide default and copied into streams that set none; kept after the urls migration |
 | `realtime.rtsp.health.healthydatathreshold` | integer | seconds before stream considered unhealthy (default: 60) |
 | `realtime.rtsp.health.monitoringinterval` | integer | health check interval in seconds (default: 30) |
 | `realtime.rtsp.ffmpegParameters` | string[] | Custom FFmpeg parameters |
@@ -312,7 +313,7 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.species.speciesworkspace.sort.column` | string | column identifier |
 | `realtime.species.speciesworkspace.sort.direction` | string | "asc" or "desc" |
 | `realtime.species.speciesworkspace.condensed` | boolean | use two-line rows on phones |
-| `realtime.weather.provider` | string | "none", "yrno", "openweather", or "wunderground" |
+| `realtime.weather.provider` | string | "none", "yrno", "openweather", "wunderground", or "pirateweather" |
 | `realtime.weather.pollinterval` | integer | weather data polling interval in minutes |
 | `realtime.weather.debug` | boolean | true to enable debug mode |
 | `realtime.weather.openweather.enabled` | boolean | true to enable OpenWeather integration, for legacy support |
@@ -324,6 +325,8 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.weather.wunderground.stationid` | string | WeatherUnderground station ID |
 | `realtime.weather.wunderground.endpoint` | string | WeatherUnderground API endpoint |
 | `realtime.weather.wunderground.units` | string | units of measurement: "e" (imperial), "m" (metric), "h" (UK hybrid) |
+| `realtime.weather.pirateweather.apikey` | string | Pirate Weather API key |
+| `realtime.weather.pirateweather.endpoint` | string | Pirate Weather API endpoint |
 | `realtime.speciestracking.enabled` | boolean | true to enable new species tracking |
 | `realtime.speciestracking.newspecieswindowdays` | integer | Days to consider a species "new" (default: 7) |
 | `realtime.speciestracking.syncintervalminutes` | integer | Interval to sync with database (default: 60) |
