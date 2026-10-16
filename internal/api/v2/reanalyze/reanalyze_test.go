@@ -299,14 +299,15 @@ func TestAddSpeciesScore_KeepsBestPerModelAndUnparseableLabels(t *testing.T) {
 	addSpeciesScore(agg, "Parus major_Great Tit", "BirdNET_V2.4", 0.91, 1)
 	assert.InDelta(t, 0.91, float64(agg["Parus major"].byModel["BirdNET_V2.4"]), 1e-6)
 
-	// An underscore-separated Perch sound class splits the same way it does
-	// everywhere else in the UI (SplitSpeciesName is the shared splitter), so the
-	// grid stays consistent with the detection views rather than inventing its own
-	// rendering for these labels.
+	// An underscore-separated Perch sound class is keyed the same way it is
+	// everywhere else in the UI (SplitSpeciesName is the shared splitter, which
+	// keeps known multi-word sound classes whole), so the grid stays consistent
+	// with the detection views rather than inventing its own rendering for these
+	// labels.
 	addSpeciesScore(agg, "power_tool", "Perch_V2", 0.5, 1)
 	addSpeciesScore(agg, "power_tool", "Perch_V2", 0.7, 1)
-	require.Contains(t, agg, "power")
-	assert.InDelta(t, 0.7, float64(agg["power"].byModel["Perch_V2"]), 1e-6)
+	require.Contains(t, agg, "power_tool")
+	assert.InDelta(t, 0.7, float64(agg["power_tool"].byModel["Perch_V2"]), 1e-6)
 
 	// A multi-word non-binomial label has no scientific half at all. It must key
 	// on its common name, not on "" — otherwise every such label in the clip

@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"strconv"
 
-	"github.com/tphakala/birdnet-go/internal/audiocore/convert"
 	"github.com/tphakala/birdnet-go/internal/errors"
+	dsppcm "github.com/tphakala/go-audio-dsp/pcm"
 )
 
 // bytesPerDecodedSample is the width of one mono s16le sample ffmpeg writes.
@@ -167,19 +167,13 @@ func decodeClipMonoPCM16(
 			Build()
 	}
 
-	channels, err := convert.ConvertToFloat32(pcm, 16)
-	if err != nil {
+	samples := make([]float32, len(pcm)/bytesPerDecodedSample)
+	if _, err := dsppcm.BytesToFloat32(samples, pcm); err != nil {
 		return nil, errors.New(err).
 			Component(errComponent).
 			Category(errors.CategoryAudio).
 			Context("operation", "pcm_to_float32").
 			Build()
 	}
-	if len(channels) == 0 {
-		return nil, errors.Newf("conversion returned zero channels").
-			Component(errComponent).
-			Category(errors.CategoryAudio).
-			Build()
-	}
-	return channels[0], nil
+	return samples, nil
 }
