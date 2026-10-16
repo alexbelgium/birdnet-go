@@ -60,6 +60,8 @@ func isPrivateModeExempt(method, path string) bool {
 		return true
 	case method == http.MethodGet && path == hlsBase+audioapi.HLSStatusPath:
 		return true
+	case method == http.MethodGet && path == apiV2Prefix+audioapi.StaticSpectrogramPath:
+		return true
 	case method == http.MethodGet && path == hlsTokenBase+audioapi.HLSPlaylistPath:
 		return true
 	case method == http.MethodGet && path == hlsTokenBase+audioapi.HLSContentPath:
