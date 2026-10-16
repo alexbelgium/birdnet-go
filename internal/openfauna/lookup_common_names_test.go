@@ -33,6 +33,23 @@ func TestLookupCommonNames_FinnishTranslationForKnownSpecies(t *testing.T) {
 	assert.Equal(t, "mustarastas", got["Turdus merula"])
 }
 
+func TestLookupCommonNames_CanonicalAliasUsesRequestedLocale(t *testing.T) {
+	t.Parallel()
+
+	inputs := []string{"Accipiter gentilis", "Astur gentilis"}
+	got := LookupCommonNames(inputs, "fi")
+	for _, scientific := range inputs {
+		assert.Equal(t, "kanahaukka", got[scientific])
+	}
+
+	r := NewResolver()
+	require.NoError(t, r.Rebuild(nil, "fi"))
+	got = r.ResolveLocalizedBatch(inputs)
+	for _, scientific := range inputs {
+		assert.Equal(t, "kanahaukka", got[scientific])
+	}
+}
+
 func TestLookupCommonNames_EnglishFallbackForUntranslatedLocale(t *testing.T) {
 	t.Parallel()
 
