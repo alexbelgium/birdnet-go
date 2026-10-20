@@ -91,6 +91,33 @@ func TestBuildIndex_CaseInsensitiveMatching_Embedded(t *testing.T) {
 	assert.NotEmpty(t, m.Family)
 }
 
+func TestBuildIndex_CanonicalAliasUsesRequestedLocale_Embedded(t *testing.T) {
+	t.Parallel()
+
+	ix, err := BuildIndex([]string{"Accipiter gentilis", "Astur gentilis"}, "fi")
+	require.NoError(t, err)
+	for _, scientific := range []string{"Accipiter gentilis", "Astur gentilis"} {
+		name, ok := ix.CommonName(scientific)
+		require.True(t, ok)
+		assert.Equal(t, "kanahaukka", name)
+	}
+}
+
+func TestLookupForward_ExactNameWinsCanonicalAlias(t *testing.T) {
+	t.Parallel()
+
+	names := map[string]string{
+		"accipiter gentilis": "legacy exact",
+		"astur gentilis":     "canonical alias",
+	}
+	name, ok := lookupForward("Accipiter gentilis", func(key string) (string, bool) {
+		value, found := names[key]
+		return value, found
+	})
+	require.True(t, ok)
+	assert.Equal(t, "legacy exact", name)
+}
+
 func TestLookup_CaseInsensitive_Embedded(t *testing.T) {
 	t.Parallel()
 
