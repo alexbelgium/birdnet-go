@@ -15,6 +15,25 @@
 
 import { normalizeForLookup } from '$lib/utils/speciesNames';
 
+export interface SpeciesListResponse {
+  species?: Array<{ label: string; commonName?: string; scientificName?: string }>;
+}
+
+export function mapSpeciesListResponse(data: SpeciesListResponse): {
+  values: string[];
+  scientificNames: Map<string, string>;
+} {
+  const scientificNames = new Map<string, string>();
+  const values = (data.species ?? []).map(species => {
+    const value = species.commonName?.trim() ? species.commonName : species.label;
+    if (species.scientificName) {
+      scientificNames.set(normalizeForLookup(value), species.scientificName);
+    }
+    return value;
+  });
+  return { values, scientificNames };
+}
+
 /** A canonical value paired with the visitor-locale label shown for it. */
 export interface SpeciesPrediction {
   /** Canonical value emitted/persisted (server-locale common name or scientific name). */
