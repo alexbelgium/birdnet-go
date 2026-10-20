@@ -97,7 +97,11 @@
   const MAX_OVERLAY_SLOTS = 4;
 
   // Initialize composable during component init (must be at top level for $effect cleanup)
-  const spectro = useSpectrogramAnalyser({ fftSize: FFT_SIZE, audioOutput: false });
+  const spectro = useSpectrogramAnalyser({
+    fftSize: FFT_SIZE,
+    audioOutput: false,
+    getPlayingDate: () => hls?.playingDate ?? null,
+  });
 
   function shouldAutoStart(): boolean {
     if (appState.liveSpectrogram) return true;
@@ -245,7 +249,7 @@
           persistToggleState(true);
 
           if (audioElement) {
-            await spectro.connect(audioElement);
+            await spectro.connect(audioElement, sourceId);
           }
           if (signal.aborted) {
             spectro.disconnect();
@@ -278,7 +282,7 @@
         isConnecting = false;
         persistToggleState(true);
 
-        await spectro.connect(audioElement);
+        await spectro.connect(audioElement, sourceId);
         if (signal.aborted) {
           spectro.disconnect();
         }
@@ -533,8 +537,9 @@
       <SpectrogramCanvas
         analyser={spectro.analyser}
         frequencyData={spectro.frequencyData}
+        externalFrequencyData={spectro.usingServerSpectrum}
         sampleRate={spectro.sampleRate}
-        fftSize={FFT_SIZE}
+        fftSize={spectro.fftSize}
         {frequencyRange}
         {colorMap}
         isActive={spectro.isActive}
