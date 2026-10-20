@@ -1,5 +1,5 @@
 /**
- * useSpectrogramAnalyser — Web Audio composable for live spectrogram
+ * useSpectrogramAnalyser - Web Audio composable for live spectrogram
  *
  * Connects to an HTMLMediaElement (HLS.js attached), creates an AnalyserNode,
  * and exposes the frequency data buffer for rendering by SpectrogramCanvas.
@@ -8,13 +8,13 @@
  *   source → highpass → gainNode (visualization) → analyserNode → outputGainNode → destination
  *
  * The visualization gain (gainNode) controls the FFT input for the spectrogram.
- * The output gain (outputGainNode) controls audio to speakers — mute sets it to 0.
+ * The output gain (outputGainNode) controls audio to speakers - mute sets it to 0.
  * This separation means muting audio does not affect the spectrogram visualization.
  *
  * Key constraints:
- * - createMediaElementSource() can only be called once per element (guarded by WeakMap)
+ * - createMediaElementSource() can only be called once per element (shared source cache in audioNodes)
  * - Uses the shared audioContextManager singleton
- * - Does NOT use onMount — exposes connect()/disconnect() for parent control
+ * - Does NOT use onMount - exposes connect()/disconnect() for parent control
  * - On browsers whose AnalyserNode cannot read HLS-backed media (Safari/WebKit)
  *   the bins come from the server instead; see ./serverSpectrumFallback
  */
@@ -25,24 +25,15 @@ import {
   releaseAudioContext,
 } from './audioContextManager';
 import { dbToGain } from './audio';
+import { getOrCreateMediaElementSource } from './audioNodes';
 import { loggers } from './logger';
 import { computeWallClockAtPlayhead } from './detectionOverlay';
 import { createServerSpectrumFallback, type AnalyserProbe } from './serverSpectrumFallback';
 
 const logger = loggers.audio;
 
-/**
- * Guard: createMediaElementSource() can only be called once per element per AudioContext.
- * Keyed by AudioContext first, then HTMLMediaElement — so if the AudioContext is
- * recreated (after close), stale source nodes from the old context won't be reused.
- */
-const sourceNodeMap = new WeakMap<
-  AudioContext,
-  WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>
->();
-
 export interface SpectrogramAnalyserOptions {
-  /** FFT size — must be power of 2 (default: 1024) */
+  /** FFT size - must be power of 2 (default: 1024) */
   fftSize?: number;
   /** Whether to route audio to speakers (default: false) */
   audioOutput?: boolean;
@@ -161,19 +152,10 @@ export function useSpectrogramAnalyser(options?: SpectrogramAnalyserOptions) {
       audioContext = ctx;
       sampleRate = audioContext.sampleRate;
 
-      // Guard: reuse existing source node for this element + context combination
-      let contextCache = sourceNodeMap.get(audioContext);
-      if (!contextCache) {
-        contextCache = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
-        sourceNodeMap.set(audioContext, contextCache);
-      }
-      const existingSource = contextCache.get(mediaElement);
-      if (existingSource) {
-        sourceNode = existingSource;
-      } else {
-        sourceNode = audioContext.createMediaElementSource(mediaElement);
-        contextCache.set(mediaElement, sourceNode);
-      }
+      // Reuse the element's existing source node for this context. The node is shared
+      // with createAudioNodeChain through the per-element cache, so the analyser and
+      // a node chain must not be used on the same element at the same time.
+      sourceNode = getOrCreateMediaElementSource(audioContext, mediaElement).source;
 
       // Create processing nodes
       highPassNode = audioContext.createBiquadFilter();
@@ -224,7 +206,11 @@ export function useSpectrogramAnalyser(options?: SpectrogramAnalyserOptions) {
     if (sourceID && mine === generation) fallback.start(sourceID);
   }
 
-  /** Disconnect the audio graph and the server-spectrum fallback */
+  /**
+   * Disconnect the audio graph and the server-spectrum fallback. The source node
+   * is shared through the per-element cache, and disconnect() with no argument
+   * drops every route of it, including one owned by a node chain on the same element.
+   */
   function disconnect(): void {
     // Invalidate every in-flight await before releasing any state it may touch.
     generation++;
@@ -276,7 +262,7 @@ export function useSpectrogramAnalyser(options?: SpectrogramAnalyserOptions) {
     }
   }
 
-  /** Full cleanup — disconnects graph and releases AudioContext */
+  /** Full cleanup - disconnects graph and releases AudioContext */
   function destroy(): void {
     disconnect();
     releaseAudioContext();

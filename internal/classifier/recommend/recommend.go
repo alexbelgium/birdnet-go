@@ -46,7 +46,10 @@ const (
 	// that case does not arise in shipped catalog data.)
 	scoreRegionGlobalFallback = 50
 	// scoreFP16Native rewards an fp16 variant on a host with native
-	// half-precision SIMD.
+	// half-precision SIMD, but only when the variant's selected backend actually
+	// runs the fp16 file at f16. It is suppressed when the chosen backend forces
+	// f32 (see classifier.BackendForcesFP32), for example BirdNET v3.0 on any
+	// OpenVINO device, where the native-f16 speed rationale does not hold.
 	scoreFP16Native = 15
 	// scoreFP16GPUPreferredHeadroom is the margin above benchmarkMaxScore that
 	// keeps fp16 winning outright rather than on the backend-rank tie-break.
@@ -225,7 +228,9 @@ type Recommendation struct {
 type Input struct {
 	// Capabilities are the host capability tokens (hwprofile.Profile.Capabilities()).
 	Capabilities []string
-	// TotalRAMBytes is the effective memory ceiling, 0 when unknown.
+	// TotalRAMBytes is an upper bound on the memory ceiling (the exact ceiling
+	// when it is known), 0 when unknown. Because it may be only a bound, use it
+	// for "at most N" checks, never to prove a host has at least N.
 	TotalRAMBytes int64
 	// DeviceClass is the benchmark device identifier for this host, "" when the
 	// host maps to no benchmarked class.
@@ -297,7 +302,7 @@ func rankEntry(entry *classifier.CatalogEntry, in *Input) []Recommendation {
 	scoredVariants := make([]scoredVariant, 0, len(entry.Variants))
 	for j := range entry.Variants {
 		v := &entry.Variants[j]
-		scoredVariants = append(scoredVariants, evaluateVariant(entry.ID, v, in, bench[v.ID], hasMatchingRegion))
+		scoredVariants = append(scoredVariants, evaluateVariant(entry, v, in, bench[v.ID], hasMatchingRegion))
 	}
 
 	sortScored(scoredVariants)
@@ -335,7 +340,7 @@ type scoredVariant struct {
 // hasMatchingRegion reports whether the variant's entry ships a slice matching
 // the host's resolved region, which decides whether a global variant earns the
 // region fallback bonus (see rankEntry).
-func evaluateVariant(catalogID string, v *classifier.CatalogVariant, in *Input, bench benchmarkResult, hasMatchingRegion bool) scoredVariant {
+func evaluateVariant(entry *classifier.CatalogEntry, v *classifier.CatalogVariant, in *Input, bench benchmarkResult, hasMatchingRegion bool) scoredVariant {
 	var reasons, blockers []Reason
 	score := 0
 
@@ -358,7 +363,9 @@ func evaluateVariant(catalogID string, v *classifier.CatalogVariant, in *Input, 
 	// deliberately treated as "do not block", because hiding a model from a user
 	// whose RAM probe failed is worse than optimistically offering it. The low-RAM
 	// score bonus is likewise inert on unknown RAM, since its CapLowRAM token is
-	// only emitted when TotalRAMBytes is both known and below the threshold.
+	// only emitted when memory is provably below the threshold. The figure may be
+	// an upper bound when a cgroup limit was unreadable, which keeps this "below
+	// N" check sound.
 	if v.Requirements.MinRAMMB > 0 && in.TotalRAMBytes > 0 && in.TotalRAMBytes < int64(v.Requirements.MinRAMMB)*bytesPerMB {
 		blockers = append(blockers, Reason{Code: BlockerRAMInsufficient, Args: map[string]string{"requiredMb": strconv.Itoa(v.Requirements.MinRAMMB)}})
 	}
@@ -374,6 +381,12 @@ func evaluateVariant(catalogID string, v *classifier.CatalogVariant, in *Input, 
 	// gpuRecommended is set when the variant's Recommended backend on this host
 	// runs on a GPU, gating the fp16 size-lever modifier below.
 	gpuRecommended := false
+	// fp16ForcedOff is set when the variant's selected backend force-runs it at
+	// f32 (see classifier.BackendForcesFP32), which suppresses the fp16 native-f16
+	// reward below because the variant will not actually execute at f16 on that
+	// backend. It stays false when no backend term applies, preserving the
+	// empty-Backends-map behaviour a user-edited catalog can carry.
+	fp16ForcedOff := false
 	if term, missing := backendTerm(v, in.Capabilities); missing {
 		if !backendMissing {
 			blockers = append(blockers, Reason{Code: BlockerBackendMissing, Args: joinArg("required", backendKeys(v.Backends))})
@@ -383,6 +396,7 @@ func evaluateVariant(catalogID string, v *classifier.CatalogVariant, in *Input, 
 		reasons = append(reasons, Reason{Code: term.code, Args: map[string]string{ReasonArgBackend: term.backend}})
 		backendRank = preferenceRank(term.backend)
 		gpuRecommended = term.code == ReasonBackendRecommended && isGPUBackend(term.backend)
+		fp16ForcedOff = classifier.BackendForcesFP32(entry.RegistryID, term.backend)
 	}
 
 	// Region term. A regional slice matching the host's resolved region is the
@@ -401,7 +415,7 @@ func evaluateVariant(catalogID string, v *classifier.CatalogVariant, in *Input, 
 	}
 
 	// Modifiers.
-	if slices.Contains(in.Capabilities, hwprofile.CapFP16Native) && v.Precision == precisionFP16 {
+	if slices.Contains(in.Capabilities, hwprofile.CapFP16Native) && v.Precision == precisionFP16 && !fp16ForcedOff {
 		score += scoreFP16Native
 		reasons = append(reasons, Reason{Code: ReasonPrecisionFP16Native})
 	}
@@ -435,7 +449,7 @@ func evaluateVariant(catalogID string, v *classifier.CatalogVariant, in *Input, 
 
 	return scoredVariant{
 		rec: Recommendation{
-			CatalogID:  catalogID,
+			CatalogID:  entry.ID,
 			VariantID:  v.ID,
 			Score:      score,
 			Compatible: len(blockers) == 0,

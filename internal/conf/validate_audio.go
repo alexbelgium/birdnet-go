@@ -38,6 +38,84 @@ const (
 	AudioExportTypeOPUS = "opus" // Lossy compressed audio
 )
 
+// isLossyExportFormat reports whether an export format is a lossy codec that needs
+// a bitrate. AAC, Opus and MP3 are lossy; WAV and FLAC are lossless and ignore the
+// bitrate. Callers gate bitrate defaulting and validation on this instead of
+// repeating the AAC/OPUS/MP3 set.
+func isLossyExportFormat(format string) bool {
+	switch format {
+	case AudioExportTypeAAC, AudioExportTypeOPUS, AudioExportTypeMP3:
+		return true
+	default:
+		return false
+	}
+}
+
+// isLosslessExportFormat reports whether format is one of the lossless containers
+// (WAV or FLAC) that carry every capture sample rate natively without FFmpeg (FLAC
+// tops out at 655350 Hz, above the highest capture rate). It is the
+// permitted set for Export.UltrasonicType, which stores bat/ultrasonic captures
+// above the analysis rate at full source rate.
+func isLosslessExportFormat(format string) bool {
+	switch format {
+	case AudioExportTypeWAV, AudioExportTypeFLAC:
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizeAndValidateExportType heals an empty export type to WAV and rejects
+// unknown formats, so a garbage value surfaces as a validation error instead of
+// being carried into clip export, where it would fail every save. An empty Type previously produced extension-less clip_name
+// rows in the DB, causing audio download and spectrogram generation to 404
+// (GitHub #2810, #2814). Kept separate from validateAudioSettings to hold that
+// function's cyclomatic complexity down.
+func normalizeAndValidateExportType(export *ExportSettings) error {
+	if strings.TrimSpace(export.Type) == "" {
+		GetLogger().Warn("audio export type is empty, normalizing to wav",
+			logger.String("previous_type", export.Type),
+			logger.String("action", "normalize_to_wav"))
+		export.Type = AudioExportTypeWAV
+	}
+	switch export.Type {
+	case AudioExportTypeWAV, AudioExportTypeFLAC,
+		AudioExportTypeAAC, AudioExportTypeOPUS, AudioExportTypeMP3:
+		// known format
+	default:
+		return errors.Newf("unsupported audio export type: %s", export.Type).
+			Category(errors.CategoryValidation).
+			Context("validation_type", "audio-export-type").
+			Context("export_type", export.Type).
+			Build()
+	}
+	return nil
+}
+
+// normalizeAndValidateUltrasonicExportType heals an empty ultrasonic export
+// format to FLAC and rejects anything outside the lossless set (WAV/FLAC). This
+// dedicated setting is used only for bat/ultrasonic captures above the analysis
+// rate, which are stored losslessly at full source rate; it is deliberately NOT
+// the 5-format Export.Type switch, because a lossy value here would silently
+// strand ultrasonic recordings. Kept separate from validateAudioSettings to hold
+// that function's cyclomatic complexity down.
+func normalizeAndValidateUltrasonicExportType(export *ExportSettings) error {
+	if strings.TrimSpace(export.UltrasonicType) == "" {
+		GetLogger().Warn("ultrasonic audio export type is empty, normalizing to flac",
+			logger.String("previous_type", export.UltrasonicType),
+			logger.String("action", "normalize_to_flac"))
+		export.UltrasonicType = AudioExportTypeFLAC
+	}
+	if !isLosslessExportFormat(export.UltrasonicType) {
+		return errors.Newf("unsupported ultrasonic audio export type: %s (must be wav or flac)", export.UltrasonicType).
+			Category(errors.CategoryValidation).
+			Context("validation_type", "audio-export-ultrasonic-type").
+			Context("ultrasonic_type", export.UltrasonicType).
+			Build()
+	}
+	return nil
+}
+
 // EBU R128 normalization limits
 const (
 	MinTargetLUFS    = -40.0 // Minimum target loudness in LUFS
@@ -141,7 +219,7 @@ func (s *StreamConfig) Validate() error {
 	}
 
 	// Validate transport (only tcp/udp allowed, empty defaults to tcp)
-	if s.Transport != "" && s.Transport != "tcp" && s.Transport != "udp" {
+	if s.Transport != "" && s.Transport != TransportTCP && s.Transport != TransportUDP {
 		return fmt.Errorf("invalid transport '%s' for '%s': must be tcp or udp", s.Transport, s.Name)
 	}
 
@@ -258,15 +336,31 @@ func (s *StreamConfig) validateURLScheme() error {
 	return nil
 }
 
+// ResolveTransport returns the concrete RTSP transport to use for a stream given
+// its per-stream value: the per-stream value when set, otherwise the global
+// RTSPSettings.Transport, otherwise DefaultTransport. This is the single owner of
+// the "per-stream else global else default" rule, so the migration, the startup
+// engine default, and the audio pipeline all resolve transport the same way and
+// never disagree about what an unset value means.
+func (r *RTSPSettings) ResolveTransport(perStreamTransport string) string {
+	if perStreamTransport != "" {
+		return perStreamTransport
+	}
+	if r.Transport != "" {
+		return r.Transport
+	}
+	return DefaultTransport
+}
+
 // ApplyStreamDefaults sets default transport for RTSP/RTMP streams that have an empty
 // transport field. This handles the case where users write the new streams: YAML format
 // directly without specifying per-stream transport; the global RTSPSettings.Transport
 // (defaulting to "tcp") is propagated to each applicable stream.
 func (r *RTSPSettings) ApplyStreamDefaults() {
-	globalTransport := r.Transport
-	if globalTransport == "" {
-		globalTransport = DefaultTransport
-	}
+	// ResolveTransport("") yields the global transport when set, else the default.
+	// Resolve once (it is loop-invariant) and propagate to each per-stream empty,
+	// matching MigrateRTSPConfig and the single owner of the rule.
+	globalTransport := r.ResolveTransport("")
 	for _, stream := range r.AllStreams() {
 		if stream.Transport == "" && (stream.Type == StreamTypeRTSP || stream.Type == StreamTypeRTMP) {
 			stream.Transport = globalTransport
@@ -408,41 +502,6 @@ func (s *AudioSettings) clearFfmpegMetadata() {
 	s.FfprobePath = ""
 }
 
-// applyFfmpegFormatFallback forces WAV export when FFmpeg is unavailable and the
-// configured format has no encoder that can run without it. Does nothing when
-// export is disabled.
-func (s *AudioSettings) applyFfmpegFormatFallback() {
-	if s.Export.Enabled && s.FfmpegPath == "" && exportFormatNeedsFFmpeg(s.Export.Type) {
-		GetLogger().Warn("FFmpeg not available, forcing WAV format for audio export",
-			logger.String("previous_type", s.Export.Type))
-		s.Export.Type = AudioExportTypeWAV
-	}
-}
-
-// exportFormatNeedsFFmpeg reports whether a clip export format can only be
-// produced by shelling out to FFmpeg.
-//
-// WAV, FLAC and Opus always have a native encoder, so they never need FFmpeg and
-// must NOT be downgraded to WAV when it is missing. AAC has one too, but it is
-// opt-in while it earns field confidence, so for it the answer depends on the
-// runtime gate: without the gate the export really does need FFmpeg, and with it
-// the format is native and must NOT be downgraded. Getting this wrong is silent,
-// because the downgrade happens during config validation and the operator only
-// sees WAV files appear where they asked for .m4a.
-//
-// REMOVAL: when the native AAC encoder becomes the default too, the remaining
-// gate call goes away and this collapses to "only MP3 needs FFmpeg".
-func exportFormatNeedsFFmpeg(exportType string) bool {
-	switch exportType {
-	case AudioExportTypeWAV, AudioExportTypeFLAC, AudioExportTypeOPUS:
-		return false
-	case AudioExportTypeAAC:
-		return !NativeAACEncoderEnabled()
-	default:
-		return true
-	}
-}
-
 // ffmpegVersionDetector resolves the version of the ffmpeg binary at a validated
 // path by executing it. It is a package variable so unit tests can replace it
 // with a stub. validateAudioSettings runs across many parallel test cases that
@@ -522,45 +581,22 @@ func validateAudioSettings(settings *AudioSettings) error {
 			Build()
 	}
 
-	// Validate audio export settings.
-	//
-	// Normalize first, validate second. Type must be normalized even when
-	// Export.Enabled is false, because the Enabled flag can be flipped back on
-	// without triggering validation of the already-persisted Type value.
-	// An empty Type previously produced extension-less clip_name rows in the
-	// DB, causing audio download and spectrogram generation to 404
-	// (GitHub #2810, #2814).
-	if strings.TrimSpace(settings.Export.Type) == "" {
-		GetLogger().Warn("audio export type is empty, normalizing to wav",
-			logger.String("previous_type", settings.Export.Type),
-			logger.String("action", "normalize_to_wav"))
-		settings.Export.Type = AudioExportTypeWAV
+	// Validate audio export settings. Both the configured Export.Type and the
+	// dedicated ultrasonic format are normalized then validated (empty healed to a
+	// default, unknown rejected) even when Export.Enabled is false, because the
+	// Enabled flag can be flipped back on without re-triggering validation.
+	if err := normalizeAndValidateExportType(&settings.Export); err != nil {
+		return err
 	}
 
-	// Reject unknown Type before any fallback runs. Doing this first means a
-	// garbage value cannot be silently rewritten to WAV by the ffmpeg-missing
-	// fallback below, which would hide the misconfiguration.
-	switch settings.Export.Type {
-	case AudioExportTypeWAV, AudioExportTypeFLAC,
-		AudioExportTypeAAC, AudioExportTypeOPUS, AudioExportTypeMP3:
-		// known format
-	default:
-		return errors.Newf("unsupported audio export type: %s", settings.Export.Type).
-			Category(errors.CategoryValidation).
-			Context("validation_type", "audio-export-type").
-			Context("export_type", settings.Export.Type).
-			Build()
+	if err := normalizeAndValidateUltrasonicExportType(&settings.Export); err != nil {
+		return err
 	}
-
-	settings.applyFfmpegFormatFallback()
 
 	// Bitrate only matters for lossy formats and only when export is enabled.
-	switch settings.Export.Type {
-	case AudioExportTypeAAC, AudioExportTypeOPUS, AudioExportTypeMP3:
-		if settings.Export.Enabled {
-			if err := validateExportBitrate(settings.Export.Type, settings.Export.Bitrate); err != nil {
-				return err
-			}
+	if settings.Export.Enabled && isLossyExportFormat(settings.Export.Type) {
+		if err := validateExportBitrate(settings.Export.Type, settings.Export.Bitrate); err != nil {
+			return err
 		}
 	}
 
@@ -650,7 +686,7 @@ func validateExportBitrate(exportType, bitrate string) error {
 	}
 	bitrateValue, err := strconv.Atoi(strings.TrimSuffix(bitrate, audioExportBitrateSuffix))
 	if err != nil {
-		return errors.Newf("invalid bitrate value for %s: %s", exportType, bitrate).
+		return errors.Newf("invalid bitrate value for %s: %s: %w", exportType, bitrate, err).
 			Category(errors.CategoryValidation).
 			Context("validation_type", "audio-export-bitrate-value").
 			Context("export_type", exportType).
@@ -720,8 +756,8 @@ func validateNormalizationSettings(norm *NormalizationSettings, gain float64) er
 	return nil
 }
 
-// validateExportPath rejects export paths that contain path traversal sequences
-// or null bytes. Both relative and absolute paths are accepted: Docker
+// validateExportPath rejects export paths that contain a ".." path segment
+// (with either separator) or null bytes. Both relative and absolute paths are accepted: Docker
 // containers and install.sh legitimately use absolute paths like /data/clips/.
 func validateExportPath(path string) error {
 	if path == "" {
@@ -736,8 +772,10 @@ func validateExportPath(path string) error {
 			Build()
 	}
 
-	//nolint:gocritic // ruleguard suggests IsLocal alone, but IsLocal cleans "../x" to "x" (valid!); explicit ".." check is required for untrusted input per internal/CLAUDE.md
-	if strings.Contains(path, "..") {
+	// IsLocal alone would reject the absolute paths this function must accept,
+	// so a ".." path segment is the traversal guard for them. Only whole
+	// segments count: a name such as "clips..old" is a valid directory.
+	if hasParentDirSegment(path) {
 		return errors.Newf("audio export path must not contain path traversal (..): %q", path).
 			Category(errors.CategoryValidation).
 			Context("validation_type", "audio-export-path").
@@ -759,6 +797,26 @@ func validateExportPath(path string) error {
 	}
 
 	return nil
+}
+
+// parentDirSegment is the path segment that refers to the parent directory.
+const parentDirSegment = ".."
+
+// hasParentDirSegment reports whether path contains a ".." segment. It splits
+// on both '/' and '\' regardless of the host OS, so a Windows-style traversal
+// such as `a\..\b` is caught on Unix too. The raw path is checked, not a
+// filepath.Clean result, because cleaning would fold "a/../b" into "b" and hide
+// the traversal attempt. It is for file paths; hasDotDotSegment in
+// huggingface.go is the URL-path variant, which splits on '/' only.
+func hasParentDirSegment(path string) bool {
+	for segment := range strings.FieldsFuncSeq(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}) {
+		if segment == parentDirSegment {
+			return true
+		}
+	}
+	return false
 }
 
 // validateEQFilters validates a slice of equalizer filters. The context string

@@ -15,7 +15,7 @@ import (
 // PERSISTENCE of the correction is skipped.
 //
 // It is a process-level switch rather than an Orchestrator field on purpose: the
-// first correction drain runs INSIDE NewOrchestrator (loadAdditionalModels ->
+// first correction drain runs INSIDE NewOrchestrator (loadEnabledModels ->
 // runPendingPathCorrections), so a per-instance flag set after construction would
 // be too late to stop that write. Read-only diagnostic commands (benchmark,
 // rangefilter print) set it BEFORE constructing the Orchestrator so they never
@@ -133,16 +133,33 @@ func (o *Orchestrator) runPendingPathCorrections() {
 	o.pendingPathCorrections = nil
 	o.mu.Unlock()
 
-	for i := range pending {
-		o.applyPathCorrection(&pending[i])
-	}
+	o.applyPathCorrections(pending)
 }
 
 // applyPathCorrection rewrites one family's stale gallery paths in settings and
-// persists them, using the clone-mutate-publish protocol every other settings
-// writer follows. It serializes against ModelManager's install/uninstall config
-// writers through the package-level settingsWriteMu.
+// persists them. It is a thin single-family wrapper over applyPathCorrections so
+// the drain and the tests share one code path.
 func (o *Orchestrator) applyPathCorrection(pc *pendingPathCorrection) {
+	o.applyPathCorrections([]pendingPathCorrection{*pc})
+}
+
+// applyPathCorrections drains a batch of queued corrections under ONE settings
+// clone/store/save, using the clone-mutate-publish protocol every other settings
+// writer follows and serializing against ModelManager's install/uninstall config
+// writers through the package-level settingsWriteMu.
+//
+// Coalescing the batch is deliberate. Rewriting per family (one StoreSettings +
+// SaveSettings each) republished config.yaml once per stale family, so a start
+// that had, say, the primary and two secondaries stale would publish a sequence of
+// snapshots in which some families were repaired and others still stale, and a
+// concurrent reader could observe a half-repaired configuration. One clone threaded
+// across every rewriting family, then a single store+save, publishes the repaired
+// configuration atomically. Notifications are emitted per family after the write.
+func (o *Orchestrator) applyPathCorrections(pending []pendingPathCorrection) {
+	if len(pending) == 0 {
+		return
+	}
+
 	settingsWriteMu.Lock()
 	defer settingsWriteMu.Unlock()
 
@@ -157,72 +174,91 @@ func (o *Orchestrator) applyPathCorrection(pc *pendingPathCorrection) {
 
 	if pathCorrectionPersistenceDisabled.Load() {
 		// A read-only diagnostic command (benchmark, rangefilter print) is running.
-		// The model already loaded from the runtime fallback, so analysis works; we
+		// The models already loaded from the runtime fallback, so analysis works; we
 		// only skip rewriting config.yaml and any user-facing notification, so the
 		// command leaves no side effect on the user's configuration.
-		GetLogger().Info("stale model path resolved via fallback; persistence disabled, leaving config.yaml untouched",
-			logger.String("registry_id", pc.registryID),
-			logger.String("resolved_model_path", pc.resolved.model))
+		for i := range pending {
+			GetLogger().Info("stale model path resolved via fallback; persistence disabled, leaving config.yaml untouched",
+				logger.String("registry_id", pending[i].registryID),
+				logger.String("resolved_model_path", pending[i].resolved.model))
+		}
 		return
 	}
 
-	updated, outcome := o.planPathCorrection(current, pc)
+	// Thread ONE snapshot through every rewriting family. planPathCorrection clones
+	// the snapshot it is given and returns the clone; feeding the previous rewrite
+	// forward accumulates every family's repair into a single snapshot, since the
+	// families touch disjoint settings fields. rolling ends as current when nothing
+	// rewrote, so no store happens.
+	rolling := current
+	var rewritten, substituted []*pendingPathCorrection
+	for i := range pending {
+		pc := &pending[i]
+		updated, outcome := o.planPathCorrection(rolling, pc)
+		switch outcome {
+		case correctionNoop:
+			// The configured paths already match what the model was built from.
+		case correctionRewrite:
+			if updated == nil {
+				// Defensive: correctionRewrite always carries a snapshot. Skipping keeps
+				// a nil out of StoreSettings, which would publish a nil process-wide.
+				GetLogger().Warn("path-correction rewrite produced no settings snapshot; skipping family",
+					logger.String("registry_id", pc.registryID))
+				continue
+			}
+			rolling = updated
+			rewritten = append(rewritten, pc)
+		case correctionSubstituted:
+			// The model is running a DIFFERENT (installed) model than the user
+			// configured, and the configuration was deliberately left alone: either the
+			// configured path is user-owned, or the failure to read it was not a
+			// confirmed absence and must not be persisted. This would otherwise be
+			// entirely silent, since the reconciled notification fires only when config
+			// was rewritten. Tell the user, after the batch write below.
+			substituted = append(substituted, pc)
+		case correctionUnknownFamily:
+			// No settings mapping for this registry ID. Distinct from
+			// correctionSubstituted on purpose: a substitution did happen, but the thing
+			// at fault is the SELF-HEAL (no settings mapping for this family), not the
+			// user's configuration, so this is developer-facing and never a user warning.
+			GetLogger().Warn("no settings mapping for model family; skipping path correction",
+				logger.String("registry_id", pc.registryID))
+		default:
+			// Not reachable today. Guarded anyway because the write below is the only
+			// destructive action in this file: an outcome nobody enumerated must never
+			// reach it by falling out of the switch.
+			GetLogger().Warn("unrecognised path-correction outcome; not writing configuration",
+				logger.String("registry_id", pc.registryID),
+				logger.Int("outcome", int(outcome)))
+		}
+	}
 
-	switch outcome {
-	case correctionNoop:
-		// The configured paths already match what the model was built from. Nothing
-		// to write and nothing to say.
-		return
-	case correctionSubstituted:
-		// The model is running a DIFFERENT (installed) model than the user
-		// configured, and the configuration was deliberately left alone: either the
-		// configured path is user-owned, or the failure to read it was not a
-		// confirmed absence and must not be persisted. Either way this would
-		// otherwise be entirely silent, since emitPathReconciledNotification fires
-		// only when config was rewritten. Tell the user instead.
+	saved := false
+	if len(rewritten) > 0 {
+		conf.StoreSettings(rolling)
+		if err := conf.SaveSettings(); err != nil {
+			// The in-memory snapshot still carries the corrected paths, so the running
+			// process is consistent; only the repair's persistence is lost, and the
+			// next start repeats the fallback and tries again. Withhold the reconciled
+			// notifications, since config was not actually saved.
+			GetLogger().Warn("failed to persist repaired model paths",
+				logger.Error(err))
+		} else {
+			saved = true
+		}
+	}
+
+	if saved {
+		for _, pc := range rewritten {
+			emitPathReconciledNotification(pc.registryID, pc.resolved.model)
+		}
+	}
+	// Substituted families are independent of the rewrite save: their configuration
+	// was never going to be written, so they are told regardless of whether another
+	// family's save succeeded.
+	for _, pc := range substituted {
 		emitPathSubstitutedNotification(pc)
-		return
-	case correctionUnknownFamily:
-		// No settings mapping for this registry ID, so there is nothing to plan.
-		// Distinct from correctionSubstituted on purpose: a substitution did happen,
-		// but the thing at fault is the SELF-HEAL (no settings mapping for this
-		// family), not the user's configuration, so this is a developer-facing log
-		// and never a user-facing warning.
-		GetLogger().Warn("no settings mapping for model family; skipping path correction",
-			logger.String("registry_id", pc.registryID))
-		return
-	case correctionRewrite:
-		// Fall through to the write below.
-	default:
-		// Not reachable today. Guarded anyway because the write below is the only
-		// destructive action in this file: an outcome nobody enumerated must never
-		// reach it by falling out of the switch.
-		GetLogger().Warn("unrecognised path-correction outcome; not writing configuration",
-			logger.String("registry_id", pc.registryID),
-			logger.Int("outcome", int(outcome)))
-		return
 	}
-
-	if updated == nil {
-		// Defensive: correctionRewrite always carries a snapshot. StoreSettings(nil)
-		// would publish a nil settings pointer process-wide.
-		GetLogger().Warn("path-correction rewrite produced no settings snapshot; skipping write",
-			logger.String("registry_id", pc.registryID))
-		return
-	}
-
-	conf.StoreSettings(updated)
-	if err := conf.SaveSettings(); err != nil {
-		// The in-memory snapshot still carries the corrected paths, so the running
-		// process is consistent; only the repair's persistence is lost, and the
-		// next start repeats the fallback and tries again.
-		GetLogger().Warn("failed to persist repaired model paths",
-			logger.String("registry_id", pc.registryID),
-			logger.Error(err))
-		return
-	}
-
-	emitPathReconciledNotification(pc.registryID, pc.resolved.model)
 }
 
 // correctionOutcome is what applyPathCorrection should DO with a planned
@@ -274,40 +310,27 @@ func (o *Orchestrator) planPathCorrection(current *conf.Settings, pc *pendingPat
 		resolved string
 	}
 
-	var fields []fieldCorrection
-	switch pc.registryID {
-	case permanentRegistryID:
-		// The primary BirdNET v2.4 slot carries ONE gallery-managed path. Its label
-		// set is embedded and identical across variants, which is why
-		// applyConfigForPrimarySwap sets BirdNET.ModelPath alone and documents that
-		// it never touches BirdNET.LabelPath: a user-configured custom label path
-		// must survive a variant swap. Repairing LabelPath here would break that
-		// contract, so the primary family is deliberately model-only.
-		fields = []fieldCorrection{
-			{&updated.BirdNET.ModelPath, pc.resolved.model},
-		}
-	case RegistryIDPerchV2:
-		fields = []fieldCorrection{
-			{&updated.Perch.ModelPath, pc.resolved.model},
-			{&updated.Perch.LabelPath, pc.resolved.labels},
-		}
-	case RegistryIDBirdNETV3:
-		fields = []fieldCorrection{
-			{&updated.BirdNETV3.ModelPath, pc.resolved.model},
-			{&updated.BirdNETV3.LabelPath, pc.resolved.labels},
-		}
-	case RegistryIDBat:
-		// The bat family carries three paths; the shared embedding extractor is
-		// part of the set and goes stale with the rest.
-		fields = []fieldCorrection{
-			{&updated.Bat.ClassifierModel, pc.resolved.model},
-			{&updated.Bat.LabelPath, pc.resolved.labels},
-			{&updated.Bat.EmbeddingModel, pc.resolved.embeddings},
-		}
-	default:
+	// familyFields is the single source of truth for the family-to-settings-field
+	// mapping. A nil labels/embeddings pointer means the family has no such field and
+	// it must NOT be written. The primary now exposes a Labels pointer like every
+	// other family, but its label path is still never rewritten here: the "model
+	// only" rule for a variant swap lives in applyConfigForVariantSwap, and
+	// resolvePrimaryModelPath only ever resolves a model path, so the primary's
+	// labels field always has fc.resolved == "" and is skipped by the guard below.
+	// Every family but bat carries no embeddings path.
+	fs, ok := familyFields(updated, pc.registryID)
+	if !ok {
 		// Unknown registry: nothing to plan. Return nil rather than current so no
 		// caller can mutate the live published snapshot through the result.
 		return nil, correctionUnknownFamily
+	}
+	fields := make([]fieldCorrection, 0, 3)
+	fields = append(fields, fieldCorrection{fs.Model, pc.resolved.model})
+	if fs.Labels != nil {
+		fields = append(fields, fieldCorrection{fs.Labels, pc.resolved.labels})
+	}
+	if fs.Embeddings != nil {
+		fields = append(fields, fieldCorrection{fs.Embeddings, pc.resolved.embeddings})
 	}
 
 	// A substitution that is not repairable must never reach the field loop: the
@@ -392,7 +415,7 @@ func emitPathReconciledNotification(registryID, modelPath string) {
 		fmt.Sprintf("Configured file paths for %s were out of date and have been repaired to match "+
 			"the installed model at %s.", modelName, modelPath),
 	).
-		WithComponent("classifier").
+		WithComponent(notification.ComponentClassifier).
 		WithTitleKey(notification.MsgModelPathReconciledTitle, map[string]any{
 			"modelName": modelName,
 		}).
@@ -400,7 +423,7 @@ func emitPathReconciledNotification(registryID, modelPath string) {
 			"modelName": modelName,
 			"modelPath": modelPath,
 		}).
-		WithDeliveryTarget("bell")
+		WithDeliveryTarget(notification.DeliveryTargetBell)
 
 	// CreateWithMetadata is rate limited and returns an error when the notification
 	// is dropped. Log it rather than discarding: a batch of family repairs could
@@ -480,7 +503,7 @@ func emitPathSubstitutedNotification(pc *pendingPathCorrection) {
 		title,
 		body,
 	).
-		WithComponent("classifier").
+		WithComponent(notification.ComponentClassifier).
 		WithTitleKey(titleKey, map[string]any{
 			"modelName": modelName,
 		}).
@@ -488,7 +511,7 @@ func emitPathSubstitutedNotification(pc *pendingPathCorrection) {
 			"modelName": modelName,
 			"modelPath": modelPath,
 		}).
-		WithDeliveryTarget("bell")
+		WithDeliveryTarget(notification.DeliveryTargetBell)
 
 	// CreateWithMetadata is rate limited and returns an error when the notification
 	// is dropped. Log it rather than discarding, matching emitPathReconciledNotification.

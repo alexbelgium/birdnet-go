@@ -56,14 +56,6 @@ const (
 	// HLS handlers.
 	queryValueTrue = "true"
 
-	// logLevelWarning is the ffmpeg log-level used when verbose HLS logging is off.
-	logLevelWarning = "warning"
-
-	// filePermReadWrite (0o644) and filePermExecutable (0o755) are the file/dir
-	// permissions used for the HLS FFmpeg output directory and log files.
-	filePermReadWrite  = 0o644
-	filePermExecutable = 0o755
-
 	// defaultReadBufferSize is the slot capacity of an HLS audio feed's channel.
 	//
 	// It bounds how many chunks can be queued, not how much memory they hold:
@@ -91,6 +83,11 @@ type Handler struct {
 	// stream-test endpoint. nil by default (TestStream falls back to
 	// ffmpeg.ProbeStreamInfo); overridden in tests to stub probing.
 	probeStreamInfo probeStreamInfoFunc
+
+	// lookupStreamHost resolves stream-test hostnames before probing. nil by
+	// default (the system resolver is used); overridden in tests so they never
+	// touch real DNS.
+	lookupStreamHost lookupHostFunc
 
 	// audioLevelChan is the live audio-level channel injected by the parent server
 	// via SetAudioLevelChan after construction.

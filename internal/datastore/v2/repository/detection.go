@@ -30,6 +30,18 @@ type DetectionRepository interface {
 	// Returns ErrDetectionNotFound if not found, ErrDetectionLocked if locked.
 	Update(ctx context.Context, id uint, updates map[string]any) error
 
+	// RecordClipSampleRate sets the clip sample rate (Hz) of the detection whose
+	// clip_name still equals clipName, overwriting any stored value. An empty
+	// clipName or rate <= 0 is a no-op. It ignores detection locks (the rate is
+	// clip metadata) and never reports ErrDetectionNotFound or ErrDetectionLocked.
+	RecordClipSampleRate(ctx context.Context, id uint, clipName string, rate int) error
+
+	// FillClipSampleRate sets the clip sample rate (Hz) only while it is NULL and
+	// clip_name still equals clipName, so concurrent fills converge and an exporter
+	// value is never overwritten. It reports whether a row changed. An empty
+	// clipName or rate <= 0 is a no-op. It ignores detection locks.
+	FillClipSampleRate(ctx context.Context, id uint, clipName string, rate int) (bool, error)
+
 	// Delete removes a detection by ID.
 	// Returns ErrDetectionNotFound if not found, ErrDetectionLocked if locked.
 	Delete(ctx context.Context, id uint) error
@@ -214,7 +226,7 @@ type DetectionRepository interface {
 	Lock(ctx context.Context, detectionID uint) error
 
 	// Unlock removes the lock from a detection.
-	// This operation is idempotent — unlocking an already-unlocked detection succeeds silently.
+	// This operation is idempotent: unlocking an already-unlocked detection succeeds silently.
 	Unlock(ctx context.Context, detectionID uint) error
 
 	// IsLocked checks if a detection is locked.
@@ -239,14 +251,17 @@ type DetectionRepository interface {
 
 	// GetHourlyDistribution returns detection counts by hour. tzOffsetSeconds is the
 	// configured timezone's UTC offset, applied so detections bucket by wall-clock hour in
-	// that zone rather than the database/OS-local zone. labelID and modelID are optional filters.
-	GetHourlyDistribution(ctx context.Context, start, end int64, tzOffsetSeconds int, labelID, modelID *uint) ([]HourlyDistributionData, error)
+	// that zone rather than the database/OS-local zone. labelIDs (every label of one species across
+	// models) and modelID are optional filters: nil or empty labelIDs means no label filter, so a
+	// caller that resolved a species to no labels must return its own empty result (or pass the
+	// no-match sentinel) rather than forward the empty slice.
+	GetHourlyDistribution(ctx context.Context, start, end int64, tzOffsetSeconds int, labelIDs []uint, modelID *uint) ([]HourlyDistributionData, error)
 
 	// GetDetectionTimestamps returns the raw detected_at epochs (seconds) for the half-open
-	// range [start, end), excluding false positives, in no particular order. labelID is an
-	// optional species filter. Callers bucket the timestamps in Go (e.g. the seasonal heatmap),
+	// range [start, end), excluding false positives, in no particular order. labelIDs is an
+	// optional species filter (every label of the species; nil or empty for none). Callers bucket the timestamps in Go (e.g. the seasonal heatmap),
 	// which keeps the slot/date math out of dialect SQL and correct across DST.
-	GetDetectionTimestamps(ctx context.Context, start, end int64, labelID *uint) ([]int64, error)
+	GetDetectionTimestamps(ctx context.Context, start, end int64, labelIDs []uint) ([]int64, error)
 
 	// GetBatchConfidences returns the per-label-ID detection confidences for the given label IDs over
 	// the half-open range [start, end), false positives excluded and filtered by minConfidence. Results
@@ -258,8 +273,9 @@ type DetectionRepository interface {
 	// GetDailyAnalytics returns daily statistics.
 	// tzOffsetSeconds is the configured timezone's UTC offset, applied so detections bucket by
 	// wall-clock date in that zone rather than the database/OS-local zone.
-	// labelID and modelID are optional filters.
-	GetDailyAnalytics(ctx context.Context, start, end int64, tzOffsetSeconds int, labelID, modelID *uint) ([]DailyAnalyticsData, error)
+	// labelIDs (every label of one species across models) and modelID are optional filters; nil or
+	// empty labelIDs means no label filter (see GetHourlyDistribution).
+	GetDailyAnalytics(ctx context.Context, start, end int64, tzOffsetSeconds int, labelIDs []uint, modelID *uint) ([]DailyAnalyticsData, error)
 
 	// GetDetectionTrends returns detection trends over time.
 	// period is "day", "week", or "month".

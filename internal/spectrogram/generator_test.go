@@ -366,10 +366,9 @@ func TestAudioDurationCache_EvictsOldestEntries(t *testing.T) {
 }
 
 // TestBuildFFmpegSpectrogramFilter_ResamplesPerProfile verifies the FFmpeg-only
-// fallback honors the frequency profile's resample rate, just like the Sox paths.
-// Without an aresample stage the fallback renders to the native Nyquist, so a bat
-// clip captured at 192/384 kHz would disagree with the fixed 0-128 kHz UI axis (and
-// that mismatched image would be cached under the "-bat-v2" filename).
+// fallback honors the frequency profile's resample rate, just like the Sox paths:
+// bird clips resample to 24 kHz, while bat clips keep the source rate so the
+// image spans 0 to half the capture rate.
 func TestBuildFFmpegSpectrogramFilter_ResamplesPerProfile(t *testing.T) {
 	t.Parallel()
 
@@ -379,7 +378,7 @@ func TestBuildFFmpegSpectrogramFilter_ResamplesPerProfile(t *testing.T) {
 		wantResamplePrefix string // expected leading "aresample=<rate>," stage, or "" for none
 	}{
 		{"bird profile resamples to 24 kHz", BirdProfile(), "aresample=24000,"},
-		{"bat profile resamples to 256 kHz", BatProfile(), "aresample=256000,"},
+		{"bat profile keeps the source rate", BatProfile(), ""},
 		{"native profile keeps the source rate", FrequencyProfile{}, ""},
 	}
 
@@ -848,6 +847,11 @@ func TestGetSoxArgs_FileInput(t *testing.T) {
 
 	// Should contain spectrogram command
 	assert.True(t, slices.Contains(args, "spectrogram"), "should contain spectrogram command")
+	channelsIndex := slices.Index(args, "channels")
+	spectrogramIndex := slices.Index(args, "spectrogram")
+	require.NotEqual(t, -1, channelsIndex, "file input should be downmixed to mono")
+	assert.Equal(t, "1", args[channelsIndex+1], "file input should use one channel")
+	assert.Less(t, channelsIndex, spectrogramIndex, "downmix should occur before spectrogram generation")
 
 	// Should contain width and height
 	assert.True(t, slices.Contains(args, "-x"), "should contain -x flag")
@@ -856,6 +860,24 @@ func TestGetSoxArgs_FileInput(t *testing.T) {
 	// Should contain output path
 	assert.True(t, slices.Contains(args, "-o"), "should contain -o flag")
 	assert.True(t, slices.Contains(args, outputPath), "should contain output path")
+}
+
+// TestBuildFFmpegSoxPipelineArgs_DownmixesToMono verifies the FFmpeg|Sox
+// pipeline path downmixes file input to mono (-ac 1) before the sox output
+// spec, so stereo files do not render a doubled-height spectrogram (#4361).
+func TestBuildFFmpegSoxPipelineArgs_DownmixesToMono(t *testing.T) {
+	args := buildFFmpegSoxPipelineArgs("/tmp/test.mp3")
+
+	acIndex := slices.Index(args, "-ac")
+	require.NotEqual(t, -1, acIndex, "FFmpeg args should downmix channels with -ac")
+	require.Less(t, acIndex+1, len(args), "-ac should be followed by a channel count")
+	assert.Equal(t, "1", args[acIndex+1], "FFmpeg should downmix file input to one channel")
+
+	// The -ac output option must precede the "-f sox -" output spec so it applies
+	// to the stream Sox receives.
+	formatIndex := slices.Index(args, "-f")
+	require.NotEqual(t, -1, formatIndex, "FFmpeg args should specify the sox output format")
+	assert.Less(t, acIndex, formatIndex, "downmix should be applied before the sox output format")
 }
 
 // TestGetSoxSpectrogramArgs_RawFlag tests that raw flag is properly added.
@@ -879,10 +901,10 @@ func TestGetSoxSpectrogramArgs_RawFlag(t *testing.T) {
 	assert.True(t, hasRaw, "should contain -r flag when raw=true")
 }
 
-// TestGetSoxSpectrogramArgs_BatProfile verifies that the bat frequency profile
-// resamples to 256 kHz (Nyquist = 128 kHz) so the fixed 0–128 kHz UI axis is
-// always accurate, regardless of the original capture rate.
-func TestGetSoxSpectrogramArgs_BatProfile(t *testing.T) {
+// TestGetSoxSpectrogramArgs_BatProfileKeepsSourceRate verifies that the bat
+// frequency profile adds no rate effect, so the spectrogram spans 0 to half of
+// the clip's own capture rate.
+func TestGetSoxSpectrogramArgs_BatProfileKeepsSourceRate(t *testing.T) {
 	env := setupTestEnv(t)
 	env.Settings.Realtime.Audio.Export.Length = 15
 
@@ -893,10 +915,10 @@ func TestGetSoxSpectrogramArgs_BatProfile(t *testing.T) {
 
 	args := gen.getSoxSpectrogramArgs(t.Context(), gen.currentSettings(), audioPath, outputPath, 400, false, 0, BatProfile())
 
-	// Bat profile: resampled to 256 kHz – no sinc filter.
+	// Bat profile: native rate, no sinc filter.
 	assert.NotContains(t, args, "sinc", "bat profile should not apply a high-pass filter")
-	assert.Contains(t, args, "rate", "bat profile should resample to 256 kHz")
-	assert.Contains(t, args, "256000", "bat profile should resample to 256000 Hz")
+	assert.NotContains(t, args, "rate", "bat profile should keep the source rate")
+	assert.NotContains(t, args, "256000", "bat profile should not resample to 256 kHz")
 }
 
 // TestGetSoxSpectrogramArgs_BirdProfile verifies that the bird frequency profile
@@ -919,7 +941,7 @@ func TestGetSoxSpectrogramArgs_BirdProfile(t *testing.T) {
 }
 
 // TestProfileForModelType verifies model type to frequency profile mapping.
-// Bat models resolve to the bat profile (256 kHz resample);
+// Bat models resolve to the bat profile (native rate, no resample);
 // every other model type falls back to bird defaults.
 func TestProfileForModelType(t *testing.T) {
 	t.Parallel()
@@ -931,7 +953,7 @@ func TestProfileForModelType(t *testing.T) {
 		wantSuffix   string
 	}{
 		{"bird model", "bird", 24000, ""},
-		{"bat model uses bat profile", "bat", 256000, "bat-v2"},
+		{"bat model uses bat profile", "bat", 0, "bat-v3"},
 		{"multi model defaults to bird", "multi", 24000, ""},
 		{"empty defaults to bird", "", 24000, ""},
 	}
@@ -946,15 +968,15 @@ func TestProfileForModelType(t *testing.T) {
 }
 
 // TestProfileSuffix verifies the cache-key token derived from a frequency profile:
-// bat profiles get a versioned "bat-v2" token (bumped with the FFmpeg-fallback
-// resample fix so stale bat renders are not served from cache); bird defaults stay
+// bat profiles get a versioned "bat-v3" token (bumped when bat renders moved to the
+// clip's native rate so 0-128 kHz renders are not served from cache); bird defaults stay
 // empty for backward compatibility with existing cached spectrogram filenames.
 func TestProfileSuffix(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "bat-v2", ProfileSuffix(BatProfile()), "bat profile should map to the versioned bat token")
+	assert.Equal(t, "bat-v3", ProfileSuffix(BatProfile()), "bat profile should map to the versioned bat token")
 	assert.Empty(t, ProfileSuffix(BirdProfile()), "bird profile should map to an empty token")
-	assert.Equal(t, "bat-v2", ProfileSuffix(ProfileForModelType("bat")))
+	assert.Equal(t, "bat-v3", ProfileSuffix(ProfileForModelType("bat")))
 	assert.Empty(t, ProfileSuffix(ProfileForModelType("bird")))
 }
 
@@ -1085,8 +1107,8 @@ func TestOperationalErrors_SetLowPriority(t *testing.T) {
 			err := gen.GenerateFromPCM(ctx, pcmData, outputPath, 400, false, 0)
 			require.Error(t, err, "expected error from cancelled/expired context")
 
-			var enhancedErr *errors.EnhancedError
-			require.True(t, errors.As(err, &enhancedErr), "error should be an EnhancedError")
+			enhancedErr, ok := errors.AsType[*errors.EnhancedError](err)
+			require.True(t, ok, "error should be an EnhancedError")
 			assert.Equal(t, tt.wantPriority, enhancedErr.GetPriority(),
 				"operational error should have PriorityLow to prevent dashboard notifications")
 		})
@@ -1108,17 +1130,17 @@ func TestNonOperationalErrors_NoExplicitPriority(t *testing.T) {
 	outputPath := filepath.Join(env.TempDir, "test_non_op.png")
 	pcmData := []byte{0, 1, 2, 3}
 
-	// Use a valid (non-cancelled) context — the error will be "exec: /nonexistent/sox: not found"
+	// Use a valid (non-cancelled) context; the error will be "exec: /nonexistent/sox: not found"
 	// which is NOT an operational error
 	err := gen.GenerateFromPCM(t.Context(), pcmData, outputPath, 400, false, 0)
 	require.Error(t, err, "expected error from missing binary execution")
 
-	var enhancedErr *errors.EnhancedError
-	require.True(t, errors.As(err, &enhancedErr), "error should be an EnhancedError")
+	enhancedErr, ok := errors.AsType[*errors.EnhancedError](err)
+	require.True(t, ok, "error should be an EnhancedError")
 
 	// Non-operational errors should NOT have explicit `PriorityLow`
 	assert.NotEqual(t, errors.PriorityLow, enhancedErr.GetPriority(),
-		"non-operational error should not have PriorityLow — it should generate notifications")
+		"non-operational error should not have PriorityLow; it should generate notifications")
 }
 
 // TestGetFileSizeBytes_ReturnsSize tests that getFileSizeBytes returns the correct size for an existing file.
@@ -1405,4 +1427,15 @@ func TestSoxAndFFmpegStyleConsistency(t *testing.T) {
 				"FFmpeg color mode should not be empty for style %q", tc.style)
 		})
 	}
+}
+
+// TestSupersededSuffixesForToken verifies which older bat tokens a current
+// token replaces.
+func TestSupersededSuffixesForToken(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []string{"bat-v2", "bat"}, SupersededSuffixesForToken("bat-v3"))
+	assert.Empty(t, SupersededSuffixesForToken("bat-v2"))
+	assert.Empty(t, SupersededSuffixesForToken(""))
+	assert.Empty(t, SupersededSuffixesForToken("unknown"))
 }

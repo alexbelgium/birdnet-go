@@ -69,7 +69,6 @@ func newPopulatedSettings() *Settings {
 	s.BirdNET.RangeFilter.Species = []string{"Turdus merula", "Parus major"}
 
 	s.Models.Enabled = []string{"birdnet", "perch_v2"}
-	s.Models.Installed = []string{"birdnet", "perch_v3"}
 
 	s.Realtime.Audio.Sources = []AudioSourceConfig{
 		{
@@ -135,6 +134,7 @@ func newPopulatedSettings() *Settings {
 		{Provider: "google", Scopes: []string{"openid", "email"}},
 	}
 	s.Security.TrustedProxies = []string{"cloudflare", "10.0.0.0/8"}
+	s.Security.PlainHTTPSessionClients = []string{"172.18.0.5"}
 
 	// Include nested slices and nested maps inside the Settings map[string]any
 	// so the clone test catches a regression if the deep copy ever degrades
@@ -207,8 +207,6 @@ func mutateCloneEverywhere(dst *Settings) {
 	dst.BirdNET.RangeFilter.Species = append(dst.BirdNET.RangeFilter.Species, "Corvus corax")
 
 	dst.Models.Enabled[0] = mutated
-	dst.Models.Installed[0] = mutated
-	dst.Models.Installed = append(dst.Models.Installed, "added-model")
 
 	dst.Realtime.Audio.Sources[0].Name = mutated
 	dst.Realtime.Audio.Sources[0].Models[0] = mutated
@@ -252,6 +250,7 @@ func mutateCloneEverywhere(dst *Settings) {
 
 	dst.Security.OAuthProviders[0].Scopes[0] = mutated
 	dst.Security.TrustedProxies[0] = mutated
+	dst.Security.PlainHTTPSessionClients[0] = mutated
 
 	dst.Backup.Targets[0].Settings["path"] = mutated
 	// Mutate nested slice and nested map inside the any-typed Settings so
@@ -330,7 +329,6 @@ func assertSourceUnchanged(t *testing.T, src *Settings) {
 	assert.Equal(t, []string{"Turdus merula", "Parus major"}, src.BirdNET.RangeFilter.Species)
 
 	assert.Equal(t, []string{"birdnet", "perch_v2"}, src.Models.Enabled)
-	assert.Equal(t, []string{"birdnet", "perch_v3"}, src.Models.Installed)
 
 	require.Len(t, src.Realtime.Audio.Sources, 1)
 	assert.Equal(t, "front", src.Realtime.Audio.Sources[0].Name)
@@ -388,6 +386,7 @@ func assertSourceUnchanged(t *testing.T, src *Settings) {
 	require.Len(t, src.Security.OAuthProviders, 1)
 	assert.Equal(t, []string{"openid", "email"}, src.Security.OAuthProviders[0].Scopes)
 	assert.Equal(t, []string{"cloudflare", "10.0.0.0/8"}, src.Security.TrustedProxies)
+	assert.Equal(t, []string{"172.18.0.5"}, src.Security.PlainHTTPSessionClients)
 
 	require.Len(t, src.Backup.Targets, 1)
 	assert.Equal(t, "/backups", src.Backup.Targets[0].Settings["path"])

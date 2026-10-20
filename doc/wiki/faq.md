@@ -28,6 +28,12 @@ The app opened a fresh, empty database instead of your real one. Your old detect
 
 No. `install.sh` supports Debian, Ubuntu, and Raspberry Pi OS only. Use a manual binary install on macOS (see the [Installation Guide](installation.md)).
 
+### install.sh fails on WSL ("requires systemd" or "Docker cannot be accessed")
+
+Two things trip people up under WSL. First, the installer manages BirdNET-Go as a systemd service, so systemd has to be the init system (PID 1). Enable it by adding a `[boot]` section with `systemd=true` to `/etc/wsl.conf`, then run `wsl --shutdown` from Windows and reopen the distro. Second, "Docker cannot be accessed by user" means the `docker info` check failed, usually because your user isn't in the `docker` group yet (group changes need a fresh login, and on WSL that means another `wsl --shutdown`) or the Docker service isn't running (`sudo systemctl enable --now docker`). The full step-by-step is in [Troubleshooting install.sh](installation.md#troubleshooting-installsh).
+
+Worth knowing: BirdNET-Go also runs natively on Windows with no Docker and no WSL, so if WSL is more hassle than it's worth, just download the Windows archive from the [releases page](https://github.com/tphakala/birdnet-go/releases) and run `birdnet-go.exe`.
+
 ### I installed as root. How do I move to a normal user without losing data?
 
 Run `install.sh` as your normal user; it detects the root install and offers to migrate it automatically. After migrating, the old `/root/birdnet-go-app` is left in place so you can verify, which makes the installer keep re-offering migration. Once you have confirmed everything works, remove it:
@@ -39,6 +45,10 @@ sudo rm -rf /root/birdnet-go-app
 ### Are the DietPi packages official?
 
 No. DietPi packaging is maintained by the DietPi project, not here.
+
+### Should my Docker Compose, Portainer or Unraid install use host or bridge networking?
+
+For a new Linux install that does not use `install.sh`, use host networking (`Docker/docker-compose.host.yml`, the Portainer host network template, the Unraid host template (best effort, untested on real Unraid), or `docker run --network host`): multicast reaches the app directly, with no host socket mounts needed. Bridge networking remains supported, and existing installs are never switched automatically. `install.sh` keeps using bridge networking. Details, caveats and an optional migration checklist are in the [Docker Compose Guide](docker_compose_guide.md#choosing-a-network-mode).
 
 ### Why are my times shown in UTC (or the wrong timezone)?
 
@@ -148,7 +158,7 @@ birdnet:
 
 ### How do I do bat detection?
 
-Bats need an **ultrasonic-capable mic** (e.g. an AudioMoth) capturing at **192 kHz or higher**, and it is **Linux only** (high-rate exclusive sound-card mode). Install a regional BattyBirdNET model and assign it to that source. Bats only run at night by default, and clips that lack ultrasonic energy are flagged **"Unlikely"**. BirdNET-Go's spectrograms top out around 12 kHz, so to verify a bat call, download the clip and open it in a tool like Audacity (bat clips keep their full sample rate).
+Bats need an **ultrasonic-capable mic** (e.g. an AudioMoth) capturing at **192 kHz or higher**, and it is **Linux only** (high-rate exclusive sound-card mode). Install a regional BattyBirdNET model and assign it to that source. Bats only run at night by default, and clips that lack ultrasonic energy are flagged **"Unlikely"**. Bat spectrograms render at the clip's own sample rate and show up to half of it (a 192 kHz clip shows 0 to 96 kHz, a 384 kHz clip 0 to 192 kHz), so you can check a call in the detection view. Bat clips also keep their full sample rate, so you can download one and open it in a tool like Audacity.
 
 ### Where did the Sensitivity and Overlap settings go?
 
@@ -175,7 +185,7 @@ In rough order of impact:
 
 ### The privacy filter isn't catching human speech
 
-The privacy filter is limited by the model. The BirdNET model itself has poor human-speech recognition, so it can only do so much; this is a model limitation, not a BirdNET-Go bug. (Perch has human-speech classes, but the privacy filter does not map to them yet.)
+The privacy filter is limited by the model. The BirdNET model itself has poor human-speech recognition, so it can only do so much; this is a model limitation, not a BirdNET-Go bug. Perch V2 has human-speech classes and the privacy filter uses them. Among Perch V2 labels, only voiced sounds (speech, conversation, whispering, shouting, singing, laughter, crying, cheering, plus the `Homo sapiens` taxon) trigger it; its body and action labels such as coughing, breathing, clapping, footsteps or chewing do not, because they are not speech. All of BirdNET's `Human` classes still trigger it.
 
 ### A bird I can clearly hear isn't being detected
 
@@ -240,7 +250,7 @@ Run the `reset_auth.sh` script from the repo against your `config.yaml`; it back
 
 ### How do I get rid of the `:8080` in the URL?
 
-Put a reverse proxy in front (it can serve on port 80/443 and proxy to 8080). install.sh binds port 80 for AutoTLS renewal, so you can't simply move the web port to 80 without conflict.
+Put a reverse proxy in front (it can serve on port 80/443 and proxy to 8080). install.sh binds port 80 for AutoTLS renewal, so you can't simply move the web port to 80 without conflict. With host networking (Docker Compose, Portainer, Unraid or `docker run --network host`), the app runs as a non-root user and cannot listen on port 80 at all, so a proxy on the same host forwards to `localhost:<WEB_PORT>` instead.
 
 ## Integrations and notifications
 

@@ -588,9 +588,17 @@ Audio Source → Capture → Buffer → Analyze → Detect → Store → Notify
 FFmpeg is used for:
 
 - **RTSP Stream Ingestion**: Capturing audio from IP cameras and network streams
-- **Audio Format Conversion**: PCM to MP3 at the audio export/save stage, and to AAC while its native encoder remains opt-in. WAV, FLAC, and Opus are encoded natively (FFmpeg encodes Opus only as a fallback for the rare clip shapes go-opus cannot carry).
-- **On-demand Clip Transcoding**: Re-encoding already-saved clips for the web player (the v2 media API), which is the only remaining user of the `loudnorm` filter
-- **Gain Application**: `volume` filter for dB boost/cut. On the clip export path the value it applies is the EBU R128 gain measured in Go by `internal/audiocore/audionorm`; FFmpeg no longer measures or normalises loudness there.
+- **Spectrograms**: Checking each clip with ffprobe before an on-demand spectrogram is drawn, and rendering clips in formats the installed SoX cannot read or when SoX fails
+
+On-demand clip downloads, the denoise, normalize and gain preview, and audible-bats playback in the web interface do not use FFmpeg. `internal/audiocore/transcode` decodes WAV, FLAC, MP3, AAC (M4A) and Opus natively, denoises with the go-audio-dsp `denoiser`, normalizes with the go-audio-dsp `loudnorm` package, applies gain with the go-audio-dsp `gain` package, and encodes WAV, FLAC, MP3, AAC and Opus with the same native encoders clip export uses. A clip whose sample rate the lossy encoder cannot carry is resampled to 48 kHz first.
+
+On the live path, the per-route EQ and gain in `internal/audiocore` run on the go-audio-dsp `equalizer` and `gain` packages in float32, with float64 filter state. Audio returns to 16-bit with round-to-nearest and saturation. A route that resamples and processes hands the resampler's float32 output straight to those stages, so the audio is quantized once.
+
+A gain change applies to a source's live routes, including open live-audio listeners, without rebuilding them.
+
+Analysis inference input, the bat ultrasonic filter input and the voice activity detector's 16 kHz passthrough decode PCM16 with the go-audio-dsp `pcm` package, and the bat ultrasonic filter computes its STFT with the go-audio-dsp `stft` package. The route resampler decodes and encodes PCM16 with the same package, and the MP3 stream decoder encodes its float32 output with it, so both round to nearest and reach the full 16-bit range like the per-route EQ and gain.
+
+Sound level monitoring (`internal/audiocore/soundlevel`) measures each source with the go-audio-dsp `octave` meter: 1/3-octave bands from 25 Hz to 20 kHz below 0.95 of Nyquist, one-second mean square per band. birdnet-go keeps only the interval min/max/mean aggregation, the band keys and the output type. The Prometheus sound level series are labelled with the source id in both the `source` and the `name` label, never the display name, because the metrics listener has no authentication.
 
 **SoX Integration:**
 
@@ -874,7 +882,7 @@ internal/birdweather/
 **Features:**
 
 - **Soundscape Upload**: Uploads 15-second audio clips to BirdWeather
-- **Audio Normalization**: Uses the native Go `audiocore/audionorm` library to achieve -23 LUFS (EBU R128 standard); no FFmpeg involvement
+- **Audio Normalization**: Uses the go-audio-dsp `loudnorm` package to achieve -23 LUFS (EBU R128 standard); no FFmpeg involvement
 - **Detection Metadata**: Sends species, confidence, location, and timestamp
 - **Error Handling**: Retry logic via job queue for network failures
 - **Logging**: Dedicated file logger (`logs/birdweather.log`) for debugging uploads
@@ -1011,21 +1019,37 @@ func TestDetectionSave(t *testing.T) {
 
 **Conditional Mock Calls:**
 
-For methods called conditionally or asynchronously, use `.Maybe()`:
+Use `.Maybe()` only for incidental calls that may or may not happen and are
+not what the test is checking:
 
 ```go
-// Method only called when feature enabled
+// Incidental call, only made when a feature is enabled
 mockDS.EXPECT().
-    GetActiveNotificationHistory(mock.AnythingOfType("time.Time")).
+    GetActiveNotificationHistory(mock.Anything, mock.AnythingOfType("time.Time")).
     Return([]datastore.NotificationHistory{}, nil).
     Maybe()  // Won't fail if not called
-
-// Async operation in goroutine
-mockDS.EXPECT().
-    SaveNotificationHistory(mock.AnythingOfType("*datastore.NotificationHistory")).
-    Return(nil).
-    Maybe()  // Non-blocking
 ```
+
+When an asynchronous call (for example one made from a goroutine) is the
+behaviour under test, keep the expectation strict and wait for it. A `.Maybe()`
+there lets the test pass when the behaviour is gone:
+
+```go
+// Async operation in goroutine: strict expectation plus an explicit wait
+saved := make(chan struct{})
+mockDS.EXPECT().
+    SaveNotificationHistory(mock.Anything, mock.AnythingOfType("*datastore.NotificationHistory")).
+    Return(nil).
+    Run(func(_ context.Context, _ *datastore.NotificationHistory) { close(saved) }).
+    Once()
+
+// ... trigger the code under test ...
+
+testutil.WaitForChannel(t, saved, 5*time.Second, "SaveNotificationHistory not called")
+```
+
+See `TESTING.md` (Async Mock Expectations) for the full rule, including the
+`require.Eventually` variant.
 
 **Regenerating Mocks:**
 
@@ -1372,7 +1396,11 @@ export const settings = writable<Settings>({
 
 // Auto-persist to localStorage
 settings.subscribe((value) => {
-  localStorage.setItem("settings", JSON.stringify(value));
+  try {
+    localStorage.setItem("settings", JSON.stringify(value));
+  } catch {
+    // Storage can be unavailable (private mode, quota exceeded); keep in-memory state
+  }
 });
 ```
 
@@ -1954,10 +1982,9 @@ BirdNET-Go uses a **binary authentication model** (authenticated or not) rather 
 
 ```go
 func (s *OAuth2Server) IsUserAuthenticated(c echo.Context) bool {
-    clientIP := net.ParseIP(c.RealIP())
-
-    // 1. Check local subnet bypass
-    if IsInLocalSubnet(clientIP) {
+    // 1. Check local subnet bypass on the verified client address
+    //    (authClientIP), never on the logged c.RealIP()
+    if _, ok := s.isLocalSubnetBypass(s.currentSettings(), c.Request()); ok {
         return true
     }
 
@@ -2214,11 +2241,11 @@ c.Set("userClaims", nil)                  // reserved for future use
 
 ```go
 var (
-    ErrInvalidCredentials = errors.New("invalid credentials")
-    ErrInvalidToken       = errors.New("invalid or expired token")
-    ErrSessionNotFound    = errors.New("session not found or expired")
-    ErrLogoutFailed       = errors.New("logout operation failed")
-    ErrBasicAuthDisabled  = errors.New("basic authentication is disabled")
+    ErrInvalidCredentials = errors.NewStd("invalid credentials")
+    ErrInvalidToken       = errors.NewStd("invalid or expired token")
+    ErrSessionNotFound    = errors.NewStd("session not found or expired")
+    ErrLogoutFailed       = errors.NewStd("logout operation failed")
+    ErrBasicAuthDisabled  = errors.NewStd("basic authentication is disabled")
 )
 ```
 
@@ -2443,8 +2470,8 @@ npm run build
 **Linting:**
 
 ```bash
-# Backend linting (from project root)
-golangci-lint run -v
+# Backend linting (from project root; whole module, adds build tags and CGO flags)
+task lint
 
 # Frontend linting (from frontend/ directory)
 cd frontend && npm run check:all
@@ -2456,11 +2483,16 @@ task frontend-lint
 **Formatting:**
 
 ```bash
-# Go formatting (via golangci-lint)
-golangci-lint run --fix
+# Go formatting: golangci-lint has no formatters configured, so run gofmt on
+# the files you changed (the pre-commit hook also runs gofmt on staged files)
+gofmt -w <files>
 
-# Markdown formatting
-task format-md
+# Go linting, and lint with auto-fix (task lint-fix runs golangci-lint --fix)
+task lint
+task lint-fix
+
+# Markdown: format only the files you changed (from frontend/)
+npx prettier --write ../<path to each changed .md file>
 
 # Frontend formatting (Prettier)
 npm run format

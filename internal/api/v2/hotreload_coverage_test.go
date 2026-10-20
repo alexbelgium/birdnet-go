@@ -32,6 +32,10 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	// --- Top-level ---
 	"Debug": {categories: []hotReloadCategory{hotReloadFresh}},
 
+	// ConfigVersion is a runtime-managed one-shot migration marker, set by config load
+	// and hidden from the settings API; it is never edited by a user, so no reload path.
+	"ConfigVersion": {categories: []hotReloadCategory{hotReloadRuntime}},
+
 	// --- Runtime values (yaml:"-") ---
 	"Version":            {categories: []hotReloadCategory{hotReloadRuntime}},
 	"BuildDate":          {categories: []hotReloadCategory{hotReloadRuntime}},
@@ -49,10 +53,20 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"BirdNET.Sensitivity": {categories: []hotReloadCategory{hotReloadFresh}},
 	// The base threshold is read live per detection; the dynamic threshold applies
 	// it against the shared per-species level at read time, so no recalc action fires.
-	"BirdNET.Threshold":          {categories: []hotReloadCategory{hotReloadFresh}},
-	"BirdNET.Overlap":            {categories: []hotReloadCategory{hotReloadFresh}},
-	"BirdNET.Longitude":          {categories: []hotReloadCategory{hotReloadDisplay}, action: "rebuild_range_filter"},
-	"BirdNET.Latitude":           {categories: []hotReloadCategory{hotReloadDisplay}, action: "rebuild_range_filter"},
+	"BirdNET.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
+	// Overlap is read fresh by the false-positive filter per flush, AND drives the
+	// realtime analysis-buffer cadence, so a change reallocates the buffers via a
+	// full audio-capture restart (restart_audio_capture; analysisOverlapChanged in
+	// the detector table).
+	"BirdNET.Overlap": {categories: []hotReloadCategory{hotReloadFresh}, action: "restart_audio_capture"},
+	// The sun calculators read the coordinates fresh (the shared one and both datastores' via
+	// suncalc.NewSunCalcWithSource over conf.LiveLocation; the weather service rebuilds its own per
+	// poll). Not marked fresh because other consumers still capture them at startup: the
+	// BirdWeather client and the seasonal-tracking hemisphere.
+	"BirdNET.Longitude": {categories: []hotReloadCategory{hotReloadDisplay}, action: "rebuild_range_filter"},
+	"BirdNET.Latitude":  {categories: []hotReloadCategory{hotReloadDisplay}, action: "rebuild_range_filter"},
+	// Not marked fresh: the nighttime scheduler reads it live, but the daylight filter resolves
+	// it only at startup (initDaylightFilter), so a change does not reach every consumer.
 	"BirdNET.LocationConfigured": {categories: []hotReloadCategory{hotReloadDisplay}},
 	"BirdNET.Threads":            {categories: []hotReloadCategory{hotReloadFresh}, action: "reload_birdnet"},
 	"BirdNET.Locale":             {categories: []hotReloadCategory{hotReloadDisplay}, action: "reload_birdnet"},
@@ -97,7 +111,14 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"BSG": {categories: []hotReloadCategory{hotReloadRestart}},
 
 	// --- Models ---
-	"Models": {categories: []hotReloadCategory{hotReloadRestart}},
+	// Enabled is authoritative since Phase 4: a change loads/unloads models at runtime via
+	// the reconcile_models signal (modelsEnabledChanged in the detector table).
+	"Models.Enabled": {categories: []hotReloadCategory{hotReloadFresh}, action: "reconcile_models"},
+	// Directory is resolved once at startup (ResolveModelsDir / NewModelManager).
+	"Models.Directory": {categories: []hotReloadCategory{hotReloadRestart}},
+	// AutoEnableMigrated is a runtime-managed one-shot migration marker, set by the classifier
+	// and hidden from the settings API; never user-edited, so no reload path.
+	"Models.AutoEnableMigrated": {categories: []hotReloadCategory{hotReloadRuntime}},
 
 	// --- LowMemory (applied once at startup: mallopt before threads, GOMEMLIMIT) ---
 	"LowMemory": {categories: []hotReloadCategory{hotReloadRestart}},
@@ -119,7 +140,7 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"Realtime.Audio.Sources.*.Name":       {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_audio_sources"},
 	"Realtime.Audio.Sources.*.Device":     {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_audio_sources"},
 	"Realtime.Audio.Sources.*.SampleRate": {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_audio_sources"},
-	"Realtime.Audio.Sources.*.Gain":       {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_audio_sources"},
+	"Realtime.Audio.Sources.*.Gain":       {categories: []hotReloadCategory{hotReloadFresh}, action: "update_source_gains"},
 	"Realtime.Audio.Sources.*.Model":      {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_audio_sources"},
 	"Realtime.Audio.Sources.*.Models":     {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_audio_sources"},
 	"Realtime.Audio.Sources.*.Equalizer":  {categories: []hotReloadCategory{hotReloadFresh}},
@@ -153,7 +174,9 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"Realtime.DynamicThreshold.ValidHours": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// -- FalsePositiveFilter --
-	"Realtime.FalsePositiveFilter": {categories: []hotReloadCategory{hotReloadFresh}},
+	// The level is read fresh per flush. Crossing between off and on re-plans the
+	// analysis cadence cap (falsePositiveFilterActiveChanged in the detector table).
+	"Realtime.FalsePositiveFilter": {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_audio_sources"},
 
 	// -- Log (OBS) --
 	"Realtime.Log": {categories: []hotReloadCategory{hotReloadFresh}},
@@ -186,7 +209,7 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"Realtime.RTSP.Streams.*.Transport":   {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_rtsp_sources"},
 	"Realtime.RTSP.Streams.*.ChannelMode": {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_rtsp_sources"},
 	"Realtime.RTSP.Streams.*.MediaMode":   {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_rtsp_sources"},
-	"Realtime.RTSP.Streams.*.Gain":        {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_rtsp_sources"},
+	"Realtime.RTSP.Streams.*.Gain":        {categories: []hotReloadCategory{hotReloadFresh}, action: "update_source_gains"},
 	"Realtime.RTSP.Streams.*.Equalizer":   {categories: []hotReloadCategory{hotReloadFresh}},
 	"Realtime.RTSP.Streams.*.QuietHours":  {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_quiet_hours"},
 	"Realtime.RTSP.Streams.*.Models":      {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_rtsp_sources"},

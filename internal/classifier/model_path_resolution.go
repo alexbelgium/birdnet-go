@@ -48,32 +48,40 @@ func (s modelFileSet) allPresentOnDisk(needEmbeddings bool) bool {
 	return true
 }
 
-// diskPresence classifies the on-disk state of a required member set. It
-// separates a member that is confirmed absent (fs.ErrNotExist), which marks the
-// configured set stale and worth repairing, from a member that could not be
-// stat'd for another reason (EACCES, EIO, a stale NFS handle, a half-initialised
-// mount that reports EIO). The latter must not trigger a permanent config
-// rewrite, because the file may well reappear.
+// presenceResult classifies the on-disk state of a required member set as two
+// INDEPENDENT facts rather than one ranked enum, because a set can be both at once
+// (one member confirmed gone, another merely unreadable) and the two facts drive
+// two different decisions that must not be collapsed:
+//
+//   - missing is true when at least one non-empty required member is CONFIRMED
+//     absent (fs.ErrNotExist). This is what makes the configured set stale and, on
+//     its own, worth repairing.
+//   - unreadable is true when at least one non-empty required member could not be
+//     stat'd for a reason OTHER than absence (EACCES, EIO, a stale NFS handle, a
+//     half-initialised mount). The file may well reappear, so it must never trigger
+//     a permanent config rewrite.
+//
+// PERSISTENCE keys on unreadable: while any member is merely unreadable the repair
+// is withheld (repairable = missing && !unreadable), so a slow-to-mount volume is
+// never persisted as a stale path. WORDING keys on missing: a set with a
+// confirmed-absent member is "not found", never "exists but could not be read",
+// even when another member is also unreadable (the unreadable notification flag is
+// unreadable && !missing). Keeping the two facts separate is what lets a set that
+// is BOTH be reported honestly: withhold the rewrite AND tell the
+// user a file is missing.
 //
 // Note the boundary: a FULLY unmounted path reports ErrNotExist, not one of the
-// above, so it classifies as presenceMissing (repairable), NOT indeterminate.
-// The guard against that rewriting a user's own path is the gallery-layout
-// requirement in isGalleryManagedPath, not this classification.
-type diskPresence int
+// above, so it classifies as missing (repairable), NOT unreadable. The guard
+// against that rewriting a user's own path is the gallery-layout requirement in
+// isGalleryManagedPath, not this classification.
+type presenceResult struct {
+	missing    bool
+	unreadable bool
+}
 
-const (
-	// presenceComplete means every non-empty required member exists on disk.
-	presenceComplete diskPresence = iota
-	// presenceMissing means at least one non-empty required member is confirmed
-	// absent (fs.ErrNotExist) and no member was indeterminate.
-	presenceMissing
-	// presenceIndeterminate means at least one non-empty required member could
-	// not be stat'd for a reason OTHER than absence (a permissions failure, an I/O
-	// error, a half-initialised mount reporting EIO). It dominates presenceMissing
-	// so a transient error is never mistaken for a stale path. A fully unmounted
-	// path reports ErrNotExist and is therefore presenceMissing, not this.
-	presenceIndeterminate
-)
+// complete reports that every non-empty required member exists on disk (neither
+// missing nor unreadable).
+func (p presenceResult) complete() bool { return !p.missing && !p.unreadable }
 
 // pathResolution carries resolveFamilyPaths' outcome out of a model builder so
 // the loader can act on it without resolving a second time.
@@ -100,7 +108,7 @@ type pathResolution struct {
 	// repairable reports that the substitution came from a CONFIRMED absence
 	// (ErrNotExist), so the stale configuration MAY be rewritten. It is never true
 	// unless substituted is also true. A member that is unreadable for some OTHER
-	// reason (presenceIndeterminate: a permissions failure, an I/O error, a
+	// reason (unreadable: a permissions failure, an I/O error, a
 	// half-initialised mount) is substituted but NOT repairable, so a transient
 	// failure never rewrites config.yaml permanently.
 	repairable bool
@@ -121,32 +129,30 @@ type pathResolution struct {
 // configured path (fill it from the gallery, keep the rest) from a stale one (a
 // non-empty path that has gone missing, which makes the whole set stale).
 //
-// A member that is unreadable for a reason other than absence yields
-// presenceIndeterminate, which dominates: a single unreadable member classifies
-// the whole set as indeterminate so a slow-to-mount volume is never mistaken for
-// a stale configuration.
-func (s modelFileSet) nonEmptyMembersPresence(needEmbeddings bool) diskPresence {
+// Every member is stat'd and BOTH facts are recorded: the scan does not stop at the
+// first unreadable member, because a later member may be confirmed absent, and a
+// set with a confirmed-absent member must be reported as missing (for the wording)
+// even while its unreadable member withholds the config rewrite (for persistence).
+// See presenceResult for why the two are kept separate rather than ranked.
+func (s modelFileSet) nonEmptyMembersPresence(needEmbeddings bool) presenceResult {
 	paths := []string{s.model, s.labels}
 	if needEmbeddings {
 		paths = append(paths, s.embeddings)
 	}
-	sawMissing := false
+	var res presenceResult
 	for _, p := range paths {
 		if p == "" {
 			continue
 		}
 		if _, err := os.Stat(p); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
-				sawMissing = true
+				res.missing = true
 				continue
 			}
-			return presenceIndeterminate
+			res.unreadable = true
 		}
 	}
-	if sawMissing {
-		return presenceMissing
-	}
-	return presenceComplete
+	return res
 }
 
 // resolveFamilyPaths decides which file set a secondary model family should be
@@ -184,7 +190,7 @@ func (o *Orchestrator) resolveFamilyPaths(registryID string, configured modelFil
 	// empty members from the gallery (main's behaviour). Neither flag is set:
 	// nothing configured went stale, so there is nothing to repair and nothing the
 	// user chose was replaced.
-	if presence == presenceComplete {
+	if presence.complete() {
 		if configured.complete(needEmbeddings) {
 			return pathResolution{resolved: configured}
 		}
@@ -220,17 +226,20 @@ func (o *Orchestrator) resolveFamilyPaths(registryID string, configured modelFil
 		return pathResolution{resolved: filled}
 	}
 
-	// A non-empty configured path is missing or unreadable. Only a CONFIRMED
-	// absence (presenceMissing) marks the set stale and may rewrite config; a
-	// member that is unreadable for a reason OTHER than absence
-	// (presenceIndeterminate: a permissions failure, an I/O error, a
-	// half-initialised mount reporting EIO) still falls back at runtime so
-	// analysis can run, but must NOT persist a repair, or a transient error
-	// rewrites config.yaml permanently. repairable carries that distinction to
-	// both fallback returns below. (A fully unmounted path reports ErrNotExist, so
-	// it is presenceMissing here; isGalleryManagedPath is what stops that rewrite
-	// from taking over a user's own path.)
-	repairable := presence == presenceMissing
+	// A non-empty configured path is missing or unreadable. The repair may rewrite
+	// config only for a CONFIRMED absence with NO member merely unreadable: a member
+	// that could not be read for a reason OTHER than absence (a permissions failure,
+	// an I/O error, a half-initialised mount reporting EIO) may still reappear, so a
+	// set that has ANY such member still falls back at runtime so analysis can run
+	// but must NOT persist a repair, or a transient error rewrites config.yaml
+	// permanently. repairable carries that distinction to both fallback returns
+	// below; the unreadable-for-wording flag (unreadable && !missing) is set only
+	// when NOTHING is confirmed absent, so a set with a missing member is reported
+	// "not found" rather than "could not be read". (A fully unmounted path reports
+	// ErrNotExist, so it is missing here; isGalleryManagedPath is what stops that
+	// rewrite from taking over a user's own path.)
+	repairable := presence.missing && !presence.unreadable
+	unreadableWording := presence.unreadable && !presence.missing
 
 	// Before the generic gallery probe, try to keep the variant the configured
 	// model file names. When only a companion file went missing (a partial
@@ -244,7 +253,7 @@ func (o *Orchestrator) resolveFamilyPaths(registryID string, configured modelFil
 		GetLogger().Debug("recovered the configured variant's companion files",
 			logger.String("registry_id", registryID),
 			logger.String("model_path", sameVariant.model))
-		return pathResolution{resolved: sameVariant, substituted: true, repairable: repairable, unreadable: presence == presenceIndeterminate}
+		return pathResolution{resolved: sameVariant, substituted: true, repairable: repairable, unreadable: unreadableWording}
 	}
 
 	m, l, e := o.resolveInstalledPaths(registryID)
@@ -267,7 +276,7 @@ func (o *Orchestrator) resolveFamilyPaths(registryID string, configured modelFil
 		logger.String("configured_model_path", configured.model),
 		logger.String("resolved_model_path", fallback.model))
 
-	return pathResolution{resolved: fallback, substituted: true, repairable: repairable, unreadable: presence == presenceIndeterminate}
+	return pathResolution{resolved: fallback, substituted: true, repairable: repairable, unreadable: unreadableWording}
 }
 
 // resolveSiblingSet rebuilds a family's complete file set from the variant that
@@ -291,7 +300,7 @@ func (o *Orchestrator) resolveSiblingSet(registryID, modelPath string) (set mode
 		// error (an unreadable volume) is treated the same as absence here, so a
 		// half-mounted volume never yields a spurious sibling set. Suppressing the
 		// config repair for the merely-unreadable case is the caller's job, via the
-		// presenceIndeterminate classification from nonEmptyMembersPresence.
+		// unreadable classification from nonEmptyMembersPresence.
 		return modelFileSet{}, false
 	}
 
@@ -321,14 +330,7 @@ func (o *Orchestrator) resolveSiblingSet(registryID, modelPath string) (set mode
 		if entry.RegistryID != registryID {
 			continue
 		}
-		fileSets := [][]CatalogFile{entry.Files}
-		if len(entry.Variants) > 0 {
-			fileSets = fileSets[:0]
-			for j := range entry.Variants {
-				fileSets = append(fileSets, entry.Variants[j].Files)
-			}
-		}
-		for _, files := range fileSets {
+		for _, files := range entryFileSets(entry) {
 			if !declaresModelFile(files, base) {
 				continue
 			}
@@ -339,7 +341,7 @@ func (o *Orchestrator) resolveSiblingSet(registryID, modelPath string) (set mode
 					candidate.labels = filepath.Join(dir, f.LocalName)
 				case RoleEmbeddings:
 					if modelsDir != "" {
-						candidate.embeddings = filepath.Join(modelsDir, "shared", f.LocalName)
+						candidate.embeddings = filepath.Join(modelsDir, sharedDirName, f.LocalName)
 					}
 				}
 			}
@@ -358,6 +360,27 @@ func declaresModelFile(files []CatalogFile, localName string) bool {
 		}
 	}
 	return false
+}
+
+// entryFileSets returns the catalog file sets to probe for entry: each variant's
+// files when the entry declares variants, otherwise the entry's own files.
+//
+// A variant entry's resolved top-level Files name only the DEFAULT variant
+// (resolveVariantDefaults overwrites them, and validateCatalogEntryFiles forbids an
+// entry from declaring both Files and Variants), so a non-default install is found
+// only by probing each variant's own files. For a flat entry the single set is
+// entry.Files. Callers that stop at the first match (isGalleryManagedPath) are
+// unaffected by no longer searching the default variant twice, because the default
+// remains one of the returned variant sets.
+func entryFileSets(entry *CatalogEntry) [][]CatalogFile {
+	if len(entry.Variants) > 0 {
+		sets := make([][]CatalogFile, 0, len(entry.Variants))
+		for j := range entry.Variants {
+			sets = append(sets, entry.Variants[j].Files)
+		}
+		return sets
+	}
+	return [][]CatalogFile{entry.Files}
 }
 
 // isGalleryManagedPath reports whether path looks like a file the model gallery
@@ -404,7 +427,7 @@ func (o *Orchestrator) isGalleryManagedPath(registryID, path string) bool {
 	// name, normally "models"). Matching only base + parent would qualify any path
 	// that merely MIRRORS the gallery layout, e.g. /mnt/nas/perch-v2/perch_v2.onnx:
 	// a NAS or USB mount that is late at boot yields ENOENT (the mountpoint exists
-	// but is empty), which classifies as presenceMissing with repairable=true, so a
+	// but is empty), which classifies as missing with repairable=true, so a
 	// user who moved their models to a NAS but left a local gallery copy would have
 	// the NAS path permanently rewritten. Dropping only the models-directory PREFIX
 	// (not its base name) still handles the changed-container-HOME case the issues
@@ -427,20 +450,16 @@ func (o *Orchestrator) isGalleryManagedPath(registryID, path string) bool {
 		if entry.RegistryID != registryID {
 			continue
 		}
-		// Check the entry's own files and every variant's files as a union: the
-		// stale configured path could name any installed variant's file.
-		fileSets := [][]CatalogFile{entry.Files}
-		for j := range entry.Variants {
-			fileSets = append(fileSets, entry.Variants[j].Files)
-		}
-		for _, files := range fileSets {
+		// Probe the flat entry's files or each variant's files; see entryFileSets.
+		// The stale configured path could name any installed variant's file.
+		for _, files := range entryFileSets(entry) {
 			for _, f := range files {
 				if f.LocalName != base {
 					continue
 				}
 				expectedParent := entry.ID
 				if isSharedRole(f.Role) {
-					expectedParent = "shared"
+					expectedParent = sharedDirName
 				}
 				if parent == expectedParent {
 					return true
@@ -469,12 +488,13 @@ type primaryPathResolver func(configured string) pathResolution
 // NewBirdNET fail outright, so there is no analysis at all rather than one
 // missing optional model.
 //
-// The primary is deliberately NOT a modelFileSet family. Its label set is
-// embedded and identical across v2.4 variants, which is why
-// applyConfigForPrimarySwap writes BirdNET.ModelPath alone and documents that it
-// never touches BirdNET.LabelPath: a user-configured custom label path must
-// survive a variant swap. So there is exactly one path to resolve and no
-// cross-variant pairing hazard to protect against.
+// The primary resolves a model path only: its label set is embedded and identical
+// across v2.4 variants, which is why applyConfigForVariantSwap writes
+// BirdNET.ModelPath alone and a user-configured custom label path must survive a
+// variant swap. This function never populates resolved.labels or resolved.embeddings,
+// which is exactly what lets planPathCorrection skip the primary's label field even
+// though familyFields now exposes its Labels pointer. So there is one path to resolve
+// and no cross-variant pairing hazard to protect against.
 func (o *Orchestrator) resolvePrimaryModelPath(configured string) pathResolution {
 	if configured == "" {
 		// No configured path at all: the Tier-4 default (the embedded model, or the
@@ -518,7 +538,7 @@ func (o *Orchestrator) resolvePrimaryModelPath(configured string) pathResolution
 
 	// CONFIRMED absent. Recover to the installed gallery variant when there is one
 	// AND that variant can actually run on this host.
-	if installed, _, _ := o.resolveInstalledPaths(permanentRegistryID); installed != "" && o.primaryVariantUsable(installed) {
+	if installed, _, _ := o.resolveInstalledPaths(RegistryIDBirdNETV24); installed != "" && o.primaryVariantUsable(installed) {
 		GetLogger().Info("configured primary model path is missing on disk, recovering the installed variant",
 			logger.String("configured_model_path", configured),
 			logger.String("resolved_model_path", installed))
@@ -569,13 +589,17 @@ func (o *Orchestrator) resolvePrimaryModelPath(configured string) pathResolution
 // return a DFT-truncated ONNX build for this family. Recovering onto one that
 // cannot load would turn a recoverable stale path into a hard startup failure,
 // which is precisely the outcome this recovery exists to prevent. Reporting false
-// makes the caller fall through to the built-in baseline, which always loads.
+// makes the caller fall through to the built-in baseline, which loads wherever
+// its backend is available (on arm64 it is the INT8 ONNX model, which needs ONNX
+// Runtime on the auto backend; see applyOpenVINOQuantizationPolicy).
 //
 // "Can load" is deliberately NOT "ONNX Runtime is available". initializeModel
 // tries OPENVINO FIRST for the v2.4 identity and only falls through to ONNX
 // Runtime when OpenVINO declines, so an openvino-tagged build on an A76/Pi5 or an
-// Intel iGPU runs these variants with no ORT installed at all. Gating on ORT alone
-// would refuse a variant that would have loaded, silently dropping such a host to
+// Intel iGPU runs these variants with no ORT installed at all (except an INT8 or
+// unrecognized-precision build on the auto backend, which OpenVINO declines; see
+// applyOpenVINOQuantizationPolicy). Gating on ORT alone would refuse a variant
+// that would have loaded, silently dropping such a host to
 // the embedded model and telling the user no installed model was available, which
 // is false.
 //
@@ -605,13 +629,8 @@ func (o *Orchestrator) primaryVariantUsable(modelPath string) bool {
 	// OpenVINO library straight to the ONNX path it has no runtime for, which is
 	// the hard startup failure this gate exists to prevent, reached from the other
 	// side. So the plan must be usable AND the library must actually load.
-	if _, ok, _ := openVINOPlanFor(
-		settings.BirdNET.Backend,
-		settings.BirdNET.OpenVINODevice,
-		DefaultModelVersion,
-		settings.BirdNET.OpenVINOPath,
-		birdnetLogitsOutputIndex,
-	); ok && o.openVINOLoads(settings.BirdNET.OpenVINOPath) {
+	if _, ok, _ := birdnetV24OpenVINOPlan(&settings.BirdNET, detectQuantization(modelPath)); ok &&
+		o.openVINOLoads(settings.BirdNET.OpenVINOPath) {
 		return true
 	}
 

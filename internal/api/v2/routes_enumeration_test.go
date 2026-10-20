@@ -20,7 +20,7 @@ import (
 // for the internal/api/v2 package split: every phase that moves handlers must
 // keep this set byte-identical. The entries include echo's auto-generated
 // route-not-found stubs for group prefixes, and the greedy GET /api/v2/audio/:id
-// route registered directly on the Echo instance (see internal/api/v2/CLAUDE.md).
+// route registered directly on the Echo instance (see internal/api/v2/AGENTS.md).
 //
 // To regenerate after an INTENTIONAL route change: run the test, take the sorted
 // list it prints on failure, and replace this slice.
@@ -40,6 +40,7 @@ var goldenRoutes = []string{
 	"GET /api/v2/alerts/rules/:id",
 	"GET /api/v2/alerts/rules/export",
 	"GET /api/v2/alerts/schema",
+	"GET /api/v2/alerts/status",
 	"GET /api/v2/analytics/confidence/distribution",
 	"GET /api/v2/analytics/sources",
 	"GET /api/v2/analytics/species/accumulation",
@@ -100,7 +101,6 @@ var goldenRoutes = []string{
 	"GET /api/v2/models/regions/:slug/map",
 	"GET /api/v2/notifications",
 	"GET /api/v2/notifications/:id",
-	"GET /api/v2/notifications/check-ntfy-server",
 	"GET /api/v2/notifications/stream",
 	"GET /api/v2/notifications/unread/count",
 	"GET /api/v2/ping",
@@ -112,6 +112,7 @@ var goldenRoutes = []string{
 	"GET /api/v2/range/status",
 	"GET /api/v2/settings",
 	"GET /api/v2/settings/:section",
+	"GET /api/v2/settings/connection",
 	"GET /api/v2/settings/dashboard",
 	"GET /api/v2/settings/imageproviders",
 	"GET /api/v2/settings/locales",
@@ -187,6 +188,7 @@ var goldenRoutes = []string{
 	"POST /api/v2/alerts/rules/import",
 	"POST /api/v2/alerts/rules/reset-defaults",
 	"POST /api/v2/app/wizard/dismiss",
+	"POST /api/v2/audio/:id/audible-bats",
 	"POST /api/v2/audio/:id/clip",
 	"POST /api/v2/audio/:id/process",
 	"POST /api/v2/auth/login",
@@ -216,6 +218,7 @@ var goldenRoutes = []string{
 	"POST /api/v2/integrations/weather/test",
 	"POST /api/v2/models/install/:id",
 	"POST /api/v2/models/reinstall/:id",
+	"POST /api/v2/notifications/check-ntfy-server",
 	"POST /api/v2/notifications/test/new-species",
 	"POST /api/v2/range/rebuild",
 	"POST /api/v2/range/species/test",
@@ -228,6 +231,7 @@ var goldenRoutes = []string{
 	"POST /api/v2/streams/hls/heartbeat",
 	"POST /api/v2/streams/test",
 	"POST /api/v2/support/generate",
+	"POST /api/v2/system/audio/equalizer/response",
 	"POST /api/v2/system/database/backup",
 	"POST /api/v2/system/database/backup/jobs",
 	"POST /api/v2/system/database/legacy/cleanup",

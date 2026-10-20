@@ -215,9 +215,7 @@ func (p *Processor) LearnFromApprovedDetection(speciesLowercase, scientificName 
 
 	// Calculate learning cooldown based on detection window duration
 	// This prevents multiple threshold learnings within a single detection event
-	captureLength := time.Duration(settings.Realtime.Audio.Export.Length) * time.Second
-	preCaptureLength := time.Duration(settings.Realtime.Audio.Export.PreCapture) * time.Second
-	learningCooldown := captureLength - preCaptureLength
+	learningCooldown := normalDetectionWindow(settings)
 	const minCooldown = 5 * time.Second
 	if learningCooldown < minCooldown {
 		learningCooldown = minCooldown
@@ -288,28 +286,6 @@ func (p *Processor) LearnFromApprovedDetection(speciesLowercase, scientificName 
 			logger.Float32("confidence", confidence),
 			logger.Int("level", dt.Level),
 			logger.Float64("threshold", newValue))
-	}
-}
-
-// updateDynamicThreshold updates the dynamic threshold for a given species if enabled.
-func (p *Processor) updateDynamicThreshold(modelID, commonName string, confidence float64) {
-	settings := p.currentSettings()
-	if settings.Realtime.DynamicThreshold.Enabled {
-		// Lock the mutex to ensure thread-safe access to the DynamicThresholds map
-		p.thresholdsMutex.Lock()
-		defer p.thresholdsMutex.Unlock()
-
-		// Check if the species already has a dynamic threshold. The entry is keyed
-		// per species; modelID still selects the model-specific base to compare the
-		// detection confidence against before extending the timer.
-		// Note: scientific name not available in this context, but common name lookup is sufficient.
-		// Lowercase the key to match how entries are stored (addSpeciesToDynamicThresholds);
-		// otherwise a title-cased common name misses and the timer is never extended.
-		if dt, exists := p.DynamicThresholds[strings.ToLower(commonName)]; exists && confidence > float64(p.getBaseConfidenceThreshold(settings, commonName, "", modelID)) {
-			// Update the timer to extend the threshold's validity
-			// Note: dt is a pointer, so this directly mutates the struct in the map
-			dt.Timer = time.Now().Add(time.Duration(dt.ValidHours) * time.Hour)
-		}
 	}
 }
 

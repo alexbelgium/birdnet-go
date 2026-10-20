@@ -171,3 +171,84 @@ func TestUnguardedClientDoesNotUseGuard(t *testing.T) {
 	}
 	assert.False(t, errors.Is(err, ErrBlockedTarget), "unguarded client must not apply the SSRF policy")
 }
+
+// TestNewGuardedHTTPClient_AllowsLoopback verifies the standalone guarded
+// *http.Client constructor (used by the weather and ntfy probe sites) permits
+// loopback so on-LAN targets keep working.
+func TestNewGuardedHTTPClient_AllowsLoopback(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewGuardedHTTPClient(5 * time.Second)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, http.NoBody)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// TestNewGuardedHTTPClient_BlocksMetadataLiteral verifies the standalone guarded
+// *http.Client refuses the cloud metadata address at dial time with
+// ErrBlockedTarget, so the outbound probe sites that adopt it cannot be turned
+// into SSRF relays.
+func TestNewGuardedHTTPClient_BlocksMetadataLiteral(t *testing.T) {
+	t.Parallel()
+
+	client := NewGuardedHTTPClient(2 * time.Second)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://169.254.169.254/latest/meta-data/", http.NoBody)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	if resp != nil {
+		t.Cleanup(func() { _ = resp.Body.Close() })
+	}
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrBlockedTarget), "expected ErrBlockedTarget, got %v", err)
+}
+
+func TestIsBlockedStreamTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		ip      string
+		blocked bool
+	}{
+		{"loopback v4", "127.0.0.1", true},
+		{"loopback v4 other", "127.1.2.3", true},
+		{"loopback v6", "::1", true},
+		{"ipv4-mapped loopback", "::ffff:127.0.0.1", true},
+		{"ipv4-compatible loopback", "::127.0.0.1", true},
+		{"nat64 loopback", "64:ff9b::7f00:1", true},
+		{"unspecified v4", "0.0.0.0", true},
+		{"unspecified v6", "::", true},
+		{"metadata link-local", "169.254.169.254", true},
+		{"alibaba metadata", "100.100.100.200", true},
+		{"aws imds ipv6", "fd00:ec2::254", true},
+		{"zoned link-local", "fe80::1%eth0", true},
+		{"rfc1918 192.168", "192.168.1.10", false},
+		{"rfc1918 10", "10.0.0.5", false},
+		{"rfc1918 172.16", "172.16.4.2", false},
+		{"ula", "fd12:3456:789a::1", false},
+		{"ipv4-mapped rfc1918", "::ffff:192.168.1.10", false},
+		{"multicast", "224.1.1.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ip, err := netip.ParseAddr(tt.ip)
+			require.NoError(t, err)
+			assert.Equal(t, tt.blocked, IsBlockedStreamTarget(ip))
+		})
+	}
+
+	t.Run("invalid address fails closed", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, IsBlockedStreamTarget(netip.Addr{}))
+	})
+}

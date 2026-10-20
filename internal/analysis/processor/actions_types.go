@@ -33,6 +33,12 @@ const (
 
 	// ExecuteCommandTimeout is the timeout for external command execution
 	ExecuteCommandTimeout = 5 * time.Minute
+
+	// speciesTimeQueryTimeout bounds the per-detection query for the first/last
+	// species detection times published in the MQTT payload. It is short because
+	// it runs on the MQTT hot path and a failure must degrade to null fields,
+	// not stall the publish.
+	speciesTimeQueryTimeout = 2 * time.Second
 )
 
 // DetectionContext provides thread-safe shared state for detection pipeline actions.
@@ -141,6 +147,8 @@ type SaveAudioAction struct {
 	readyAt          time.Time
 	sourceSampleRate int    // Actual source capture rate for correct export headers
 	modelName        string // Detection model name (e.g. "BattyBirdNET") for export strategy
+	modelVersion     string // Detection model version, paired with modelName for ResolveModelType so the
+	// encode-side model-type check matches the clip-name path exactly (no name/version skew).
 	// species is the detection's common name, LOWERCASED to match the casing the
 	// sibling detection operations log, carried so the export log lines can name
 	// it. GET /api/v2/system/events/detections attributes recorded clip paths to a
@@ -149,7 +157,17 @@ type SaveAudioAction struct {
 	// exact string match. Without it every bucket the endpoint returns has an
 	// empty ClipPaths; with the wrong casing the paths land on a phantom
 	// zero-count species row instead of the counted one.
-	species       string
+	species string
+	// clipTags is the safe, display-ready detection metadata embedded as FLAC
+	// tags; see clip_tags.go for what may and may not be carried.
+	clipTags clipTagMeta
+	// clipRates is the detection repository the corrected clip sample rate is
+	// written through after the encode; nil only for a processor built without a
+	// repository (tests).
+	clipRates clipSampleRateRecorder
+	// plannedRate is the clip sample rate stored with the detection at save time
+	// (plannedClipSampleRate); the action corrects it when the encode wrote another.
+	plannedRate   int
 	NoteID        uint              // Note ID for correlation logging with pre-renderer
 	PreRenderer   PreRendererSubmit // Injected from processor
 	DetectionCtx  *DetectionContext // Shared context to signal ClipSaved to late consumers
@@ -204,6 +222,20 @@ type BirdWeatherAction struct {
 	mu            sync.Mutex // Protect concurrent access to Result and pcmData
 }
 
+// speciesDetectionTimeSource is the minimal datastore capability MqttAction needs to
+// populate first/last species detection times. Both *datastore.DataStore (legacy) and
+// *v2only.Datastore satisfy it. Kept out of datastore.Interface on purpose (matches the
+// convention used by other per-species analytics queries).
+type speciesDetectionTimeSource interface {
+	GetSpeciesFirstAndLastDetectionTimeBefore(ctx context.Context, scientificName string, before time.Time) (first, last *time.Time, err error)
+}
+
+// clipSampleRateRecorder is the single detection repository method SaveAudioAction
+// needs to correct the stored clip sample rate after the encode.
+type clipSampleRateRecorder interface {
+	RecordClipSampleRate(ctx context.Context, id uint, clipName string, rate int) error
+}
+
 type MqttAction struct {
 	Settings       *conf.Settings
 	Result         detection.Result // Domain model (single source of truth)
@@ -215,6 +247,10 @@ type MqttAction struct {
 	Description    string
 	CorrelationID  string     // Detection correlation ID for log tracking
 	mu             sync.Mutex // Protect concurrent access to Result
+	// SpeciesTimeSource provides the species' first-ever and most-recent previous
+	// detection times for the MQTT payload. Nil when the database is disabled or
+	// the backend does not support the query; the payload then carries null fields.
+	SpeciesTimeSource speciesDetectionTimeSource
 }
 
 type UpdateRangeFilterAction struct {

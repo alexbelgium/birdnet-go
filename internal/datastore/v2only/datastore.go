@@ -41,8 +41,8 @@ import (
 	"github.com/tphakala/birdnet-go/internal/labels/nonbird"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	obmetrics "github.com/tphakala/birdnet-go/internal/observability/metrics"
+	"github.com/tphakala/birdnet-go/internal/speciesindex"
 	"github.com/tphakala/birdnet-go/internal/suncalc"
-	"golang.org/x/text/unicode/norm"
 	"gorm.io/gorm"
 )
 
@@ -104,19 +104,6 @@ func parseDetectionTimestamp(date, timeStr string, tz *time.Location) int64 {
 	return time.Now().Unix()
 }
 
-// nameMaps holds the species name lookup maps. Stored behind an atomic.Pointer
-// so readers are lock-free and UpdateNameMaps can swap atomically.
-type nameMaps struct {
-	// common maps scientific name → common name (display lookup).
-	common map[string]string
-	// commonFolded maps scientific name → lower-cased NFC-normalized common name. Precomputed
-	// once here so common-name search (ResolveCommonNameToLabelIDs) does not normalize every map
-	// value on every query.
-	commonFolded map[string]string
-	// species maps lowercase common name → scientific name (reverse lookup).
-	species map[string]string
-}
-
 // Datastore implements datastore.Interface using only v2 repositories.
 type Datastore struct {
 	manager      v2.Manager
@@ -145,14 +132,14 @@ type Datastore struct {
 	// classify Perch v2 (FSD50K) sound classes without a data race.
 	nonBirdLabelTypeIDs map[nonbird.Category]uint
 
-	// names holds the species name lookup maps behind an atomic.Pointer
-	// for lock-free reads and atomic swaps when locale changes.
-	names atomic.Pointer[nameMaps]
-
-	// nameResolver, when set, is the authoritative localized name source shared
-	// with the classifier orchestrator. It overrides the label-derived maps and
-	// resolves historic out-of-working-set species via on-demand lookup.
-	nameResolver atomic.Pointer[datastore.SpeciesNameResolver]
+	// names points at the species-name lookup index (the forward display and
+	// reverse search maps plus the authoritative resolver). New seeds a private
+	// fallback service from the configured labels; APIServerService.Start swaps in
+	// the orchestrator-owned shared service via SetSpeciesIndex. Held behind an
+	// atomic.Pointer so that swap is lock-free against concurrent readers. A nil
+	// pointer (a bare-struct test) is treated as an empty index by the accessors
+	// below.
+	names atomic.Pointer[speciesindex.Service]
 
 	// speciesCodeMap provides O(1) lookup from scientific name to eBird species code.
 	// Populated from the eBird taxonomy data passed via Config.SpeciesCodeMap.
@@ -164,10 +151,17 @@ type Datastore struct {
 
 	// dbstatAvailable caches whether the dbstat virtual table exists.
 	// 0 = unchecked, 1 = available, -1 = not available.
-	dbstatAvailable int32
+	dbstatAvailable atomic.Int32
 
 	// dbCounters tracks atomic query latency counters for metrics collection.
 	dbCounters *dbstats.Counters
+
+	// Cached PRAGMA quick_check result for the Database Integrity health check
+	// (#3939). integrityMu is dedicated to this cache only, never a broader
+	// datastore lock, because quick_check can be slow and must not block Save.
+	integrityMu        sync.RWMutex
+	integrityResult    string    // "ok", a corruption description, or "" until first run
+	integrityCheckedAt time.Time // when integrityResult was last computed
 }
 
 // Config configures the Datastore.
@@ -303,11 +297,6 @@ func New(cfg *Config) (*Datastore, error) {
 		tz = time.Local
 	}
 
-	// Build species name maps from labels. The OpenFauna resolver is injected
-	// later via SetNameResolver (it is owned by the orchestrator, constructed
-	// separately), so the maps are localized on the first post-wiring rebuild.
-	nm := buildNameMaps(cfg.Labels, nil)
-
 	// Use species code map from taxonomy data (injected via config).
 	speciesCodeMap := cfg.SpeciesCodeMap
 	if speciesCodeMap == nil {
@@ -336,7 +325,16 @@ func New(cfg *Config) (*Datastore, error) {
 		speciesCodeMap:      speciesCodeMap,
 		dbCounters:          dbCounters,
 	}
-	ds.names.Store(nm)
+
+	// Seed a private fallback species-name index from the configured labels. A
+	// datastore later handed the orchestrator-owned shared index (via
+	// SetSpeciesIndex in APIServerService.Start) swaps this out; a datastore never
+	// handed one (file-analysis commands, fresh install, tests) keeps this
+	// fallback, byte-identical to Phase 1. The OpenFauna resolver is absent here;
+	// the shared service carries the orchestrator's resolver once injected.
+	fallback := speciesindex.New(nil)
+	fallback.Rebuild(cfg.Labels, "")
+	ds.names.Store(fallback)
 
 	// Start periodic WAL checkpoint for SQLite to prevent unbounded WAL growth.
 	// The auto-checkpoint mechanism may not fire reliably with connection pooling.
@@ -347,63 +345,27 @@ func New(cfg *Config) (*Datastore, error) {
 	return ds, nil
 }
 
-// buildNameMaps parses BirdNET labels ("ScientificName_CommonName" format)
-// into lookup maps for common<->scientific name resolution.
-// When resolver is non-nil, each label's common name is overridden by the
-// resolver (authoritative/localized); labels the resolver does not cover keep
-// their embedded common name. This keeps the reverse (search) maps consistent
-// with what resolveCommonName displays.
-func buildNameMaps(labels []string, resolver datastore.SpeciesNameResolver) *nameMaps {
-	speciesMap := make(map[string]string, len(labels))
-	commonMap := make(map[string]string, len(labels))
-	commonFoldedMap := make(map[string]string, len(labels))
-	// Ambiguous reverse keys are deleted, not last-writer-wins: an ambiguous common
-	// name must fall through to substring search (which returns all matches) rather
-	// than route to an arbitrary species.
-	ambiguous := make(map[string]struct{})
-	for _, sn := range datastore.ResolveLabelNames(labels, resolver) {
-		commonMap[sn.Scientific] = sn.Common
-		folded := strings.ToLower(norm.NFC.String(sn.Common))
-		commonFoldedMap[sn.Scientific] = folded
-
-		if _, seen := ambiguous[folded]; seen {
-			continue
-		}
-		if existing, exists := speciesMap[folded]; exists && existing != sn.Scientific {
-			ambiguous[folded] = struct{}{}
-			delete(speciesMap, folded)
-			continue
-		}
-		speciesMap[folded] = sn.Scientific
-	}
-	return &nameMaps{common: commonMap, commonFolded: commonFoldedMap, species: speciesMap}
-}
-
-// UpdateNameMaps rebuilds species name lookup maps from updated BirdNET labels.
-// Called after locale or model changes to keep common name resolution current.
-// The new maps are built first, then atomically swapped in - readers are never blocked.
-// Also resets the missing-name warning deduplication so new mismatches are logged.
-func (ds *Datastore) UpdateNameMaps(labels []string) {
-	ds.names.Store(buildNameMaps(labels, ds.loadNameResolver()))
-	ds.loggedMissingNames.Clear()
-}
-
-// SetNameResolver installs the authoritative localized name resolver, shared with
-// the classifier orchestrator. Safe to call concurrently with reads; a nil
-// resolver is ignored.
-func (ds *Datastore) SetNameResolver(r datastore.SpeciesNameResolver) {
-	if datastore.IsNilResolver(r) {
+// SetSpeciesIndex installs the orchestrator-owned species-name index, replacing
+// the fallback seeded in New. The datastore never writes to the shared service;
+// the classifier orchestrator is its only writer. A nil service is ignored. The
+// missing-name warning dedup is cleared so a name that goes missing under the new
+// index is logged once more (the one side effect the removed UpdateNameMaps had
+// that a shared rebuild no longer reaches).
+func (ds *Datastore) SetSpeciesIndex(svc *speciesindex.Service) {
+	if svc == nil {
 		return
 	}
-	ds.nameResolver.Store(&r)
+	ds.names.Store(svc)
+	ds.loggedMissingNames.Clear()
 }
 
 // loadNameResolver returns the installed resolver, or nil if none has been set.
 func (ds *Datastore) loadNameResolver() datastore.SpeciesNameResolver {
-	if p := ds.nameResolver.Load(); p != nil {
-		return *p
+	svc := ds.names.Load()
+	if svc == nil {
+		return nil
 	}
-	return nil
+	return svc.Resolver()
 }
 
 // Open is a no-op since the manager is already open.
@@ -412,26 +374,23 @@ func (ds *Datastore) Open() error {
 }
 
 // loadNameMaps returns the current name maps. Always returns a non-nil value.
-func (ds *Datastore) loadNameMaps() *nameMaps {
-	if m := ds.names.Load(); m != nil {
-		return m
+func (ds *Datastore) loadNameMaps() *speciesindex.Snapshot {
+	svc := ds.names.Load()
+	if svc == nil {
+		return speciesindex.Empty()
 	}
-	return &nameMaps{
-		common:       make(map[string]string),
-		commonFolded: make(map[string]string),
-		species:      make(map[string]string),
-	}
+	return svc.Snapshot()
 }
 
 // filterLookupDeps builds the dependency set used by repository filter resolution (species and
 // device lookups, plus common-name search via the active-locale name maps).
 func (ds *Datastore) filterLookupDeps() *repository.FilterLookupDeps {
-	nm := ds.loadNameMaps()
+	snap := ds.loadNameMaps()
 	return &repository.FilterLookupDeps{
 		LabelRepo:         ds.label,
 		SourceRepo:        ds.source,
-		SciToCommon:       nm.common,
-		SciToCommonFolded: nm.commonFolded,
+		SciToCommon:       snap.SciToCommon,
+		SciToCommonFolded: snap.SciToCommonFolded,
 	}
 }
 
@@ -519,6 +478,177 @@ func (ds *Datastore) PingWithLatency(ctx context.Context) (time.Duration, error)
 		return 0, fmt.Errorf("database ping failed: %w", err)
 	}
 	return time.Since(start), nil
+}
+
+// v2IntegrityCacheTTL bounds how long a PRAGMA quick_check result is reused
+// before the Database Integrity health check recomputes it. quick_check can be
+// slow on a large database, so the on-demand health check reads a cached result.
+const v2IntegrityCacheTTL = 24 * time.Hour
+
+// v2IntegrityCheckTimeout caps a single PRAGMA quick_check run. quick_check scans
+// every page on the single pinned SQLite connection, so an unbounded run would
+// block writes for its full duration; the timeout is generous enough for a
+// legitimate scan to complete (and then be cached for the TTL) while capping a
+// pathological hang (#3939).
+const v2IntegrityCheckTimeout = 2 * time.Minute
+
+// v2IntegrityRefreshCooldown coalesces forced integrity refreshes. A forced
+// refresh (an explicit "run diagnostics" refresh) only clears the cache when the
+// cached result is at least this old, so an authenticated client cannot repeatedly
+// force back-to-back multi-minute quick_check scans on the single pinned SQLite
+// connection (CWE-400). Within the window the recent result is reused. It is
+// longer than v2IntegrityCheckTimeout so a scan cannot be re-triggered before the
+// previous one could have finished; a legitimate re-check after a repair is
+// unaffected because the passive TTL keeps the prior result far older than this.
+const v2IntegrityRefreshCooldown = 5 * time.Minute
+
+const (
+	// integrityResultOK is the healthy PRAGMA quick_check result. DatabaseIntegrityCheck.Run
+	// maps any non-empty, non-"ok" result to a corruption status, so this exact value
+	// is the integrity-result contract shared across cache reads, writes and the
+	// non-SQLite path.
+	integrityResultOK = "ok"
+	// sqliteDialectName is gorm's dialect name for SQLite (db.Name()); other dialects
+	// have no PRAGMA quick_check equivalent.
+	sqliteDialectName = "sqlite"
+)
+
+// IntegrityResult reports the cached database integrity result and whether the
+// database is corrupted, for the Database Integrity health check (#3939). It
+// mirrors the legacy SQLiteStore accessor so the check can read integrity through
+// a shared interface instead of asserting the concrete legacy type; on v2 installs
+// that assertion failed, leaving the check stuck at "Unknown" forever.
+//
+// The result is "ok" for a healthy SQLite database (and for any non-SQLite dialect,
+// where PRAGMA quick_check does not apply), a quick_check corruption description
+// when corruption is found, or "" when a check could not be run yet. The health
+// check treats a non-"ok", non-empty result as corruption, so a dialect without
+// quick_check must report "ok", never a "skipped"-style sentinel.
+func (ds *Datastore) IntegrityResult() (string, bool) {
+	// Fast path: a fresh cached result needs only a read lock and runs no query.
+	ds.integrityMu.RLock()
+	cached := ds.integrityResult
+	fresh := cached != "" && time.Since(ds.integrityCheckedAt) < v2IntegrityCacheTTL
+	ds.integrityMu.RUnlock()
+	if fresh {
+		return cached, cached != integrityResultOK
+	}
+
+	// Slow path: recompute under the write lock so concurrent callers with a cold or
+	// expired cache do not all run PRAGMA quick_check at once (thundering herd).
+	// integrityMu is dedicated to this cache and is never taken by Save or any query
+	// path, so holding it across the check serializes only integrity reads and cannot
+	// block writes; the single SQLite connection, not this mutex, is what the query
+	// occupies for its duration (#3939).
+	ds.integrityMu.Lock()
+	defer ds.integrityMu.Unlock()
+	// Re-check under the write lock: another caller may have refreshed it while we
+	// waited for the lock.
+	if ds.integrityResult != "" && time.Since(ds.integrityCheckedAt) < v2IntegrityCacheTTL {
+		return ds.integrityResult, ds.integrityResult != integrityResultOK
+	}
+
+	result, ran := ds.runIntegrityQuickCheck()
+	if !ran {
+		// Could not run the check (no DB handle, timeout, or query error); report
+		// "not run yet" rather than a false corruption alarm, and do not cache so the
+		// next health run retries.
+		return "", false
+	}
+	ds.integrityResult = result
+	ds.integrityCheckedAt = time.Now()
+	return result, result != integrityResultOK
+}
+
+// RefreshIntegrityCache clears the cached PRAGMA quick_check result so the next
+// IntegrityResult call recomputes it, and reports whether it did. It coalesces
+// rapid forced refreshes: within v2IntegrityRefreshCooldown of the last check it
+// keeps the recent result and returns false, so an authenticated client cannot
+// repeatedly force back-to-back multi-minute quick_check scans on the single
+// pinned SQLite connection (CWE-400). The only wired caller is the explicit "run
+// diagnostics" refresh (RunDiagnostics with refresh_integrity=true). Without it a
+// repaired database keeps reporting the cached corruption string, and corruption
+// that appears after a passing check stays hidden, for up to v2IntegrityCacheTTL
+// (#3939 follow-up). integrityMu is the same lock IntegrityResult recomputes
+// under, so clearing here is safe against a concurrent refresh.
+func (ds *Datastore) RefreshIntegrityCache() bool {
+	ds.integrityMu.Lock()
+	defer ds.integrityMu.Unlock()
+	// A cached, recent result is reused: only a result older than the cooldown (or
+	// no result yet) is worth re-scanning for. An empty result means "not run yet",
+	// so it is always eligible.
+	if ds.integrityResult != "" && time.Since(ds.integrityCheckedAt) < v2IntegrityRefreshCooldown {
+		return false
+	}
+	ds.integrityResult = ""
+	ds.integrityCheckedAt = time.Time{}
+	return true
+}
+
+// runIntegrityQuickCheck executes PRAGMA quick_check on SQLite and returns the
+// result ("ok" or a "; "-joined corruption description) with ran=true. Non-SQLite
+// dialects have no quick_check equivalent, so it returns ("ok", true) to report
+// healthy. A query that errors with a corruption-class error (malformed image,
+// "file is not a database") is itself a corruption verdict, returned with
+// ran=true so the caller escalates it. ran is false only when the check could not
+// run at all (no DB handle, or a transient query error such as a timeout,
+// cancellation, or a locked db), which the caller maps to the "not run yet" state.
+func (ds *Datastore) runIntegrityQuickCheck() (result string, ran bool) {
+	db := ds.manager.DB()
+	if db == nil {
+		return "", false
+	}
+	// PRAGMA quick_check is SQLite-specific; other engines (e.g. MySQL/InnoDB)
+	// self-check and have no equivalent, so report healthy rather than tripping
+	// the corruption branch of the health check. db.Name() is the dialect name
+	// ("sqlite"/"mysql"), promoted from gorm.DB's embedded Dialector.
+	if db.Name() != sqliteDialectName {
+		return integrityResultOK, true
+	}
+	// Bound the scan: quick_check reads every page and runs on the single pinned
+	// SQLite connection, so an unbounded run would block writes for its full
+	// duration. A context timeout interrupts it (the SQLite driver honors
+	// cancellation), capping the worst-case write stall (#3939).
+	ctx, cancel := context.WithTimeout(context.Background(), v2IntegrityCheckTimeout)
+	defer cancel()
+	var rows []string
+	if err := db.WithContext(ctx).Raw("PRAGMA quick_check").Scan(&rows).Error; err != nil {
+		// A corruption-class error is itself the verdict (surfaced, cached, and
+		// escalated to Critical); a transient error is "not run yet" and retried.
+		// classifyIntegrityQueryError documents the split.
+		if r, corrupt := classifyIntegrityQueryError(err); corrupt {
+			if ds.log != nil {
+				ds.log.Error("database integrity quick_check reports corruption", logger.Error(err))
+			}
+			return r, true
+		}
+		if ds.log != nil {
+			ds.log.Warn("database integrity quick_check failed to run", logger.Error(err))
+		}
+		return "", false
+	}
+	joined := strings.Join(rows, "; ")
+	if joined == "" {
+		return integrityResultOK, true
+	}
+	return joined, true
+}
+
+// classifyIntegrityQueryError maps a PRAGMA quick_check execution error to an
+// integrity verdict. A corruption-class error (malformed image, "file is not a
+// database") IS the verdict: it is returned as a non-"ok" result with corrupt=true
+// so the health check escalates to Critical, mirroring the legacy store which
+// returned err.Error() as the result string. Every other error (a context
+// timeout, a cancellation, a locked database) is transient and not an integrity
+// signal, so it reports corrupt=false and the caller treats it as "not run yet".
+// datastore.IsDatabaseCorruption matches only structural keywords (corrupt,
+// malformed, "file is not a database"), never locked/timeout/closed, so transient
+// failures never false-escalate.
+func classifyIntegrityQueryError(err error) (result string, corrupt bool) {
+	if datastore.IsDatabaseCorruption(err) {
+		return err.Error(), true
+	}
+	return "", false
 }
 
 // CountDetectionsSince returns the number of detections recorded since the given time.
@@ -751,6 +881,11 @@ func (ds *Datastore) Save(note *datastore.Note, results []datastore.Results) err
 	}
 	if note.ClipName != "" {
 		det.ClipName = &note.ClipName
+		// The rate describes the clip file, so it is stored only with a clip;
+		// an unknown rate stays NULL rather than 0.
+		if note.ClipSampleRate > 0 {
+			det.ClipSampleRate = &note.ClipSampleRate
+		}
 	}
 	if !note.BeginTime.IsZero() {
 		bt := note.BeginTime.UnixMilli()
@@ -879,7 +1014,16 @@ func (ds *Datastore) Get(id string) (datastore.Note, error) {
 	return ds.detectionToNote(det), nil
 }
 
-// detectionToNote converts a v2 Detection to a legacy Note.
+// clipSampleRateValue returns the stored clip sample rate, or 0 when it is NULL.
+func clipSampleRateValue(rate *int) int {
+	if rate == nil {
+		return 0
+	}
+	return *rate
+}
+
+// detectionToNote converts a v2 Detection to a legacy Note, including the runtime-only
+// SpectrogramClipName of a detection whose audio was removed but whose spectrogram was kept.
 // Common name is looked up from the name maps which are built at startup.
 func (ds *Datastore) detectionToNote(det *entities.Detection) datastore.Note {
 	// Guard against nil detection to prevent panics
@@ -907,6 +1051,10 @@ func (ds *Datastore) detectionToNote(det *entities.Detection) datastore.Note {
 	clipName := ""
 	if det.ClipName != nil {
 		clipName = *det.ClipName
+	}
+	spectrogramClipName := ""
+	if det.SpectrogramClipName != nil {
+		spectrogramClipName = *det.SpectrogramClipName
 	}
 
 	lat := 0.0
@@ -977,24 +1125,26 @@ func (ds *Datastore) detectionToNote(det *entities.Detection) datastore.Note {
 	}
 
 	note := datastore.Note{
-		ID:             det.ID,
-		Date:           dateStr,
-		Time:           timeStr,
-		ScientificName: scientificName,
-		CommonName:     commonName,
-		SpeciesCode:    ds.speciesCodeMap[scientificName],
-		Confidence:     det.Confidence,
-		Latitude:       lat,
-		Longitude:      lon,
-		ClipName:       clipName,
-		BeginTime:      beginTime,
-		EndTime:        endTime,
-		ProcessingTime: processingTime,
-		Source:         source,
-		Comments:       comments,
-		Unlikely:       det.Unlikely,
-		Verified:       verified,
-		Locked:         locked,
+		ID:                  det.ID,
+		Date:                dateStr,
+		Time:                timeStr,
+		ScientificName:      scientificName,
+		CommonName:          commonName,
+		SpeciesCode:         ds.speciesCodeMap[scientificName],
+		Confidence:          det.Confidence,
+		Latitude:            lat,
+		Longitude:           lon,
+		ClipName:            clipName,
+		SpectrogramClipName: spectrogramClipName,
+		ClipSampleRate:      clipSampleRateValue(det.ClipSampleRate),
+		BeginTime:           beginTime,
+		EndTime:             endTime,
+		ProcessingTime:      processingTime,
+		Source:              source,
+		Comments:            comments,
+		Unlikely:            det.Unlikely,
+		Verified:            verified,
+		Locked:              locked,
 	}
 
 	// Populate model info from preloaded Model entity. ModelType is carried here
@@ -1066,6 +1216,11 @@ func (ds *Datastore) detectionToRecord(det *entities.Detection) datastore.Detect
 		audioFilePath = *det.ClipName
 		hasAudio = true
 	}
+	spectrogramClipName := ""
+	if det.SpectrogramClipName != nil {
+		spectrogramClipName = *det.SpectrogramClipName
+	}
+	spectrogramOnly := datastore.IsSpectrogramOnly(audioFilePath, spectrogramClipName)
 
 	// Verification status from Review.
 	// Emit the same vocabulary the rest of the API speaks ("correct",
@@ -1112,23 +1267,25 @@ func (ds *Datastore) detectionToRecord(det *entities.Detection) datastore.Detect
 	}
 
 	return datastore.DetectionRecord{
-		ID:             strconv.FormatUint(uint64(det.ID), 10),
-		Timestamp:      timestamp,
-		ScientificName: scientificName,
-		CommonName:     commonName,
-		Confidence:     det.Confidence,
-		Latitude:       lat,
-		Longitude:      lon,
-		Week:           week,
-		AudioFilePath:  audioFilePath,
-		Verified:       verified,
-		Locked:         locked,
-		Unlikely:       det.Unlikely,
-		HasAudio:       hasAudio,
-		Device:         device,
-		Source:         source,
-		TimeOfDay:      timeOfDay,
-		ModelType:      modelType,
+		ID:              strconv.FormatUint(uint64(det.ID), 10),
+		Timestamp:       timestamp,
+		ScientificName:  scientificName,
+		CommonName:      commonName,
+		Confidence:      det.Confidence,
+		Latitude:        lat,
+		Longitude:       lon,
+		Week:            week,
+		AudioFilePath:   audioFilePath,
+		Verified:        verified,
+		Locked:          locked,
+		Unlikely:        det.Unlikely,
+		HasAudio:        hasAudio,
+		SpectrogramOnly: spectrogramOnly,
+		ClipSampleRate:  clipSampleRateValue(det.ClipSampleRate),
+		Device:          device,
+		Source:          source,
+		TimeOfDay:       timeOfDay,
+		ModelType:       modelType,
 	}
 }
 
@@ -1167,31 +1324,9 @@ func (ds *Datastore) calculateTimeOfDay(timestamp time.Time, lat, lon float64) s
 		return datastore.TimeOfDayAny
 	}
 
-	// Define 30-minute window around sunrise/sunset
-	window := 30 * time.Minute
-
-	// Get detection time as string for comparison (format: "15:04:05")
-	detTime := timestamp.Format(time.TimeOnly)
-
-	// Calculate window boundaries
-	sunriseStart := sunEvents.Sunrise.Add(-window).Format(time.TimeOnly)
-	sunriseEnd := sunEvents.Sunrise.Add(window).Format(time.TimeOnly)
-	sunsetStart := sunEvents.Sunset.Add(-window).Format(time.TimeOnly)
-	sunsetEnd := sunEvents.Sunset.Add(window).Format(time.TimeOnly)
-	sunriseTime := sunEvents.Sunrise.Format(time.TimeOnly)
-	sunsetTime := sunEvents.Sunset.Format(time.TimeOnly)
-
-	// Determine time of day
-	switch {
-	case detTime >= sunriseStart && detTime <= sunriseEnd:
-		return datastore.TimeOfDaySunrise
-	case detTime >= sunsetStart && detTime <= sunsetEnd:
-		return datastore.TimeOfDaySunset
-	case detTime >= sunriseTime && detTime < sunsetTime:
-		return datastore.TimeOfDayDay
-	default:
-		return datastore.TimeOfDayNight
-	}
+	// Delegate the sunrise/sunset/day/night classification to the shared,
+	// midnight-safe helper so every call site stays in lockstep.
+	return suncalc.ClassifyTimeOfDay(timestamp, &sunEvents)
 }
 
 // GetAllNotes retrieves all notes.
@@ -1239,6 +1374,7 @@ func (ds *Datastore) GetTopBirdsData(ctx context.Context, selectedDate string, m
 		Count          int     `gorm:"column:count"`
 		MaxConfidence  float64 `gorm:"column:max_confidence"`
 		LatestTime     int64   `gorm:"column:latest_time"`
+		FirstTime      int64   `gorm:"column:first_time"`
 	}
 
 	var results []speciesAggregate
@@ -1255,7 +1391,8 @@ func (ds *Datastore) GetTopBirdsData(ctx context.Context, selectedDate string, m
 			l.scientific_name,
 			COUNT(d.id) as count,
 			MAX(d.confidence) as max_confidence,
-			MAX(d.detected_at) as latest_time
+			MAX(d.detected_at) as latest_time,
+			MIN(d.detected_at) as first_time
 		`).
 		Joins(fmt.Sprintf("JOIN %slabels l ON d.label_id = l.id", prefix)).
 		Joins(fmt.Sprintf("LEFT JOIN %sdetection_reviews dr ON d.id = dr.detection_id", prefix)).
@@ -1276,6 +1413,7 @@ func (ds *Datastore) GetTopBirdsData(ctx context.Context, selectedDate string, m
 	for _, r := range results {
 		// Format the latest time as HH:MM:SS
 		latestTime := time.Unix(r.LatestTime, 0).In(ds.timezone)
+		firstTime := time.Unix(r.FirstTime, 0).In(ds.timezone)
 
 		// Labels may contain legacy concatenated "ScientificName_CommonName" format,
 		// so extract only the scientific name portion.
@@ -1291,6 +1429,7 @@ func (ds *Datastore) GetTopBirdsData(ctx context.Context, selectedDate string, m
 			Confidence:     r.MaxConfidence,
 			Date:           selectedDate,
 			Time:           latestTime.Format(time.TimeOnly),
+			FirstTime:      firstTime.Format(time.TimeOnly),
 		}
 		notes = append(notes, note)
 	}
@@ -1647,6 +1786,55 @@ func (ds *Datastore) GetNoteModelType(noteID string) (string, error) {
 		return "", fmt.Errorf("invalid note ID for model type lookup: %w", err)
 	}
 	return ds.detection.GetModelType(ctx, id)
+}
+
+// GetNoteKeptSpectrogram returns, in one narrow query, the clip name a spectrogram
+// was kept under after retention removed the detection's audio (empty when there is
+// none) and the AI model type ("bird" when unknown). It returns
+// repository.ErrDetectionNotFound when the detection does not exist.
+func (ds *Datastore) GetNoteKeptSpectrogram(noteID string) (clipName, modelType string, err error) {
+	id, err := parseID(noteID)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid note ID for kept spectrogram lookup: %w", err)
+	}
+	prefix := ds.manager.TablePrefix()
+	detectionsTable := prefix + "detections"
+	modelsTable := prefix + "ai_models"
+
+	var row struct {
+		SpectrogramClipName *string `gorm:"column:spectrogram_clip_name"`
+		ModelType           *string `gorm:"column:model_type"`
+	}
+	err = ds.manager.DB().WithContext(context.Background()).Table(detectionsTable).
+		Select(detectionsTable+".spectrogram_clip_name, "+modelsTable+".model_type").
+		Joins("LEFT JOIN "+modelsTable+" ON "+modelsTable+".id = "+detectionsTable+".model_id").
+		Where(detectionsTable+".id = ?", id).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", "", repository.ErrDetectionNotFound
+		}
+		return "", "", err
+	}
+	modelType = string(entities.ModelTypeBird)
+	if row.ModelType != nil && *row.ModelType != "" {
+		modelType = *row.ModelType
+	}
+	if row.SpectrogramClipName != nil {
+		clipName = *row.SpectrogramClipName
+	}
+	return clipName, modelType, nil
+}
+
+// RecordClipSampleRate forwards to the v2 detection repository, which holds the
+// guarded UPDATE and runs it under ctx.
+func (ds *Datastore) RecordClipSampleRate(ctx context.Context, noteID uint, clipName string, rate int) error {
+	return ds.detection.RecordClipSampleRate(ctx, noteID, clipName, rate)
+}
+
+// FillClipSampleRate forwards to the v2 detection repository, see RecordClipSampleRate.
+func (ds *Datastore) FillClipSampleRate(ctx context.Context, noteID uint, clipName string, rate int) (bool, error) {
+	return ds.detection.FillClipSampleRate(ctx, noteID, clipName, rate)
 }
 
 // DeleteNoteClipPath deletes the clip path for a note.
@@ -2333,20 +2521,23 @@ func (ds *Datastore) GetLockedNotesClipPaths() ([]string, error) {
 	return ds.detection.GetLockedClipPaths(ctx)
 }
 
+// clipNameBatchSize bounds the number of names per UPDATE to stay within SQLite's
+// parameter limit (999).
+const clipNameBatchSize = 500
+
 // ClearNoteClipPathsByNames clears the clip_name field for detections matching the given filenames.
-// Updates are batched to stay within SQLite's parameter limit (999).
+// It leaves spectrogram_clip_name alone. Updates are batched to stay within SQLite's parameter limit (999).
 func (ds *Datastore) ClearNoteClipPathsByNames(clipNames []string) (int64, error) {
 	if len(clipNames) == 0 {
 		return 0, nil
 	}
 
-	const batchSize = 500
 	var totalAffected int64
 	ctx := context.Background()
 	detectionsTable := ds.manager.TablePrefix() + "detections"
 
-	for i := 0; i < len(clipNames); i += batchSize {
-		end := min(i+batchSize, len(clipNames))
+	for i := 0; i < len(clipNames); i += clipNameBatchSize {
+		end := min(i+clipNameBatchSize, len(clipNames))
 		batch := clipNames[i:end]
 
 		result := ds.manager.DB().WithContext(ctx).
@@ -2355,6 +2546,39 @@ func (ds *Datastore) ClearNoteClipPathsByNames(clipNames []string) (int64, error
 			Update("clip_name", nil)
 		if result.Error != nil {
 			return totalAffected, fmt.Errorf("failed to clear clip paths for %d names: %w", len(batch), result.Error)
+		}
+		totalAffected += result.RowsAffected
+	}
+
+	return totalAffected, nil
+}
+
+// RetainNoteSpectrogramsByClipNames moves clip_name into spectrogram_clip_name for
+// detections matching the given filenames and clears clip_name, so a spectrogram
+// render that outlives its audio stays reachable. Updates are batched to stay
+// within SQLite's parameter limit (999). Rows already moved no longer match
+// clip_name, so a rerun changes nothing.
+func (ds *Datastore) RetainNoteSpectrogramsByClipNames(clipNames []string) (int64, error) {
+	if len(clipNames) == 0 {
+		return 0, nil
+	}
+
+	var totalAffected int64
+	ctx := context.Background()
+	detectionsTable := ds.manager.TablePrefix() + "detections"
+	// Raw SQL on purpose: the SET order is load-bearing. GORM sorts the keys of an
+	// Updates(map) call, which would emit clip_name = NULL first, and MySQL
+	// evaluates single-table assignments left to right, so spectrogram_clip_name
+	// would then be copied from the already-cleared column and the link lost.
+	query := "UPDATE " + detectionsTable + " SET spectrogram_clip_name = clip_name, clip_name = NULL WHERE clip_name IN ?"
+
+	for i := 0; i < len(clipNames); i += clipNameBatchSize {
+		end := min(i+clipNameBatchSize, len(clipNames))
+		batch := clipNames[i:end]
+
+		result := ds.manager.DB().WithContext(ctx).Exec(query, batch)
+		if result.Error != nil {
+			return totalAffected, fmt.Errorf("failed to retain spectrogram clip names for %d names: %w", len(batch), result.Error)
 		}
 		totalAffected += result.RowsAffected
 	}
@@ -2727,7 +2951,7 @@ func (ds *Datastore) GetHourlyAnalyticsData(ctx context.Context, date, species s
 		return nil, err
 	}
 
-	labelID, err := ds.resolveLabelID(ctx, species)
+	labelIDs, err := ds.resolveLabelIDs(ctx, species)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			return []datastore.HourlyAnalyticsData{}, nil
@@ -2735,7 +2959,7 @@ func (ds *Datastore) GetHourlyAnalyticsData(ctx context.Context, date, species s
 		return nil, err
 	}
 
-	v2Data, err := ds.detection.GetHourlyDistribution(ctx, start, end, ds.zoneOffsetSeconds(start), labelID, nil)
+	v2Data, err := ds.detection.GetHourlyDistribution(ctx, start, end, ds.zoneOffsetSeconds(start), labelIDs, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2750,16 +2974,19 @@ func (ds *Datastore) GetHourlyAnalyticsData(ctx context.Context, date, species s
 	return result, nil
 }
 
-// resolveLabelID looks up a label ID for a species name.
-// Returns (nil, nil) if species is empty (no filter).
-// Returns (nil, errNotFound) if species not found.
-// Returns (&id, nil) if found.
-// Returns (nil, err) for other errors.
+// errNotFound is returned by resolveLabelIDs when no label carries the species name.
 var errNotFound = errors.NewStd("species not found")
 
-func (ds *Datastore) resolveLabelID(ctx context.Context, species string) (*uint, error) {
+// resolveLabelIDs returns every label ID carrying the species' scientific name. A species has one
+// label per AI model, and detections reference the label of the model that made them, so a species
+// filter must span all of its labels: picking one (the first, which on a multi-model station is
+// typically the permanently installed primary model's) silently excluded every detection from the
+// models actually assigned to the audio streams.
+//
+// Returns (nil, nil) for an empty species (no filter), (nil, errNotFound) when no label matches.
+func (ds *Datastore) resolveLabelIDs(ctx context.Context, species string) ([]uint, error) {
 	if species == "" {
-		return nil, nil //nolint:nilnil // nil means no filter, which is valid
+		return nil, nil
 	}
 	labelIDs, err := ds.label.GetLabelIDsByScientificName(ctx, species)
 	if err != nil {
@@ -2768,7 +2995,7 @@ func (ds *Datastore) resolveLabelID(ctx context.Context, species string) (*uint,
 	if len(labelIDs) == 0 {
 		return nil, errNotFound
 	}
-	return &labelIDs[0], nil
+	return labelIDs, nil
 }
 
 // GetDailyAnalyticsData retrieves daily analytics data.
@@ -2778,7 +3005,7 @@ func (ds *Datastore) GetDailyAnalyticsData(ctx context.Context, startDate, endDa
 		return nil, err
 	}
 
-	labelID, err := ds.resolveLabelID(ctx, species)
+	labelIDs, err := ds.resolveLabelIDs(ctx, species)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			return []datastore.DailyAnalyticsData{}, nil
@@ -2788,7 +3015,7 @@ func (ds *Datastore) GetDailyAnalyticsData(ctx context.Context, startDate, endDa
 
 	// Bucket dates by the configured timezone, anchored to a query boundary (start, or end for a
 	// left-open range) so an end-only historical query buckets stably regardless of run time.
-	v2Data, err := ds.detection.GetDailyAnalytics(ctx, start, end, ds.zoneOffsetSeconds(dateRangeOffsetAnchor(start, end)), labelID, nil)
+	v2Data, err := ds.detection.GetDailyAnalytics(ctx, start, end, ds.zoneOffsetSeconds(dateRangeOffsetAnchor(start, end)), labelIDs, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2828,7 +3055,7 @@ func (ds *Datastore) GetHourlyDistribution(ctx context.Context, startDate, endDa
 		return nil, err
 	}
 
-	labelID, err := ds.resolveLabelID(ctx, species)
+	labelIDs, err := ds.resolveLabelIDs(ctx, species)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			return []datastore.HourlyDistributionData{}, nil
@@ -2836,7 +3063,7 @@ func (ds *Datastore) GetHourlyDistribution(ctx context.Context, startDate, endDa
 		return nil, err
 	}
 
-	v2Data, err := ds.detection.GetHourlyDistribution(ctx, start, end, ds.zoneOffsetSeconds(start), labelID, nil)
+	v2Data, err := ds.detection.GetHourlyDistribution(ctx, start, end, ds.zoneOffsetSeconds(start), labelIDs, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2857,6 +3084,8 @@ type speciesFirstSeenInfo struct {
 	ScientificName string
 	FirstDetected  int64
 	LastDetected   int64
+	CountInPeriod  int // detections inside the queried window; only the lifetime-first query fills it
+	FirstBeginTime int64
 }
 
 // convertToNewSpeciesData converts species first-seen data to NewSpeciesData with common name resolution.
@@ -2884,12 +3113,17 @@ func (ds *Datastore) convertToNewSpeciesData(_ context.Context, data []speciesFi
 		if d.LastDetected > 0 {
 			lastSeenDate = time.Unix(d.LastDetected, 0).In(ds.timezone).Format(time.DateOnly)
 		}
+		var firstBeginTime time.Time
+		if d.FirstBeginTime > 0 {
+			firstBeginTime = time.UnixMilli(d.FirstBeginTime).In(ds.timezone)
+		}
 		result = append(result, datastore.NewSpeciesData{
 			ScientificName: sciName,
 			CommonName:     commonName,
 			FirstSeenDate:  firstSeenDate,
 			LastSeenDate:   lastSeenDate,
-			CountInPeriod:  0,
+			CountInPeriod:  d.CountInPeriod,
+			FirstBeginTime: firstBeginTime,
 		})
 	}
 	return result
@@ -2915,6 +3149,8 @@ func (ds *Datastore) GetNewSpeciesDetections(ctx context.Context, startDate, end
 			ScientificName: d.ScientificName,
 			FirstDetected:  d.FirstDetected,
 			LastDetected:   d.LastDetected,
+			CountInPeriod:  d.CountInPeriod,
+			FirstBeginTime: d.FirstBeginTime,
 		}
 	}
 
@@ -3015,6 +3251,27 @@ func (ds *Datastore) GetSpeciesDetectionDatesInPeriod(ctx context.Context, start
 // is safe for concurrent use, so there is no need to rebuild it on every call.
 var scientificNameLikeEscaper = strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`)
 
+// labelIDsForScientificName returns the "d.label_id IN (...)" clause and its
+// arguments for a scientific-name history lookup.
+//
+// A bare scientific name matches exactly, or a legacy concatenated label stored
+// as "ScientificName_CommonName". The "!_%" suffix is "literal underscore
+// separator, then anything" ('!_' is an escaped underscore, '%' is the
+// wildcard), mirroring how such labels are split on the first underscore (see
+// detection.ExtractScientificName). A class name that is also the first token of
+// a longer class matches exactly, because otherwise "Car" would also match the
+// distinct class "Car_passing_by"; the legacy concatenated form of such a name
+// is no longer matched. Every other name, including a single-token class like
+// "Dog" that BirdNET also emits as "Dog_Dog", keeps the prefix match.
+func labelIDsForScientificName(tablePrefix, scientificName string) (clause string, args []any) {
+	if nonbird.IsMultiWordClassPrefix(scientificName) {
+		return fmt.Sprintf("d.label_id IN (SELECT id FROM %slabels WHERE scientific_name = ?)", tablePrefix), []any{scientificName}
+	}
+	// Escape LIKE metacharacters with '!' (see scientificNameLikeEscaper).
+	escaped := scientificNameLikeEscaper.Replace(scientificName)
+	return fmt.Sprintf("d.label_id IN (SELECT id FROM %slabels WHERE scientific_name = ? OR scientific_name LIKE ? ESCAPE '!')", tablePrefix), []any{scientificName, escaped + `!_%`}
+}
+
 // GetSpeciesLastDetectionDateBefore returns the last detection date before the given date.
 func (ds *Datastore) GetSpeciesLastDetectionDateBefore(ctx context.Context, scientificName, beforeDate string) (string, error) {
 	before, err := time.ParseInLocation(time.DateOnly, beforeDate, ds.timezone)
@@ -3029,20 +3286,15 @@ func (ds *Datastore) GetSpeciesLastDetectionDateBefore(ctx context.Context, scie
 		LastSeenDate string `gorm:"column:last_seen_date"`
 	}
 
-	// Escape LIKE metacharacters with '!' (see scientificNameLikeEscaper).
-	escapedScientificName := scientificNameLikeEscaper.Replace(scientificName)
 	prefix := ds.manager.TablePrefix()
+	labelIDsClause, labelIDsArgs := labelIDsForScientificName(prefix, scientificName)
 	query := ds.manager.DB().WithContext(ctx).
 		Table(prefix+"detections d").
 		Select(fmt.Sprintf("COALESCE(MAX(%s), '') as last_seen_date", dateExpr)).
 		Joins(fmt.Sprintf("LEFT JOIN %sdetection_reviews dr ON d.id = dr.detection_id", prefix)).
 		Where("d.detected_at < ?", before.Unix()).
-		// Match the bare scientific name exactly, or a legacy concatenated label
-		// stored as "ScientificName_CommonName". The "!_%" suffix is "literal
-		// underscore separator, then anything" ('!_' is an escaped underscore,
-		// '%' is the wildcard), mirroring how such labels are split on the first
-		// underscore (see detection.ExtractScientificName).
-		Where(fmt.Sprintf("d.label_id IN (SELECT id FROM %slabels WHERE scientific_name = ? OR scientific_name LIKE ? ESCAPE '!')", prefix), scientificName, escapedScientificName+`!_%`).
+		// See labelIDsForScientificName for the matching rule.
+		Where(labelIDsClause, labelIDsArgs...).
 		Where("(dr.verified IS NULL OR dr.verified != ?)", string(entities.VerificationFalsePositive))
 
 	if err := query.Scan(&result).Error; err != nil {
@@ -3056,6 +3308,59 @@ func (ds *Datastore) GetSpeciesLastDetectionDateBefore(ctx context.Context, scie
 	}
 
 	return result.LastSeenDate, nil
+}
+
+// GetSpeciesFirstAndLastDetectionTimeBefore returns the earliest and most-recent
+// detection times for a species that occurred strictly before `before`.
+// Either/both may be nil when there is no prior detection. The name is matched
+// as described on labelIDsForScientificName.
+func (ds *Datastore) GetSpeciesFirstAndLastDetectionTimeBefore(ctx context.Context, scientificName string, before time.Time) (first, last *time.Time, err error) {
+	var result struct {
+		FirstDetectedAt *int64 `gorm:"column:first_detected_at"`
+		LastDetectedAt  *int64 `gorm:"column:last_detected_at"`
+	}
+
+	prefix := ds.manager.TablePrefix()
+	labelIDsClause, labelIDsArgs := labelIDsForScientificName(prefix, scientificName)
+	priorDetections := func(aggregate string) *gorm.DB {
+		return ds.manager.DB().
+			Table(prefix+"detections d").
+			Select(aggregate).
+			Joins(fmt.Sprintf("LEFT JOIN %sdetection_reviews dr ON d.id = dr.detection_id", prefix)).
+			Where("d.detected_at < ?", before.Unix()).
+			// See labelIDsForScientificName for the matching rule.
+			Where(labelIDsClause, labelIDsArgs...).
+			Where("(dr.verified IS NULL OR dr.verified != ?)", string(entities.VerificationFalsePositive))
+	}
+
+	// Each bound gets its own scalar subquery. SQLite answers a lone MIN() or
+	// MAX() by seeking to one end of the (label_id, detected_at) index, but
+	// with both in one SELECT it scans every matching row, which takes over a
+	// second for a species with hundreds of thousands of detections.
+	query := ds.manager.DB().WithContext(ctx).
+		Raw("SELECT (?) AS first_detected_at, (?) AS last_detected_at",
+			priorDetections("MIN(d.detected_at)"), priorDetections("MAX(d.detected_at)"))
+
+	if err := query.Scan(&result).Error; err != nil {
+		return nil, nil, errors.New(err).
+			Component("datastore").
+			Category(errors.CategoryDatabase).
+			Context("operation", "get_species_first_and_last_detection_time_before").
+			Context("scientific_name", scientificName).
+			Context("before", before.Format(time.RFC3339)).
+			Build()
+	}
+
+	if result.FirstDetectedAt != nil {
+		t := time.Unix(*result.FirstDetectedAt, 0).In(ds.timezone)
+		first = &t
+	}
+	if result.LastDetectedAt != nil {
+		t := time.Unix(*result.LastDetectedAt, 0).In(ds.timezone)
+		last = &t
+	}
+
+	return first, last, nil
 }
 
 // GetSpeciesDiversityData returns unique species count per day.
@@ -3139,7 +3444,7 @@ func (ds *Datastore) GetActivityHeatmap(ctx context.Context, startDate, endDate,
 		return datastore.ActivityHeatmapData{}, err
 	}
 
-	labelID, err := ds.resolveLabelID(ctx, species)
+	labelIDs, err := ds.resolveLabelIDs(ctx, species)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			return buildActivityHeatmap(nil, ds.timezone, startDate, endDate)
@@ -3147,7 +3452,7 @@ func (ds *Datastore) GetActivityHeatmap(ctx context.Context, startDate, endDate,
 		return datastore.ActivityHeatmapData{}, err
 	}
 
-	timestamps, err := ds.detection.GetDetectionTimestamps(ctx, start, end, labelID)
+	timestamps, err := ds.detection.GetDetectionTimestamps(ctx, start, end, labelIDs)
 	if err != nil {
 		return datastore.ActivityHeatmapData{}, err
 	}
@@ -3228,6 +3533,7 @@ func (ds *Datastore) selectTopSpeciesHourly(ctx context.Context, startDate, endD
 // It selects the top-N species and their per-hour counts via selectTopSpeciesHourly, then merges and
 // normalizes per species in Go (buildSpeciesHourlyDistribution) so each species' timing shape is
 // comparable regardless of raw volume. Powers the who-sings-when ridgeline.
+// Each row's CommonName is the server-locale name from resolveCommonName, passed to the builder.
 func (ds *Datastore) GetHourlyDistributionBySpecies(ctx context.Context, startDate, endDate string, species []string, limit int) ([]datastore.SpeciesHourlyDistribution, error) {
 	top, hourlyByLabel, err := ds.selectTopSpeciesHourly(ctx, startDate, endDate, species, limit)
 	if err != nil {
@@ -3236,7 +3542,7 @@ func (ds *Datastore) GetHourlyDistributionBySpecies(ctx context.Context, startDa
 	if len(top) == 0 {
 		return []datastore.SpeciesHourlyDistribution{}, nil
 	}
-	return buildSpeciesHourlyDistribution(top, hourlyByLabel), nil
+	return buildSpeciesHourlyDistribution(top, hourlyByLabel, ds.resolveCommonName), nil
 }
 
 // GetAcousticSuccession returns the raw hour-of-day detection counts (false positives excluded) for
@@ -3245,6 +3551,7 @@ func (ds *Datastore) GetHourlyDistributionBySpecies(ctx context.Context, startDa
 // same path as the ridgeline), then merges per species in Go (buildAcousticSuccession). Unlike the
 // ridgeline it does NOT normalize: the streamgraph stacks raw counts so band width is detection
 // volume. Powers the acoustic succession streamgraph.
+// Each row's CommonName is the server-locale name from resolveCommonName, passed to the builder.
 func (ds *Datastore) GetAcousticSuccession(ctx context.Context, startDate, endDate string, species []string, limit int) ([]datastore.SpeciesHourlyCounts, error) {
 	top, hourlyByLabel, err := ds.selectTopSpeciesHourly(ctx, startDate, endDate, species, limit)
 	if err != nil {
@@ -3253,7 +3560,7 @@ func (ds *Datastore) GetAcousticSuccession(ctx context.Context, startDate, endDa
 	if len(top) == 0 {
 		return []datastore.SpeciesHourlyCounts{}, nil
 	}
-	return buildAcousticSuccession(top, hourlyByLabel), nil
+	return buildAcousticSuccession(top, hourlyByLabel, ds.resolveCommonName), nil
 }
 
 // GetDailyActivityOnset returns the per-day dawn-chorus onset relative to civil dawn over the
@@ -3272,7 +3579,7 @@ func (ds *Datastore) GetDailyActivityOnset(ctx context.Context, startDate, endDa
 
 	dawn := ds.civilDawnMinuteLookup()
 
-	labelID, err := ds.resolveLabelID(ctx, species)
+	labelIDs, err := ds.resolveLabelIDs(ctx, species)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			return buildDailyActivityOnset(nil, ds.timezone, startDate, endDate, onsetDetectionRank, minOnsetDetections, dawn)
@@ -3280,7 +3587,7 @@ func (ds *Datastore) GetDailyActivityOnset(ctx context.Context, startDate, endDa
 		return nil, err
 	}
 
-	timestamps, err := ds.detection.GetDetectionTimestamps(ctx, start, end, labelID)
+	timestamps, err := ds.detection.GetDetectionTimestamps(ctx, start, end, labelIDs)
 	if err != nil {
 		return nil, errors.New(err).
 			Component("datastore").
@@ -3299,6 +3606,7 @@ func (ds *Datastore) GetDailyActivityOnset(ctx context.Context, startDate, endDa
 // confidences in one batched query (GetBatchConfidences), then bins and normalizes them in a shared,
 // table-tested Go helper (buildSpeciesConfidenceHistogram). minConfidence is 0 so every detection is
 // counted, matching the who-sings-when ridgeline and the other species analytics endpoints.
+// Each row's CommonName is the server-locale name from resolveCommonName, passed to the builder.
 func (ds *Datastore) GetConfidenceHistogram(ctx context.Context, startDate, endDate, species string, bins, limit int) ([]datastore.SpeciesConfidenceHistogram, error) {
 	start, end, err := ds.parseDateRange(startDate, endDate)
 	if err != nil {
@@ -3372,7 +3680,7 @@ func (ds *Datastore) GetConfidenceHistogram(ctx context.Context, startDate, endD
 			Build()
 	}
 
-	return buildSpeciesConfidenceHistogram(speciesSet, confByLabel, bins, minCount), nil
+	return buildSpeciesConfidenceHistogram(speciesSet, confByLabel, bins, minCount, ds.resolveCommonName), nil
 }
 
 // GetSpeciesAccumulation returns the species accumulation curve over [startDate, endDate]: per
@@ -3491,6 +3799,7 @@ func (ds *Datastore) GetYearOverYear(ctx context.Context, date string) (datastor
 // plus the in-range count. It fetches the spans in one grouped query (GetSpeciesPhenologyInPeriod),
 // then formats the timestamps to station-local dates and orders the rows by arrival in a shared,
 // table-tested Go helper (buildSpeciesPhenology) using the station timezone.
+// Each row's CommonName is the server-locale name from resolveCommonName, passed to the builder.
 func (ds *Datastore) GetSpeciesPhenology(ctx context.Context, startDate, endDate string, limit int) ([]datastore.SpeciesPhenologyPoint, error) {
 	start, end, err := ds.parseDateRange(startDate, endDate)
 	if err != nil {
@@ -3506,7 +3815,7 @@ func (ds *Datastore) GetSpeciesPhenology(ctx context.Context, startDate, endDate
 			Build()
 	}
 
-	return buildSpeciesPhenology(rows, ds.timezone), nil
+	return buildSpeciesPhenology(rows, ds.timezone, ds.resolveCommonName), nil
 }
 
 // civilDawnMinuteLookup returns a civilDawnMinuteLookup closure over the datastore's SunCalc and
@@ -3567,8 +3876,8 @@ func (ds *Datastore) resolveCommonName(scientificName string) string {
 			return name
 		}
 	}
-	nm := ds.loadNameMaps()
-	if cn, ok := nm.common[sciName]; ok {
+	snap := ds.loadNameMaps()
+	if cn, ok := snap.SciToCommon[sciName]; ok {
 		return cn
 	}
 	// Log once per missing species when maps are populated (not during startup with empty maps).
@@ -3578,11 +3887,11 @@ func (ds *Datastore) resolveCommonName(scientificName string) string {
 	// Guard ds.log: it may be nil when the datastore is constructed without a logger,
 	// matching the other logging sites in this file. Skipping the LoadOrStore when there
 	// is no logger is harmless: the dedup set only exists to rate-limit this log line.
-	if ds.log != nil && len(nm.common) > 0 {
+	if ds.log != nil && len(snap.SciToCommon) > 0 {
 		if _, alreadyLogged := ds.loggedMissingNames.LoadOrStore(sciName, struct{}{}); !alreadyLogged {
 			ds.log.Info("common name not found in name maps, falling back to scientific name",
 				logger.String("scientific_name", sciName),
-				logger.Int("name_map_size", len(nm.common)))
+				logger.Int("name_map_size", len(snap.SciToCommon)))
 		}
 	}
 	return sciName
@@ -3593,8 +3902,8 @@ func (ds *Datastore) resolveCommonName(scientificName string) string {
 // Uses the pre-built species name map (lowercase common name → scientific name).
 // Falls back to the input unchanged if no mapping is found.
 func (ds *Datastore) resolveToScientificName(name string) string {
-	normalized := strings.ToLower(norm.NFC.String(strings.TrimSpace(name)))
-	species := ds.loadNameMaps().species
+	normalized := speciesindex.Fold(strings.TrimSpace(name))
+	species := ds.loadNameMaps().CommonToSci
 	if sci, ok := species[normalized]; ok {
 		return sci
 	}

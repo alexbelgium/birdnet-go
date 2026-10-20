@@ -19,8 +19,8 @@
   <a href="https://golang.org">
     <img src="https://img.shields.io/badge/Built%20with-Go-teal?style=flat-square&logo=go">
   </a>
-  <a href="https://goreportcard.com/report/github.com/tphakala/birdnet-go">
-    <img src="https://goreportcard.com/badge/github.com/tphakala/birdnet-go?style=flat-square">
+  <a href="https://scorecard.dev/viewer/?uri=github.com/tphakala/birdnet-go">
+    <img src="https://img.shields.io/ossf-scorecard/github.com/tphakala/birdnet-go?label=OpenSSF%20Scorecard&style=flat-square">
   </a>
 
   <br>
@@ -36,7 +36,7 @@
     <img src="https://img.shields.io/github/issues/tphakala/birdnet-go?style=flat-square&color=red">
   </a>
   <a href="https://discord.gg/gcSCFGUtsd">
-    <img src="https://img.shields.io/discord/1298738918239100939?style=flat-square&logo=discord&color=5865F2&label=Discord">
+    <img src="https://img.shields.io/discord/1416220486433767436?style=flat-square&logo=discord&color=5865F2&label=Discord">
   </a>
 
   <a href="https://coderabbit.ai">
@@ -55,7 +55,7 @@ Self-hosted, 24/7, local AI inference. BirdNET-Go ingests soundcard input or net
 - **Live spectrogram streaming** and **detection heatmaps** rendered straight in the browser.
 - **Alert rules engine** that routes detections to Discord, Slack, Telegram, ntfy, Pushover, Gotify, Matrix, webhooks, browser push, MQTT (with Home Assistant discovery), shell scripts, and BirdWeather.
 - **Production-ready ops**: onboarding wizard, OIDC/SSO, TLS certificate management, hot-reload settings, system health page, database doctor, and one-click support dumps.
-- **Installable as a PWA**, with 15 UI languages and species names in 40+ languages.
+- **Installable as a PWA**, with a multilingual UI and species names in 40+ languages.
 - **Local-only by default**. Optional Sentry telemetry is strictly opt-in.
 
 ## Quick install
@@ -66,6 +66,8 @@ Debian, Ubuntu, and Raspberry Pi OS:
 curl -fsSL https://github.com/tphakala/birdnet-go/raw/main/install.sh -o install.sh
 bash ./install.sh
 ```
+
+Docker Compose, Portainer, Unraid and plain `docker run` users should start from the host-network configurations described in the [installation guide](https://github.com/tphakala/birdnet-go/wiki/installation) (Portainer: the **BirdNET-Go (host network, recommended)** template or the stack file `Docker/docker-compose.host.yml`, see the [Docker Compose guide](https://github.com/tphakala/birdnet-go/wiki/docker_compose_guide); Unraid: the [Unraid README](Unraid/README.md)); the bridge configurations remain supported. The Unraid host template is untested on real Unraid.
 
 Docker images are published for `linux/amd64` and `linux/arm64`. Pre-built binaries for Linux, Windows, and macOS ship with each [release](https://github.com/tphakala/birdnet-go/releases). See the [installation guide](https://github.com/tphakala/birdnet-go/wiki/installation), [hardware recommendations](https://github.com/tphakala/birdnet-go/wiki/hardware), and [security guide](https://github.com/tphakala/birdnet-go/wiki/security) for details.
 
@@ -105,7 +107,7 @@ Docker images are published for `linux/amd64` and `linux/arm64`. Pre-built binar
 - Customizable dashboard layout, color schemes, and a "Currently Hearing" card
 - Multiselect and bulk actions on the detections list
 - Browser terminal (xterm.js over WebSocket PTY) for in-app administration
-- 15 UI languages: English, German, French, Spanish, Portuguese, Dutch, Polish, Italian, Czech, Slovak, Hungarian, Finnish, Swedish, Danish, Latvian
+- UI languages: English, German, French, Spanish, Portuguese, Dutch, Polish, Italian, Czech, Slovak, Hungarian, Finnish, Swedish, Danish, Norwegian (Bokmål), Latvian
 - Species names in 40+ languages
 
 ### Alerts and integrations
@@ -210,6 +212,7 @@ Join the [Discord server](https://discord.gg/gcSCFGUtsd) for support, discussion
 ### Mobile apps
 
 - [Perch](https://github.com/arunrajiah/perch): open-source Android/iOS companion app. Connects to BirdNET-Go via the BirdWeather API. Live detection feed, audio playback, species browser, 14-day chart, and notifications for favourite species. MIT licensed.
+- [BirdFeeder](https://github.com/kj7ppk/birdfeeder): open-source Android streaming app. Publishes real-time RTSP audio for consumption as a BirdNET-GO stream.
 
 ## Contributing
 

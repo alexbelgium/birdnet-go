@@ -54,7 +54,6 @@ func CloneSettings(src *Settings) *Settings {
 
 	// Models.
 	dst.Models.Enabled = slices.Clone(src.Models.Enabled)
-	dst.Models.Installed = slices.Clone(src.Models.Installed)
 
 	// Realtime.Audio.
 	dst.Realtime.Audio.Sources = cloneAudioSources(src.Realtime.Audio.Sources)
@@ -97,6 +96,7 @@ func CloneSettings(src *Settings) *Settings {
 	// Security.
 	dst.Security.OAuthProviders = cloneOAuthProviders(src.Security.OAuthProviders)
 	dst.Security.TrustedProxies = slices.Clone(src.Security.TrustedProxies)
+	dst.Security.PlainHTTPSessionClients = slices.Clone(src.Security.PlainHTTPSessionClients)
 
 	// Backup.
 	dst.Backup.Targets = cloneBackupTargets(src.Backup.Targets)

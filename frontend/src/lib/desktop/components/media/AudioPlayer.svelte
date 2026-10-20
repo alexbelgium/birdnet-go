@@ -23,6 +23,8 @@
     Use for flexible layouts like cards and tables. When false, uses fixed dimensions.
   - spectrogramSize: Spectrogram display size - md/lg/xl (default: lg)
   - spectrogramRaw: Display raw spectrogram without axes (default: false)
+  - modelType: AI model type ('bird', 'bat'); selects the frequency axis
+  - clipSampleRate: Clip sample rate in Hz; sets the bat frequency axis range
   - onPlayStart: Callback when audio starts playing (freezes SSE updates)
   - onPlayEnd: Callback when audio stops playing after 3s delay (resumes SSE updates)
 -->
@@ -32,6 +34,8 @@
   import { cn } from '$lib/utils/cn.js';
   import { Play, Pause, Download, XCircle } from '@lucide/svelte';
   import AudioSettingsButton from '$lib/desktop/features/dashboard/components/AudioSettingsButton.svelte';
+  import AudibleBatsButton from '$lib/desktop/features/dashboard/components/AudibleBatsButton.svelte';
+  import { useAudibleBats } from '$lib/utils/useAudibleBats.svelte';
   import AudioToolbar from './AudioToolbar.svelte';
   import { t } from '$lib/i18n';
   import { loggers } from '$lib/utils/logger';
@@ -45,6 +49,8 @@
     MIN_CONTROLS_WIDTH_PX,
     MAX_AUDIO_LOAD_RETRIES,
     AUDIO_RETRY_DELAY_MS,
+    isPlayInterruptedError,
+    playButtonLabelKey,
   } from '$lib/utils/audio';
   import {
     getAudioContext,
@@ -57,7 +63,18 @@
     type AudioNodeChain,
   } from '$lib/utils/audioNodes';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
+  import {
+    CLIP_CONTAINER_EXTENSION,
+    extensionFromContentDisposition,
+  } from '$lib/utils/audioDownload';
   import { getCsrfToken } from '$lib/utils/api';
+  import { isKnownSampleRate, lookupClipSampleRate } from '$lib/utils/clipSampleRateLookup';
+  import {
+    fetchSpectrogramStatus,
+    parseSpectrogramStatus,
+    type SpectrogramGenerationStatus,
+  } from '$lib/utils/spectrogramStatus';
+  import { batFrequencyAxis } from '$lib/utils/spectrogramAxis';
   import { get } from 'svelte/store';
   import { dashboardSettings } from '$lib/stores/settings';
 
@@ -112,6 +129,11 @@
     clipLabel?: string;
     /** AI model type (e.g. 'bird', 'bat'); selects the spectrogram frequency axis range */
     modelType?: string;
+    /**
+     * Sample rate of the clip in Hz. Bat spectrograms span 0 to half this rate;
+     * when it is missing the player asks the detection endpoint for it once.
+     */
+    clipSampleRate?: number;
   }
 
   let {
@@ -131,6 +153,7 @@
     enableClipExtraction = false,
     clipLabel = '',
     modelType = '',
+    clipSampleRate,
   }: Props = $props();
 
   // Audio and UI elements
@@ -148,6 +171,10 @@
   let currentTime = $state(0);
   let duration = $state(0);
   let audioContextAvailable = $state(true);
+  // Mutual-exclusion signals: bumping one forces the sibling popup (Audible
+  // Bats vs Audio Settings) closed, so only one is ever open at a time.
+  let closeAudibleBatsSignal = $state(0);
+  let closeAudioSettingsSignal = $state(0);
   let progress = $state(0);
   let isLoading = $state(false);
   let error = $state<string | null>(null);
@@ -174,17 +201,17 @@
   // Cache key for forcing spectrogram reload via Svelte reactivity (instead of direct DOM manipulation)
   let spectrogramCacheKey = $state(0);
 
-  // Audio load retry state — handles race condition where detection DB record
+  // Audio load retry state: handles race condition where detection DB record
   // exists but audio file is still being encoded by FFmpeg (backend returns 503)
   let audioRetryCount = 0;
   let audioRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  // True when the user pressed play while a load retry was pending; consumed once
+  // by 'loadedmetadata' or 'canplay' so the play intent is not lost when the
+  // transient error is suppressed.
+  let playRequestedAfterRetry = false;
 
   // Spectrogram generation status
-  let spectrogramStatus = $state<{
-    status: string;
-    queuePosition: number;
-    message: string;
-  } | null>(null);
+  let spectrogramStatus = $state<SpectrogramGenerationStatus | null>(null);
   let statusPollTimer: ReturnType<typeof setTimeout> | undefined;
   let statusPollStartTime: number | undefined;
   let statusPollAbortController: AbortController | undefined;
@@ -222,7 +249,7 @@
   }> = [];
 
   // Control state
-  // Read persistent default from settings store (one-time, not reactive —
+  // Read persistent default from settings store (one-time, not reactive:
   // changing the setting while a player is mounted should not cause gain to jump)
   const defaultGainDb = get(dashboardSettings)?.defaultAudioGain ?? 0;
   let gainValue = $state(defaultGainDb); // dB
@@ -261,32 +288,97 @@
   let processAbortController: AbortController | null = null;
   let processDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Audible bats derived playback. When active, the player swaps its audio source
+  // to a server-generated time-expanded (slowed) copy so ultrasonic bat calls fall
+  // into the human hearing range. The spectrogram still spans the full original
+  // clip; because the derived audio's duration scales by the expansion factor, the
+  // playhead and seeking stay proportionally in sync automatically. The request
+  // lifecycle lives in the shared composable; this component owns the actual
+  // source swap (so position is preserved across the duration change).
+  const audibleBats = useAudibleBats({
+    getDetectionId: () => detectionId,
+    onActivate: url => swapAudioSource(url),
+    onDeactivate: () => swapAudioSource(processedAudioUrl ?? audioUrl),
+  });
+  // Proportional position (0-1) to restore after an audio source swap, applied
+  // once the new source's metadata (and therefore its duration) is available.
+  let audibleBatsPendingFraction: number | null = null;
+  // Whether playback should resume once the swapped-in source's metadata (and
+  // restored position) are ready, which avoids a race where play() starts from 0
+  // before handleLoadedMetadata applies audibleBatsPendingFraction.
+  let audibleBatsPendingAutoplay = false;
+
   // Constants
   const GAIN_MAX_DB = 24;
   const FILTER_HP_MIN_FREQ = 20;
   const FILTER_HP_MAX_FREQ = 10000;
 
-  // Frequency scale overlay constants. Bird spectrograms are resampled to 24kHz
-  // (Nyquist = 12kHz); bat spectrograms keep the native capture rate and are always
-  // labelled on a fixed 0-128 kHz axis regardless of the clip's actual sample rate.
-  // The axis range follows the detection's model type.
+  // Frequency scale overlay. Bird spectrograms are drawn for 24 kHz, so their
+  // axis is a fixed 0-12 kHz. Bat spectrograms are rendered at the clip's own
+  // sample rate, so their axis runs from 0 to half the clip sample rate. Without a
+  // known rate the bat axis is hidden rather than guessed.
   const BIRD_NYQUIST_KHZ = 12;
   const BIRD_TICKS_KHZ = [12, 10, 8, 6, 5, 4, 3, 2, 1];
-  const BAT_NYQUIST_KHZ = 128;
-  const BAT_TICKS_KHZ = [120, 100, 80, 60, 40, 20];
   const MODEL_TYPE_BAT = 'bat';
+  // Query parameter that tells the server the rate the axis is drawn from; the
+  // server then serves only the exact render for that rate (404 otherwise).
+  const SPECTROGRAM_RATE_PARAM = 'sr';
+  // Longest wait for the status check of a failed image URL that carries the
+  // rate. It is longer than the server's 5 s wait for a missing audio file, so a
+  // 404 from that path still arrives in time.
+  const SPECTROGRAM_PROBE_TIMEOUT_MS = 8000;
+  const HTTP_STATUS_NOT_FOUND = 404;
+  // Generation statuses that mean the exact-rate render is coming or already
+  // there, so a 404 for it is not a missing render.
+  const RENDER_PENDING_OR_READY_STATUSES = new Set([
+    'queued',
+    'generating',
+    'generated',
+    'completed',
+    'exists',
+  ]);
+
   let isBatSpectrogram = $derived(modelType === MODEL_TYPE_BAT);
-  let freqNyquistKHz = $derived(isBatSpectrogram ? BAT_NYQUIST_KHZ : BIRD_NYQUIST_KHZ);
-  let freqTicksKHz = $derived(isBatSpectrogram ? BAT_TICKS_KHZ : BIRD_TICKS_KHZ);
+
+  // Rate learned from GET /api/v2/detections/:id, keyed by the detection it was
+  // resolved for so a new detection never reuses an old rate. rate is undefined
+  // when the resolve finished without one (error, timeout, field omitted).
+  let rateResolve = $state<{ detectionId: string; rate: number | undefined } | null>(null);
+  // Detection whose exact-rate spectrogram failed to load; it is shown without sr
+  // and without an axis instead.
+  let overlayFallbackDetectionId = $state<string | null>(null);
+
+  let needsRateResolve = $derived(
+    isBatSpectrogram && showSpectrogram && !isKnownSampleRate(clipSampleRate) && detectionId !== ''
+  );
+  let rateResolvePending = $derived(needsRateResolve && rateResolve?.detectionId !== detectionId);
+  let effectiveClipSampleRate = $derived(
+    isKnownSampleRate(clipSampleRate)
+      ? clipSampleRate
+      : rateResolve?.detectionId === detectionId
+        ? rateResolve.rate
+        : undefined
+  );
+  // Rate the spectrogram URL carries and the bat axis is drawn from.
+  let overlayRate = $derived(
+    isBatSpectrogram && overlayFallbackDetectionId !== detectionId
+      ? effectiveClipSampleRate
+      : undefined
+  );
+  let batAxis = $derived(isBatSpectrogram ? batFrequencyAxis(overlayRate) : null);
+  let freqNyquistKHz = $derived(isBatSpectrogram ? (batAxis?.nyquistKHz ?? 0) : BIRD_NYQUIST_KHZ);
+  let freqTicksKHz = $derived(isBatSpectrogram ? (batAxis?.ticksKHz ?? []) : BIRD_TICKS_KHZ);
   // PLAY_END_DELAY_MS imported from $lib/utils/audio
   // Spinner delay is now handled by useDelayedLoading utility
 
   // Computed values
-  // Base URL without cache-busting parameters
+  // Base URL without cache-busting parameters. It stays null while a bat rate
+  // is being resolved, so an image cached under a URL without the rate is never
+  // shown first under an axis it does not match.
   const spectrogramBaseUrl = $derived(
-    showSpectrogram
+    showSpectrogram && !rateResolvePending
       ? buildAppUrl(
-          `/api/v2/spectrogram/${encodeURIComponent(detectionId)}?size=${spectrogramSize}${spectrogramRaw ? '&raw=true' : ''}`
+          `/api/v2/spectrogram/${encodeURIComponent(detectionId)}?size=${spectrogramSize}${spectrogramRaw ? '&raw=true' : ''}${overlayRate !== undefined ? `&${SPECTROGRAM_RATE_PARAM}=${overlayRate}` : ''}`
         )
       : null
   );
@@ -298,6 +390,16 @@
       (spectrogramBaseUrl
         ? `${spectrogramBaseUrl}&cache=${spectrogramCacheKey}${spectrogramRetryCount > 0 ? `&retry=${spectrogramRetryCount}` : ''}`
         : null)
+  );
+
+  // The frequency axis overlay: drawn over a spectrogram that has not failed,
+  // with a known range; a bat axis only once its image has loaded.
+  const showFreqAxis = $derived(
+    showSpectrogram &&
+      spectrogramUrl !== null &&
+      !spectrogramLoader.error &&
+      freqNyquistKHz > 0 &&
+      !(isBatSpectrogram && spectrogramLoader.loading)
   );
 
   const playPauseId = $derived(`playPause-${detectionId}`);
@@ -337,11 +439,11 @@
   };
 
   // Selection interaction constants
-  const MIN_DRAG_DISTANCE = 5; // Pixels — distinguishes click from drag
-  const MOUSE_HANDLE_THRESHOLD = 16; // Pixels — snap zone for mouse handle grab
-  const TOUCH_HANDLE_THRESHOLD = 24; // Pixels — larger snap zone for touch
-  const MIN_SELECTION_DURATION = 0.05; // Seconds — minimum useful selection
-  const ARROW_KEY_STEP = 0.1; // Seconds — keyboard handle adjustment
+  const MIN_DRAG_DISTANCE = 5; // Pixels: distinguishes click from drag
+  const MOUSE_HANDLE_THRESHOLD = 16; // Pixels: snap zone for mouse handle grab
+  const TOUCH_HANDLE_THRESHOLD = 24; // Pixels: larger snap zone for touch
+  const MIN_SELECTION_DURATION = 0.05; // Seconds: minimum useful selection
+  const ARROW_KEY_STEP = 0.1; // Seconds: keyboard handle adjustment
   const PROCESS_DEBOUNCE_MS = 300; // Debounce delay for server-side processing requests
   const INTERACTIVE_ELEMENTS_SELECTOR =
     'button, select, input, label, a, [role="button"], [role="dialog"]';
@@ -402,7 +504,7 @@
       return;
     }
 
-    // Check if clicking inside existing selection — start scrubbing
+    // Check if clicking inside existing selection: start scrubbing
     const clickTime = xToTime(e.clientX);
     if (isInsideSelection(clickTime) && selectionStartSec !== null && selectionEndSec !== null) {
       isScrubbing = true;
@@ -413,7 +515,7 @@
       return;
     }
 
-    // Don't start selection yet — wait for mousemove to confirm it's a drag.
+    // Don't start selection yet; wait for mousemove to confirm it's a drag.
     // Single click will seek the playhead in mouseUp handler.
     e.preventDefault();
   };
@@ -502,7 +604,7 @@
       return;
     }
 
-    // Single click (no drag) — seek or clear selection
+    // Single click (no drag): seek or clear selection
     // Only if the mousedown originated within the spectrogram container
     if (wasInPlayer && Math.abs(e.clientX - dragOriginX) < MIN_DRAG_DISTANCE) {
       const clickTime = xToTime(e.clientX);
@@ -552,7 +654,7 @@
       return;
     }
 
-    // Check if touching inside existing selection — start scrubbing
+    // Check if touching inside existing selection: start scrubbing
     const clickTime = xToTime(touch.clientX);
     if (isInsideSelection(clickTime) && selectionStartSec !== null && selectionEndSec !== null) {
       isScrubbing = true;
@@ -715,10 +817,12 @@
 
       const blob = await response.blob();
 
-      // Map format to container file extension (must match backend clipFileExtension)
-      const extMap: Record<string, string> = { alac: 'm4a', aac: 'm4a', opus: 'ogg' };
-      // eslint-disable-next-line security/detect-object-injection -- extractionFormat is a controlled string from component props
-      const ext = extMap[extractionFormat] ?? extractionFormat;
+      // Name the download for the container the server produced (m4a for AAC, ogg
+      // for Opus), taken from the response's Content-Disposition filename.
+      const ext = extensionFromContentDisposition(
+        response.headers.get('Content-Disposition'),
+        CLIP_CONTAINER_EXTENSION[extractionFormat] ?? extractionFormat
+      );
       // Sanitize label for filesystem safety (remove reserved chars, normalize whitespace)
       const safeLabel = clipLabel
         ? clipLabel.replace(/[<>:"/\\|?*]/g, '-').replace(/\s+/g, '_')
@@ -762,9 +866,12 @@
     if (processAbortController) {
       processAbortController.abort();
     }
+    // The source is about to change, so a queued play intent or load retry
+    // belongs to the old clip and must not autoplay the processed one.
+    resetRetryState();
 
     if (!processingDenoise && !processingNormalize) {
-      // No server-side processing needed — revert to original audio and spectrogram
+      // No server-side processing needed; revert to original audio and spectrogram
       if (processedAudioUrl) {
         URL.revokeObjectURL(processedAudioUrl);
         processedAudioUrl = null;
@@ -775,7 +882,7 @@
       }
       if (audioElement) {
         const pos = audioElement.currentTime;
-        audioElement.src = audioUrl;
+        replaceSource(audioUrl);
         audioElement.currentTime = pos;
       }
       return;
@@ -823,7 +930,7 @@
 
       if (audioElement) {
         const pos = audioElement.currentTime;
-        audioElement.src = processedAudioUrl;
+        replaceSource(processedAudioUrl);
         audioElement.currentTime = pos;
       }
 
@@ -852,7 +959,7 @@
       }
       if (audioElement) {
         const pos = audioElement.currentTime;
-        audioElement.src = audioUrl;
+        replaceSource(audioUrl);
         audioElement.currentTime = pos;
       }
     } finally {
@@ -918,7 +1025,7 @@
 
   function handleToolbarExport(format: string) {
     if (format === 'original') {
-      // Download original file directly — empty download attribute lets the
+      // Download original file directly; an empty download attribute lets the
       // browser use the server's Content-Disposition filename
       const a = document.createElement('a');
       a.href = audioUrl;
@@ -931,7 +1038,7 @@
 
     extractionFormat = format;
     if (selectionStartSec === null || selectionEndSec === null) {
-      // No selection — export full file (guard against unloaded metadata)
+      // No selection: export full file (guard against unloaded metadata)
       if (!isFinite(duration) || duration <= 0) return;
       extractClip(0, duration);
     } else {
@@ -964,50 +1071,134 @@
     }
   };
 
+  // The source the element should currently load: the audible-bats clip or the
+  // processed clip when active, otherwise the original.
+  const currentSource = () =>
+    audibleBats.active && audibleBats.url ? audibleBats.url : (processedAudioUrl ?? audioUrl);
+
+  function clearAudioRetryTimer() {
+    if (audioRetryTimer !== undefined) {
+      clearTimeout(audioRetryTimer);
+      audioRetryTimer = undefined;
+    }
+  }
+
+  // A src assignment or load() pauses the element without a 'pause' event, so
+  // mirror the pause listener when the flag still says playing.
+  function markPlaybackStopped() {
+    if (isPlaying) handlePause();
+  }
+
+  // Resume playback the user asked for during a retry, at most once.
+  function consumePendingPlay() {
+    if (!playRequestedAfterRetry) return;
+    playRequestedAfterRetry = false;
+    if (audioElement?.paused) {
+      void audioElement.play().catch(handlePlayRejection);
+    }
+  }
+
+  // Handle a rejected play(). While a retry timer is pending the retry can
+  // still succeed, so only remember the play intent.
+  function handlePlayRejection(err: unknown) {
+    if (audioRetryTimer !== undefined) {
+      playRequestedAfterRetry = true;
+      return;
+    }
+    if (isPlayInterruptedError(err)) {
+      logger.debug('Audio play interrupted', { detectionId });
+      return;
+    }
+    // A reload's loadstart set isLoading, which disables the play button, so an
+    // error must never sit behind a disabled spinner button.
+    isLoading = false;
+    if (audioElement?.error) {
+      error ??= t('media.audio.error');
+      logger.warn('Audio play failed after a load error', { detectionId });
+      return;
+    }
+    logger.error('Error playing audio:', err);
+    error = t('media.audio.playError');
+  }
+
+  // Drop any queued play intent and pending retry, and restore the full budget.
+  function resetRetryState() {
+    playRequestedAfterRetry = false;
+    clearAudioRetryTimer();
+    audioRetryCount = 0;
+  }
+
+  // Point the element at a new source. The assignment pauses the element without
+  // a 'pause' event, so the playing flag is cleared first.
+  function replaceSource(url: string) {
+    if (!audioElement) return;
+    markPlaybackStopped();
+    audioElement.src = url;
+  }
+
+  // Reload a failed clip at once, cancelling any pending retry and restoring the
+  // full retry budget. Runs inside the click so the gesture reaches play().
+  function reloadAfterFailure() {
+    if (!audioElement) return;
+    resetRetryState();
+    replaceSource(currentSource());
+    audioElement.load();
+  }
+
   // Audio event handlers
   const handlePlayPause = async () => {
     if (!audioElement) return;
 
-    try {
-      if (isPlaying) {
-        audioElement.pause();
-      } else {
-        // Initialize the audio context on first play, and re-enter whenever the
-        // graph is not attached OR the context has fallen back to suspended
-        // (e.g. tab backgrounding / audio-session interruption) so
-        // getAudioContext() resumes it. Without the state re-check, an
-        // already-attached graph on a re-suspended context plays silently.
-        // Guard against rapid clicks that could create multiple AudioContexts.
-        if ((!audioNodes || audioContext?.state !== 'running') && !isInitializingContext) {
-          isInitializingContext = true;
-          try {
-            audioContext = await initializeAudioContext();
-            // Attach the Web Audio graph only when the context is running;
-            // while suspended the element plays through native output and the
-            // graph is deferred to a later play (see attachAudioGraphWhenRunning).
-            audioNodes = attachAudioGraphWhenRunning(audioContext, audioElement, audioNodes, {
-              gainDb: gainValue,
-              highPassFreq: filterFreq,
-              includeCompressor: true,
-            });
-            // Reflect whether the EQ/gain graph is actually live: attached AND
-            // the context running. A previously-attached graph on a re-suspended
-            // context that failed to resume is inert, so the audio settings
-            // control must not be enabled in that case.
-            audioContextAvailable = audioNodes !== null && audioContext?.state === 'running';
-          } finally {
-            isInitializingContext = false;
-          }
-        }
+    if (!audioElement.paused && !audioElement.error) {
+      audioElement.pause();
+      return;
+    }
 
-        // Safety check: component may have unmounted during async initialization
-        if (!audioElement) return;
+    error = null;
+    // A failed element cannot play (retries exhausted, or a retry timer pending):
+    // reload it now instead of swallowing the click.
+    if (audioElement.error) reloadAfterFailure();
 
-        await audioElement.play();
+    // Initialize the audio context on first play, and re-enter whenever the
+    // graph is not attached OR the context has fallen back to suspended
+    // (e.g. tab backgrounding / audio-session interruption) so
+    // getAudioContext() resumes it. Without the state re-check, an
+    // already-attached graph on a re-suspended context plays silently.
+    // Guard against rapid clicks that could create multiple AudioContexts.
+    if ((!audioNodes || audioContext?.state !== 'running') && !isInitializingContext) {
+      isInitializingContext = true;
+      try {
+        audioContext = await initializeAudioContext();
+        // Attach the Web Audio graph only when the context is running;
+        // while suspended the element plays through native output and the
+        // graph is deferred to a later play (see attachAudioGraphWhenRunning).
+        audioNodes = attachAudioGraphWhenRunning(audioContext, audioElement, audioNodes, {
+          gainDb: gainValue,
+          highPassFreq: filterFreq,
+          includeCompressor: true,
+        });
+        // Reflect whether the EQ/gain graph is actually live: attached AND
+        // the context running. A previously-attached graph on a re-suspended
+        // context that failed to resume is inert, so the audio settings
+        // control must not be enabled in that case.
+        audioContextAvailable = audioNodes !== null && audioContext?.state === 'running';
+      } catch (err) {
+        // A failed graph build must not block playback: the element still
+        // plays through its native output.
+        logger.warn('Audio graph setup failed, playing without processing', err);
+        audioContextAvailable = false;
+      } finally {
+        isInitializingContext = false;
       }
+    }
+
+    // Safety check: component may have unmounted during async initialization
+    if (!audioElement) return;
+
+    try {
+      await audioElement.play();
     } catch (err) {
-      logger.error('Error playing audio:', err);
-      error = t('media.audio.playError');
+      handlePlayRejection(err);
     }
   };
 
@@ -1031,6 +1222,23 @@
     }
   };
 
+  const handlePause = () => {
+    isPlaying = false;
+    stopInterval();
+    isPlayingSelection = false;
+    if (selectionPlaybackTimeout) {
+      clearTimeout(selectionPlaybackTimeout);
+      selectionPlaybackTimeout = undefined;
+    }
+    // Set delay before signaling play end to avoid disrupting UI during brief pauses
+    clearPlayEndTimeout();
+    playEndTimeout = setTimeout(() => {
+      if (onPlayEnd) {
+        onPlayEnd();
+      }
+    }, PLAY_END_DELAY_MS);
+  };
+
   const handleTimeUpdate = () => {
     // Keep as fallback but primary updates come from interval
     updateProgress();
@@ -1041,6 +1249,20 @@
     duration = audioElement.duration;
     isLoading = false;
     error = null;
+    // Restore the proportional playback position after an audible-bats source
+    // swap (the derived clip has a different duration than the original).
+    if (audibleBatsPendingFraction !== null && isFinite(duration) && duration > 0) {
+      audioElement.currentTime = audibleBatsPendingFraction * duration;
+      currentTime = audioElement.currentTime;
+      progress = (currentTime / duration) * 100;
+    }
+    audibleBatsPendingFraction = null;
+
+    if (audibleBatsPendingAutoplay) {
+      audibleBatsPendingAutoplay = false;
+      audioElement.play().catch(handlePlayRejection);
+    }
+    consumePendingPlay();
   };
 
   const handleProgressClick = (event: MouseEvent) => {
@@ -1083,6 +1305,31 @@
       applyPlaybackRate(audioElement, newSpeed);
     }
   };
+
+  // --- Audible bats derived playback ---
+
+  // Swap the player's audio source, preserving the proportional playback
+  // position and play/pause state across the change. The actual seek (and any
+  // resumed playback) happens in handleLoadedMetadata once the new source
+  // reports its duration, avoiding a race where play() would otherwise start
+  // from position 0 before the proportional position is restored.
+  function swapAudioSource(newSrc: string) {
+    if (!audioElement) return;
+    // Read the live element position rather than the reactive `currentTime`
+    // state, which only updates on the progress interval/timeupdate and can
+    // lag a recent direct seek.
+    const liveCurrentTime = audioElement.currentTime;
+    const frac = isFinite(duration) && duration > 0 ? liveCurrentTime / duration : 0;
+    audibleBatsPendingFraction = frac;
+    audibleBatsPendingAutoplay = isPlaying || playRequestedAfterRetry;
+    resetRetryState();
+    replaceSource(newSrc);
+    audioElement.load();
+  }
+
+  // The generate/disable lifecycle lives in the useAudibleBats composable; the
+  // onActivate/onDeactivate callbacks above route back into swapAudioSource so the
+  // playback position is preserved across the source change.
 
   // Part of user-requested spectrogram generation feature (see TODO above)
   // Check spectrogram mode on mount/URL change to avoid double-request pattern
@@ -1132,6 +1379,12 @@
   };
 
   // Poll spectrogram generation status
+  // URL of this detection's spectrogram generation status.
+  const spectrogramStatusUrl = () =>
+    buildAppUrl(
+      `/api/v2/spectrogram/${encodeURIComponent(detectionId)}/status?size=${spectrogramSize}${spectrogramRaw ? '&raw=true' : ''}`
+    );
+
   const pollSpectrogramStatus = async () => {
     if (!showSpectrogram || !detectionId) {
       debugLog('pollSpectrogramStatus: skipped', {
@@ -1158,9 +1411,7 @@
     // Create new AbortController for this poll request
     statusPollAbortController = new AbortController();
 
-    const statusUrl = buildAppUrl(
-      `/api/v2/spectrogram/${encodeURIComponent(detectionId)}/status?size=${spectrogramSize}${spectrogramRaw ? '&raw=true' : ''}`
-    );
+    const statusUrl = spectrogramStatusUrl();
     debugLog('pollSpectrogramStatus: fetching', { url: statusUrl });
 
     try {
@@ -1172,10 +1423,9 @@
       });
 
       if (response.ok) {
-        const responseData = await response.json();
-        // Extract status from v2 envelope format
-        const status = responseData.data ?? responseData;
-        spectrogramStatus = status;
+        const status = parseSpectrogramStatus(await response.json());
+        spectrogramStatus = status ?? null;
+        if (!status) return;
 
         debugLog('pollSpectrogramStatus: status data', {
           status: status.status,
@@ -1232,6 +1482,64 @@
     statusPollStartTime = undefined;
   };
 
+  // Status check of a failed spectrogram image that carries the clip rate.
+  let spectrogramProbeAbortController: AbortController | undefined;
+
+  const clearSpectrogramProbe = () => {
+    spectrogramProbeAbortController?.abort();
+    spectrogramProbeAbortController = undefined;
+  };
+
+  // Loads the render the server has for this detection without the rate, and
+  // without an axis, instead of the exact-rate render.
+  const fallBackToImageWithoutRate = () => {
+    overlayFallbackDetectionId = detectionId;
+    clearSpectrogramRetryTimer();
+    clearStatusPollTimer();
+    clearSpectrogramProbe();
+  };
+
+  // An <img> cannot read the response status, so the failed URL is requested
+  // once more with fetch. A 404 means the exact-rate render does not exist
+  // (sr requests are answered from the exact render only), so the player falls
+  // back at once instead of spending its retries on it, unless the detection's
+  // spectrogram status reports a generation that is queued, running or just
+  // finished, which the status poll then waits for or reloads as before. Any other outcome (503 while a clip
+  // is written, a network error, the timeout) leaves the retries to run as
+  // before.
+  const probeExactRateRender = async (url: string) => {
+    clearSpectrogramProbe();
+    const controller = new AbortController();
+    spectrogramProbeAbortController = controller;
+    const probedBaseUrl = spectrogramBaseUrl;
+    const timeoutId = setTimeout(() => controller.abort(), SPECTROGRAM_PROBE_TIMEOUT_MS);
+    const stillCurrent = () =>
+      spectrogramBaseUrl === probedBaseUrl && overlayRate !== undefined && !processedSpectrogramUrl;
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      // Only the status is needed; drop the body.
+      void response.body?.cancel();
+      if (response.status !== HTTP_STATUS_NOT_FOUND || !stillCurrent()) return;
+
+      // Ask for the generation status here rather than reading the status
+      // poll's state, which may not have answered yet. If it cannot be read
+      // (network error, the timeout), the 404 decides on its own.
+      const generation = await fetchSpectrogramStatus(spectrogramStatusUrl(), controller.signal);
+      // Cancelled by an image load, a URL change or unmount: nothing to do.
+      if (spectrogramProbeAbortController !== controller || !stillCurrent()) return;
+      if (generation && RENDER_PENDING_OR_READY_STATUSES.has(generation.status)) return;
+      debugLog('probeExactRateRender: 404, dropping the rate and the axis');
+      fallBackToImageWithoutRate();
+    } catch {
+      // Aborted, timed out or failed: the retries carry on unchanged.
+    } finally {
+      clearTimeout(timeoutId);
+      if (spectrogramProbeAbortController === controller) {
+        spectrogramProbeAbortController = undefined;
+      }
+    }
+  };
+
   // Spectrogram loading handlers
   const handleSpectrogramLoad = () => {
     debugLog('handleSpectrogramLoad: success');
@@ -1239,6 +1547,7 @@
     spectrogramRetryCount = 0; // Reset retry count on successful load
     clearSpectrogramRetryTimer();
     clearStatusPollTimer(); // Also clear status polling
+    clearSpectrogramProbe();
   };
 
   const handleSpectrogramError = async (event: Event) => {
@@ -1269,6 +1578,10 @@
       debugLog('handleSpectrogramError: first error, starting status polling');
       statusPollStartTime = Date.now();
       pollSpectrogramStatus();
+      // An image requested with the clip rate: ask the server why it failed.
+      if (overlayRate !== undefined && !processedSpectrogramUrl && spectrogramUrl) {
+        void probeExactRateRender(spectrogramUrl);
+      }
     }
 
     // Retry on any error (likely 503 or temporary failure) up to max retries
@@ -1315,6 +1628,19 @@
         queuePosition: spectrogramStatus.queuePosition,
       });
       // Don't set error, keep polling
+      return;
+    }
+
+    // The image requested with the clip rate still fails after the retries and
+    // the status check on the first failure did not fall back (it timed out,
+    // the failure was not a missing render, or a 404 came with a pending or
+    // finished generation). Any persistent failure lands
+    // here unless the status poll reports a queued or running generation
+    // (handled above): load whatever render the server has, without the rate
+    // and without an axis, before giving up.
+    if (overlayRate !== undefined && !processedSpectrogramUrl) {
+      debugLog('handleSpectrogramError: exact-rate render unavailable, dropping the axis');
+      fallBackToImageWithoutRate();
       return;
     }
 
@@ -1435,6 +1761,30 @@
   };
   /* eslint-enable no-unused-vars */
 
+  // Resolve a missing bat clip sample rate once per detection. The detection
+  // endpoint reads it from the clip for older detections; list and search
+  // responses never carry it for those. The spectrogram request waits for the
+  // answer, at most CLIP_RATE_LOOKUP_TIMEOUT_MS, and goes out without a rate
+  // (and without an axis) when none comes back. Players for the same detection
+  // share one lookup (lookupClipSampleRate).
+  $effect(() => {
+    if (!rateResolvePending) return;
+
+    const resolvingId = detectionId;
+    const controller = new AbortController();
+    let active = true;
+    spectrogramLoader.setLoading(true);
+
+    void lookupClipSampleRate(resolvingId, controller.signal).then(rate => {
+      if (active) rateResolve = { detectionId: resolvingId, rate };
+    });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  });
+
   // Track previous base URL to detect when detection changes (not just cache key updates)
   let previousSpectrogramBaseUrl = $state<string | null>(null);
 
@@ -1460,8 +1810,9 @@
       spectrogramRetryCount = 0;
       spectrogramCacheKey = 0;
       clearSpectrogramRetryTimer();
-      // Abort any in-flight status polling when URL changes
+      // Abort any in-flight status polling and status check when URL changes
       clearStatusPollTimer();
+      clearSpectrogramProbe();
       // Revoke stale processed spectrogram from previous detection
       if (processedSpectrogramUrl) {
         URL.revokeObjectURL(processedSpectrogramUrl);
@@ -1494,6 +1845,13 @@
         processingDenoise = '';
         processingNormalize = false;
         isProcessing = false;
+        // Reset audible-bats derived playback for the new detection (the source
+        // is reset to audioUrl above; this just clears the derived-copy state).
+        audibleBats.reset();
+        audibleBatsPendingFraction = null;
+        // Clear any pending source-swap autoplay so a swap that was in flight for
+        // the previous detection can't auto-start playback on the new one.
+        audibleBatsPendingAutoplay = false;
         // Reset playback state for new audio
         isPlaying = false;
         currentTime = 0;
@@ -1546,6 +1904,7 @@
       // Add all audio event listeners with proper tracking
       addTrackedEventListener(audioElement, 'play', () => {
         isPlaying = true;
+        error = null;
         startInterval();
         // Clear any pending delay timeout and immediately signal play start
         clearPlayEndTimeout();
@@ -1556,25 +1915,10 @@
         }
       });
 
-      addTrackedEventListener(audioElement, 'pause', () => {
-        isPlaying = false;
-        stopInterval();
-        isPlayingSelection = false;
-        if (selectionPlaybackTimeout) {
-          clearTimeout(selectionPlaybackTimeout);
-          selectionPlaybackTimeout = undefined;
-        }
-        // Set delay before signaling play end to avoid disrupting UI during brief pauses
-        clearPlayEndTimeout();
-        playEndTimeout = setTimeout(() => {
-          if (onPlayEnd) {
-            onPlayEnd();
-          }
-        }, PLAY_END_DELAY_MS);
-      });
+      addTrackedEventListener(audioElement, 'pause', handlePause);
 
       addTrackedEventListener(audioElement, 'ended', () => {
-        // When playing a selection, scheduleSelectionEnd handles looping — ignore ended event
+        // When playing a selection, scheduleSelectionEnd handles looping, so ignore ended event
         if (isPlayingSelection) return;
 
         if (loopEnabled && audioElement) {
@@ -1623,10 +1967,8 @@
         isLoading = false;
         // Reset retry state on successful load (may have succeeded after retries)
         audioRetryCount = 0;
-        if (audioRetryTimer) {
-          clearTimeout(audioRetryTimer);
-          audioRetryTimer = undefined;
-        }
+        clearAudioRetryTimer();
+        consumePendingPlay();
       });
 
       addTrackedEventListener(audioElement, 'error', () => {
@@ -1636,18 +1978,20 @@
           canplayTimeoutId = undefined;
         }
 
-        // Retry loading if under the retry limit — the audio file may still
+        // Retry loading if under the retry limit; the audio file may still
         // be encoding (backend returns 503 which the browser treats as a load error)
         if (audioRetryCount < MAX_AUDIO_LOAD_RETRIES) {
-          if (audioRetryTimer) {
-            clearTimeout(audioRetryTimer);
-            audioRetryTimer = undefined;
-          }
+          clearAudioRetryTimer();
           audioRetryCount++;
           debugLog(`Audio load failed, retrying (${audioRetryCount}/${MAX_AUDIO_LOAD_RETRIES})`);
           audioRetryTimer = setTimeout(() => {
+            audioRetryTimer = undefined;
             if (audioElement) {
-              audioElement.src = audioUrl;
+              // Retry against whichever source is currently active; reverting
+              // to the original audioUrl here would silently drop out of an
+              // active audible-bats or processed-audio derived clip while
+              // leaving its state flagged as still active.
+              replaceSource(currentSource());
               audioElement.load();
             }
           }, AUDIO_RETRY_DELAY_MS);
@@ -1656,6 +2000,8 @@
 
         error = t('media.audio.error');
         isLoading = false;
+        playRequestedAfterRetry = false;
+        markPlaybackStopped();
       });
 
       // If already playing when mounted, start interval
@@ -1723,6 +2069,7 @@
       clearPlayEndTimeout();
       clearSpectrogramRetryTimer();
       clearStatusPollTimer();
+      clearSpectrogramProbe();
       spectrogramLoader.cleanup();
       if (audioRetryTimer) {
         clearTimeout(audioRetryTimer);
@@ -1784,6 +2131,7 @@
       if (processAbortController) {
         processAbortController.abort();
       }
+      audibleBats.cleanup();
     };
   });
 
@@ -1815,8 +2163,8 @@
   class:cursor-crosshair={enableClipExtraction}
   class:spectrogram-skeleton={responsive &&
     showSpectrogram &&
-    spectrogramUrl !== null &&
-    (spectrogramLoader.loading || spectrogramLoader.error)}
+    ((spectrogramUrl !== null && (spectrogramLoader.loading || spectrogramLoader.error)) ||
+      rateResolvePending)}
   style={responsive
     ? showSpectrogram
       ? 'aspect-ratio: 2 / 1;'
@@ -1827,27 +2175,32 @@
   ontouchmove={enableClipExtraction ? handleSelectionTouchMove : undefined}
   ontouchend={enableClipExtraction ? handleSelectionTouchEnd : undefined}
 >
-  {#if spectrogramUrl}
-    <!-- Screen reader announcement for loading state -->
-    <div class="sr-only" role="status">
-      {spectrogramLoader.loading
+  <!-- Screen reader announcement for the spectrogram state (the rate resolve counts
+       as loading). Always rendered, so screen readers hear each change of its text. -->
+  <div class="sr-only" role="status">
+    {#if spectrogramUrl || rateResolvePending}
+      {spectrogramLoader.loading || rateResolvePending
         ? t('components.audio.spectrogramLoading')
         : t('components.audio.spectrogramLoaded')}
-    </div>
+    {/if}
+  </div>
 
-    <!-- Loading spinner overlay -->
+  {#if spectrogramUrl || rateResolvePending}
+    <!-- Loading spinner overlay (hidden from screen readers: the status region above
+         already announces the loading state) -->
     {#if spectrogramLoader.showSpinner}
       <div
         class="absolute inset-0 flex items-center justify-center bg-[var(--color-base-200)]/75 rounded-md border border-[var(--color-base-300)]"
       >
         <div
           class="loading loading-spinner loading-sm md:loading-md text-[var(--color-primary)]"
-          role="status"
-          aria-label={t('components.audio.spectrogramLoadingAria')}
+          aria-hidden="true"
         ></div>
       </div>
     {/if}
+  {/if}
 
+  {#if spectrogramUrl}
     <!-- Always render the img so the browser cache works across state transitions -->
     <img
       bind:this={spectrogramImage}
@@ -1933,8 +2286,10 @@
     </div>
   {/if}
 
-  <!-- Frequency scale overlay (linear; range follows the detection's model type) -->
-  {#if showSpectrogram && spectrogramUrl && !spectrogramLoader.error}
+  <!-- Frequency scale overlay (linear; range follows the model type and, for bats,
+       the clip sample rate; a bat axis without a known rate has no ticks, and a
+       bat axis is drawn only once its image has loaded) -->
+  {#if showFreqAxis}
     {#each freqTicksKHz as freq (freq)}
       <span class="freq-label" style:bottom="{(freq / freqNyquistKHz) * 100}%" aria-hidden="true"
         >{freq}k</span
@@ -1949,13 +2304,26 @@
 
   <!-- Audio element is created dynamically in onMount for iOS Safari compatibility -->
 
-  <!-- Audio settings button (top-right) -->
+  <!-- Audio settings button (top-right), with the audible-bats button alongside
+       it for bat detections. -->
   {#if showControls}
     <div
-      class="absolute top-2 right-2 transition-opacity duration-200"
+      class="absolute top-2 right-2 flex items-center gap-1 transition-opacity duration-200"
       class:opacity-0={!isMobile}
       class:group-hover:opacity-100={!isMobile}
     >
+      {#if isBatSpectrogram}
+        <AudibleBatsButton
+          active={audibleBats.active}
+          generating={audibleBats.generating}
+          error={audibleBats.error}
+          disabled={!audioContextAvailable}
+          closeSignal={closeAudibleBatsSignal}
+          onEnable={settings => audibleBats.enable(settings)}
+          onDisable={() => audibleBats.disable()}
+          onMenuOpen={() => closeAudioSettingsSignal++}
+        />
+      {/if}
       <AudioSettingsButton
         {gainValue}
         {filterFreq}
@@ -1965,6 +2333,8 @@
         onFilterChange={updateFilter}
         onSpeedChange={handleSpeedChange}
         disabled={!audioContextAvailable}
+        closeSignal={closeAudioSettingsSignal}
+        onMenuOpen={() => closeAudibleBatsSignal++}
       />
     </div>
   {/if}
@@ -2099,7 +2469,7 @@
           class="text-white p-1 rounded-full hover:bg-white/20 shrink-0"
           onclick={handlePlayPause}
           disabled={isLoading}
-          aria-label={isPlaying ? t('media.audio.pause') : t('media.audio.play')}
+          aria-label={t(playButtonLabelKey(isLoading, isPlaying))}
         >
           {#if isLoading}
             <div
@@ -2129,8 +2499,7 @@
               e.preventDefault();
               const rect = progressBar.getBoundingClientRect();
               const centerX = rect.left + rect.width / 2;
-              const mockEvent = { clientX: centerX } as MouseEvent;
-              handleProgressClick(mockEvent);
+              handleProgressClick(new MouseEvent('click', { clientX: centerX }));
             }
           }}
         >
@@ -2161,7 +2530,8 @@
   <!-- Error message -->
   {#if error}
     <div
-      class="absolute inset-0 flex items-center justify-center bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] rounded-md"
+      role="alert"
+      class="pointer-events-none absolute inset-0 flex items-center justify-center bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] rounded-md"
     >
       <span class="text-[var(--color-error)] text-sm">{error}</span>
     </div>

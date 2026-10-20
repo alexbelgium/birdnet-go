@@ -10,13 +10,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tphakala/birdnet-go/internal/audiocore/audioformat"
+	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/privacy"
 )
 
 // MinBatSampleRate is the minimum source capture rate in Hz for bat detection
 // models. Streams below this rate cannot carry ultrasonic content.
-const MinBatSampleRate = 96000
+const MinBatSampleRate = audioformat.MinBatSampleRate
 
 // ErrNoAudioStreamsFound reports that ffprobe found no audio streams in the input.
 var ErrNoAudioStreamsFound = errors.NewStd("no audio streams found in probe output")
@@ -163,7 +165,7 @@ func buildProbeArgs(url string, audioOnly bool) []string {
 	// handshake to audio tracks so ffprobe never SETUPs the camera's video track
 	// (issue #3798); -select_streams below only filters ffprobe's output.
 	if isRTSPURL(url) {
-		args = appendRTSPMediaArgs(args, "tcp", audioOnly)
+		args = appendRTSPMediaArgs(args, conf.DefaultTransport, audioOnly)
 	}
 
 	args = append(args,
