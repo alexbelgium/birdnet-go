@@ -436,6 +436,7 @@
         "extendedCaptureRestartRequired": "Udvidede optagelsesindstillinger ændret. Genstart påkrævet.",
         "equalizerUpdateFailed": "Kunne ikke opdatere lyd-equalizerindstillinger",
         "equalizerUpdated": "Lyd-equalizerindstillinger opdateret",
+        "equalizerFiltersSkipped": "Indstillinger for lyd-equalizeren er gemt, men nogle filtre springes over på {count, plural, one {kilde} other {kilder}} {sources}: et filter skal være gyldigt ved kildens samplingfrekvens, og dets frekvens skal ligge under halvdelen af den.",
         "savedSuccessfully": "Indstillinger gemt",
         "saveFailed": "Kunne ikke gemme indstillinger"
       },
@@ -449,7 +450,15 @@
         "completedTitle": "Databasemigrering fuldført",
         "completedMessage": "Migrering fuldført. Genstart venligst BirdNET-Go for at skifte til den nye database.",
         "errorTitle": "Databasemigreringsfejl",
-        "errorMessage": "Migrering sat på pause på grund af fejl. Kontrollér logfiler og prøv at genoptage."
+        "errorMessage": "Migrering sat på pause på grund af fejl. Kontrollér logfiler og prøv at genoptage.",
+        "legacyNotStartedTitle": "Databaseopgradering påkrævet",
+        "legacyNotStartedMessage": "Denne installation bruger stadig det gamle databaseformat, som holder op med at fungere i en kommende version. Åbn System > Database for at køre migreringen.",
+        "legacyInProgressTitle": "Databasemigrering i gang",
+        "legacyInProgressMessage": "Migreringen til det nye databaseformat kører. Lad BirdNET-Go køre, indtil den er færdig; det gamle format holder op med at fungere i en kommende version.",
+        "legacyNeedsAttentionTitle": "Databasemigrering kræver opmærksomhed",
+        "legacyNeedsAttentionMessage": "Migreringen til det nye databaseformat er sat på pause eller mislykkedes. Åbn System > Database for at genoptage eller prøve igen; det gamle format holder op med at fungere i en kommende version.",
+        "legacyRestartRequiredTitle": "Genstart for at afslutte databasemigreringen",
+        "legacyRestartRequiredMessage": "Migreringen er fuldført. Genstart BirdNET-Go for at skifte til den nye database. Hvis denne besked bliver ved efter en genstart, så tjek loggen for databasefejl."
       },
       "cleanup": {
         "completeTitle": "Oprydning af ældre database fuldført",
@@ -521,6 +530,12 @@
         "cadenceCappedMessage": "At køre {models, plural, one {# model} other {# modeller}} på {sources, plural, one {# lydkilde} other {# lydkilder}} med det indstillede overlap på {configured} s overstiger denne enheds målte kapacitet, så lyden analyseres med {effective} s overlap. Falsk positiv-filteret kan derfor kræve færre bekræftelser. Dine gemte indstillinger er uændrede; se Indstillinger > Analyse.",
         "cadenceOverloadedTitle": "Denne enhed kan ikke følge med lydanalysen",
         "cadenceOverloadedMessage": "At køre {models, plural, one {# model} other {# modeller}} på {sources, plural, one {# lydkilde} other {# lydkilder}} overstiger denne enheds målte kapacitet selv uden overlap, så analysen kan komme bagud, og detektioner kan gå tabt. Aktivér færre modeller eller lydkilder, eller vælg en hurtigere modelvariant."
+      },
+      "storage": {
+        "notPersistentTitle": "Data går tabt, når containeren genoprettes",
+        "notPersistentMessage": "Disse stier ligger på lagerplads, der slettes, når containeren genoprettes, for eksempel ved en opdatering af image: {paths}. Tilknyt et volumen eller en værtsmappe til dem i din containerkonfiguration.",
+        "anonymousVolumeTitle": "Data er gemt i et anonymt containervolumen",
+        "anonymousVolumeMessage": "Disse stier ligger i anonyme volumener, som container-runtimen oprettede, fordi intet volumen var tilknyttet: {paths}. En container, der startes forfra, for eksempel med docker run efter en opdatering af image, får nye tomme volumener, så dataene ser ud til at være tabt. Tilknyt et navngivet volumen eller en værtsmappe til dem."
       }
     },
     "loading": "Indlæser notifikationer..."
@@ -787,6 +802,9 @@
       "loadFailedAction": "Vis status for AI-modeller",
       "failingTitle": "{count, plural, one {En model fejler ved hver analyse} other {# modeller fejler ved hver analyse}}",
       "failingMessage": "{count, plural, one {{models} er indlæst, men hver analyse fejler, så den registrerer intet.} other {{models} er indlæst, men hver analyse fejler, så de registrerer intet.}} Siden AI-modeller viser backend og fejlen."
+    },
+    "legacyDatabase": {
+      "action": "Åbn databaseindstillinger"
     },
     "banner": {
       "title": "Titel",
@@ -1575,7 +1593,7 @@
           "restartTitle": "Genstart påkrævet",
           "restartBody": "Genstart applikationen for at skifte til V2-databasen. Oprydning af ældre database vil være tilgængelig efter genstart.",
           "fallbackError": "Uoverensstemmelse i antal poster mellem ældre og V2-databaser. Nogle poster er muligvis ikke migreret korrekt.",
-          "migrateInfo": "Migreringen vil overføre {count} poster fra den ældre database til det nye V2-skema. Dobbeltskrivningstilstand sikrer nul datatab under migreringen.",
+          "migrateInfo": "Migreringen vil overføre {count} poster fra den ældre database til det nye V2-skema. Nye registreringer, der gemmes under migreringen, kopieres også til den nye database.",
           "sourceLegacy": "Kilde (Ældre)",
           "targetV2": "Mål (V2)",
           "recordsLabel": "Poster",
@@ -1627,7 +1645,7 @@
         },
         "notes": {
           "in_progress": "Du kan fortsætte med at bruge systemet normalt, mens migreringen kører i baggrunden.",
-          "dual_write": "Migrering i gang. Dine data er sikre - alle nye registreringer gemmes i begge databaser.",
+          "dual_write": "Migrering i gang. Dine data er sikre - nye registreringer gemmes i den nuværende database og kopieres til den nye database under migreringen.",
           "migrating": "Kopierer dine eksisterende registreringer til den nye database.",
           "validating": "Verificerer at alle poster er kopieret korrekt. Næsten færdig!",
           "cutover": "Skifter til den nye database. Dette tager kun et øjeblik.",
@@ -2317,6 +2335,7 @@
     "errors": {
       "loadFailed": "Kunne ikke indlæse indstillinger",
       "saveFailed": "Kunne ikke gemme indstillinger",
+      "changedElsewhere": "Indstillingerne blev ændret et andet sted. Gennemgå dem, og gem igen.",
       "databaseStatsFailed": "Kunne ikke indlæse databasestatistik",
       "csvDownloadFailed": "Kunne ikke downloade CSV"
     },
@@ -2664,7 +2683,7 @@
                 "descriptions": {
                   "highContrast": "Bedst til svage signaler. Fuglekald fremstår tydeligt fra baggrundsstøj. Anbefales til videnskabelige/gråtonestile.",
                   "standard": "Standard balanceret indstilling. God til de fleste anvendelser.",
-                  "extended": "Flere detaljer synlige, men lavere kontrast. SoX-standardværdi."
+                  "extended": "Flere detaljer synlige, men lavere kontrast."
                 }
               },
               "enabled": {
@@ -2766,7 +2785,7 @@
           "title": "Hvad er inkluderet i rapporten:",
           "applicationLogs": "**Applikationslogfiler** - Nylige fejl og debuginformation",
           "configuration": "**Konfiguration** - Dine indstillinger med følsomme data fjernet",
-          "systemInfo": "**Systeminformation** - OS-version, hukommelse og kørselsdetaljer",
+          "systemInfo": "**Systeminformation** - OS-version, hukommelse, hardware, tilsluttede USB-enheder og lydkort samt kørselsdetaljer",
           "notIncluded": "**IKKE inkluderet** - Lydfiler, fugledetektioner eller personlige data"
         },
         "userMessage": {
@@ -2919,6 +2938,11 @@
             "unit": "min",
             "helpText": "Forhindrer gentagne notifikationer for samme art inden for dette tidsvindue. Sæt til 0 for at deaktivere."
           }
+        },
+        "rulesNotice": {
+          "message": "Push-notifikationer om registreringer kommer fra alarmregler på fanen Regler. De indbyggede registreringsregler giver kun besked i appen. For at få push-notifikationer skal du tilføje handlingen {pushAction} til reglen {ruleName} eller oprette en regel for hændelsen {eventName} med en konfidensbetingelse og en afkøling.",
+          "previousFilters": "Dine indstillinger for Minimumskonfidens ({confidence}%) og Artspause ({minutes} min) her bruges ikke af alarmregler.",
+          "openRules": "Åbn Regler"
         },
         "noProviders": "Ingen udbydere konfigureret",
         "noProvidersDescription": "Tilføj en udbyder for at begynde at modtage push-notifikationer",
@@ -3186,7 +3210,7 @@
         "vadEnable": "Aktivér Privatlivsbeskyttelse (Silero VAD)",
         "vadHelp": "Kører en dedikeret neural taledetekteringsmodel sammen med klassifikatoren for robust talefiltrering. Forbruger yderligere systemressourcer (ca. 20-30 MB RAM og CPU-inferens pr. segment).",
         "vadThresholdLabel": "Tærskel for privatlivsbeskyttelse",
-        "vadThresholdHelp": "Følsomhedstærskel for taleaktivitetsdetektoren (standard 0,35). Lavere værdier gør filtret mere følsomt over for svag eller fjern tale."
+        "vadThresholdHelp": "Følsomhedstærskel for taleaktivitetsdetektoren (standard 0,6). Lavere værdier gør filtret mere følsomt over for svag eller fjern tale."
       },
       "falsePositivePrevention": {
         "title": "Forebyggelse af falske positiver",
@@ -3223,10 +3247,6 @@
       "birdweather": {
         "title": "BirdWeather",
         "description": "Upload detektioner til BirdWeather",
-        "ffmpegWarning": {
-          "title": "FFmpeg ikke fundet",
-          "message": "Installér venligst FFmpeg for at aktivere FLAC-kodningssupport. BirdWeather udfaser WAV-uploads til fordel for komprimerede FLAC-lydfiler."
-        },
         "enable": "Aktivér BirdWeather-uploads",
         "token": {
           "label": "BirdWeather-token",
@@ -3738,6 +3758,8 @@
         "frequencyResponse": "Frekvensrespons",
         "cutoffFrequency": "Afskæringsfrekvens",
         "cutoffFrequencyHelp": "Frekvens, hvor filteret begynder at dæmpe signaler. Fuglekald ligger typisk i intervallet 1-10 kHz.",
+        "centerFrequency": "Centerfrekvens",
+        "bandwidth": "Båndbredde",
         "qFactor": "Q-faktor",
         "qFactorHelp": "Kvalitetsfaktor styrer filterets skarphed. Lavere værdier (0,1-1) giver blødere kurver, højere værdier (1-10) giver skarpere afskæring.",
         "gain": "Forstærkning",
@@ -3745,17 +3767,31 @@
         "attenuation": "Dæmpning",
         "attenuationHelp": "Filterets dæmpningsrate. Højere værdier giver stejlere dæmpning af filtrerede frekvenser.",
         "attenuationLevels": {
-          "0db": "0dB",
+          "off": "Fra",
           "12db": "12dB",
           "24db": "24dB",
           "36db": "36dB",
-          "48db": "48dB"
+          "48db": "48dB",
+          "custom": "{db} dB"
         },
         "filterHelp": "Tilføj flere filtre for at forme frekvensresponsen til optimal fugleregistrering i dit miljø.",
+        "emptyEntryRestored": "Indtast et tal. Den tidligere værdi blev bevaret.",
         "graph": {
           "flatResponse": "Flad respons (ingen filtre anvendt)",
           "frequency": "Frekvens (Hz)",
-          "gain": "Forstærkning (dB)"
+          "gain": "Forstærkning (dB)",
+          "loading": "Beregner frekvensresponsen...",
+          "updating": "Opdaterer frekvensresponsen...",
+          "error": "Frekvensresponsen kunne ikke beregnes. Den opdateres, når du ændrer et filter, eller når du vælger Prøv igen.",
+          "sampleRate": "Beregnet for en samplingsfrekvens på {rate} Hz.",
+          "clipped": "Responsen topper ved {peak} dB, over grafens øvre kant.",
+          "skippedHeading": "{count, plural, one {# filter anvendes ikke på lyden} other {# filtre anvendes ikke på lyden}}",
+          "skippedReasons": {
+            "unknown_type": "Filter {number} ({type}, {frequency} Hz) springes over: denne filtertype understøttes ikke.",
+            "invalid_parameters": "Filter {number} ({type}, {frequency} Hz) springes over: dets indstillinger er ikke gyldige ved {rate} Hz.",
+            "add_failed": "Filter {number} ({type}, {frequency} Hz) springes over: det kunne ikke føjes til filterkæden.",
+            "unknown": "Filter {number} ({type}, {frequency} Hz) springes over."
+          }
         }
       },
       "soundLevelMonitoring": {
@@ -4227,7 +4263,6 @@
     },
     "species": {
       "pageLabel": "Artsindstillinger",
-      "saveError": "Kunne ikke gemme konfigurationen for \"{species}\". Prøv venligst igen.",
       "configUpdated": "Opdateret konfiguration for \"{species}\"",
       "configAdded": "Tilføjet konfiguration for \"{species}\"",
       "duplicateConfigError": "Arten \"{species}\" har allerede en konfiguration. Vælg venligst et andet navn.",
@@ -5030,6 +5065,7 @@
       "loop": "Skift gentag",
       "player": "Lydafspiller",
       "autoplayBlocked": "Klik for at afspille (autoplay blokeret)",
+      "hlsLoadFailed": "Lydafspilleren kunne ikke indlæses, genindlæs siden og prøv igen",
       "hlsNotSupported": "HLS-afspilning understøttes ikke i denne browser",
       "streamStarting": "Starter lydstrøm...",
       "levelFor": "Lydniveau for {source}",
@@ -5264,6 +5300,9 @@
       "invalidJSON": "Ugyldig JSON",
       "invalidEscalation": "Eskaleringstrinnene er ugyldige",
       "engineUnavailable": "Advarselsmotor er utilgængelig"
+    },
+    "insights": {
+      "v2Required": "Indsigter kræver den udvidede (v2) database"
     },
     "detection": {
       "invalidDate": "Ugyldigt {paramName}-format, brug ÅÅÅÅ-MM-DD"

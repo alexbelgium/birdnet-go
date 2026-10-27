@@ -59,7 +59,7 @@ const validationCatchUpPercent = 5.0
 // used when the percentage-based threshold would be too small for small datasets.
 const validationCatchUpMinThreshold = 100
 
-// validationPreDelay is the delay before validation to let dual-writes complete.
+// validationPreDelay is the delay before each validation attempt.
 const validationPreDelay = 3 * time.Second
 
 // catchUpMaxBatches is the safety limit for catch-up iterations per validation attempt.
@@ -501,7 +501,7 @@ func (w *Worker) handleValidatingState(ctx context.Context) runAction {
 	for attempt := 1; attempt <= validationMaxRetries; attempt++ {
 		w.logger.Info("running validation", logger.Int("attempt", attempt))
 
-		// Wait for in-flight dual-writes to complete
+		// Wait before counting records
 		select {
 		case <-ctx.Done():
 			return runActionReturn
@@ -689,10 +689,9 @@ func (w *Worker) processDirtyIDsBatch(ctx context.Context, dirtyIDs []uint) (int
 		if len(results) == 0 || results[0].ID != dirtyID {
 			// The legacy row for this dirty ID is gone, so the detection was deleted and any
 			// surviving v2 row is an orphan that would resurrect after v2 promotion.
-			// Reconcile the v2 side and clear the marker via the same shared helper the
-			// runtime reconciler (DualWriteRepository.reconcileDirtyIDs) uses, so the two paths
-			// cannot drift. On any error other than not-found/locked, leave the id dirty for retry.
-			if recErr := repository.ReconcileDeletedGhost(ctx, w.v2Detection, w.stateManager, dirtyID); recErr != nil {
+			// Reconcile the v2 side and clear the marker; on any error other than
+			// not-found/locked, leave the id dirty for retry.
+			if recErr := reconcileDeletedGhost(ctx, w.v2Detection, w.stateManager, dirtyID); recErr != nil {
 				w.logger.Warn("failed to reconcile deleted dirty ID in v2, will retry",
 					logger.Uint64("id", uint64(dirtyID)),
 					logger.Error(recErr))
@@ -723,6 +722,26 @@ func (w *Worker) processDirtyIDsBatch(ctx context.Context, dirtyIDs []uint) (int
 		caught++
 	}
 	return caught, nil
+}
+
+// reconcileDeletedGhost removes from v2 a detection whose legacy row no longer exists and
+// clears its dirty marker. Legacy is the source of truth during migration, so a missing
+// legacy row means the detection was deleted; a surviving v2 row is an orphan that would
+// resurrect after v2 promotion. A row already absent from v2 (ErrDetectionNotFound) needs
+// no delete. A locked, user-verified v2 row (ErrDetectionLocked) is never force-deleted;
+// its marker is still cleared so the id does not linger in the dirty set and block
+// migration validation forever, and the protected row is left in place. Any other delete
+// error leaves the marker for a later retry (a non-nil return); it returns nil once the
+// marker is cleared or the row was already gone.
+func reconcileDeletedGhost(ctx context.Context, v2Repo repository.DetectionRepository, sm *datastoreV2.StateManager, id uint) error {
+	if v2Repo == nil || sm == nil {
+		return fmt.Errorf("reconcile deleted ghost %d: nil repository or state manager", id)
+	}
+	if delErr := v2Repo.Delete(ctx, id); delErr != nil &&
+		!errors.Is(delErr, repository.ErrDetectionNotFound) && !errors.Is(delErr, repository.ErrDetectionLocked) {
+		return delErr
+	}
+	return sm.RemoveDirtyID(id)
 }
 
 // runCatchUp finds and migrates records that exist in legacy but not in V2.
@@ -1091,6 +1110,8 @@ func (w *Worker) failOnValidation() {
 // Handles the case where we're still in dual_write by transitioning through migrating first.
 // The ctx parameter is used as the parent context for related data migration, ensuring
 // cancellation from Start(ctx) propagates to the migration.
+// When an auxiliary migrator is configured, its outcome is recorded in the same
+// UPDATE as the transition; it never changes whether the transition happens.
 func (w *Worker) transitionToValidation(ctx context.Context) {
 	w.logger.Info("migration complete, starting validation")
 
@@ -1143,6 +1164,10 @@ func (w *Worker) transitionToValidation(ctx context.Context) {
 	}
 
 	// Migrate auxiliary data (weather, thresholds, image cache, notifications)
+	var (
+		auxStatus entities.AuxiliaryDataStatus
+		auxMsg    string
+	)
 	if w.auxiliaryMigrator != nil {
 		w.logger.Info("starting auxiliary data migration")
 
@@ -1177,6 +1202,9 @@ func (w *Worker) transitionToValidation(ctx context.Context) {
 				auxResult.LogErrors(w.logger)
 			}
 		}
+
+		auxStatus, auxMsg = auxiliaryOutcome(auxResult, auxErr)
+		w.logger.Info("auxiliary data outcome", logger.String("status", string(auxStatus)))
 	}
 
 	// Clear the phase after related data migration (also resets phase_number/total_phases)
@@ -1184,10 +1212,36 @@ func (w *Worker) transitionToValidation(ctx context.Context) {
 		w.logger.Warn("failed to clear migration phase", logger.Error(err))
 	}
 
-	// Now transition to validating
-	if err := w.stateManager.TransitionToValidating(); err != nil {
-		w.logger.Error("failed to transition to validating", logger.Error(err))
+	// Now transition to validating, recording the auxiliary outcome in the same
+	// UPDATE so it exists only if this transition happened after the run above.
+	var transitionErr error
+	if w.auxiliaryMigrator != nil {
+		transitionErr = w.stateManager.TransitionToValidatingWithAuxiliaryOutcome(auxStatus, auxMsg)
+	} else {
+		transitionErr = w.stateManager.TransitionToValidating()
 	}
+	if transitionErr != nil {
+		w.logger.Error("failed to transition to validating", logger.Error(transitionErr))
+	}
+}
+
+// auxRunFailedSummary is the persisted summary when the auxiliary migration returned
+// an error instead of a result.
+const auxRunFailedSummary = "auxiliary migration could not run"
+
+// auxiliaryOutcome maps the auxiliary migration result to the status and error
+// summary persisted with the validating transition. A MigrateAll error means the
+// run did not copy anything reliably and is recorded as failed. The persisted
+// summary is a fixed message because it is shown in the status API and the support
+// dump, and an error text can carry paths or credentials; the caller logs the error.
+func auxiliaryOutcome(result *AuxiliaryMigrationResult, err error) (status entities.AuxiliaryDataStatus, summary string) {
+	if err != nil {
+		return entities.AuxiliaryDataStatusFailed, auxRunFailedSummary
+	}
+	if result == nil {
+		return entities.AuxiliaryDataStatusFailed, "auxiliary migration returned no result"
+	}
+	return result.Outcome()
 }
 
 // updateBatchProgress records rate sample and updates progress.
@@ -1307,7 +1361,7 @@ func (w *Worker) validateWithCounts(ctx context.Context) (legacyCount, v2Count i
 		logger.Int64("legacy", legacyCount),
 		logger.Int64("v2", v2Count))
 
-	// V2 should have at least as many records as legacy (could have more from dual-write)
+	// V2 should have at least as many records as legacy (it can have more, for example a locked v2 row kept after its legacy row was deleted)
 	if v2Count < legacyCount {
 		return legacyCount, v2Count, fmt.Errorf("v2 count (%d) is less than legacy count (%d)", v2Count, legacyCount)
 	}
@@ -1406,10 +1460,10 @@ type batchResult struct {
 // Returns the number of records migrated and the highest ID processed.
 func (w *Worker) processBatch(ctx context.Context) (batchResult, error) {
 	// Get the last migrated ID from the state manager (NOT from V2 table).
-	// CRITICAL: We must use state.LastMigratedID because during dual-write mode,
-	// new detections are written to V2 with high IDs. Querying MAX(legacy_id)
-	// from V2 would return the newest detection's ID, causing the worker to
-	// incorrectly believe all historical records have been migrated.
+	// CRITICAL: We must use state.LastMigratedID because V2 can hold
+	// rows above the watermark (for example from catch-up or tail sync). Querying
+	// MAX(legacy_id) from V2 would then run ahead of the watermark, causing the
+	// worker to incorrectly believe all historical records have been migrated.
 	state, err := w.stateManager.GetState()
 	if err != nil {
 		return batchResult{}, fmt.Errorf("failed to get migration state: %w", err)
@@ -1652,6 +1706,8 @@ func (w *Worker) updateExistingRecords(ctx context.Context, records []*detection
 			// Keep clip_name and spectrogram_clip_name mutually exclusive.
 			updates["spectrogram_clip_name"] = nil
 		}
+		// clip_sample_rate is deliberately not touched: the legacy table has no such
+		// column, so the migration has nothing to copy and must not clear a stored value.
 
 		if updateErr := w.v2Detection.Update(ctx, r.ID, updates); updateErr != nil {
 			w.logger.Warn("failed to update record", logger.Uint64("id", uint64(r.ID)), logger.Error(updateErr))
@@ -1678,7 +1734,7 @@ func (w *Worker) migrateRecord(ctx context.Context, result *detection.Result) er
 		return fmt.Errorf("conversion failed: %w", err)
 	}
 
-	// Check if record already exists in V2 (from dual-write)
+	// Check if record already exists in V2 (from an earlier pass)
 	existing, err := w.v2Detection.Get(ctx, result.ID)
 	if err == nil && existing != nil {
 		// Record already exists - check if it's locked
@@ -1704,6 +1760,7 @@ func (w *Worker) migrateRecord(ctx context.Context, result *detection.Result) er
 			// Keep clip_name and spectrogram_clip_name mutually exclusive.
 			updates["spectrogram_clip_name"] = nil
 		}
+		// clip_sample_rate is left untouched here too (see the update above).
 		return w.v2Detection.Update(ctx, result.ID, updates)
 	}
 

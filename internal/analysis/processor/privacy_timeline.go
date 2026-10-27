@@ -1,8 +1,13 @@
 package processor
 
 import (
+	"cmp"
+	"fmt"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/tphakala/birdnet-go/internal/analysis/privacyrollup"
 	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/observability/metrics"
@@ -190,14 +195,25 @@ func (c *chunkAudio) coverage() audioSpan {
 // discard check reads only the latest value, so a later write with an earlier
 // stamp (the label path after the VAD within one chunk, or a 5 s model's chunk
 // after a 3 s model's) would hide an earlier-reaching hit. An equal time keeps
-// the existing entry and its trigger.
+// the existing entry and its trigger. The hit is recorded without a model or
+// score; callers that know them use recordHumanHitLocked.
 func (p *Processor) recordHumanDetection(source string, at time.Time, trigger string) {
 	p.detectionMutex.Lock()
 	defer p.detectionMutex.Unlock()
-	if existing, ok := p.LastHumanDetection[source]; ok && !at.After(existing.Time) {
+	p.recordHumanHitLocked(source, humanHit{at: at, trigger: trigger, thresholdMilli: privacyrollup.NoThresholdMilli})
+}
+
+// recordHumanHitLocked is recordHumanDetection for a caller that already holds
+// detectionMutex for writing, and that knows the model that scored the hit and
+// its score. The hit joins the per-source attribution list (every counted hit,
+// whichever model produced it, so the discard log can name all contributors)
+// and moves LastHumanDetection forward under the rule of recordHumanDetection.
+func (p *Processor) recordHumanHitLocked(source string, hit humanHit) {
+	p.appendHumanHitLocked(source, hit)
+	if existing, ok := p.LastHumanDetection[source]; ok && !hit.at.After(existing.Time) {
 		return
 	}
-	p.LastHumanDetection[source] = HumanDetection{Time: at, Trigger: trigger}
+	p.LastHumanDetection[source] = HumanDetection{Time: hit.at, Trigger: hit.trigger, ModelID: hit.modelID, Score: hit.score, ThresholdMilli: hit.thresholdMilli}
 }
 
 // clipSpan returns the exact audio span the exporter saves for a pending
@@ -384,6 +400,17 @@ type privacyCheck struct {
 	hit     HumanDetection
 	hasHit  bool
 	verdict coverageVerdict
+	// detector is the detector the coverage verdict was computed for
+	// (metrics.TriggerLabel or metrics.TriggerVAD).
+	detector string
+	// contributions lists who produced the counted hits that reach the saved clip
+	// (see hitContributionsLocked). Filled whenever the latest hit reaches the
+	// clip, for the discard log and the discard row.
+	contributions []hitContribution
+	// hitCountsLowerBound is true when the attribution list dropped, at its cap, a
+	// hit stamped at or after the start of the reach window, so the counts in
+	// contributions are lower bounds. Set together with contributions.
+	hitCountsLowerBound bool
 }
 
 // checkPrivacy takes the privacyCheck for a pending detection at now. With the
@@ -400,6 +427,8 @@ type privacyCheck struct {
 // end by privacyCoverageMaxWait. A detection by a model that cannot carry speech
 // (the bat model) or an unregistered one keeps at once only when no detector has
 // recently scored its source; otherwise it waits for coverage like any other.
+// When the latest hit reaches the clip, the check also lists who produced the
+// counted hits that reach it, for the discard log and the discard row.
 func (p *Processor) checkPrivacy(settings *conf.Settings, item *PendingDetection, now time.Time) privacyCheck {
 	clip := clipSpan(settings, item)
 	if !settings.Realtime.PrivacyFilter.Enabled {
@@ -409,18 +438,30 @@ func (p *Processor) checkPrivacy(settings *conf.Settings, item *PendingDetection
 	p.detectionMutex.RLock()
 	defer p.detectionMutex.RUnlock()
 	hit, hasHit := p.LastHumanDetection[item.Source]
-	return privacyCheck{clip: clip, hit: hit, hasHit: hasHit, verdict: p.coverageVerdictLocked(settings, item.Source, item.BestModelID, clip, now)}
+	detector := p.requiredDetectorLocked(settings, item.Source, now)
+	check := privacyCheck{clip: clip, hit: hit, hasHit: hasHit, detector: detector,
+		verdict: p.coverageVerdictLocked(settings, detector, item.Source, item.BestModelID, clip, now)}
+	// Only a hit that reaches the clip leads to a discard, so only then is the
+	// contributor list of any use. This is the privacy discard condition of
+	// shouldDiscardDetection, and a detection that meets it is decided in the same
+	// tick, so the list is built at most once per detection.
+	reachFrom := clip.from.Add(-privacyClipGuard)
+	if hasHit && !hit.Time.Before(reachFrom) {
+		check.contributions = p.hitContributionsLocked(item.Source, reachFrom)
+		check.hitCountsLowerBound = p.capDroppedReachesLocked(item.Source, reachFrom)
+	}
+	return check
 }
 
-// coverageVerdictLocked is the coverage half of checkPrivacy; model is the model
+// coverageVerdictLocked is the coverage half of checkPrivacy; detector is the
+// required detector of the source (requiredDetectorLocked) and model the model
 // of the pending detection. With the VAD as the required detector, one stream
 // covering the padded clip keeps it; with the label detector one current model
 // must have covered all of it and every current model its own share
 // (labelCoverageCoversLocked). Otherwise the verdict defers
 // until the clip end plus privacyCoverageMaxWait, then reports a timeout. The
 // caller must hold detectionMutex.
-func (p *Processor) coverageVerdictLocked(settings *conf.Settings, source, model string, clip audioSpan, now time.Time) coverageVerdict {
-	detector := p.requiredDetectorLocked(settings, source, now)
+func (p *Processor) coverageVerdictLocked(settings *conf.Settings, detector, source, model string, clip audioSpan, now time.Time) coverageVerdict {
 	if !p.hasRecentCoverageLocked(source, detector, now) && !speechBandModel(model) {
 		// No detector has recently scored the source, and the detection comes from
 		// a model whose audio cannot carry speech (the ultrasonic bat model) or
@@ -509,4 +550,140 @@ func (p *Processor) labelCoverageCoversLocked(source string, padded audioSpan, n
 // spanContains reports whether outer covers all of inner by time.
 func spanContains(outer, inner audioSpan) bool {
 	return !outer.from.After(inner.from) && !outer.to.Before(inner.to)
+}
+
+const (
+	// humanHitMaxPreCapture is the longest pre-capture the export settings allow:
+	// half the longest capture length of 60 s (see the audio export validation).
+	humanHitMaxPreCapture = 30 * time.Second
+
+	// humanHitRetention is how long counted hits stay in the attribution list,
+	// measured back from the hit being appended. It covers the longest saved clip:
+	// the extended capture limit and the longest pre-capture, with the coverage
+	// wait and the clip guard around them, so a hit at the start of such a clip is
+	// still listed when its detection is decided.
+	humanHitRetention = time.Duration(conf.MaxExtendedCaptureDuration)*time.Second +
+		humanHitMaxPreCapture + privacyCoverageMaxWait + privacyClipGuard
+
+	// humanHitMaxPerSource bounds the attribution list of one source (about 0.6 MB),
+	// so a long stretch of continuous speech cannot grow it without limit. Once it
+	// is reached the oldest entries by arrival order go first; contributor
+	// counts are lower bounds only when a dropped hit reaches the clip
+	// (privacyCheck.hitCountsLowerBound).
+	humanHitMaxPerSource = 8192
+
+	// vadHitModelID names the VAD gate in hit attribution, next to classifier
+	// model IDs.
+	vadHitModelID = "silero_vad"
+)
+
+// humanHit is the one carrier of a speech hit: the audio end it was stamped
+// with, what produced it (trigger and model), its score and the threshold it was
+// scored against in thousandths. It serves the attribution list, held label hits
+// and the reporting of hit decisions. thresholdMilli is kept so a later
+// confirmation or drop reports the threshold of the hit and not the one in
+// effect when it resolves.
+type humanHit struct {
+	at             time.Time
+	trigger        string
+	modelID        string // model that scored the hit, empty when unknown
+	score          float64
+	thresholdMilli int
+}
+
+// labelHumanHit is a human label hit scored by modelID with confidence, against
+// the privacy filter confidence threshold thresholdMilli (in thousandths).
+func labelHumanHit(at time.Time, modelID string, confidence float32, thresholdMilli int) humanHit {
+	return humanHit{at: at, trigger: metrics.TriggerLabel, modelID: modelID, score: float64(confidence), thresholdMilli: thresholdMilli}
+}
+
+// vadHumanHit is a VAD speech hit with its speech probability, attributed to
+// vadHitModelID, against the VAD threshold thresholdMilli (in thousandths).
+func vadHumanHit(at time.Time, probability float64, thresholdMilli int) humanHit {
+	return humanHit{at: at, trigger: metrics.TriggerVAD, modelID: vadHitModelID, score: probability, thresholdMilli: thresholdMilli}
+}
+
+// appendHumanHitLocked adds hit to the attribution list of source and drops
+// entries older than humanHitRetention before it or beyond humanHitMaxPerSource.
+// The caller holds detectionMutex for writing.
+func (p *Processor) appendHumanHitLocked(source string, hit humanHit) {
+	if p.humanHits == nil {
+		p.humanHits = make(map[string][]humanHit)
+	}
+	cutoff := hit.at.Add(-humanHitRetention)
+	kept := slices.DeleteFunc(p.humanHits[source], func(h humanHit) bool { return h.at.Before(cutoff) })
+	kept = append(kept, hit)
+	if over := len(kept) - humanHitMaxPerSource; over > 0 {
+		// Note the latest stamp the cap drops before Delete zeroes the tail.
+		dropped := kept[0].at
+		for _, h := range kept[1:over] {
+			if h.at.After(dropped) {
+				dropped = h.at
+			}
+		}
+		if p.humanHitsCapDropped == nil {
+			p.humanHitsCapDropped = make(map[string]time.Time)
+		}
+		if dropped.After(p.humanHitsCapDropped[source]) {
+			p.humanHitsCapDropped[source] = dropped
+		}
+		kept = slices.Delete(kept, 0, over)
+	}
+	p.humanHits[source] = kept
+}
+
+// capDroppedReachesLocked reports whether the cap of the attribution list has
+// dropped, for source, a hit stamped at or after since. The list drops by arrival
+// order while stamps can arrive out of order, so the latest dropped stamp is
+// tracked instead of looking at the oldest survivor. Time-based drops are not
+// counted: they fall before any clip a pending detection can still reach. The
+// caller holds detectionMutex.
+func (p *Processor) capDroppedReachesLocked(source string, since time.Time) bool {
+	w, ok := p.humanHitsCapDropped[source]
+	return ok && !w.Before(since)
+}
+
+// hitContribution totals the counted hits one detector (a classifier model with
+// the label trigger, or the VAD gate) contributed to a window.
+type hitContribution struct {
+	trigger  string
+	modelID  string
+	count    int
+	minScore float64
+	maxScore float64
+}
+
+// hitContributionsLocked groups the counted hits of source stamped at or after
+// since by detector, most hits first. The caller holds detectionMutex.
+func (p *Processor) hitContributionsLocked(source string, since time.Time) []hitContribution {
+	var out []hitContribution
+	for _, h := range p.humanHits[source] {
+		if h.at.Before(since) {
+			continue
+		}
+		i := slices.IndexFunc(out, func(c hitContribution) bool { return c.trigger == h.trigger && c.modelID == h.modelID })
+		if i < 0 {
+			out = append(out, hitContribution{trigger: h.trigger, modelID: h.modelID, count: 1, minScore: h.score, maxScore: h.score})
+			continue
+		}
+		out[i].count++
+		out[i].minScore = min(out[i].minScore, h.score)
+		out[i].maxScore = max(out[i].maxScore, h.score)
+	}
+	slices.SortStableFunc(out, func(a, b hitContribution) int { return cmp.Compare(b.count, a.count) })
+	return out
+}
+
+// formatHitContributions renders contributions for a log field, for example
+// "Perch_V2/label x3 max 0.188; silero_vad/vad x2 max 0.810".
+func formatHitContributions(cs []hitContribution) string {
+	parts := make([]string, 0, len(cs))
+	for _, c := range cs {
+		model := c.modelID
+		if model == "" {
+			model = "unknown"
+		}
+		parts = append(parts, fmt.Sprintf("%s/%s x%d max %.3f", model, c.trigger, c.count, c.maxScore))
+	}
+	return strings.Join(parts, "; ")
 }

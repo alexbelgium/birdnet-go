@@ -53,6 +53,7 @@ const (
 	MsgSettingsExtendedCaptureRestart    = "notifications.content.settings.extendedCaptureRestartRequired"
 	MsgSettingsEqualizerFailed           = "notifications.content.settings.equalizerUpdateFailed"
 	MsgSettingsEqualizerUpdated          = "notifications.content.settings.equalizerUpdated"
+	MsgSettingsEqualizerFiltersSkipped   = "notifications.content.settings.equalizerFiltersSkipped"
 
 	// Database migration notifications
 	MsgMigrationStartedTitle     = "notifications.content.migration.startedTitle"
@@ -65,6 +66,16 @@ const (
 	MsgMigrationCompletedMessage = "notifications.content.migration.completedMessage"
 	MsgMigrationErrorTitle       = "notifications.content.migration.errorTitle"
 	MsgMigrationErrorMessage     = "notifications.content.migration.errorMessage"
+
+	// Legacy database schema notices
+	MsgMigrationLegacyNotStartedTitle        = "notifications.content.migration.legacyNotStartedTitle"
+	MsgMigrationLegacyNotStartedMessage      = "notifications.content.migration.legacyNotStartedMessage"
+	MsgMigrationLegacyInProgressTitle        = "notifications.content.migration.legacyInProgressTitle"
+	MsgMigrationLegacyInProgressMessage      = "notifications.content.migration.legacyInProgressMessage"
+	MsgMigrationLegacyNeedsAttentionTitle    = "notifications.content.migration.legacyNeedsAttentionTitle"
+	MsgMigrationLegacyNeedsAttentionMessage  = "notifications.content.migration.legacyNeedsAttentionMessage"
+	MsgMigrationLegacyRestartRequiredTitle   = "notifications.content.migration.legacyRestartRequiredTitle"
+	MsgMigrationLegacyRestartRequiredMessage = "notifications.content.migration.legacyRestartRequiredMessage"
 
 	// Legacy database cleanup notifications
 	MsgCleanupCompleteTitle   = "notifications.content.cleanup.completeTitle"
@@ -96,6 +107,13 @@ const (
 	MsgErrAlertInvalidJSON       = "errors.alert.invalidJSON"
 	MsgErrAlertInvalidEscalation = "errors.alert.invalidEscalation"
 	MsgErrAlertEngineUnavailable = "errors.alert.engineUnavailable"
+
+	// Insights errors
+	MsgErrInsightsV2Required = "errors.insights.v2Required"
+
+	// Privacy filter errors. No locale entry exists yet because no UI calls the
+	// privacy filter endpoints.
+	MsgErrPrivacyFilterV2Required = "errors.privacyFilter.v2Required"
 
 	// Detection errors
 	MsgErrDetectionInvalidDate = "errors.detection.invalidDate"
@@ -242,4 +260,12 @@ const (
 	MsgCadenceCappedMessage     = "notifications.content.analysis.cadenceCappedMessage"
 	MsgCadenceOverloadedTitle   = "notifications.content.analysis.cadenceOverloadedTitle"
 	MsgCadenceOverloadedMessage = "notifications.content.analysis.cadenceOverloadedMessage"
+
+	// Storage notices: key paths sit on a container's own layer or a memory
+	// filesystem (lost when the container is recreated), or in an anonymous volume
+	// (data that can seem lost after a fresh container start).
+	MsgStorageNotPersistentTitle     = "notifications.content.storage.notPersistentTitle"
+	MsgStorageNotPersistentMessage   = "notifications.content.storage.notPersistentMessage"
+	MsgStorageAnonymousVolumeTitle   = "notifications.content.storage.anonymousVolumeTitle"
+	MsgStorageAnonymousVolumeMessage = "notifications.content.storage.anonymousVolumeMessage"
 )

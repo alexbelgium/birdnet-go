@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tphakala/birdnet-go/internal/analysis/jobqueue"
+	"github.com/tphakala/birdnet-go/internal/analysis/privacyrollup"
 	"github.com/tphakala/birdnet-go/internal/analysis/species"
 	"github.com/tphakala/birdnet-go/internal/audiocore"
 	"github.com/tphakala/birdnet-go/internal/audiocore/audioformat"
@@ -88,7 +88,23 @@ type Processor struct {
 	// privacyCoverage lists the audio spans each (source, model, detector) has
 	// scored for speech, guarded by detectionMutex. The privacy coverage gate
 	// defers a pending detection until its saved clip span is inside one of them.
-	privacyCoverage  map[coverageKey][]audioSpan
+	privacyCoverage map[coverageKey][]audioSpan
+	// heldLabelHits holds the label hit of each source waiting for a second hit
+	// (see recordLabelHit), guarded by detectionMutex and created lazily.
+	heldLabelHits map[string]humanHit
+	// humanHits lists the counted speech hits of each source with the model or
+	// VAD gate that produced them (see appendHumanHitLocked), guarded by
+	// detectionMutex and created lazily. The discard log and the discard rows read
+	// it to name every contributor to a verdict.
+	humanHits map[string][]humanHit
+	// humanHitsCapDropped holds, per source, the latest stamp of a hit that the cap
+	// (humanHitMaxPerSource) dropped from humanHits. It is guarded by
+	// detectionMutex and created lazily.
+	humanHitsCapDropped map[string]time.Time
+	// privacyRollup receives privacy filter activity for the hourly rollup. It is
+	// set once before Start (SetPrivacyRollup) and never written again, so it needs
+	// no lock; nil leaves every hit site a no-op.
+	privacyRollup    privacyrollup.Recorder
 	controlChan      chan string
 	JobQueue         *jobqueue.JobQueue // Queue for managing job retries
 	workerCancel     context.CancelFunc // Function to cancel worker goroutines
@@ -236,15 +252,43 @@ type Detections struct {
 	Results       []detection.AdditionalResult // Additional BirdNET prediction results
 }
 
-// PendingDetection struct represents a single detection held in memory,
-// including its last updated timestamp and a deadline for flushing it to the worker queue.
 // ModelContribution tracks a single AI model's detection activity for a pending detection.
+// Update it only through recordHit so the statistics stay consistent.
 type ModelContribution struct {
 	HitCount      int       // Number of times this model detected the species
 	MaxConfidence float64   // Highest confidence seen from this model
-	LastHitAt     time.Time // When this model last detected the species
+	MinConfidence float64   // Lowest confidence seen from this model
+	ConfidenceSum float64   // Sum of the confidences of this model's hits
+	FirstHitAt    time.Time // Audio end stamp of the earliest hit window (processing time when the source gave none)
+	LastHitAt     time.Time // Audio end stamp of the latest hit window (processing time when the source gave none)
 }
 
+// recordHit folds one hit into the contribution. Times are folded with min/max
+// rather than first write wins, because two models' windows can arrive out of
+// audio order. A contribution without FirstHitAt has no statistics yet, so they
+// start from this hit.
+func (c *ModelContribution) recordHit(confidence float64, at time.Time) {
+	c.HitCount++
+	c.MaxConfidence = max(c.MaxConfidence, confidence)
+	if c.FirstHitAt.IsZero() {
+		c.MinConfidence = confidence
+		c.ConfidenceSum = confidence
+		c.FirstHitAt = at
+		c.LastHitAt = at
+		return
+	}
+	c.MinConfidence = min(c.MinConfidence, confidence)
+	c.ConfidenceSum += confidence
+	if at.Before(c.FirstHitAt) {
+		c.FirstHitAt = at
+	}
+	if at.After(c.LastHitAt) {
+		c.LastHitAt = at
+	}
+}
+
+// PendingDetection struct represents a single detection held in memory,
+// including its last updated timestamp and a deadline for flushing it to the worker queue.
 type PendingDetection struct {
 	Detection       Detections // The detection data (from the best-confidence model)
 	Confidence      float64    // Best confidence seen across all models
@@ -502,7 +546,10 @@ func (p *Processor) initDynamicThresholds(settings *conf.Settings) {
 // New creates a new Processor with the given dependencies.
 // The parentLog parameter should be the analysis package logger, which will be used to create
 // a child logger with ".processor" suffix for hierarchical logging (e.g., "analysis.processor").
-func New(settings *conf.Settings, ds datastore.Interface, bn *classifier.Orchestrator, obsMetrics *observability.Metrics, birdImageCache *imageprovider.BirdImageCache, parentLog logger.Logger) *Processor {
+// repo is the detection repository every save goes through; it is required and has no
+// default, because the bridge over ds would store a v2 database's detections with the
+// repeated-DST-hour ambiguity of wall-clock strings.
+func New(settings *conf.Settings, ds datastore.Interface, repo datastore.DetectionRepository, bn *classifier.Orchestrator, obsMetrics *observability.Metrics, birdImageCache *imageprovider.BirdImageCache, parentLog logger.Logger) *Processor {
 	// Create child logger from parent for hierarchical logging
 	var procLog logger.Logger
 	if parentLog != nil {
@@ -515,7 +562,7 @@ func New(settings *conf.Settings, ds datastore.Interface, bn *classifier.Orchest
 	p := &Processor{
 		Settings:       settings,
 		Ds:             ds,
-		Repo:           datastore.NewDetectionRepository(ds, nil), // Bridge to new domain model
+		Repo:           repo,
 		Bn:             bn,
 		log:            procLog,
 		BirdImageCache: birdImageCache,
@@ -751,100 +798,102 @@ func (p *Processor) processDetections(item classifier.Results) {
 		p.pipelineStats.RecordInference(item.Source.ID, item.ModelID, len(item.Results), len(detectionResults), maxConf, threshold)
 	}
 
+	// Every result of this chunk shares one window, so one hit stamp serves them all.
+	hitAt, _ := audioEndOrNow(&item)
+
 	for i := range detectionResults {
-		det := detectionResults[i]
-		commonName := strings.ToLower(det.Result.Species.CommonName)
-		confidence := det.Result.Confidence
-
-		// Lock the mutex to ensure thread-safe access to shared resources
-		p.pendingMutex.Lock()
-
-		now := time.Now()
-		mapKey := pendingKeyForDetection(item.Source.ID, &det)
-
-		if existing, exists := p.pendingDetections[mapKey]; exists {
-			// Update the existing detection (may be from same or different model)
-			oldConfidence := existing.Confidence
-			existing.LastUpdated = now
-			existing.AudioCapturedAt = item.AudioCapturedAt
-			if confidence > existing.Confidence {
-				existing.Detection = det
-				existing.Confidence = confidence
-				existing.BestModelID = item.ModelID
-				existing.Source = item.Source.ID
-				GetLogger().Debug("Updated pending detection with higher confidence",
-					logger.String("species", commonName),
-					logger.String("model_id", item.ModelID),
-					logger.Float64("old_confidence", oldConfidence),
-					logger.Float64("new_confidence", confidence),
-					logger.Int("count", existing.Count+1),
-					logger.String("operation", "update_pending_detection"))
-			}
-			existing.Count++
-
-			// Track per-model contribution
-			if existing.ModelContributions == nil {
-				existing.ModelContributions = make(map[string]ModelContribution, 1)
-			}
-			contrib := existing.ModelContributions[item.ModelID]
-			contrib.HitCount++
-			if confidence > contrib.MaxConfidence {
-				contrib.MaxConfidence = confidence
-			}
-			contrib.LastHitAt = now
-			existing.ModelContributions[item.ModelID] = contrib
-
-			p.pendingDetections[mapKey] = existing
-		} else {
-			GetLogger().Info("Created new pending detection",
-				logger.String("species", commonName),
-				logger.Float64("confidence", confidence),
-				logger.String("source", p.getDisplayNameForSource(item.Source.ID)),
-				logger.String("model_id", item.ModelID),
-				logger.Time("flush_deadline", now.Add(detectionWindow)),
-				logger.String("operation", "create_pending_detection"))
-			p.pendingDetections[mapKey] = PendingDetection{
-				Detection:       det,
-				Confidence:      confidence,
-				Source:          item.Source.ID,
-				BestModelID:     item.ModelID,
-				FirstDetected:   item.StartTime,
-				CreatedAt:       now,
-				AudioCapturedAt: item.AudioCapturedAt,
-				LastUpdated:     item.StartTime,
-				// FlushDeadline is relative to NOW (not startTime) to ensure it's always in the future.
-				// startTime is backdated for audio extraction, but FlushDeadline needs to be a future deadline.
-				FlushDeadline: now.Add(detectionWindow),
-				Count:         1,
-				ModelContributions: map[string]ModelContribution{
-					item.ModelID: {
-						HitCount:      1,
-						MaxConfidence: confidence,
-						LastHitAt:     now,
-					},
-				},
-			}
-		}
-
-		// Apply extended capture if species qualifies
-		if p.isExtendedCaptureSpecies(det.Result.Species.ScientificName) {
-			p.applyExtendedCapture(mapKey, now, detectionWindow)
-		}
-
-		// Note: the dynamic-threshold expiry timer is renewed only from approved,
-		// filter-passing detections above Trigger in LearnFromApprovedDetection
-		// (via processApprovedDetection). Renewing it here from pending detections
-		// above the model base let sub-trigger noise sustain a lowered gate
-		// indefinitely (#4194), so no renewal happens on the pending path.
-
-		// Unlock the mutex to allow other goroutines to access shared resources
-		p.pendingMutex.Unlock()
+		p.mergePendingHit(&item, &detectionResults[i], hitAt, detectionWindow)
 	}
 
 	// Broadcast updated pending detections snapshot for "currently hearing" UI.
 	// This runs after all new detections are incorporated into pendingDetections.
 	snapshot := p.SnapshotVisiblePending()
 	p.broadcastPendingSnapshot(snapshot)
+}
+
+// mergePendingHit folds one detection of the chunk item into pendingDetections: it
+// updates the pending entry for the detection's source and species (which another
+// model may have created) or creates one, counts the hit, records it in the model's
+// contribution statistics stamped with hitAt, and applies extended capture when the
+// species qualifies. It takes and releases pendingMutex itself; the caller must not
+// hold it.
+func (p *Processor) mergePendingHit(item *classifier.Results, det *Detections, hitAt time.Time, detectionWindow time.Duration) {
+	commonName := strings.ToLower(det.Result.Species.CommonName)
+	confidence := det.Result.Confidence
+
+	// Lock the mutex to ensure thread-safe access to shared resources
+	p.pendingMutex.Lock()
+	defer p.pendingMutex.Unlock()
+
+	now := time.Now()
+	mapKey := pendingKeyForDetection(item.Source.ID, det)
+
+	if existing, exists := p.pendingDetections[mapKey]; exists {
+		// Update the existing detection (may be from same or different model)
+		oldConfidence := existing.Confidence
+		existing.LastUpdated = now
+		existing.AudioCapturedAt = item.AudioCapturedAt
+		if confidence > existing.Confidence {
+			existing.Detection = *det
+			existing.Confidence = confidence
+			existing.BestModelID = item.ModelID
+			existing.Source = item.Source.ID
+			GetLogger().Debug("Updated pending detection with higher confidence",
+				logger.String("species", commonName),
+				logger.String("model_id", item.ModelID),
+				logger.Float64("old_confidence", oldConfidence),
+				logger.Float64("new_confidence", confidence),
+				logger.Int("count", existing.Count+1),
+				logger.String("operation", "update_pending_detection"))
+		}
+		existing.Count++
+
+		// Track per-model contribution
+		if existing.ModelContributions == nil {
+			existing.ModelContributions = make(map[string]ModelContribution, 1)
+		}
+		contrib := existing.ModelContributions[item.ModelID]
+		contrib.recordHit(confidence, hitAt)
+		existing.ModelContributions[item.ModelID] = contrib
+
+		p.pendingDetections[mapKey] = existing
+	} else {
+		GetLogger().Info("Created new pending detection",
+			logger.String("species", commonName),
+			logger.Float64("confidence", confidence),
+			logger.String("source", p.getDisplayNameForSource(item.Source.ID)),
+			logger.String("model_id", item.ModelID),
+			logger.Time("flush_deadline", now.Add(detectionWindow)),
+			logger.String("operation", "create_pending_detection"))
+		var contrib ModelContribution
+		contrib.recordHit(confidence, hitAt)
+		p.pendingDetections[mapKey] = PendingDetection{
+			Detection:       *det,
+			Confidence:      confidence,
+			Source:          item.Source.ID,
+			BestModelID:     item.ModelID,
+			FirstDetected:   item.StartTime,
+			CreatedAt:       now,
+			AudioCapturedAt: item.AudioCapturedAt,
+			LastUpdated:     item.StartTime,
+			// FlushDeadline is relative to NOW (not startTime) to ensure it's always in the future.
+			// startTime is backdated for audio extraction, but FlushDeadline needs to be a future deadline.
+			FlushDeadline:      now.Add(detectionWindow),
+			Count:              1,
+			ModelContributions: map[string]ModelContribution{item.ModelID: contrib},
+		}
+	}
+
+	// Apply extended capture if species qualifies
+	if p.isExtendedCaptureSpecies(det.Result.Species.ScientificName) {
+		p.applyExtendedCapture(mapKey, now, detectionWindow)
+	}
+
+	// Note: the dynamic-threshold expiry timer is renewed only from approved,
+	// filter-passing detections above Trigger in LearnFromApprovedDetection
+	// (via processApprovedDetection). Renewing it here from pending detections
+	// above the model base let sub-trigger noise sustain a lowered gate
+	// indefinitely (#4194), so no renewal happens on the pending path.
 }
 
 // processResults processes the results from the BirdNET prediction and returns a list of detections.
@@ -1118,9 +1167,12 @@ func (p *Processor) shouldFilterDetection(settings *conf.Settings, result datast
 		return true, 0
 	}
 
-	// Check human detection privacy filter. Match the raw label so Perch v2's
-	// FSD50K human classes are caught too, not just BirdNET's "Human *" classes.
-	if isHumanVocalization(result.Species) && result.Confidence > baseThreshold {
+	// Drop human sounds from the saved detections. Match the raw label so Perch
+	// v2's FSD50K human classes are caught too, not just BirdNET's "Human *"
+	// classes. This uses the broad human-sound check, not the privacy filter's
+	// narrower set (which leaves out Perch body and action classes), so those
+	// classes (Hands, Crowd, ...) are still dropped as non-bird detections.
+	if isHumanSoundLabel(result.Species) && result.Confidence > baseThreshold {
 		return true, 0 // Filter out human detections for privacy
 	}
 
@@ -1199,7 +1251,9 @@ func isSpeciesExcluded(commonName, scientificName string, excludeList []string) 
 	return false
 }
 
-// createDetection creates a detection object with all necessary information
+// createDetection creates a detection object with all necessary information.
+// Its ClipName is chosen from the Result's own model and sample rate, the fields
+// the audio exporter reads.
 //
 //nolint:gocritic // hugeParam: Pass by value is intentional - avoids pointer dereferencing in hot path
 func (p *Processor) createDetection(settings *conf.Settings, item classifier.Results, result datastore.Results, scientificName, commonName, speciesCode, rawScientificName string) Detections {
@@ -1208,7 +1262,8 @@ func (p *Processor) createDetection(settings *conf.Settings, item classifier.Res
 	// is or will be written, so nothing must reference one. The media API and
 	// the UI gate on a non-empty ClipName, and no SaveAudioAction is scheduled
 	// when export is off, so there is no async-export race to preserve here.
-	clipName := p.resolveClipName(settings, &item, scientificName, result.Confidence)
+	// The name is set below, once the Result exists, so it is chosen from the
+	// Result's own model and sample rate.
 
 	// Get capture length and pre-capture length for detection end time calculation
 	// Set begin and end time for note
@@ -1228,10 +1283,14 @@ func (p *Processor) createDetection(settings *conf.Settings, item classifier.Res
 		beginTime, endTime,
 		scientificName, commonName, speciesCode, rawScientificName,
 		float64(result.Confidence),
-		item.Source, clipName,
+		item.Source, "",
 		item.ElapsedTime, occurrence,
 		item.ModelID,
 		result.Species)
+	detectionResult.ClipName = p.resolveClipName(settings, &detectionResult, scientificName, result.Confidence)
+	// The planned rate depends on the container the clip name carries, so it is
+	// planned only now (0 when export is off and the name is empty).
+	detectionResult.ClipSampleRate = plannedClipSampleRate(&detectionResult, &settings.Realtime.Audio.Export)
 
 	// Convert additional results from datastore.Results to detection.AdditionalResult.
 	// Exclude the primary species since it's already stored as Detection.LabelID.
@@ -1258,6 +1317,8 @@ func (p *Processor) createDetection(settings *conf.Settings, item classifier.Res
 // createDetectionResult creates a detection.Result from the given parameters.
 // detectionTime should be pre-computed by the caller to ensure timestamp consistency
 // with other detection artifacts (e.g., Note) created from the same analysis.
+// The result carries no clip name or ClipSampleRate; createDetection sets both once the
+// clip name is resolved, because the planned rate depends on the name.
 func (p *Processor) createDetectionResult(settings *conf.Settings,
 	detectionTime time.Time,
 	beginTime, endTime time.Time,
@@ -1271,7 +1332,7 @@ func (p *Processor) createDetectionResult(settings *conf.Settings,
 	// Resolve audio source info from registry
 	audioSource := p.resolveAudioSource(source)
 
-	return detection.Result{
+	result := detection.Result{
 		Timestamp:   detectionTime,
 		SourceNode:  settings.Main.Name,
 		AudioSource: audioSource,
@@ -1294,6 +1355,7 @@ func (p *Processor) createDetectionResult(settings *conf.Settings,
 		Model:          classifier.DetectionModelInfoForID(modelID),
 		RawLabel:       rawLabel,
 	}
+	return result
 }
 
 // resolveAudioSource resolves the audio source details from the registry.
@@ -1309,21 +1371,12 @@ func (p *Processor) resolveAudioSource(source datastore.AudioSource) detection.A
 
 	// Try to get additional details from registry
 	// Use same lookup order as NewWithSpeciesInfo: connection string first, then ID
-	registry := p.Registry()
-	if registry != nil {
-		if existingSource, exists := registry.GetByConnection(source.ID); exists {
-			audioSource.ID = existingSource.ID
-			audioSource.SafeString = existingSource.SafeString
-			audioSource.DisplayName = existingSource.DisplayName
-			audioSource.Type = detection.DetermineSourceType(existingSource.SafeString)
-			audioSource.SampleRate = existingSource.SampleRate
-		} else if existingSource, exists := registry.Get(source.ID); exists {
-			audioSource.ID = existingSource.ID
-			audioSource.SafeString = existingSource.SafeString
-			audioSource.DisplayName = existingSource.DisplayName
-			audioSource.Type = detection.DetermineSourceType(existingSource.SafeString)
-			audioSource.SampleRate = existingSource.SampleRate
-		}
+	if existingSource, exists := p.registeredSource(source.ID); exists {
+		audioSource.ID = existingSource.ID
+		audioSource.SafeString = existingSource.SafeString
+		audioSource.DisplayName = existingSource.DisplayName
+		audioSource.Type = detection.DetermineSourceType(existingSource.SafeString)
+		audioSource.SampleRate = existingSource.SampleRate
 	}
 
 	if audioSource.SampleRate <= 0 && p.BufferMgr != nil {
@@ -1429,23 +1482,25 @@ func (p *Processor) handleDogDetection(settings *conf.Settings, item classifier.
 // handleHumanDetection handles the detection of human vocalizations and records
 // the hit in LastHumanDetection, stamped with the end of the chunk's audio (the
 // processing time when the producer gave none) and never moving the stored time
-// backward.
+// backward. The hit carries the model that scored it (item.ModelID) and its
+// confidence, so logs and the discard summary can name it. When the effective
+// base overlap is above labelConfirmMinBaseOverlap a hit counts only once a
+// second hit confirms it, see recordLabelHit.
 //
 //nolint:gocritic // hugeParam: Pass by value is intentional - avoids pointer dereferencing in hot path
 func (p *Processor) handleHumanDetection(settings *conf.Settings, item classifier.Results, result datastore.Results) {
 	// only check this if privacy filter is enabled
 	if settings.Realtime.PrivacyFilter.Enabled && isHumanVocalization(result.Species) &&
 		result.Confidence > settings.Realtime.PrivacyFilter.Confidence {
-		GetLogger().Info("human detection filtered",
-			logger.Float32("confidence", result.Confidence),
-			logger.Float32("threshold", float32(settings.Realtime.PrivacyFilter.Confidence)),
-			logger.String("source", p.getDisplayNameForSource(item.Source.ID)),
-			logger.String("operation", "privacy_filter"))
-		// Put the human detection into the LastHumanDetection map, stamped with the
-		// end of the audio this label scored (not the back-dated chunk start). This is
-		// used to discard bird detections whose saved clip reaches that audio.
+		// Stamp the hit with the end of the audio this label scored (not the
+		// back-dated chunk start); the discard check compares it with the saved
+		// clip. Above the confirmation overlap a lone hit is held (see
+		// recordLabelHit) and counts only when a second hit confirms it.
 		end, _ := audioEndOrNow(&item)
-		p.recordHumanDetection(item.Source.ID, end, metrics.TriggerLabel)
+		hit := labelHumanHit(end, item.ModelID, result.Confidence,
+			privacyrollup.ThresholdMilli(float64(settings.Realtime.PrivacyFilter.Confidence)))
+		d := p.recordLabelHit(settings, item.Source.ID, hit)
+		p.reportHitDecision(settings, item.Source.ID, &hit, &d)
 	}
 }
 
@@ -1497,29 +1552,30 @@ func modelGlobalConfidenceThreshold(settings *conf.Settings, modelID string) flo
 // export is off makes it a truthful per-detection signal (no clip exists or is
 // being encoded), which the media endpoint and the frontend rely on to gate
 // audio playback per detection under runtime toggling of the export setting.
-func (p *Processor) resolveClipName(settings *conf.Settings, item *classifier.Results, scientificName string, confidence float32) string {
+// res supplies the model and sample rate the name's container is chosen from.
+func (p *Processor) resolveClipName(settings *conf.Settings, res *detection.Result, scientificName string, confidence float32) string {
 	if !settings.Realtime.Audio.Export.Enabled {
 		return ""
 	}
 
 	clipName := p.generateClipName(settings, scientificName, confidence)
-	return p.applyExportFormatExtension(settings, clipName, item.ModelID, item.Source)
+	return p.applyExportFormatExtension(settings, clipName, res)
 }
 
-// applyExportFormatExtension overrides a clip name's extension to match the
-// container the exporter will actually write, keeping the persisted ClipName in
-// lockstep with the on-disk file. buildClipPath derives the extension from
-// Export.Type; a bat/ultrasonic capture above the analysis rate is stored in the
-// dedicated Export.UltrasonicType instead (resolveExportFormat), so its extension
-// must be rewritten here. Shared by the createDetection and extended-capture paths
-// so both persist the same extension. An empty clip name is returned unchanged.
-func (p *Processor) applyExportFormatExtension(settings *conf.Settings, clipName, modelID string, source datastore.AudioSource) string {
+// applyExportFormatExtension sets a clip name's extension to the container the
+// detection is stored in. buildClipPath derives the extension from Export.Type; a
+// bat/ultrasonic capture above the analysis rate is named in the dedicated
+// Export.UltrasonicType instead (resolveExportFormat), so its extension is
+// rewritten here. The model and sample rate are read from res, the same
+// detection.Result fields buildSaveAudioAction hands the encoder, so naming and
+// encoding decide from the same inputs. The exporter then writes the stored name
+// as it is (resolveExportParams). Shared by the createDetection and
+// extended-capture paths. An empty clip name is returned unchanged.
+func (p *Processor) applyExportFormatExtension(settings *conf.Settings, clipName string, res *detection.Result) string {
 	if clipName == "" {
 		return clipName
 	}
-	mInfo := classifier.DetectionModelInfoForID(modelID)
-	sourceRate := p.resolveAudioSource(source).SampleRate
-	format := exportFormatForModel(mInfo.Name, mInfo.Version, sourceRate, &settings.Realtime.Audio.Export)
+	format := exportFormatForModel(res.Model.Name, res.Model.Version, res.AudioSource.SampleRate, &settings.Realtime.Audio.Export)
 	// audioformat.FileExtension returns the extension WITHOUT a leading dot; replaceExtension
 	// expects the dot. Guard against an empty extension (only reachable with an
 	// unvalidated empty format) so buildClipPath's own extension is preserved rather
@@ -1607,7 +1663,11 @@ func (p *Processor) buildClipPath(settings *conf.Settings, scientificName string
 // consistency within a single flush cycle. priv is the detection's privacyCheck
 // for that cycle; the privacy filter discards a detection when the source's
 // latest speech hit in it is at or after the saved clip's begin less
-// privacyClipGuard.
+// privacyClipGuard. A discard logs the model and score of that hit and, with
+// privacyfilter.debug on, a summary of the detectors that counted hits
+// reaching the clip (priv.contributions, which is listed whenever the latest hit
+// reaches the clip); the counts are lower bounds once the attribution list has
+// dropped a reaching hit at its cap (priv.hitCountsLowerBound).
 func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *conf.Settings, minDetections int, priv *privacyCheck) (shouldDiscard bool, reason string) {
 	// Check minimum detection count
 	if item.Count < minDetections {
@@ -1636,8 +1696,28 @@ func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *con
 				logger.Time("detection_time", item.FirstDetected),
 				logger.Time("last_human_detection", lastHumanDetection.Time),
 				logger.String("trigger", lastHumanDetection.Trigger),
+				logger.String("hit_model_id", lastHumanDetection.ModelID),
+				logger.Float64("hit_score", lastHumanDetection.Score),
 				logger.String("source", p.getDisplayNameForSource(item.Source)),
-				logger.String("operation", "privacy_filter"))
+				logger.String("operation", privacyFilterOperation))
+			if settings.Realtime.PrivacyFilter.Debug {
+				// With privacyfilter.debug on, say who decided: the detectors that
+				// counted hits reaching the saved clip, with hit counts and best
+				// scores (lower bounds when priv.hitCountsLowerBound is set), next to
+				// the detection that was dropped.
+				GetLogger().Info("privacy filter dropped detection",
+					logger.String("species", item.Detection.Result.Species.CommonName),
+					logger.String("detection_model_id", item.BestModelID),
+					logger.Time("clip_begin", priv.clip.from),
+					logger.Time("clip_end", priv.clip.to),
+					logger.Duration("clip_guard", privacyClipGuard),
+					logger.Time("last_hit_time", lastHumanDetection.Time),
+					logger.String("last_hit_model_id", lastHumanDetection.ModelID),
+					logger.String("last_hit_trigger", lastHumanDetection.Trigger),
+					logger.String("contributors", formatHitContributions(priv.contributions)),
+					logger.String("source", p.getDisplayNameForSource(item.Source)),
+					logger.String("operation", privacyFilterDiscardOperation))
+			}
 			// Attribute the discard to the trigger that flagged the human voice
 			// (label match vs VAD speech gate), when telemetry is enabled.
 			if settings.Realtime.Telemetry.Enabled && p.Metrics != nil {
@@ -1649,7 +1729,7 @@ func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *con
 				}
 				p.Metrics.PrivacyFilter.RecordDiscard(trigger)
 			}
-			return true, "privacy filter"
+			return true, reasonPrivacyFilter
 		}
 	}
 
@@ -1762,6 +1842,10 @@ func (p *Processor) processApprovedDetection(item *PendingDetection, speciesName
 				Model:         classifier.DetectionModelInfoForID(modelID),
 				HitCount:      contrib.HitCount,
 				MaxConfidence: contrib.MaxConfidence,
+				FirstHitAt:    contrib.FirstHitAt,
+				LastHitAt:     contrib.LastHitAt,
+				MinConfidence: contrib.MinConfidence,
+				ConfidenceSum: contrib.ConfidenceSum,
 			}
 		}
 	}
@@ -1900,6 +1984,10 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 
 	var terminalNotifs []SSEPendingDetection
 	var broadcastSnapshot []SSEPendingDetection
+	// Privacy rollup events, handed off after pendingMutex is released.
+	var rollupEvents []sourcedEvent
+	// Privacy filter discard records, handed off after pendingMutex is released.
+	var discardRecords []privacyrollup.Discard
 
 	p.pendingMutex.Lock()
 
@@ -1938,6 +2026,10 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 				logger.Int("model_count", len(item.ModelContributions)),
 				logger.String("reason", reason),
 				logger.String("operation", "discard_detection"))
+			if reason == reasonPrivacyFilter && p.privacyRollup != nil {
+				rollupEvents = append(rollupEvents, discardEvent(item.Source, &priv.hit))
+				discardRecords = append(discardRecords, privacyDiscard(settings, &item, &priv, now))
+			}
 			delete(p.pendingDetections, mapKey)
 
 			if item.Count >= visThresholds.getThreshold(item.BestModelID) {
@@ -1954,6 +2046,9 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 			continue
 		case coverageTimedOut:
 			p.recordUnscannedSave(settings, &item, priv.clip, speciesName)
+			if p.privacyRollup != nil {
+				rollupEvents = append(rollupEvents, unscannedSaveEvent(item.Source, &priv))
+			}
 		case coverageKeep:
 		}
 
@@ -1992,6 +2087,9 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 	}
 
 	p.pendingMutex.Unlock()
+
+	p.recordPrivacyEvents(settings, rollupEvents...)
+	p.recordPrivacyDiscards(discardRecords)
 
 	if broadcastSnapshot != nil {
 		p.broadcastPendingSnapshot(broadcastSnapshot)
@@ -2251,22 +2349,12 @@ func (p *Processor) getDefaultActions(det *Detections, settings *conf.Settings) 
 
 	// Create SSE action if broadcaster is available (enabled when SSE API is configured)
 	if sseBroadcaster := p.GetSSEBroadcaster(); sseBroadcaster != nil {
-		// Create SSE retry config - use sensible defaults since SSE should be reliable
-		sseRetryConfig := jobqueue.RetryConfig{
-			Enabled:      true, // Enable retries for SSE to improve reliability
-			MaxRetries:   3,    // Conservative retry count for real-time streaming
-			InitialDelay: 1 * time.Second,
-			MaxDelay:     5 * time.Second,
-			Multiplier:   2.0,
-		}
-
 		sseAction = &SSEAction{
 			Settings:       settings,
 			Result:         det.Result, // Domain model (single source of truth)
 			BirdImageCache: p.BirdImageCache,
 			EventTracker:   p.GetEventTracker(),
 			DetectionCtx:   detectionCtx, // Share context from DatabaseAction (provides database ID)
-			RetryConfig:    sseRetryConfig,
 			SSEBroadcaster: sseBroadcaster,
 			CorrelationID:  det.CorrelationID,
 		}
@@ -2300,62 +2388,80 @@ func (p *Processor) getDefaultActions(det *Detections, settings *conf.Settings) 
 				RetryConfig:       mqttRetryConfig,
 				CorrelationID:     det.CorrelationID,
 				SpeciesTimeSource: speciesTimeSource,
+				liveSettings:      p.currentSettings,
+				liveClient:        p.GetMQTTClient,
 			}
 		}
 	}
 
 	// CRITICAL FIX for GitHub issue #1158 and #1748: Race condition and data visibility
 	//
-	// Problem: When database, SSE, and MQTT are enabled, they execute concurrently via the job queue.
-	// SSE and MQTT need the database-assigned Note.ID, but each action holds a VALUE COPY of Note.
-	// CompositeAction ensures sequential execution (timing), but doesn't share data between copies.
+	// Problem: SSE and MQTT need the database-assigned Note.ID, but each action holds
+	// a VALUE COPY of the result and the actions would otherwise run concurrently via
+	// the job queue.
 	//
-	// Solution: Combine DatabaseAction, SSEAction, and MqttAction into a CompositeAction that:
-	// 1. Executes them sequentially (Database → SSE → MQTT)
-	// 2. Uses DetectionContext to share the database ID atomically between actions
+	// Solution: when the database is enabled, a CompositeAction runs sequentially:
+	// 1. DatabaseAction saves the detection and stores the ID in the shared DetectionContext.
+	// 2. An enqueueAction hands MqttAction to the job queue as its own job. The queue
+	//    picks the retry policy per job (getJobQueueRetryConfig), so MQTT gets
+	//    realtime.mqtt.retrysettings, which a step inside the composite cannot have.
+	//    The job starts after the save, so it still reads the database ID.
+	// 3. SSEAction broadcasts inline.
+	// The composite itself must never be retried: a retry would run DatabaseAction
+	// again and store a duplicate row. Without a database there is no ID to wait
+	// for, so SSE and MQTT are queued as independent actions.
 	//
 	// This ensures:
 	// - Database save completes before downstream actions
 	// - SSE/MQTT receive the correct detection ID for URL construction
 	// - No polling needed (eliminates the old 5-second sleep hack in SSE)
+	// - A failed MQTT publish is retried without re-running the database save
 	//
 	// IMPORTANT: Audio export is NOT included in this CompositeAction. It runs as a
-	// separate independent action to prevent slow FFmpeg encoding (especially on
-	// Raspberry Pi) from blocking SSE/MQTT broadcasts. The media API handles the
+	// separate independent action to prevent slow clip encoding (especially on
+	// Raspberry Pi) from blocking the SSE broadcast. The media API handles the
 	// race where a client requests audio before export completes, using server-side
 	// wait with retries and 503 + Retry-After responses.
 	//
 	// See: https://github.com/tphakala/birdnet-go/issues/1158 (race condition)
 	// See: https://github.com/tphakala/birdnet-go/issues/1748 (detection ID in MQTT)
-	var sequentialActions []Action
 	if databaseAction != nil {
-		sequentialActions = append(sequentialActions, databaseAction)
-	}
-	if sseAction != nil {
-		sequentialActions = append(sequentialActions, sseAction)
-	}
-	if mqttAction != nil {
-		sequentialActions = append(sequentialActions, mqttAction)
-	}
-
-	if len(sequentialActions) > 1 {
-		// Create composite action for sequential execution with shared context
-		compositeAction := &CompositeAction{
-			Actions:       sequentialActions,
-			Description:   "Database save, SSE broadcast, and MQTT publish (sequential)",
-			CorrelationID: det.CorrelationID,
+		sequentialActions := []Action{databaseAction}
+		if mqttAction != nil {
+			sequentialActions = append(sequentialActions, &enqueueAction{
+				action: mqttAction,
+				// No PCM data: a retrying MQTT job must not pin the audio.
+				detection: Detections{CorrelationID: det.CorrelationID, Result: det.Result},
+				enqueue:   p.EnqueueTaskCtx,
+			})
 		}
-		actions = append(actions, compositeAction)
-	} else if len(sequentialActions) == 1 {
-		// Only one action enabled, add it directly
-		actions = append(actions, sequentialActions[0])
+		if sseAction != nil {
+			sequentialActions = append(sequentialActions, sseAction)
+		}
+
+		if len(sequentialActions) > 1 {
+			actions = append(actions, &CompositeAction{
+				Actions:       sequentialActions,
+				Description:   "Database save, MQTT enqueue, and SSE broadcast (sequential)",
+				CorrelationID: det.CorrelationID,
+			})
+		} else {
+			actions = append(actions, databaseAction)
+		}
+	} else {
+		if sseAction != nil {
+			actions = append(actions, sseAction)
+		}
+		if mqttAction != nil {
+			actions = append(actions, mqttAction)
+		}
 	}
 
 	// Add SaveAudioAction if audio export is enabled.
 	// This runs as an INDEPENDENT action (not inside the CompositeAction) so that
-	// slow audio encoding does not block the Database -> SSE -> MQTT pipeline.
-	// On resource-constrained hardware (RPi with SD cards), FFmpeg encoding can
-	// take 10-30+ seconds, which previously caused CompositeAction 30s timeouts
+	// slow audio encoding does not block the Database -> SSE pipeline.
+	// On resource-constrained hardware (RPi with SD cards), clip export took
+	// 10-30+ seconds back when it ran on FFmpeg, which timed out the CompositeAction
 	// (Sentry BIRDNET-GO-WD), preventing SSE/MQTT from ever firing.
 	if settings.Realtime.Audio.Export.Enabled && databaseAction != nil {
 		actions = append(actions, p.buildSaveAudioAction(det, detectionCtx, settings))
@@ -2376,6 +2482,8 @@ func (p *Processor) getDefaultActions(det *Detections, settings *conf.Settings) 
 				pcmData:       det.pcmData3s,
 				RetryConfig:   bwRetryConfig,
 				CorrelationID: det.CorrelationID,
+				liveSettings:  p.currentSettings,
+				liveClient:    p.GetBwClient,
 			})
 		}
 	}
@@ -2399,7 +2507,11 @@ func (p *Processor) getDefaultActions(det *Detections, settings *conf.Settings) 
 }
 
 // retryConfigFromSettings converts user-facing retry settings into a jobqueue RetryConfig.
+// Disabled settings yield a zero config, whatever retry counts the user left behind.
 func retryConfigFromSettings(rs conf.RetrySettings) jobqueue.RetryConfig {
+	if !rs.Enabled {
+		return jobqueue.RetryConfig{Enabled: false}
+	}
 	return jobqueue.RetryConfig{
 		Enabled:      rs.Enabled,
 		MaxRetries:   rs.MaxRetries,
@@ -2414,7 +2526,8 @@ func retryConfigFromSettings(rs conf.RetrySettings) jobqueue.RetryConfig {
 // It reads PCM data from the capture buffer eagerly (while the data is still
 // available) and returns an action that will encode and write the audio file
 // when executed by the job queue. This decouples the slower clip encoding
-// from the fast Database -> SSE -> MQTT pipeline.
+// from the fast Database -> SSE pipeline. The action carries the planned
+// clip sample rate and, when the datastore can store one, a recorder to correct it.
 func (p *Processor) buildSaveAudioAction(det *Detections, detectionCtx *DetectionContext, settings *conf.Settings) *SaveAudioAction {
 	// Derive the capture length and readiness time from the shared conf helper so this
 	// scheduler and the media API (which decides whether a not-yet-written clip is still
@@ -2453,6 +2566,8 @@ func (p *Processor) buildSaveAudioAction(det *Detections, detectionCtx *Detectio
 	// missed on one branch is invisible until that branch is exercised.
 	base := func() *SaveAudioAction {
 		return &SaveAudioAction{
+			clipRates:        p.Repo,
+			plannedRate:      det.Result.ClipSampleRate,
 			Settings:         settings,
 			ClipName:         det.Result.ClipName,
 			sourceSampleRate: det.Result.AudioSource.SampleRate,
@@ -2896,17 +3011,7 @@ func (p *Processor) generateCorrelationID(speciesName string, timestamp time.Tim
 // generateRandomHex generates a random hexadecimal string of specified length
 func generateRandomHex(length int) string {
 	bytes := make([]byte, (length+1)/2) // Round up for odd lengths
-	_, err := rand.Read(bytes)
-	if err != nil {
-		// Fallback to timestamp-based randomness if crypto/rand fails
-		// Build a hex string of exactly the requested length
-		fallback := fmt.Sprintf("%016x", time.Now().UnixNano())
-		// Repeat the fallback string if needed to ensure we have enough length
-		for len(fallback) < length {
-			fallback += fmt.Sprintf("%016x", time.Now().UnixNano())
-		}
-		return fallback[:length]
-	}
+	rand.Read(bytes)
 
 	hex := fmt.Sprintf("%x", bytes)
 	if len(hex) > length {
@@ -2942,20 +3047,6 @@ func (p *Processor) initPreRenderer() {
 			GetLogger().Error("Invalid spectrogram size, disabling pre-rendering",
 				logger.String("size", size),
 				logger.Any("valid_sizes", validSizesList),
-				logger.String("operation", "prerenderer_init"))
-			return
-		}
-
-		// Validate Sox binary is configured and exists
-		if p.Settings.Realtime.Audio.SoxPath == "" {
-			GetLogger().Error("Sox binary not configured, disabling pre-rendering",
-				logger.String("operation", "prerenderer_init"))
-			return
-		}
-		if _, err := exec.LookPath(p.Settings.Realtime.Audio.SoxPath); err != nil {
-			GetLogger().Error("Sox binary not found, disabling pre-rendering",
-				logger.String("path", p.Settings.Realtime.Audio.SoxPath),
-				logger.Error(err),
 				logger.String("operation", "prerenderer_init"))
 			return
 		}
