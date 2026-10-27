@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/telemetry"
 )
 
 // TestAnalysisOverlapDispatchesRestart guards the actual hot-reload wiring: an
@@ -39,46 +40,76 @@ func TestAnalysisOverlapDispatchesRestart(t *testing.T) {
 	assert.False(t, entry.changed(base, conf.CloneSettings(base)), "identical settings must not fire")
 }
 
-// TestAnalysisOverlapChanged verifies the birdnet.overlap change detector. Overlap
-// drives the realtime analysis-buffer cadence, so a change must be detected to
-// trigger restart_audio_capture (a full teardown that reallocates the buffers
-// with new dimensions); an unrelated save must not, so buffers are not needlessly
-// rebuilt.
-func TestAnalysisOverlapChanged(t *testing.T) {
+// TestAnalysisOverlapChangedIgnoresOtherBirdNETFields verifies that a save that
+// touches an unrelated birdnet field does not look like an overlap change, so the
+// analysis buffers are not rebuilt (a full restart_audio_capture) needlessly.
+// That an overlap change is detected is pinned by
+// TestAnalysisOverlapDispatchesRestart.
+func TestAnalysisOverlapChangedIgnoresOtherBirdNETFields(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		mutate  func(s *conf.Settings)
-		changed bool
-	}{
-		{
-			name:    "overlap change is detected",
-			mutate:  func(s *conf.Settings) { s.BirdNET.Overlap += 0.5 },
-			changed: true,
-		},
-		{
-			name:    "overlap set to a new value is detected",
-			mutate:  func(s *conf.Settings) { s.BirdNET.Overlap = 2.4 },
-			changed: true,
-		},
-		{
-			name:    "unrelated birdnet field is not an overlap change",
-			mutate:  func(s *conf.Settings) { s.BirdNET.Sensitivity += 0.1 },
-			changed: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			base := apitest.NewValidTestSettings()
-			base.BirdNET.Overlap = 0.0
-			updated := conf.CloneSettings(base)
-			tt.mutate(updated)
 
-			assert.Equal(t, tt.changed, analysisOverlapChanged(base, updated),
-				"detector result mismatch for %q", tt.name)
-			assert.False(t, analysisOverlapChanged(base, conf.CloneSettings(base)),
-				"detector reported a change for identical settings in %q", tt.name)
-		})
+	base := apitest.NewValidTestSettings()
+	base.BirdNET.Overlap = 0.0
+	updated := conf.CloneSettings(base)
+	updated.BirdNET.Sensitivity += 0.1
+
+	assert.False(t, analysisOverlapChanged(base, updated),
+		"a sensitivity change must not count as an overlap change")
+}
+
+// TestFalsePositiveFilterCrossingDispatchesReconfigure guards the table row that
+// re-plans the analysis cadence when the false positive filter is switched on or
+// off: the cap applies only while the filter is on, so a 0 to >=1 save (and
+// back) must reach reconfigure_audio_sources, while a change that stays on one
+// side of 0 must not fire.
+func TestFalsePositiveFilterCrossingDispatchesReconfigure(t *testing.T) {
+	t.Parallel()
+
+	var entry *settingsChangeCheck
+	for i := range settingsChangeChecks {
+		if settingsChangeChecks[i].name == "FP filter cadence" {
+			entry = &settingsChangeChecks[i]
+			break
+		}
 	}
+	require.NotNil(t, entry, "settingsChangeChecks must contain the FP filter cadence detector")
+	assert.Equal(t, actionReconfigureAudioSources, entry.action,
+		"a filter on/off change must re-plan through reconfigure_audio_sources")
+
+	withLevel := func(level int) *conf.Settings {
+		s := apitest.NewValidTestSettings()
+		s.Realtime.FalsePositiveFilter.Level = level
+		return s
+	}
+	assert.True(t, entry.changed(withLevel(0), withLevel(1)), "0 to 1 turns the filter on")
+	assert.True(t, entry.changed(withLevel(3), withLevel(0)), "3 to 0 turns the filter off")
+	assert.False(t, entry.changed(withLevel(2), withLevel(4)), "2 to 4 keeps the filter on")
+	assert.False(t, entry.changed(withLevel(0), withLevel(0)), "0 to 0 keeps the filter off")
+}
+
+// TestSentryEnabledChangeTriggersReconfigureSentry guards the table row that
+// starts or stops the Sentry client when Error Tracking is toggled. A Debug-only
+// change must not fire it: Debug is read live and needs no client restart.
+func TestSentryEnabledChangeTriggersReconfigureSentry(t *testing.T) {
+	t.Parallel()
+
+	var entry *settingsChangeCheck
+	for i := range settingsChangeChecks {
+		if settingsChangeChecks[i].action == telemetry.SignalReconfigureSentry {
+			entry = &settingsChangeChecks[i]
+			break
+		}
+	}
+	require.NotNil(t, entry, "settingsChangeChecks must contain a reconfigure_sentry row")
+
+	base := apitest.NewValidTestSettings()
+	base.Sentry.Enabled = false
+	enabled := conf.CloneSettings(base)
+	enabled.Sentry.Enabled = true
+	assert.True(t, entry.changed(base, enabled), "enabling Error Tracking must fire the action")
+	assert.True(t, entry.changed(enabled, base), "disabling Error Tracking must fire the action")
+
+	debugOnly := conf.CloneSettings(base)
+	debugOnly.Sentry.Debug = !base.Sentry.Debug
+	assert.False(t, entry.changed(base, debugOnly), "a Debug-only change must not fire the action")
 }

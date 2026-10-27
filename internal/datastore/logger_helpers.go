@@ -102,13 +102,13 @@ func calculateFilterComplexity(filters *SearchFilters) float64 {
 
 	// Add complexity for each active filter
 	if filters.Species != "" {
-		complexity += 1
+		complexity++
 	}
 	if filters.DateStart != "" {
-		complexity += 1
+		complexity++
 	}
 	if filters.DateEnd != "" {
-		complexity += 1
+		complexity++
 	}
 	if filters.ConfidenceMin > 0 {
 		complexity += 0.5
@@ -117,19 +117,19 @@ func calculateFilterComplexity(filters *SearchFilters) float64 {
 		complexity += 0.5
 	}
 	if filters.VerifiedOnly {
-		complexity += 1
+		complexity++
 	}
 	if filters.UnverifiedOnly {
-		complexity += 1
+		complexity++
 	}
 	if filters.LockedOnly {
-		complexity += 1
+		complexity++
 	}
 	if filters.UnlockedOnly {
-		complexity += 1
+		complexity++
 	}
 	if filters.Device != "" {
-		complexity += 1
+		complexity++
 	}
 	if filters.TimeOfDay != "" && filters.TimeOfDay != "any" {
 		complexity += 2 // Time-based filters are more complex
@@ -170,7 +170,7 @@ func calculateDateRangeComplexity(startDate, endDate string) float64 {
 	}
 
 	// Calculate the difference in days
-	daysDiff := end.Sub(start).Hours() / 24
+	daysDiff := end.Sub(start).Hours() / 24 //nolint:gocritic // fractional day count for a complexity heuristic; a DST day shifts the ratio by about 0.04 and the cutoff is only a heuristic
 	if daysDiff < 0 {
 		daysDiff = -daysDiff // Take absolute value
 	}

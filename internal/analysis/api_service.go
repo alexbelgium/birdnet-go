@@ -3,6 +3,7 @@ package analysis
 import (
 	"context"
 
+	"github.com/tphakala/birdnet-go/internal/analysis/privacyrollup"
 	"github.com/tphakala/birdnet-go/internal/analysis/processor"
 	"github.com/tphakala/birdnet-go/internal/api"
 	apiv2 "github.com/tphakala/birdnet-go/internal/api/v2"
@@ -64,6 +65,7 @@ type APIServerService struct {
 	systemMonitor  *monitor.SystemMonitor
 	controlChan    chan string
 	audioLevelChan chan audiocore.AudioLevelData
+	privacyRollup  *privacyrollup.Writer
 
 	// cancel stops background goroutines owned by subsystems (e.g. the OAuth2
 	// server's periodic token cleanup). Created in Start, invoked in Stop.
@@ -88,7 +90,7 @@ func (s *APIServerService) Name() string {
 }
 
 // Start initializes and starts the API server and all dependent subsystems.
-// It fails fast if required dependencies (DataStore, BirdNET) are not available.
+// It fails fast if required dependencies (DataStore, DetectionRepository, BirdNET) are not available.
 //
 //nolint:gocognit // Orchestration function that initializes multiple subsystems in sequence.
 func (s *APIServerService) Start(ctx context.Context) error {
@@ -119,7 +121,7 @@ func (s *APIServerService) Start(ctx context.Context) error {
 	}()
 
 	// Fail fast: verify dependencies are initialized by upstream services.
-	if s.dbService == nil || s.dbService.DataStore() == nil {
+	if s.dbService == nil || s.dbService.DataStore() == nil || s.dbService.DetectionRepository() == nil {
 		return errors.Newf("api-server requires an initialized datastore; database service must be started first").
 			Component("analysis.api_service").
 			Category(errors.CategorySystem).
@@ -152,10 +154,10 @@ func (s *APIServerService) Start(ctx context.Context) error {
 	s.birdImageCache = initBirdImageCache(s.settings, dataStore, s.metrics)
 
 	// Create SunCalc for sunrise/sunset calculations.
-	s.sunCalc = suncalc.NewSunCalc(s.settings.BirdNET.Latitude, s.settings.BirdNET.Longitude)
+	s.sunCalc = newStationSunCalc(s.settings)
 
 	// Create processor.
-	s.proc = processor.New(s.settings, dataStore, bn, s.metrics, s.birdImageCache, GetLogger())
+	s.proc = processor.New(s.settings, dataStore, s.dbService.DetectionRepository(), bn, s.metrics, s.birdImageCache, GetLogger())
 	s.proc.SetSunCalc(s.sunCalc)
 
 	// Initialize backup system (optional; failure is non-fatal).
@@ -210,6 +212,7 @@ func (s *APIServerService) Start(ctx context.Context) error {
 
 	serverOpts := []api.ServerOption{
 		api.WithDataStore(dataStore),
+		api.WithDetectionRepository(s.dbService.DetectionRepository()),
 		api.WithBirdImageCache(s.birdImageCache),
 		api.WithProcessor(s.proc),
 		api.WithMetrics(s.metrics),
@@ -255,8 +258,17 @@ func (s *APIServerService) Start(ctx context.Context) error {
 		SetResultsQueueDropHealthSink(ctrl.HealthMetricsStore(), ctrl.HealthEventBuffer())
 	}
 
+	s.startPrivacyRollup()
+
 	startSucceeded = true
 	return nil
+}
+
+// newStationSunCalc builds the sun calculator the API service shares with the processor, quiet
+// hours, the nighttime scheduler and the API. It follows the live station location, so all of
+// them pick up a location change without a restart.
+func newStationSunCalc(settings *conf.Settings) *suncalc.SunCalc {
+	return suncalc.NewSunCalcWithSource(conf.LiveLocation(settings))
 }
 
 // Stop gracefully shuts down the API server and owned subsystems.
@@ -309,6 +321,14 @@ func (s *APIServerService) Stop(ctx context.Context) error {
 				logger.String("operation", "shutdown_processor"))
 		}
 		s.proc = nil
+	}
+
+	// Stop the privacy rollup writer after the processor's last flush cycle and
+	// before the database service closes the database.
+	if err := s.stopPrivacyRollup(ctx); err != nil {
+		log.Warn("privacy rollup writer did not stop in time",
+			logger.Error(err),
+			logger.String("operation", "shutdown_privacy_rollup"))
 	}
 
 	// Detach the results-queue drop health sink so it does not retain the

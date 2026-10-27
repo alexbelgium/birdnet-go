@@ -175,7 +175,9 @@ func TestLegacyTailReconciledInV2(t *testing.T) {
 		v2DB := openTempIDTable(t, filepath.Join(dir, "v2.db"), "detections", seq(1, 15))
 		require.NoError(t, v2DB.Exec("CREATE TABLE migration_dirty_ids (detection_id INTEGER PRIMARY KEY, created_at INTEGER)").Error)
 
-		assert.True(t, legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "migration_dirty_ids", testStartupLogger()))
+		reconciled, err := legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "migration_dirty_ids", testStartupLogger())
+		require.NoError(t, err)
+		assert.True(t, reconciled)
 	})
 
 	t.Run("dirty IDs defer even when tail is present", func(t *testing.T) {
@@ -185,7 +187,9 @@ func TestLegacyTailReconciledInV2(t *testing.T) {
 		require.NoError(t, v2DB.Exec("CREATE TABLE migration_dirty_ids (detection_id INTEGER PRIMARY KEY, created_at INTEGER)").Error)
 		require.NoError(t, v2DB.Exec("INSERT INTO migration_dirty_ids (detection_id, created_at) VALUES (7, 0)").Error)
 
-		assert.False(t, legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "migration_dirty_ids", testStartupLogger()))
+		reconciled, err := legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "migration_dirty_ids", testStartupLogger())
+		require.NoError(t, err)
+		assert.False(t, reconciled)
 	})
 
 	t.Run("missing tail record defers", func(t *testing.T) {
@@ -194,7 +198,9 @@ func TestLegacyTailReconciledInV2(t *testing.T) {
 		v2DB := openTempIDTable(t, filepath.Join(dir, "v2.db"), "detections", seq(1, 13)) // 14,15 absent
 		require.NoError(t, v2DB.Exec("CREATE TABLE migration_dirty_ids (detection_id INTEGER PRIMARY KEY, created_at INTEGER)").Error)
 
-		assert.False(t, legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "migration_dirty_ids", testStartupLogger()))
+		reconciled, err := legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "migration_dirty_ids", testStartupLogger())
+		require.NoError(t, err)
+		assert.False(t, reconciled)
 	})
 
 	t.Run("empty dirty table name skips dirty check", func(t *testing.T) {
@@ -202,7 +208,29 @@ func TestLegacyTailReconciledInV2(t *testing.T) {
 		legacyDB := openTempIDTable(t, filepath.Join(dir, "legacy.db"), "notes", seq(1, 15))
 		v2DB := openTempIDTable(t, filepath.Join(dir, "v2.db"), "detections", seq(1, 15))
 
-		assert.True(t, legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "", testStartupLogger()))
+		reconciled, err := legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "", testStartupLogger())
+		require.NoError(t, err)
+		assert.True(t, reconciled)
+	})
+
+	t.Run("a failed dirty count is an error", func(t *testing.T) {
+		dir := t.TempDir()
+		legacyDB := openTempIDTable(t, filepath.Join(dir, "legacy.db"), "notes", seq(1, 15))
+		v2DB := openTempIDTable(t, filepath.Join(dir, "v2.db"), "detections", seq(1, 15))
+
+		reconciled, err := legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "no_such_dirty_table", testStartupLogger())
+		require.Error(t, err)
+		assert.False(t, reconciled)
+	})
+
+	t.Run("a failed tail scan is an error", func(t *testing.T) {
+		dir := t.TempDir()
+		legacyDB := openTempIDTable(t, filepath.Join(dir, "legacy.db"), "notes", seq(1, 15))
+		v2DB := openTempIDTable(t, filepath.Join(dir, "v2.db"), "other_table", nil)
+
+		reconciled, err := legacyTailReconciledInV2(legacyDB, v2DB, 10, "notes", "detections", "", testStartupLogger())
+		require.Error(t, err)
+		assert.False(t, reconciled)
 	})
 
 	// MySQL uses ONE database handle for both the legacy notes and the prefixed
@@ -218,7 +246,9 @@ func TestLegacyTailReconciledInV2(t *testing.T) {
 		}
 		require.NoError(t, db.Exec("CREATE TABLE migration_dirty_ids (detection_id INTEGER PRIMARY KEY, created_at INTEGER)").Error)
 
-		assert.True(t, legacyTailReconciledInV2(db, db, 10, "notes", "v2_detections", "migration_dirty_ids", testStartupLogger()))
+		reconciled, err := legacyTailReconciledInV2(db, db, 10, "notes", "v2_detections", "migration_dirty_ids", testStartupLogger())
+		require.NoError(t, err)
+		assert.True(t, reconciled)
 	})
 
 	t.Run("MySQL single-handle shape: missing tail record defers", func(t *testing.T) {
@@ -230,7 +260,9 @@ func TestLegacyTailReconciledInV2(t *testing.T) {
 		}
 		require.NoError(t, db.Exec("CREATE TABLE migration_dirty_ids (detection_id INTEGER PRIMARY KEY, created_at INTEGER)").Error)
 
-		assert.False(t, legacyTailReconciledInV2(db, db, 10, "notes", "v2_detections", "migration_dirty_ids", testStartupLogger()))
+		reconciled, err := legacyTailReconciledInV2(db, db, 10, "notes", "v2_detections", "migration_dirty_ids", testStartupLogger())
+		require.NoError(t, err)
+		assert.False(t, reconciled)
 	})
 }
 
@@ -256,7 +288,8 @@ func TestHasUnmigratedLegacyRecords_DualWriteResidueAllInV2(t *testing.T) {
 	createCompletedV2MigrationDB(t, tmpDir, 10)
 	insertV2DetectionIDs(t, V2MigrationPathFromConfigured(legacyPath), []uint{11, 12, 13})
 
-	hasUnmigrated := HasUnmigratedLegacyRecords(sqliteSettings(legacyPath), testStartupLogger())
+	hasUnmigrated, err := HasUnmigratedLegacyRecords(sqliteSettings(legacyPath), testStartupLogger())
+	require.NoError(t, err)
 	assert.False(t, hasUnmigrated,
 		"dual-write residue already present in v2 must not block promotion (#3991)")
 }
@@ -272,7 +305,8 @@ func TestHasUnmigratedLegacyRecords_PartialStragglers(t *testing.T) {
 	createCompletedV2MigrationDB(t, tmpDir, 10)
 	insertV2DetectionIDs(t, V2MigrationPathFromConfigured(legacyPath), []uint{11, 12, 13})
 
-	hasUnmigrated := HasUnmigratedLegacyRecords(sqliteSettings(legacyPath), testStartupLogger())
+	hasUnmigrated, err := HasUnmigratedLegacyRecords(sqliteSettings(legacyPath), testStartupLogger())
+	require.NoError(t, err)
 	assert.True(t, hasUnmigrated,
 		"records present in legacy but absent from v2 must defer promotion")
 }
@@ -291,7 +325,8 @@ func TestHasUnmigratedLegacyRecords_DirtyIDDefers(t *testing.T) {
 	insertV2DetectionIDs(t, sidecar, []uint{11, 12, 13})
 	insertV2DirtyIDs(t, sidecar, []uint{7}) // an unreconciled dual-write below the watermark
 
-	hasUnmigrated := HasUnmigratedLegacyRecords(sqliteSettings(legacyPath), testStartupLogger())
+	hasUnmigrated, err := HasUnmigratedLegacyRecords(sqliteSettings(legacyPath), testStartupLogger())
+	require.NoError(t, err)
 	assert.True(t, hasUnmigrated,
 		"an outstanding dirty ID must defer promotion")
 }
@@ -327,7 +362,7 @@ func TestMoveSQLiteDBFiles_PreservesSidecars(t *testing.T) {
 
 // TestMoveSQLiteDBFiles_RemovesStaleDestinationSidecar proves that when the source has no
 // sidecars (the normal post-checkpoint path), a stale sidecar left at the destination is
-// removed so it is not wrongly paired with the moved database (Forgejo #1580).
+// removed so it is not wrongly paired with the moved database.
 func TestMoveSQLiteDBFiles_RemovesStaleDestinationSidecar(t *testing.T) {
 	dir := t.TempDir()
 	from := filepath.Join(dir, "src.db")
@@ -346,7 +381,7 @@ func TestMoveSQLiteDBFiles_RemovesStaleDestinationSidecar(t *testing.T) {
 
 // TestMoveSQLiteDBFiles_FailsClosedAndRevertsOnSidecarFailure proves that a sidecar rename
 // failure is reported (not swallowed as success) and that the already-renamed main file is
-// rolled back, so the caller never sees a half-moved database (Forgejo #1580).
+// rolled back, so the caller never sees a half-moved database.
 func TestMoveSQLiteDBFiles_FailsClosedAndRevertsOnSidecarFailure(t *testing.T) {
 	dir := t.TempDir()
 	from := filepath.Join(dir, "src.db")
@@ -370,7 +405,7 @@ func TestMoveSQLiteDBFiles_FailsClosedAndRevertsOnSidecarFailure(t *testing.T) {
 
 // TestMoveSQLiteDBFiles_FailsClosedOnUnreadableSidecar proves that a non-not-exist stat
 // error on a sidecar is treated as fail-closed (the sidecar may hide live WAL data), not as
-// "absent": the move returns an error and reverts (Forgejo #1580). A self-referential symlink
+// "absent": the move returns an error and reverts. A self-referential symlink
 // makes os.Stat fail with ELOOP, which is independent of privileges (unlike a chmod, which
 // root bypasses).
 func TestMoveSQLiteDBFiles_FailsClosedOnUnreadableSidecar(t *testing.T) {
@@ -394,7 +429,7 @@ func TestMoveSQLiteDBFiles_FailsClosedOnUnreadableSidecar(t *testing.T) {
 
 // TestMoveSQLiteDBFiles_FailsClosedWhenStaleSidecarRemovalFails proves that when the source
 // has no sidecars but the stale destination sidecar cannot be removed, the move fails closed
-// and reverts rather than silently leaving a mispaired sidecar (Forgejo #1580).
+// and reverts rather than silently leaving a mispaired sidecar.
 func TestMoveSQLiteDBFiles_FailsClosedWhenStaleSidecarRemovalFails(t *testing.T) {
 	dir := t.TempDir()
 	from := filepath.Join(dir, "src.db")

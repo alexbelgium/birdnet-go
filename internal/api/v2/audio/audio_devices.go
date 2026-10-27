@@ -2,7 +2,6 @@
 package audio
 
 import (
-	goerrors "errors"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -12,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/tphakala/birdnet-go/internal/audiocore"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
@@ -34,6 +34,7 @@ func (c *Handler) RegisterAudioDeviceRoutes(g *echo.Group) {
 	audioGroup.GET("/devices/capabilities", c.GetDeviceCapabilities)
 	audioGroup.GET("/active", c.GetActiveAudioDevice)
 	audioGroup.GET("/equalizer/config", c.GetEqualizerConfig)
+	audioGroup.POST("/equalizer/response", c.ComputeEqualizerResponse)
 	audioGroup.GET("/sources", c.ListAudioSources)
 }
 
@@ -70,6 +71,15 @@ type ActiveAudioDevice struct {
 	Channels   int    `json:"channels"`
 }
 
+// captureDevices lists the capture devices through the listCaptureDevices seam
+// when one is set, and through audiocore.ListCaptureDevices otherwise.
+func (c *Handler) captureDevices() ([]audiocore.DeviceInfo, error) {
+	if c.listCaptureDevices != nil {
+		return c.listCaptureDevices()
+	}
+	return audiocore.ListCaptureDevices()
+}
+
 // GetAudioDevices handles GET /api/v2/system/audio/devices
 func (c *Handler) GetAudioDevices(ctx echo.Context) error {
 	c.LogInfoIfEnabled("Getting audio devices",
@@ -78,7 +88,7 @@ func (c *Handler) GetAudioDevices(ctx echo.Context) error {
 	)
 
 	// Get audio devices
-	devices, err := audiocore.ListCaptureDevices()
+	devices, err := c.captureDevices()
 	if err != nil {
 		c.LogErrorIfEnabled("Failed to list audio devices",
 			logger.Error(err),
@@ -144,7 +154,7 @@ func (c *Handler) GetDeviceCapabilities(ctx echo.Context) error {
 
 	caps, err := audiocore.ProbeDeviceCapabilities(deviceID, c.APILogger)
 	if err != nil {
-		if goerrors.Is(err, audiocore.ErrDeviceNotFound) {
+		if errors.Is(err, audiocore.ErrDeviceNotFound) {
 			return c.HandleError(ctx, err, "Device not found", http.StatusNotFound)
 		}
 		c.LogErrorIfEnabled("Failed to probe device capabilities",
@@ -210,7 +220,7 @@ func (c *Handler) GetActiveAudioDevice(ctx echo.Context) error {
 	}
 
 	// Try to get additional device info and validate the device exists
-	devices, err := audiocore.ListCaptureDevices()
+	devices, err := c.captureDevices()
 	if err != nil {
 		errorMsg := fmt.Sprintf("Failed to list audio devices: %v", err)
 		c.Debug("%s", errorMsg)
@@ -313,6 +323,11 @@ func (c *Handler) GetActiveAudioDevice(ctx echo.Context) error {
 	})
 }
 
+// equalizerConfigCacheControl makes clients revalidate the filter table on every
+// load. The table (limits and defaults) changes between releases, and a copy
+// cached by an older release would make the editor clamp to an old maximum.
+const equalizerConfigCacheControl = "no-cache"
+
 // GetEqualizerConfig handles GET /api/v2/system/audio/equalizer/config
 func (c *Handler) GetEqualizerConfig(ctx echo.Context) error {
 	c.LogInfoIfEnabled("Getting equalizer filter configuration",
@@ -320,8 +335,7 @@ func (c *Handler) GetEqualizerConfig(ctx echo.Context) error {
 		logger.String("ip", ctx.RealIP()),
 	)
 
-	// Set cache headers for static configuration data
-	ctx.Response().Header().Set("Cache-Control", "public, max-age=3600")
+	ctx.Response().Header().Set("Cache-Control", equalizerConfigCacheControl)
 
 	// Return the equalizer filter configuration
 	return ctx.JSON(http.StatusOK, conf.EqFilterConfig)

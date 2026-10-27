@@ -134,6 +134,9 @@ func (m *MySQLManager) Initialize() error {
 		return fmt.Errorf("v2 schema integrity check failed: %w", err)
 	}
 
+	// The unique (detection_id, model_id) index serves the detection_id foreign key.
+	dropRedundantContributionIndex(m.db, m.log)
+
 	// Initialize migration state singleton using FirstOrCreate to handle race conditions
 	state := entities.MigrationState{ID: 1, State: entities.MigrationStatusIdle}
 	if err := m.db.FirstOrCreate(&state, entities.MigrationState{ID: 1}).Error; err != nil {
@@ -256,6 +259,10 @@ func (m *MySQLManager) Delete() error {
 		prefix + "detection_model_contributions",
 		prefix + "detection_predictions",
 		prefix + "detections",
+		// These reference audio_sources (the hits reference the discards), so they go first
+		prefix + "privacy_filter_discard_hits",
+		prefix + "privacy_filter_discards",
+		prefix + "privacy_filter_hourlies",
 		prefix + "audio_sources",
 		// Alert tables (drop children first)
 		prefix + "alert_histories",

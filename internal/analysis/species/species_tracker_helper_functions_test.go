@@ -7,7 +7,6 @@
 package species
 
 import (
-	"errors"
 	"maps"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
+	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
 // ============================================================================
@@ -67,7 +67,7 @@ func TestCheckAndUpdateLifetimeLocked_EdgeCases(t *testing.T) {
 			windowDays:            7,
 			existingFirstSeen:     new(time.Date(2025, 6, 1, 10, 0, 0, 0, time.UTC)),
 			detectionTime:         time.Date(2025, 6, 8, 10, 0, 0, 0, time.UTC), // exactly 7 days
-			expectedIsNew:         true,                                         // daysSince == windowDays is still "new"
+			expectedIsNew:         false,                                        // The notification window has expired
 			expectedDaysSince:     7,
 			expectedFirstSeenTime: time.Date(2025, 6, 1, 10, 0, 0, 0, time.UTC),
 		},
@@ -103,7 +103,7 @@ func TestCheckAndUpdateLifetimeLocked_EdgeCases(t *testing.T) {
 			windowDays:            0,
 			existingFirstSeen:     new(time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)),
 			detectionTime:         time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
-			expectedIsNew:         true, // daysSince 0 <= windowDays 0
+			expectedIsNew:         false, // A zero-length notification window has expired
 			expectedDaysSince:     0,
 			expectedFirstSeenTime: time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
 		},
@@ -207,7 +207,7 @@ func TestLoadNotificationHistoryFromDatabase_EdgeCases(t *testing.T) {
 			name:              "database_error_returns_error",
 			suppressionWindow: 24 * time.Hour,
 			mockHistories:     nil,
-			mockError:         errors.New("database connection failed"),
+			mockError:         errors.NewStd("database connection failed"),
 			expectedMapSize:   0,
 			expectError:       true,
 		},
@@ -575,7 +575,7 @@ func TestLoadSingleSeasonData_ErrorPaths(t *testing.T) {
 			name:        "database_error_returns_error",
 			seasonName:  "winter",
 			mockData:    nil,
-			mockError:   errors.New("database unavailable"),
+			mockError:   errors.NewStd("database unavailable"),
 			expectError: true,
 		},
 		{
@@ -685,11 +685,15 @@ func TestLoadSingleSeasonData_ErrorPaths(t *testing.T) {
 
 // ============================================================================
 // Test: calculateDaysSince edge cases
-// Target: status.go:110 - ensure max(0, days) is applied correctly
+// Target: calculateDaysSince - ensure max(0, days) is applied correctly and
+// that calendar days are counted across DST changes
 // ============================================================================
 
 func TestCalculateDaysSince_EdgeCases(t *testing.T) {
 	t.Parallel()
+
+	helsinki, err := time.LoadLocation("Europe/Helsinki")
+	require.NoError(t, err)
 
 	tests := []struct {
 		name          string
@@ -726,6 +730,49 @@ func TestCalculateDaysSince_EdgeCases(t *testing.T) {
 			currentTime:   time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
 			referenceTime: time.Date(2020, 6, 15, 10, 0, 0, 0, time.UTC),
 			expectedDays:  1826, // ~5 years including leap year
+		},
+		{
+			// Both times are the same instant. Each is read as a date in its own location
+			// (Jun 16 in Helsinki, Jun 15 in UTC), so the count is 1 on purpose; converting
+			// either or both to one zone would give 0.
+			name:          "dates_are_read_in_each_times_own_location",
+			currentTime:   time.Date(2025, 6, 16, 1, 0, 0, 0, helsinki),
+			referenceTime: time.Date(2025, 6, 15, 22, 0, 0, 0, time.UTC),
+			expectedDays:  1,
+		},
+		{
+			// time.Time.Sub saturates at about 292 years, so a subtraction based count
+			// returned 106751 here instead of the exact number of days.
+			name:          "span_beyond_292_years_is_exact",
+			currentTime:   time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
+			referenceTime: time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC),
+			expectedDays:  739_416,
+		},
+		// 120 hours across a 25-hour day is four calendar days and across a
+		// 23-hour day it is six, so tests must build day offsets with AddDate.
+		{
+			name:          "fall_back_five_calendar_days_from_0009",
+			currentTime:   time.Date(2025, 10, 31, 0, 9, 0, 0, helsinki), // 121 hours later
+			referenceTime: time.Date(2025, 10, 26, 0, 9, 0, 0, helsinki),
+			expectedDays:  5,
+		},
+		{
+			name:          "fall_back_120_hours_from_0009_is_four_calendar_days",
+			currentTime:   time.Date(2025, 10, 30, 23, 9, 0, 0, helsinki), // 120 hours later
+			referenceTime: time.Date(2025, 10, 26, 0, 9, 0, 0, helsinki),
+			expectedDays:  4,
+		},
+		{
+			name:          "spring_forward_five_calendar_days_from_2330",
+			currentTime:   time.Date(2025, 4, 3, 23, 30, 0, 0, helsinki), // 119 hours later
+			referenceTime: time.Date(2025, 3, 29, 23, 30, 0, 0, helsinki),
+			expectedDays:  5,
+		},
+		{
+			name:          "spring_forward_120_hours_from_2330_is_six_calendar_days",
+			currentTime:   time.Date(2025, 4, 4, 0, 30, 0, 0, helsinki), // 120 hours later
+			referenceTime: time.Date(2025, 3, 29, 23, 30, 0, 0, helsinki),
+			expectedDays:  6,
 		},
 	}
 

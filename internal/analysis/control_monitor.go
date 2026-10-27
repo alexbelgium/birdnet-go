@@ -25,6 +25,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/mqtt"
 	"github.com/tphakala/birdnet-go/internal/notification"
 	"github.com/tphakala/birdnet-go/internal/observability"
+	"github.com/tphakala/birdnet-go/internal/telemetry"
 )
 
 const (
@@ -57,6 +58,15 @@ type ControlMonitor struct {
 	// from current settings. It is provided by AudioPipelineService to avoid
 	// duplicating source setup logic.
 	reconfigureSourcesFn func()
+
+	// updateSourceGainsFn applies the configured gain of every running source to
+	// its live routes without a reconfigure or a stream probe. Set by
+	// AudioPipelineService after construction; nil skips it.
+	updateSourceGainsFn func()
+
+	// replanCadenceFn re-plans the analysis cadence without probing or diffing
+	// sources. Set by AudioPipelineService after construction; nil skips it.
+	replanCadenceFn func()
 
 	// reconfigureSoundLevelFn reconciles the sound level DSP pipeline (router
 	// routes, per-source Processor, bridge goroutines) with the current
@@ -277,6 +287,8 @@ func (cm *ControlMonitor) handleControlSignal(signal string) {
 		cm.handleRebuildRangeFilter()
 	case "reload_birdnet":
 		cm.handleReloadBirdnet()
+	case "reconcile_models":
+		cm.handleReconcileModels()
 	case "reconfigure_mqtt":
 		cm.handleReconfigureMQTT()
 	case "reconfigure_rtsp_sources":
@@ -291,6 +303,8 @@ func (cm *ControlMonitor) handleControlSignal(signal string) {
 		cm.handleReconfigureSoundLevel()
 	case "reconfigure_telemetry":
 		cm.handleReconfigureTelemetry()
+	case telemetry.SignalReconfigureSentry:
+		cm.handleReconfigureSentry()
 	case "reconfigure_species_tracking":
 		cm.handleReconfigureSpeciesTracking()
 	case "reconfigure_push_notifications":
@@ -299,6 +313,8 @@ func (cm *ControlMonitor) handleControlSignal(signal string) {
 		cm.handleRebuildExtendedCapture()
 	case "reconfigure_audio_sources":
 		cm.handleReconfigureAudioSources()
+	case "update_source_gains":
+		cm.handleUpdateSourceGains()
 	case "restart_audio_capture":
 		cm.handleRestartAudioCapture()
 	case "reconfigure_dynamic_thresholds":
@@ -321,6 +337,19 @@ func (cm *ControlMonitor) handleControlSignal(signal string) {
 	default:
 		GetLogger().Warn("Received unknown control signal", logger.String("signal", signal))
 	}
+}
+
+// handleUpdateSourceGains applies changed sound card and stream gains to the
+// running sources' live routes. Unlike handleReconfigureAudioSources it does not
+// diff or probe sources, restart anything, or rebuild the routes of a healthy
+// source; it only re-wires a source whose analysis route failed on the previous
+// pass, as every reconfigure does.
+func (cm *ControlMonitor) handleUpdateSourceGains() {
+	if cm.updateSourceGainsFn == nil {
+		return
+	}
+	cm.updateSourceGainsFn()
+	emitHotReload("source_gain")
 }
 
 // handleReconfigureLogDeduplication reinitializes the log deduplicator from current settings.
@@ -388,14 +417,22 @@ func (cm *ControlMonitor) handleReloadBirdnet() {
 		GetLogger().Warn("Cannot reload BirdNET model: orchestrator not initialized")
 		return
 	}
-	if err := cm.bn.ReloadModel(); err != nil {
-		GetLogger().Error("Failed to reload BirdNET model", logger.Error(err))
-		cm.notifyError("Failed to reload BirdNET model", err)
-		return
+	// Since Phase 4, BirdNET v2.4 may not be loaded (a Perch-only or N=0 runtime). ReloadModel
+	// reloads the v2.4 primary and errors when it is absent, so only reload it when it is
+	// actually loaded. The range-filter rebuild and secondary reload below still run, so a
+	// BirdNET-section settings change (e.g. locale, threads) still takes effect on such an
+	// instance instead of failing with a "model not loaded" toast.
+	if cm.bn.IsModelLoaded(classifier.RegistryIDBirdNETV24) {
+		if err := cm.bn.ReloadModel(); err != nil {
+			GetLogger().Error("Failed to reload BirdNET model", logger.Error(err))
+			cm.notifyError("Failed to reload BirdNET model", err)
+			return
+		}
+		GetLogger().Info("BirdNET model reloaded successfully")
+		cm.notifySuccess("BirdNET model reloaded successfully")
+	} else {
+		GetLogger().Info("BirdNET v2.4 not loaded; skipping primary model reload")
 	}
-
-	GetLogger().Info("BirdNET model reloaded successfully")
-	cm.notifySuccess("BirdNET model reloaded successfully")
 
 	// Rebuild range filter after model reload
 	if err := classifier.BuildRangeFilter(cm.bn); err != nil {
@@ -420,12 +457,57 @@ func (cm *ControlMonitor) handleReloadBirdnet() {
 		cm.notifyError("Failed to reload secondary models", err)
 	}
 
+	// A thread or backend change reloads the models and re-probes their latency,
+	// so re-plan the analysis cadence (restarts capture only if the step changes).
+	// The sources did not change, so no stream is probed or reconfigured.
+	if cm.replanCadenceFn != nil {
+		cm.replanCadenceFn()
+	}
+
 	emitHotReload("birdnet_model")
 	// Signal the metrics SSE stream that the inference topology changed so the
 	// AI Models page re-fetches its snapshot.
 	if cm.apiController != nil {
 		cm.apiController.BroadcastInferenceTopologyChanged()
 	}
+}
+
+// handleReconcileModels loads or unloads acoustic models to match models.enabled after a
+// runtime edit of the enabled set (Phase 4, where models.enabled is authoritative and N=0 is
+// valid). LoadModel/UnloadModel each rebuild the range filter and sync the acoustic-model
+// notice, so on any actual topology change this only needs to run the same SSE broadcast and
+// debounced audio-source reconfigure a gallery install does, so the newly loaded models start
+// receiving audio without a restart.
+func (cm *ControlMonitor) handleReconcileModels() {
+	if cm.bn == nil {
+		GetLogger().Warn("Cannot reconcile enabled models: orchestrator not initialized")
+		return
+	}
+	loaded, unloaded, err := cm.bn.ReconcileEnabledModels()
+	if err != nil {
+		GetLogger().Error("Failed to reconcile some enabled models", logger.Error(err))
+		cm.notifyError("Failed to apply some enabled model changes", err)
+		// Fall through: models that did load/unload still need the topology reconcile below.
+	}
+	if len(loaded) == 0 && len(unloaded) == 0 {
+		if err == nil {
+			GetLogger().Info("Enabled models already match the loaded set; nothing to reconcile")
+		}
+		return
+	}
+	GetLogger().Info("Reconciled enabled models",
+		logger.Int("loaded", len(loaded)),
+		logger.Int("unloaded", len(unloaded)))
+	if err == nil {
+		cm.notifySuccess("Applied enabled model changes")
+	}
+	// A load or unload changed the model topology: refresh the AI Models page and reconcile
+	// per-source model registration so the new set starts (or stops) receiving audio, exactly
+	// as a gallery install does.
+	if cm.apiController != nil {
+		cm.apiController.OnModelTopologyChanged()
+	}
+	emitHotReload("models")
 }
 
 // handleReconfigureMQTT reconfigures the MQTT connection
@@ -442,6 +524,13 @@ func (cm *ControlMonitor) handleReconfigureMQTT() {
 			Build())
 		return
 	}
+
+	// If HA discovery was just turned off, remove its entities through the old
+	// client while it is still connected. If that is not possible, the retire
+	// handler registered on the new client retries on its first connect.
+	retireCtx, retireCancel := context.WithTimeout(context.Background(), mqttReconfigureConnectTimeout)
+	cm.proc.RetireHomeAssistantDiscovery(retireCtx, cm.proc.GetMQTTClient(), settings)
+	retireCancel()
 
 	// First, safely disconnect any existing client
 	cm.proc.DisconnectMQTTClient()
@@ -684,6 +773,12 @@ func (cm *ControlMonitor) handleReconfigureSoundLevel() {
 		GetLogger().Error("Failed to reconfigure sound level monitoring", logger.Error(err))
 		cm.notifyError("Failed to reconfigure sound level monitoring", err)
 		return
+	}
+
+	// The Sound Level sensor exists in HA discovery only while monitoring is on,
+	// so refresh discovery to add or remove it without an MQTT reconnect.
+	if cm.proc != nil {
+		cm.proc.RefreshHomeAssistantDiscovery()
 	}
 
 	settings := conf.Setting()
@@ -1010,6 +1105,18 @@ func (cm *ControlMonitor) handleReconfigureQuietHours() {
 	}
 }
 
+// handleReconfigureSentry applies a changed Error Tracking opt-in by starting or
+// closing the Sentry client.
+func (cm *ControlMonitor) handleReconfigureSentry() {
+	GetLogger().Info("Reconfiguring Sentry error tracking")
+	if err := telemetry.ReconfigureSentry(); err != nil {
+		GetLogger().Error("failed to reconfigure Sentry", logger.Error(err))
+		cm.notifyError("Failed to reconfigure error tracking", err)
+		return
+	}
+	emitHotReload("sentry")
+}
+
 // handleRestartAudioCapture signals a full audio-capture restart. Used for a
 // setting that changes the analysis-buffer dimensions but is not a per-source
 // audio property (e.g. birdnet.overlap): the diff-based reconfigure cannot see
@@ -1018,10 +1125,9 @@ func (cm *ControlMonitor) handleReconfigureQuietHours() {
 func (cm *ControlMonitor) handleRestartAudioCapture() {
 	GetLogger().Info("Restarting audio capture to apply analysis buffer changes")
 	ResetOverrunTrackers()
-	select {
-	case cm.restartChan <- struct{}{}:
+	if trySignalCaptureRestart(cm.restartChan) {
 		GetLogger().Info("audio capture restart signal sent")
-	default:
+	} else {
 		GetLogger().Warn("restart channel full, could not signal audio capture restart")
 	}
 }
@@ -1032,10 +1138,9 @@ func (cm *ControlMonitor) handleQuietHoursStopSoundCard() {
 
 	// Signal the audio capture goroutine to restart - when it restarts,
 	// CaptureAudio will check IsSoundCardInQuietHours() and skip the sound card.
-	select {
-	case cm.restartChan <- struct{}{}:
+	if trySignalCaptureRestart(cm.restartChan) {
 		GetLogger().Info("Quiet hours: sound card stop signal sent")
-	default:
+	} else {
 		GetLogger().Warn("Quiet hours: restart channel full, could not signal sound card stop")
 	}
 }
@@ -1046,10 +1151,9 @@ func (cm *ControlMonitor) handleQuietHoursStartSoundCard() {
 
 	// Signal the audio capture goroutine to restart - when it restarts,
 	// CaptureAudio will check IsSoundCardInQuietHours() and start the sound card normally.
-	select {
-	case cm.restartChan <- struct{}{}:
+	if trySignalCaptureRestart(cm.restartChan) {
 		GetLogger().Info("Quiet hours: sound card restart signal sent")
-	default:
+	} else {
 		GetLogger().Warn("Quiet hours: restart channel full, could not signal sound card restart")
 	}
 }

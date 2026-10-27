@@ -31,6 +31,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/observability/metrics"
 	"github.com/tphakala/birdnet-go/internal/suncalc" // Import suncalc
+	"github.com/tphakala/birdnet-go/internal/wallclock"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
@@ -72,8 +73,9 @@ var (
 //
 // Migration Note: For detection-specific CRUD operations, prefer using DetectionRepository
 // (see repository.go) which works with domain models (detection.Result) instead of
-// persistence models (Note). The DetectionRepository wraps Interface and handles
-// conversion between domain and persistence layers.
+// persistence models (Note). For the legacy store, the DetectionRepository wraps Interface
+// and handles conversion between domain and persistence layers; a v2 database has its own
+// implementation (v2only.NewDetectionRepository).
 //
 // Optional methods:
 // Schema version constants for datastore implementations.
@@ -116,6 +118,17 @@ type Interface interface {
 	SearchNotesAdvanced(filters *AdvancedSearchFilters) ([]Note, int64, error)
 	GetNoteClipPath(noteID string) (string, error)
 	GetNoteModelType(noteID string) (string, error)
+	GetNoteKeptSpectrogram(noteID string) (clipName, modelType string, err error)
+	// RecordClipSampleRate sets the stored clip sample rate (Hz) of the detection
+	// when its clip_name still equals clipName, overwriting any existing value. It
+	// is authoritative and used to correct a rate planned before the clip was written.
+	// Only the v2-only store persists it; the legacy store has no such column.
+	RecordClipSampleRate(ctx context.Context, noteID uint, clipName string, rate int) error
+	// FillClipSampleRate stores rate (Hz) only while the detection's clip_sample_rate
+	// is NULL and its clip_name still equals clipName. It reports whether a row
+	// changed, so concurrent or repeated fills converge and never overwrite a value
+	// written by the exporter. Only the v2-only store persists it.
+	FillClipSampleRate(ctx context.Context, noteID uint, clipName string, rate int) (bool, error)
 	DeleteNoteClipPath(noteID string) error
 	GetNoteReview(noteID string) (*NoteReview, error)
 	SaveNoteReview(review *NoteReview) error
@@ -181,6 +194,7 @@ type Interface interface {
 	GetAllImageCaches(providerName string) ([]ImageCache, error)
 	GetLockedNotesClipPaths() ([]string, error)
 	ClearNoteClipPathsByNames(clipNames []string) (int64, error)
+	RetainNoteSpectrogramsByClipNames(clipNames []string) (int64, error)
 	GetNoteClipReferences(afterID uint, limit int) ([]diskmanager.ClipReference, error)
 	CountHourlyDetections(date, hour string, duration int) (int64, error)
 	// Analytics methods
@@ -299,12 +313,11 @@ type DatabaseStats struct {
 
 // DataStore implements StoreInterface using a GORM database.
 type DataStore struct {
-	DB            *gorm.DB          // GORM database instance
-	SunCalc       *suncalc.SunCalc  // Instance for calculating sun times (Assumed initialized)
-	sunTimesCache sync.Map          // Thread-safe map for caching sun times by date
-	metrics       *Metrics          // Metrics instance for tracking operations
-	metricsMu     sync.RWMutex      // Mutex to protect metrics field access
-	dbCounters    *dbstats.Counters // Atomic counters for query latency tracking
+	DB         *gorm.DB          // GORM database instance
+	SunCalc    *suncalc.SunCalc  // Instance for calculating sun times (Assumed initialized)
+	metrics    *Metrics          // Metrics instance for tracking operations
+	metricsMu  sync.RWMutex      // Mutex to protect metrics field access
+	dbCounters *dbstats.Counters // Atomic counters for query latency tracking
 
 	// Monitoring lifecycle management
 	monitoringCtx    context.Context    // Context for monitoring goroutines
@@ -340,8 +353,9 @@ func (ds *DataStore) CountDetectionsSince(ctx context.Context, since time.Time) 
 
 // NewDataStore creates a new DataStore instance based on the provided configuration context.
 func New(settings *conf.Settings) Interface {
-	// Create a SunCalc instance to be shared by all datastore implementations
-	sunCalc := suncalc.NewSunCalc(settings.BirdNET.Latitude, settings.BirdNET.Longitude)
+	// Create a SunCalc instance to be shared by all datastore implementations. It follows the
+	// live station location so a location change in the settings takes effect without a restart.
+	sunCalc := suncalc.NewSunCalcWithSource(conf.LiveLocation(settings))
 
 	switch {
 	case settings.Output.SQLite.Enabled:
@@ -355,7 +369,7 @@ func New(settings *conf.Settings) Interface {
 			SunCalc:  sunCalc,
 		}
 	default:
-		// No database explicitly enabled — default to SQLite
+		// No database explicitly enabled, default to SQLite
 		return &SQLiteStore{
 			Settings: settings,
 			SunCalc:  sunCalc,
@@ -498,7 +512,7 @@ func (ds *DataStore) Save(note *Note, results []Results) error {
 			"total_duration_ms", time.Since(txStart).Milliseconds())
 	}
 
-	// Success — record metrics.
+	// Success: record metrics.
 	duration := time.Since(txStart)
 	txLogger.Info("Transaction completed",
 		logger.String("tx_id", txID),
@@ -628,6 +642,26 @@ func (ds *DataStore) GetNoteClipPath(noteID string) (string, error) {
 // The legacy schema does not track model types, so this always returns "bird".
 func (ds *DataStore) GetNoteModelType(_ string) (string, error) {
 	return "bird", nil
+}
+
+// GetNoteKeptSpectrogram returns the clip name of a spectrogram kept after retention
+// removed the detection's audio, and the model type. The legacy schema does not
+// persist the link, so the clip name is always empty and the model type is "bird".
+func (ds *DataStore) GetNoteKeptSpectrogram(_ string) (clipName, modelType string, err error) {
+	return "", "bird", nil
+}
+
+// RecordClipSampleRate is a no-op on the legacy store: its notes table has no
+// clip_sample_rate column (Note.ClipSampleRate is gorm:"-"). This stub exists only
+// because the legacy store still implements Interface and goes away with it.
+func (ds *DataStore) RecordClipSampleRate(_ context.Context, _ uint, _ string, _ int) error {
+	return nil
+}
+
+// FillClipSampleRate is a no-op on the legacy store, see RecordClipSampleRate. It
+// reports that no row changed. Removed together with the legacy store.
+func (ds *DataStore) FillClipSampleRate(_ context.Context, _ uint, _ string, _ int) (bool, error) {
+	return false, nil
 }
 
 // DeleteNoteClipPath deletes the field representing the path to the audio clip associated with a note.
@@ -2003,6 +2037,14 @@ func (ds *DataStore) GetLockedNotesClipPaths() ([]string, error) {
 	return clipPaths, nil
 }
 
+// RetainNoteSpectrogramsByClipNames is called when retention deleted the audio of the named
+// clips but a spectrogram render was kept. The legacy notes table has no column for the
+// spectrogram link, so this clears clip_name exactly like ClearNoteClipPathsByNames and the
+// kept render stays unlinked. Only the v2 store persists the link.
+func (ds *DataStore) RetainNoteSpectrogramsByClipNames(clipNames []string) (int64, error) {
+	return ds.ClearNoteClipPathsByNames(clipNames)
+}
+
 // ClearNoteClipPathsByNames clears the clip_name field for notes matching the given filenames.
 // This is used by the disk manager to remove stale references after audio files are deleted.
 // Updates are batched to stay within SQLite's parameter limit (999).
@@ -2269,7 +2311,7 @@ func applyCommonFilters(query *gorm.DB, filters *SearchFilters, ds *DataStore) *
 
 	// --- Dynamic TimeOfDay Filter ---
 	if (filters.TimeOfDay == TimeOfDayDay || filters.TimeOfDay == TimeOfDayNight || filters.TimeOfDay == TimeOfDaySunrise || filters.TimeOfDay == TimeOfDaySunset) && ds.SunCalc != nil && ds.DB != nil { // Include sunrise/sunset
-		dateConditions, err := buildTimeOfDayConditions(filters, ds.SunCalc, ds.DB)
+		dateConditions, err := buildTimeOfDayConditions(filters, ds.SunCalc, ds.DB, time.Local)
 		switch {
 		case err != nil:
 			GetLogger().Warn("Failed to build TimeOfDay conditions, skipping filter",
@@ -2301,8 +2343,16 @@ func applyCommonFilters(query *gorm.DB, filters *SearchFilters, ds *DataStore) *
 	return query
 }
 
-// buildTimeOfDayConditions generates the WHERE conditions for day/night/sunrise/sunset filtering
-func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *gorm.DB) ([]*gorm.DB, error) {
+// maxTimeOfDayFilterSpanDays caps the days between the first and last date of a
+// TimeOfDay filter range. The filter adds one OR condition per date and SQLite rejects
+// an expression tree deeper than 1000, so the range must stay bounded. A default
+// one-year range that spans Feb 29 is 366 days and is rejected by this cap; that is
+// pre-existing behavior left for the maintainer to decide.
+const maxTimeOfDayFilterSpanDays = 365
+
+// buildTimeOfDayConditions generates the WHERE conditions for day/night/sunrise/sunset filtering.
+// loc is the zone the notes' wall-clock dates and times are in.
+func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *gorm.DB, loc *time.Location) ([]*gorm.DB, error) {
 	startDateStr := filters.DateStart
 	endDateStr := filters.DateEnd
 
@@ -2339,10 +2389,10 @@ func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *g
 		}
 	}
 
-	// Parse dates in local timezone to match how notes store their times.
-	// Using time.Parse would return UTC, causing a ~1 second discrepancy in
-	// sunrise/sunset calculations vs the actual note timestamps.
-	startDate, err := time.ParseInLocation(time.DateOnly, startDateStr, time.Local)
+	// Read the range as calendar dates. Counting or stepping through instants is wrong
+	// across a DST change: a day is 23 or 25 hours long, and a skipped local midnight
+	// parses to an instant on a neighboring date.
+	startDate, err := wallclock.ParseDate(startDateStr)
 	if err != nil {
 		return nil, errors.New(err).
 			Component("datastore").
@@ -2351,7 +2401,7 @@ func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *g
 			Context("start_date", startDateStr).
 			Build()
 	}
-	endDate, err := time.ParseInLocation(time.DateOnly, endDateStr, time.Local)
+	endDate, err := wallclock.ParseDate(endDateStr)
 	if err != nil {
 		return nil, errors.New(err).
 			Component("datastore").
@@ -2361,7 +2411,7 @@ func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *g
 			Build()
 	}
 
-	if endDate.Before(startDate) {
+	if endDate.Compare(startDate) < 0 {
 		return nil, errors.Newf("end date cannot be before start date").
 			Component("datastore").
 			Category(errors.CategoryValidation).
@@ -2371,9 +2421,10 @@ func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *g
 			Build()
 	}
 
-	// Limit date range to avoid excessively long queries (increased to 365 days)
-	if endDate.Sub(startDate).Hours() > 365*24 {
-		return nil, errors.Newf("date range for TimeOfDay filter cannot exceed 365 days").
+	// Limit date range to avoid excessively long queries
+	spanDays := wallclock.DaysBetween(startDate, endDate)
+	if spanDays > maxTimeOfDayFilterSpanDays {
+		return nil, errors.Newf("date range for TimeOfDay filter cannot exceed %d days", maxTimeOfDayFilterSpanDays).
 			Component("datastore").
 			Category(errors.CategoryValidation).
 			Context("operation", "build_time_of_day_conditions").
@@ -2383,7 +2434,7 @@ func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *g
 	}
 
 	// Pre-allocate conditions slice based on date range
-	dayCount := int(endDate.Sub(startDate).Hours()/24) + 1
+	dayCount := spanDays + 1
 	conditions := make([]*gorm.DB, 0, dayCount)
 	window := suncalc.SunEventWindow // sunrise/sunset transition half-width (single source of truth)
 
@@ -2394,9 +2445,14 @@ func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *g
 	// week day adds no meaningful cost while removing the day-to-day drift that let
 	// the filter diverge from the per-row label near the solstices (where sunrise
 	// and sunset shift enough within a week to flip a window across midnight).
-	for d := startDate; !d.After(endDate); d = d.AddDate(0, 0, 1) {
-		dateStr := d.Format(time.DateOnly)
-		sunTimes, err := sc.GetSunEventTimes(d)
+	for date := range wallclock.Dates(startDate, endDate) {
+		dateStr := date.String()
+		// Local midnight of the date in loc. GetSunEventTimes keys its cache on this
+		// instant's date in the observer's zone, so a loc that differs from that zone
+		// can select a neighboring date's sun events.
+		// DayBounds resolves a skipped midnight onto its own date.
+		dayStart, _ := wallclock.DayBounds(date, loc)
+		sunTimes, err := sc.GetSunEventTimes(dayStart)
 		if err != nil {
 			GetLogger().Warn("Could not get sun times for date, skipping for TimeOfDay filter",
 				logger.String("date", dateStr),
@@ -2426,7 +2482,7 @@ func buildTimeOfDayConditions(filters *SearchFilters, sc *suncalc.SunCalc, db *g
 	// Log summary of how many conditions were created
 	GetLogger().Info("Created date-specific conditions for TimeOfDay filter",
 		logger.Int("condition_count", len(conditions)),
-		logger.Int("day_range", int(endDate.Sub(startDate).Hours()/24)+1))
+		logger.Int("day_range", dayCount))
 
 	return conditions, nil
 }
@@ -2683,14 +2739,11 @@ func (ds *DataStore) SearchDetections(filters *SearchFilters) ([]DetectionRecord
 	return results, int(total), nil
 }
 
-// getSunEventsForDate retrieves sun times for a given date
+// getSunEventsForDate retrieves sun times for the date of timestamp; dateStr only labels the
+// error. It relies on the SunCalc's own per-date cache, which follows the live station location;
+// caching here by date string alone would keep serving the previous location's times after a
+// location change.
 func (ds *DataStore) getSunEventsForDate(dateStr string, timestamp time.Time) (suncalc.SunEventTimes, error) {
-	// Check if the sun times are already cached
-	if cached, exists := ds.getCachedSunTimes(dateStr); exists {
-		return cached, nil
-	}
-
-	// Calculate sun times for the given date
 	sunTimes, err := ds.SunCalc.GetSunEventTimes(timestamp)
 	if err != nil {
 		return suncalc.SunEventTimes{}, errors.New(err).
@@ -2701,22 +2754,5 @@ func (ds *DataStore) getSunEventsForDate(dateStr string, timestamp time.Time) (s
 			Build()
 	}
 
-	// Cache the calculated sun times
-	ds.cacheSunTimes(dateStr, &sunTimes)
-
 	return sunTimes, nil
-}
-
-// getCachedSunTimes retrieves sun times from the cache
-func (ds *DataStore) getCachedSunTimes(dateStr string) (suncalc.SunEventTimes, bool) {
-	cached, exists := ds.sunTimesCache.Load(dateStr)
-	if exists {
-		return cached.(suncalc.SunEventTimes), true
-	}
-	return suncalc.SunEventTimes{}, false
-}
-
-// cacheSunTimes caches sun times
-func (ds *DataStore) cacheSunTimes(dateStr string, sunTimes *suncalc.SunEventTimes) {
-	ds.sunTimesCache.Store(dateStr, *sunTimes)
 }

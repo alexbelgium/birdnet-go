@@ -53,8 +53,8 @@ const phase3FixedLocale = "en-us"
 type phase3Snapshot struct {
 	LoadedIDs          []string       // sorted
 	ModelInfos         []ModelInfo    // sorted by ID; full struct incl. Backend, Quantization, NumSpecies, Overlap
-	DefaultTargetIDs   []string       // recorder reads the pre-Phase-3 PrimaryModelInfo().ID (== DefaultTargets()[0].ID)
-	EngineDims         [3]int         // clipBytes, overlapBytes, readSize of the default target
+	DefaultTargetIDs   []string       // the full ordered DefaultTargets() ID set (v2.4 first); EngineDims stays keyed on element 0
+	EngineDims         [3]int         // clipBytes, overlapBytes, readSize of the first default target
 	ThreadAllocation   map[string]int // per-model thread budget
 	AllLabelsCount     int
 	AllLabelsHead      []string // first 50 labels in order
@@ -87,17 +87,23 @@ func buildPhase3Snapshot(t *testing.T, o *Orchestrator) phase3Snapshot {
 	}
 	slices.Sort(loadedIDs)
 
-	// Default target: the v2.4 entry's live ModelInfo (DefaultTargets stamps the
-	// effective overlap and live NumSpecies via ModelInfos).
-	var primaryInfo ModelInfo
-	if dt := o.DefaultTargets(); len(dt) > 0 {
-		primaryInfo = dt[0]
-	}
+	// Default targets: every loaded non-schedule-gated model, BirdNET v2.4 first
+	// (DefaultTargets stamps effective overlap and live NumSpecies via ModelInfos).
+	// EngineDims records the first default target's analysis-buffer geometry. Since
+	// Phase 4 PR 2 the audio engine allocates only the capture buffer; the per-model
+	// analysis buffers are allocated by the pipeline (registerConsumersForSources)
+	// and the first default's geometry is what a misconfigured source falls back to
+	// (fallbackTargets[:1]). The value is unchanged by PR 2 because DefaultTargets is
+	// unchanged, so this golden stays invariant across the decouple.
+	dt := o.DefaultTargets()
 	var defaultTargetIDs []string
 	var engineDims [3]int
-	if primaryInfo.ID != "" {
-		defaultTargetIDs = []string{primaryInfo.ID}
-		clip, ov, read := primaryInfo.Spec.BufferDimensions(primaryInfo.Overlap)
+	if len(dt) > 0 {
+		defaultTargetIDs = make([]string, len(dt))
+		for i := range dt {
+			defaultTargetIDs[i] = dt[i].ID
+		}
+		clip, ov, read := dt[0].Spec.BufferDimensions(dt[0].Overlap)
 		engineDims = [3]int{clip, ov, read}
 	}
 
@@ -210,6 +216,7 @@ func phase3BaseSettings(t *testing.T) *conf.Settings {
 	settings := conftest.GetTestSettings()
 	settings.BirdNET.Locale = phase3FixedLocale
 	settings.BirdNET.Threads = phase3FixedThreads
+	enableBirdNETV24(settings) // models.enabled is authoritative (Phase 4); the multi-model cases override this
 	conftest.SetTestSettings(settings)
 	t.Cleanup(func() { conftest.SetTestSettings(nil) })
 	return settings
@@ -223,6 +230,7 @@ func phase3NewOrchestrator(t *testing.T, settings *conf.Settings) *Orchestrator 
 	if err != nil {
 		t.Skipf("Skipping: embedded model not available in test environment: %v", err)
 	}
+	requireV24Loaded(t, o) // skip when the embedded model is compiled out (noembed)
 	t.Cleanup(func() { o.Delete() })
 
 	// The goldens were recorded on the default build, where the embedded v2.4 model
@@ -256,28 +264,6 @@ func assertPhase3Golden(t *testing.T, name string, snap *phase3Snapshot) {
 	want, err := os.ReadFile(path) //nolint:gosec // fixed testdata path, not user input
 	require.NoError(t, err, "golden missing for %q; regenerate with UPDATE_PHASE3_GOLDEN=1", name)
 	assert.Equal(t, string(want), string(data), "phase 3 invariance golden drift for %q", name)
-}
-
-// TestDefaultTargets covers the neutral default-target accessor without the embedded
-// model: no v2.4 entry yields nil, a loaded v2.4 entry yields its single ModelInfo.
-func TestDefaultTargets(t *testing.T) {
-	t.Parallel()
-
-	bare := &Orchestrator{}
-	assert.Nil(t, bare.DefaultTargets(), "no v2.4 entry yields nil")
-
-	o := &Orchestrator{
-		models: map[string]*modelEntry{
-			RegistryIDBirdNETV24: {instance: &mockModelInstance{
-				id:     RegistryIDBirdNETV24,
-				spec:   ModelSpec{SampleRate: 48000, ClipLength: 3 * time.Second},
-				labels: []string{"Turdus merula_Common Blackbird", "Parus major_Great Tit"},
-			}},
-		},
-	}
-	dt := o.DefaultTargets()
-	require.Len(t, dt, 1, "a loaded v2.4 entry yields exactly one default target")
-	assert.Equal(t, RegistryIDBirdNETV24, dt[0].ID, "the single default target is the v2.4 entry")
 }
 
 // TestResolvedModelPathForID covers the neutral resolved-path accessor with mock

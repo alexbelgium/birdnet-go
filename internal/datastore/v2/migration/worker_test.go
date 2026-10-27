@@ -3,7 +3,6 @@ package migration
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"io"
 	"path/filepath"
 	"sync"
@@ -14,11 +13,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
 	datastoreV2 "github.com/tphakala/birdnet-go/internal/datastore/v2"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -43,7 +44,7 @@ func TestWorker_PanicDoesNotTriggerCancelledTelemetry(t *testing.T) {
 		stopCh:       make(chan struct{}),
 		pauseCh:      make(chan struct{}),
 		resumeCh:     make(chan struct{}),
-		// legacy is nil — processBatch() will panic on nil pointer dereference
+		// legacy is nil: processBatch() will panic on nil pointer dereference
 	}
 
 	w.mu.Lock()
@@ -365,7 +366,7 @@ func (m *mockFailingStateManager) Complete() error {
 	m.mu.Unlock()
 
 	if calls <= failCount {
-		return errors.New("simulated complete failure")
+		return errors.NewStd("simulated complete failure")
 	}
 	return m.StateManager.Complete()
 }
@@ -465,39 +466,39 @@ func TestWorker_TailSyncRetriesDirtyIDs(t *testing.T) {
 type failingModelRepo struct{}
 
 func (f *failingModelRepo) GetOrCreate(_ context.Context, _, _, _ string, _ entities.ModelType, _ *string) (*entities.AIModel, error) {
-	return nil, errors.New("model repo unavailable in test")
+	return nil, errors.NewStd("model repo unavailable in test")
 }
 
 func (f *failingModelRepo) GetByID(_ context.Context, _ uint) (*entities.AIModel, error) {
-	return nil, errors.New("not implemented")
+	return nil, errors.NewStd("not implemented")
 }
 
 func (f *failingModelRepo) GetByNameVersionVariant(_ context.Context, _, _, _ string) (*entities.AIModel, error) {
-	return nil, errors.New("not implemented")
+	return nil, errors.NewStd("not implemented")
 }
 
 func (f *failingModelRepo) GetAll(_ context.Context) ([]*entities.AIModel, error) {
-	return nil, errors.New("not implemented")
+	return nil, errors.NewStd("not implemented")
 }
 
 func (f *failingModelRepo) Count(_ context.Context) (int64, error) {
-	return 0, errors.New("not implemented")
+	return 0, errors.NewStd("not implemented")
 }
 
 func (f *failingModelRepo) CountLabels(_ context.Context, _ uint) (int64, error) {
-	return 0, errors.New("not implemented")
+	return 0, errors.NewStd("not implemented")
 }
 
 func (f *failingModelRepo) Delete(_ context.Context, _ uint) error {
-	return errors.New("not implemented")
+	return errors.NewStd("not implemented")
 }
 
 func (f *failingModelRepo) GetByIDs(_ context.Context, _ []uint) (map[uint]*entities.AIModel, error) {
-	return nil, errors.New("not implemented")
+	return nil, errors.NewStd("not implemented")
 }
 
 func (f *failingModelRepo) Exists(_ context.Context, _ uint) (bool, error) {
-	return false, errors.New("not implemented")
+	return false, errors.NewStd("not implemented")
 }
 
 func TestWorker_SwitchStatementCoverage(t *testing.T) {
@@ -588,8 +589,7 @@ func newOnDiskDetectionRepo(t *testing.T) (repository.DetectionRepository, *sql.
 }
 
 // plantGhostDetection inserts a v2 detection row that has no matching legacy row,
-// simulating a dual-write delete where the legacy row was removed but the v2 delete
-// failed and the id was marked dirty (Forgejo #1581).
+// simulating a dirty id whose legacy row was deleted after a copy of it reached v2.
 func plantGhostDetection(t *testing.T, repo repository.DetectionRepository, id uint) {
 	t.Helper()
 	require.NoError(t, repo.SaveWithID(t.Context(), &entities.Detection{
@@ -602,7 +602,7 @@ func plantGhostDetection(t *testing.T, repo repository.DetectionRepository, id u
 }
 
 // TestWorker_ProcessDirtyIDsBatch_DeletesV2GhostWhenLegacyDeleted verifies the
-// Forgejo #1581 fix: a dirty id whose legacy row is gone means the detection was
+// ghost-resurrection fix: a dirty id whose legacy row is gone means the detection was
 // deleted, so the orphaned v2 row must be removed (not just the dirty marker),
 // otherwise the deleted detection resurrects after v2 promotion.
 func TestWorker_ProcessDirtyIDsBatch_DeletesV2GhostWhenLegacyDeleted(t *testing.T) {
@@ -725,7 +725,7 @@ func TestWorker_ProcessDirtyIDsBatch_KeepsDirtyWhenV2DeleteErrors(t *testing.T) 
 // TestWorker_ProcessDirtyIDsBatch_KeepsLockedGhostButClearsDirty verifies that when the v2
 // ghost is locked (user-verified) and its legacy row is gone, the reconciler does not
 // force-delete the protected row but still clears the dirty marker, so the id cannot block
-// migration validation forever (Forgejo #1581 follow-up).
+// migration validation forever.
 func TestWorker_ProcessDirtyIDsBatch_KeepsLockedGhostButClearsDirty(t *testing.T) {
 	sm, cleanup := setupWorkerTest(t)
 	defer cleanup()
@@ -762,4 +762,199 @@ func TestWorker_ProcessDirtyIDsBatch_KeepsLockedGhostButClearsDirty(t *testing.T
 	count, err := sm.GetDirtyIDCount()
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count, "dirty id must be cleared even when the v2 row is locked")
+}
+
+const (
+	rateKeepID      = uint(77)
+	rateKeepRate    = 384000
+	rateKeepOldClip = "2026/01/old.flac"
+	rateKeepNewClip = "2026/01/new.flac"
+	rateKeepSpecies = "Myotis daubentonii"
+)
+
+// newRateKeepWorker returns a worker over real repositories and a v2 detection
+// that already stores a clip sample rate, as written by the exporter.
+func newRateKeepWorker(t *testing.T) (*Worker, *gorm.DB) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "ratekeep.db")), &gorm.Config{
+		Logger:                                   gorm_logger.Default.LogMode(gorm_logger.Silent),
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&entities.Detection{}, &entities.DetectionLock{}, &entities.DetectionReview{},
+		&entities.AIModel{}, &entities.Label{}, &entities.LabelType{}, &entities.TaxonomicClass{}, &entities.AudioSource{}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+
+	labelType := &entities.LabelType{Name: "species"}
+	require.NoError(t, db.Create(labelType).Error)
+	rate := rateKeepRate
+	clip := rateKeepOldClip
+	require.NoError(t, db.Create(&entities.Detection{
+		ID: rateKeepID, ModelID: 1, LabelID: 1, DetectedAt: time.Now().Unix(), Confidence: 0.9,
+		ClipName: &clip, ClipSampleRate: &rate,
+	}).Error)
+
+	return &Worker{
+		v2Detection:        repository.NewDetectionRepository(db, nil, false, false),
+		labelRepo:          repository.NewLabelRepository(db, nil, false, false),
+		modelRepo:          repository.NewModelRepository(db, nil, false, false),
+		sourceRepo:         repository.NewAudioSourceRepository(db, nil, false, false),
+		logger:             testLogger(),
+		speciesLabelTypeID: labelType.ID,
+	}, db
+}
+
+func rateKeepResult() *detection.Result {
+	return &detection.Result{
+		ID:         rateKeepID,
+		Species:    detection.Species{ScientificName: rateKeepSpecies},
+		Confidence: 0.8,
+		ClipName:   rateKeepNewClip,
+		Model:      detection.ModelInfo{Name: "BattyBirdNET", Version: "1.0"},
+	}
+}
+
+// requireRateKept asserts the row took the legacy clip name (the update ran) and
+// still carries the exporter's clip sample rate.
+func requireRateKept(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	var det entities.Detection
+	require.NoError(t, db.First(&det, rateKeepID).Error)
+	require.NotNil(t, det.ClipName)
+	require.Equal(t, rateKeepNewClip, *det.ClipName, "the update must have run")
+	require.NotNil(t, det.ClipSampleRate, "the migration must not clear a stored clip sample rate")
+	assert.Equal(t, rateKeepRate, *det.ClipSampleRate)
+}
+
+// TestWorker_UpdateExistingRecords_KeepsClipSampleRate verifies the legacy table
+// has no rate to copy, so updating an existing v2 row leaves its rate alone.
+func TestWorker_UpdateExistingRecords_KeepsClipSampleRate(t *testing.T) {
+	w, db := newRateKeepWorker(t)
+
+	assert.Equal(t, 1, w.updateExistingRecords(t.Context(), []*detection.Result{rateKeepResult()}))
+	requireRateKept(t, db)
+}
+
+// TestWorker_MigrateRecord_UpdateBranchKeepsClipSampleRate is the same check for
+// the update branch of migrateRecord.
+func TestWorker_MigrateRecord_UpdateBranchKeepsClipSampleRate(t *testing.T) {
+	w, db := newRateKeepWorker(t)
+
+	require.NoError(t, w.migrateRecord(t.Context(), rateKeepResult()))
+	requireRateKept(t, db)
+}
+
+// pausingThresholdRepo pauses the migration while the auxiliary step saves a
+// threshold, emulating a pause between the auxiliary run and the transition.
+type pausingThresholdRepo struct {
+	repository.DynamicThresholdRepository
+	sm *datastoreV2.StateManager
+}
+
+func (r pausingThresholdRepo) SaveDynamicThreshold(ctx context.Context, threshold *entities.DynamicThreshold) error {
+	if err := r.sm.Pause(); err != nil {
+		return err
+	}
+	return r.DynamicThresholdRepository.SaveDynamicThreshold(ctx, threshold)
+}
+
+func TestWorker_TransitionToValidation_RecordsAuxiliaryOutcome(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// prepare adjusts the migrator config; sm is the migration state manager.
+		prepare      func(env *auxV2Env, cfg *AuxiliaryMigratorConfig, sm *datastoreV2.StateManager)
+		eventFetches int
+		// legacyUntouched means MigrateAll must fail before reading legacy data.
+		legacyUntouched bool
+		wantState       entities.MigrationStatus // after transitionToValidation
+		wantOutcome     entities.AuxiliaryDataStatus
+		wantErrPart     string
+	}{
+		{
+			name: "section failure is recorded and migration completes",
+			prepare: func(env *auxV2Env, _ *AuxiliaryMigratorConfig, _ *datastoreV2.StateManager) {
+				env.dropTable(&entities.DynamicThreshold{})
+			},
+			wantState:   entities.MigrationStatusValidating,
+			wantOutcome: entities.AuxiliaryDataStatusFailed,
+			wantErrPart: "threshold:",
+		},
+		{
+			name: "MigrateAll error is recorded and migration completes",
+			prepare: func(_ *auxV2Env, cfg *AuxiliaryMigratorConfig, _ *datastoreV2.StateManager) {
+				cfg.WeatherRepo = nil
+			},
+			legacyUntouched: true,
+			wantState:       entities.MigrationStatusValidating,
+			wantOutcome:     entities.AuxiliaryDataStatusFailed,
+			wantErrPart:     auxRunFailedSummary,
+		},
+		{
+			name:         "clean run is recorded as succeeded",
+			prepare:      func(*auxV2Env, *AuxiliaryMigratorConfig, *datastoreV2.StateManager) {},
+			eventFetches: 1,
+			wantState:    entities.MigrationStatusValidating,
+			wantOutcome:  entities.AuxiliaryDataStatusSucceeded,
+		},
+		{
+			name: "pause before the transition records nothing",
+			prepare: func(env *auxV2Env, cfg *AuxiliaryMigratorConfig, sm *datastoreV2.StateManager) {
+				cfg.ThresholdRepo = pausingThresholdRepo{DynamicThresholdRepository: env.thresholdRepo, sm: sm}
+			},
+			eventFetches: 1,
+			wantState:    entities.MigrationStatusPaused,
+			wantOutcome:  entities.AuxiliaryDataStatusUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := newAuxV2Env(t)
+			sm := datastoreV2.NewStateManager(env.db)
+			var store datastore.Interface = mocks.NewMockInterface(t)
+			if !tt.legacyUntouched {
+				store = expectLegacy(t, defaultAuxLegacyRows(), tt.eventFetches)
+			}
+			cfg := env.config(store)
+			tt.prepare(env, cfg, sm)
+
+			require.NoError(t, sm.StartMigration(10))
+			require.NoError(t, sm.TransitionToDualWrite())
+
+			w := &Worker{
+				stateManager:      sm,
+				auxiliaryMigrator: NewAuxiliaryMigrator(cfg),
+				logger:            testLogger(),
+				stopCh:            make(chan struct{}),
+			}
+			w.transitionToValidation(t.Context())
+
+			state, err := sm.GetState()
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantState, state.State)
+			assert.Equal(t, tt.wantOutcome, state.AuxiliaryDataOutcome())
+			assert.Empty(t, state.ErrorMessage)
+			assert.Empty(t, state.RelatedDataError)
+			if tt.wantOutcome == entities.AuxiliaryDataStatusUnknown {
+				assert.Empty(t, state.AuxiliaryDataStatus)
+				assert.Empty(t, state.AuxiliaryDataError)
+				assert.Nil(t, state.AuxiliaryDataStartedAt)
+				return
+			}
+			assert.Contains(t, state.AuxiliaryDataError, tt.wantErrPart)
+
+			require.NoError(t, sm.TransitionToCutover())
+			require.NoError(t, sm.Complete())
+			state, err = sm.GetState()
+			require.NoError(t, err)
+			assert.Equal(t, entities.MigrationStatusCompleted, state.State)
+			assert.Equal(t, tt.wantOutcome, state.AuxiliaryDataOutcome())
+		})
+	}
 }

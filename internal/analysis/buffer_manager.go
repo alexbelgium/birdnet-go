@@ -16,6 +16,21 @@ import (
 
 const bufferMonitorDebugEveryTicks = 300
 
+// bufferAllocGraceTicks bounds how long a monitor tolerates a missing analysis
+// buffer before it is (re)allocated. The buffer is transiently absent on every
+// source (re)start (the stream-reset callback starts the monitor before
+// registerConsumersForSources allocates the buffer) and across a kept-source
+// reconfigure (ReconfigureSource deallocates the buffer before
+// registerConsumersForSources reallocates it). Polling through this grace
+// (pollInterval each) keeps the monitor alive across that window instead of
+// dropping it, while a model that is not a target for the source (no buffer ever
+// appears) still stops once the grace elapses. Genuine (source, model) removal is
+// handled separately by closing the monitor's quit channel, so the grace never
+// keeps a removed monitor alive. At 100ms per tick this is a 5s window: far longer
+// than the sub-tick (re)allocation normally takes, short enough to bound a stuck
+// monitor.
+const bufferAllocGraceTicks = 50
+
 // monitorKey identifies a unique monitor (one per source x model).
 type monitorKey struct {
 	sourceID string
@@ -35,10 +50,57 @@ type monitorConfig struct {
 // calls by analysisBufferMonitor. hasReadBuffer flips the "buffer removed" log
 // level once the buffer has been seen at least once; notLoadedWarned is the
 // warn-once latch for the model-not-loaded skip, so a monitor that outlives its
-// model during a reconfigure logs one warning rather than one per window.
+// model during a reconfigure logs one warning rather than one per window;
+// notFoundTicks bounds the startup allocation grace before the buffer is first found.
 type monitorTickState struct {
 	hasReadBuffer   bool
 	notLoadedWarned bool
+	// notFoundTicks counts consecutive ticks on which the analysis buffer was not
+	// found, bounding the (re)allocation grace in processMonitorTick (see
+	// bufferAllocGraceTicks); the grace applies both before the buffer is first found
+	// (startup) and after it disappears on a kept-source reconfigure. It resets once
+	// the buffer is found again. hasReadBuffer flips when AnalysisBuffer first
+	// succeeds (the buffer is found), before any window is read.
+	notFoundTicks int
+	// keepUp evaluates whether analysis keeps up with the audio arriving in the
+	// analysis buffer (see keepUpState).
+	keepUp keepUpState
+
+	// lastWindowAnalyzed records that the previous window read was handed to
+	// ProcessData and processed without error; false until then, so a window read
+	// but skipped or failed (and the first window) makes the next one report a gap.
+	lastWindowAnalyzed bool
+}
+
+// windowAudio places the window just read on its source's audio timeline. Call it
+// once per window read, right after ReadWindow.
+//
+// The analysis ring is FIFO, so a lagging monitor reads old audio: the newest
+// unread byte was written at info.LastWriteAt, and the window ends the unread
+// backlog earlier. That write is read under the same lock as the window, so it
+// is the latest write at the moment of the read.
+//
+// Gap is the buffer's own gap flag (a splice at or inside the window's fresh
+// part: the first window of a buffer, overwrite-mode loss, a refused write, a
+// Reset) or a previous window that was read but not analyzed (skipped, failed or
+// its result dropped by a full queue). ContiguousBytes, the stream positions and
+// the generation come from the buffer unchanged. The analyzed latch is cleared
+// here and set again once ProcessData succeeds.
+func (s *monitorTickState) windowAudio(info buffer.WindowInfo, bytesPerSecond int) classifier.AudioTiming {
+	gap := info.Gap || !s.lastWindowAnalyzed
+	s.lastWindowAnalyzed = false
+	endAt := info.LastWriteAt
+	if bytesPerSecond > 0 {
+		endAt = endAt.Add(-time.Duration(info.Backlog) * time.Second / time.Duration(bytesPerSecond))
+	}
+	return classifier.AudioTiming{
+		EndAt:           endAt,
+		Gap:             gap,
+		FreshBytes:      info.FreshBytes,
+		ContiguousBytes: info.ContiguousBytes,
+		EndPos:          info.EndPos,
+		Generation:      info.Generation,
+	}
 }
 
 // classifierBackend is the analysis package's view of *classifier.Orchestrator:
@@ -54,20 +116,37 @@ type classifierBackend interface {
 	IsModelActive(modelID string) bool
 	ModelInfos() []classifier.ModelInfo
 	DefaultTargets() []classifier.ModelInfo
-	PredictModel(ctx context.Context, modelID string, sample [][]float32) ([]datastore.Results, error)
+	PredictModelTimed(ctx context.Context, modelID string, sample [][]float32) ([]datastore.Results, classifier.PredictTiming, error)
 	CurrentSettings() *conf.Settings
+	EffectiveBaseOverlap() time.Duration
 	ModelSpecFor(modelID string) (classifier.ModelSpec, bool)
 }
 
-// firstDefaultTarget returns the single fallback analysis target and whether one
-// exists, reproducing the old PrimaryModelInfo() fallback with a len guard so an empty
-// DefaultTargets() (no default model loaded) never panics a caller that indexed [0].
-func firstDefaultTarget(bn classifierBackend) (classifier.ModelInfo, bool) {
-	targets := bn.DefaultTargets()
+// defaultTargetIDs returns the registry IDs of the default targets in order: the
+// set a source with no resolvable model list is analyzed with. Nil at N = 0 or
+// when no default target is loaded.
+func defaultTargetIDs(targets []classifier.ModelInfo) []string {
 	if len(targets) == 0 {
-		return classifier.ModelInfo{}, false
+		return nil
 	}
-	return targets[0], true
+	ids := make([]string, len(targets))
+	for i := range targets {
+		ids[i] = targets[i].ID
+	}
+	return ids
+}
+
+// fallbackTargets returns the analysis targets for a source whose configured models
+// resolved to nothing. An empty config list means "the orchestrator's default
+// targets", so it fans out to every default. A non-empty list whose models are all
+// unknown or unloaded (a misconfigured source) falls back to the FIRST default only
+// (BirdNET v2.4 when loaded), preserving pre-Phase-4 behavior so an upgrade never adds
+// a model to it. Empty when no default target is loaded (N = 0).
+func fallbackTargets(configModelIDs []string, defaults []classifier.ModelInfo) []classifier.ModelInfo {
+	if len(configModelIDs) == 0 || len(defaults) == 0 {
+		return defaults
+	}
+	return defaults[:1]
 }
 
 // BufferManager handles the lifecycle of analysis buffer monitors
@@ -184,20 +263,12 @@ func (m *BufferManager) AddMonitor(source string) error {
 			Build()
 	}
 
-	// Build monitorConfigs for all loaded models.
+	// Build monitorConfigs for all loaded models. With no models loaded (N = 0) this
+	// is empty and AddMonitors starts no analysis monitors, which is correct.
 	allInfos := m.bn.ModelInfos()
 	configs := make([]monitorConfig, 0, len(allInfos))
 	for i := range allInfos {
 		configs = append(configs, buildMonitorConfig(source, &allInfos[i]))
-	}
-
-	// Fallback to the default target for backward compatibility when no
-	// models are registered via the orchestrator's model map.
-	if len(configs) == 0 {
-		if info, ok := firstDefaultTarget(m.bn); ok {
-			cfg := buildMonitorConfig(source, &info)
-			configs = []monitorConfig{cfg}
-		}
 	}
 
 	return m.AddMonitors(source, configs)
@@ -456,11 +527,22 @@ func (m *BufferManager) analysisBufferMonitor(quitChan chan struct{}, cfg *monit
 // up the current AnalysisBuffer for (sourceID, modelID), reads one window,
 // and dispatches it to ProcessData when a full readSize window is present.
 //
-// Returns keepRunning=false when the buffer was not found OR the goroutine was
-// asked to shut down during a backoff. The per-monitor state (see
-// monitorTickState) is updated in place across ticks so the caller can toggle its
-// "once seen, log on later loss" log-level preference and hold the model-not-loaded
-// warn-once latch.
+// Returns keepRunning=false only after a bounded grace (bufferAllocGraceTicks) has
+// elapsed with the analysis buffer still absent, or when the goroutine was asked to
+// shut down during a backoff. While the buffer is missing but the grace has not
+// elapsed it returns keepRunning=true, so a monitor survives the (re)allocation window
+// on startup and across a kept-source reconfigure; a genuine (source, model) removal
+// is handled by closing the monitor's quit channel, not by this return. The
+// per-monitor state (see monitorTickState) is updated in place across ticks so the
+// caller can toggle its "once seen, log on later loss" log-level preference and hold
+// the model-not-loaded warn-once latch and the not-found grace counter.
+//
+// Each full window is stamped with its backlog-corrected audio end, a gap flag
+// and the exact count of fresh bytes it carries (see monitorTickState.windowAudio
+// and buffer.WindowInfo), which ProcessData passes on to the results consumer; a
+// window read but not analyzed, including one whose result the full results
+// queue dropped (ProcessData returns ErrResultsDropped, logged where it happens),
+// makes the next one report a gap.
 //
 // The window's backing slice is always returned to its pool via a
 // "defer release()" immediately after Read, so every exit path including the
@@ -475,20 +557,46 @@ func (m *BufferManager) processMonitorTick(
 ) (keepRunning bool) {
 	ab, err := m.bufferMgr.AnalysisBuffer(cfg.sourceID, cfg.modelID)
 	if err != nil {
+		// The analysis buffer is not currently allocated. This is transient in two
+		// cases, and the monitor must survive both rather than stop and be silently
+		// dropped:
+		//   - startup: the stream-reset callback (fireReset -> AddMonitor) starts this
+		//     monitor as soon as StartStream fires, before registerConsumersForSources
+		//     allocates the buffer;
+		//   - reconfigure: on a kept-source reconfigure, ReconfigureSource deallocates
+		//     the analysis buffer and registerConsumersForSources reallocates it a few
+		//     steps later, so a monitor that already read the old buffer briefly finds
+		//     none (this gap widens with the number of reconfigured sources).
+		// Poll through a bounded grace so the monitor picks the (re)allocated buffer
+		// back up instead of dying in the window. A genuinely removed (source, model)
+		// is torn down by UpdateMonitors/RemoveMonitor closing this monitor's quit
+		// channel, which analysisBufferMonitor's outer select exits on regardless of
+		// this grace, so the grace never keeps a removed monitor alive; it only bridges
+		// the reallocation gap. If the buffer never returns within the grace, stop as a
+		// safety net so a monitor cannot poll forever.
+		state.notFoundTicks++
+		if state.notFoundTicks <= bufferAllocGraceTicks {
+			return true
+		}
 		if state.hasReadBuffer {
-			m.logger.Info("analysis buffer removed, stopping monitor",
+			m.logger.Info("analysis buffer removed and not reallocated within grace, stopping monitor",
 				logger.String("source_id", cfg.sourceID),
 				logger.String("model_id", cfg.modelID))
 		} else {
-			m.logger.Warn("analysis buffer not found for monitor, may not be allocated",
+			m.logger.Warn("analysis buffer not found for monitor after allocation grace, stopping",
 				logger.String("source_id", cfg.sourceID),
 				logger.String("model_id", cfg.modelID))
 		}
 		return false
 	}
 	state.hasReadBuffer = true
+	state.notFoundTicks = 0
 
-	data, release, readErr := ab.Read()
+	// Judge keep-up on every tick, including not-loaded, inactive and partial
+	// window ticks, so lost audio is seen whatever the tick does afterwards.
+	m.observeKeepUp(cfg, ab, &state.keepUp, time.Now())
+
+	data, info, release, readErr := ab.ReadWindow()
 	defer release()
 	if readErr != nil {
 		m.logger.Error("buffer read error",
@@ -504,6 +612,10 @@ func (m *BufferManager) processMonitorTick(
 	}
 
 	if len(data) != analysisWindowBytes {
+		if len(data) > 0 {
+			// A window was consumed but cannot be analyzed.
+			state.lastWindowAnalyzed = false
+		}
 		if tickCount%bufferMonitorDebugEveryTicks == 0 {
 			m.logger.Debug("buffer monitor polling",
 				logger.String("source_id", cfg.sourceID),
@@ -513,6 +625,9 @@ func (m *BufferManager) processMonitorTick(
 		}
 		return true
 	}
+
+	audio := state.windowAudio(info,
+		cfg.spec.EffectiveSampleRate()*conf.BytesPerSample*conf.NumChannels)
 
 	// Skip inference when the model is not loaded in the orchestrator. A monitor
 	// can briefly outlive its model's registration: UnloadModel (uninstall,
@@ -564,13 +679,20 @@ func (m *BufferManager) processMonitorTick(
 	beginTimeOffset := time.Duration(conf.Setting().Realtime.Audio.Export.PreCapture)*time.Second + detectionOffset
 	startTime := time.Now().Add(-beginTimeOffset)
 
-	if processErr := ProcessData(context.Background(), m.bn, m.bufferMgr, &ProcessRequest{
+	switch processErr := ProcessData(context.Background(), m.bn, m.bufferMgr, &ProcessRequest{
 		Data:            data,
 		StartTime:       startTime,
 		AudioCapturedAt: audioCapturedAt,
 		Source:          cfg.sourceID,
 		ModelID:         cfg.modelID,
-	}); processErr != nil {
+		Audio:           audio,
+	}); {
+	case processErr == nil:
+		state.lastWindowAnalyzed = true
+	case errors.Is(processErr, ErrResultsDropped):
+		// Already logged and counted at the drop; the window stays unanalyzed so
+		// the next one reports a gap.
+	default:
 		m.logger.Error("error processing data",
 			logger.String("source_id", cfg.sourceID),
 			logger.String("model_id", cfg.modelID),

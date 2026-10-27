@@ -1,7 +1,6 @@
 package species
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
+	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
 // TestIsNewSpecies tests the IsNewSpecies method
@@ -173,7 +173,7 @@ func TestSyncIfNeeded(t *testing.T) {
 	t.Run("sync handles database error with existing data", func(t *testing.T) {
 		ds := mocks.NewMockInterface(t)
 		ds.On("GetNewSpeciesDetections", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("int"), mock.AnythingOfType("int")).
-			Return(nil, errors.New("database error"))
+			Return(nil, errors.NewStd("database error"))
 
 		settings := &conf.SpeciesTrackingSettings{
 			Enabled:              true,
@@ -361,7 +361,7 @@ func TestCheckAndUpdateSpeciesAtomic(t *testing.T) {
 
 	t.Run("existing species recent", func(t *testing.T) {
 		// Add again after 5 days
-		laterTime := now.Add(5 * 24 * time.Hour)
+		laterTime := now.AddDate(0, 0, 5)
 		isNew, daysSince := tracker.CheckAndUpdateSpecies("New Species", laterTime)
 		assert.True(t, isNew, "Should still be new within window")
 		assert.Equal(t, 5, daysSince, "Should be 5 days")
@@ -369,7 +369,7 @@ func TestCheckAndUpdateSpeciesAtomic(t *testing.T) {
 
 	t.Run("existing species old", func(t *testing.T) {
 		// Add old species
-		oldTime := now.Add(-30 * 24 * time.Hour)
+		oldTime := now.AddDate(0, 0, -30)
 		tracker.CheckAndUpdateSpecies("Old Species", oldTime)
 
 		// Check it now
@@ -383,7 +383,7 @@ func TestCheckAndUpdateSpeciesAtomic(t *testing.T) {
 		tracker.CheckAndUpdateSpecies("Test Species", now)
 
 		// Earlier detection
-		earlierTime := now.Add(-10 * 24 * time.Hour)
+		earlierTime := now.AddDate(0, 0, -10)
 		isNew, daysSince := tracker.CheckAndUpdateSpecies("Test Species", earlierTime)
 		assert.True(t, isNew, "Should be new (within window)")
 		assert.Equal(t, 0, daysSince, "Should be 0 (just detected)")

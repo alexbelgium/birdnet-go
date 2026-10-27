@@ -39,9 +39,10 @@
     speciesSettings,
     realtimeSettings,
     speciesTrackingSettings,
+    SettingsChangedElsewhereError,
   } from '$lib/stores/settings';
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
-  import type { SpeciesConfig, SpeciesSettings } from '$lib/stores/settings';
+  import type { SpeciesSettings } from '$lib/stores/settings';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
@@ -171,11 +172,11 @@
 
   // PERFORMANCE OPTIMIZATION: Reactive settings with proper defaults
   let settings = $derived(
-    (() => {
-      const base = $speciesSettings ?? {
-        include: [] as string[],
-        exclude: [] as string[],
-        config: {} as Record<string, SpeciesConfig>,
+    ((): SpeciesSettings => {
+      const base: SpeciesSettings = $speciesSettings ?? {
+        include: [],
+        exclude: [],
+        config: {},
       };
 
       // Ensure config is always a valid object to prevent Object.keys() errors
@@ -183,7 +184,7 @@
         include: base.include ?? [],
         exclude: base.exclude ?? [],
         config: isPlainObject(base.config) ? base.config : {},
-      } as SpeciesSettings;
+      };
     })()
   );
 
@@ -1217,8 +1218,17 @@
       );
       closeEditor();
     } catch (error) {
-      logger.error('Failed to save species configuration:', error);
-      toastActions.error(t('settings.species.saveError', { species }));
+      // The store already showed the error to the user, so no second toast here. A
+      // changed-elsewhere conflict is an expected flow (the user was asked to review and
+      // save again), not a fault.
+      if (error instanceof SettingsChangedElsewhereError) {
+        logger.warn(
+          'Settings changed elsewhere during species configuration save; the user was asked to review them',
+          error
+        );
+      } else {
+        logger.error('Failed to save species configuration:', error);
+      }
     }
   }
 
@@ -1834,6 +1844,7 @@
                   </span>
                 </label>
                 <SelectDropdown
+                  id="yearly-reset-month"
                   value={String(
                     trackingSettings?.yearlyTracking?.resetMonth ??
                       TRACKING_DEFAULTS.yearlyTracking.resetMonth
@@ -1986,11 +1997,16 @@
                     <div class="grid grid-cols-2 gap-3 items-end">
                       <div>
                         <label class="flex items-center py-2" for={`${season}-start-month`}>
+                          <!-- The card heading names the season on screen; the name carries it too -->
+                          <span class="sr-only">
+                            {t(`settings.species.tracking.seasonal.seasons.${season}`)}
+                          </span>
                           <span class="text-sm font-medium">
                             {t('settings.species.tracking.seasonal.seasons.startMonth')}
                           </span>
                         </label>
                         <SelectDropdown
+                          id={`${season}-start-month`}
                           value={String(currentSeasonData?.startMonth ?? seasonDefaults.startMonth)}
                           options={monthOptions}
                           disabled={store.isLoading || store.isSaving}

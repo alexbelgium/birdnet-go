@@ -11,19 +11,34 @@ on:
       - "go.sum"
       - "Taskfile.yml"
       - ".github/workflows/container-test.yml"
+  # A pull request runs these image smoke tests only when something they check
+  # can change: the image recipe, the entrypoint and startup code, the config and
+  # path handling, the model loading, or the toolchain. Pushes to main keep the
+  # broad filter above, so any Go change is still checked on main.
   pull_request:
     paths:
       - "Dockerfile"
       - "Docker/**"
-      - "**/*.go"
       - "go.mod"
       - "go.sum"
       - "Taskfile.yml"
+      - "main.go"
+      - "cmd/**"
+      - "internal/conf/**"
+      - "internal/classifier/**"
+      - "internal/inference/**"
+      - "internal/securefs/**"
+      - "internal/diskmanager/**"
+      - "internal/datastore/sqlite*.go"
+      - "!**/*_test.go"
       - ".github/workflows/container-test.yml"
 
+# Only superseded pull request runs are cancelled. A run on main or a manual run
+# gets its own group per commit, so a burst of merges cannot cancel the run that
+# is the authoritative check of main.
 concurrency:
-  group: container-test-${{ github.ref }}
-  cancel-in-progress: true
+  group: container-test-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -39,17 +54,18 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Build container image (amd64, load locally)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           load: true
           tags: birdnet-go:test
           platforms: linux/amd64
           # Reads the registry caches the publish workflows populate (anonymous,
-          # public); writes/reads the PR-scoped GHA cache. Never pushes. The
+          # public) and the GHA cache; only pushes to main write the GHA cache, so PR
+          # builds do not churn the repository's cache budget. Never pushes images. The
           # -base:buildcache is required because publish app builds stack on the
           # pre-published base and never rebuild the runtime-base stage, so the
           # app :buildcache no longer holds the heavy base layers; this PR build
@@ -59,7 +75,7 @@ jobs:
             type=gha
             type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
             type=registry,ref=ghcr.io/${{ github.repository }}-base:buildcache
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
           provenance: false
 
       - name: Arbitrary-UID startup smoke test
@@ -76,6 +92,16 @@ jobs:
       - name: tini PID 1 + reaping smoke test
         run: Docker/test/tini-pid1-smoke.sh birdnet-go:test
 
+      # .local names must resolve through the host's Avahi socket (libnss-mdns +
+      # forced nsswitch line); a fake Avahi on the runner stands in for the host.
+      - name: mDNS (.local) resolution smoke test
+        run: Docker/test/mdns-nss-smoke.sh birdnet-go:test
+
+      # The image HEALTHCHECK must probe BIRDNET_WEBSERVER_PORT (host networking
+      # sets the port this way) without falling back to 8080 for a custom port.
+      - name: Health check port smoke test
+        run: Docker/test/healthcheck-port-smoke.sh birdnet-go:test
+
   arbitrary-uid-start-arm64:
     name: arm64 container startup
     # Native arm64 runner (free for public repos): the only PR-time job that
@@ -91,10 +117,10 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Build container image (arm64, load locally)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           load: true
@@ -110,7 +136,7 @@ jobs:
             type=gha,scope=arm64
             type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
             type=registry,ref=ghcr.io/${{ github.repository }}-base:buildcache
-          cache-to: type=gha,mode=max,scope=arm64
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=arm64' || '' }}
           provenance: false
 
       - name: Arbitrary-UID startup smoke test (arm64)
@@ -119,3 +145,6 @@ jobs:
       # tini must be PID 1 (baked into the image) and reap orphaned grandchildren.
       - name: tini PID 1 + reaping smoke test (arm64)
         run: Docker/test/tini-pid1-smoke.sh birdnet-go:test-arm64
+
+      - name: mDNS (.local) resolution smoke test (arm64)
+        run: Docker/test/mdns-nss-smoke.sh birdnet-go:test-arm64

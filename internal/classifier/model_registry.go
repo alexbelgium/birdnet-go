@@ -128,7 +128,7 @@ type ModelInfo struct {
 	DetectionVersion string        // Database model version (e.g., "2.4", "V2")
 	Description      string        // Description of the model
 	Spec             ModelSpec     // Audio requirements (sample rate, clip length)
-	Overlap          time.Duration // Resolved analysis-window overlap for this model under current settings. Stamped by the Orchestrator via ResolveModelOverlap; zero on the static registry template. Pass to Spec.BufferDimensions/BufferInterval.
+	Overlap          time.Duration // Resolved analysis-window overlap for this model under the effective base overlap (published cadence plan, else configured). Stamped by the Orchestrator via ResolveModelOverlap; zero on the static registry template. Pass to Spec.BufferDimensions/BufferInterval.
 	ConfigAliases    []string      // User-facing config IDs (e.g., ["birdnet"])
 	SupportedLocales []string      // List of supported locale codes
 	DefaultLocale    string        // Default locale if none is specified
@@ -138,6 +138,11 @@ type ModelInfo struct {
 	// rangeFilterCompat is this classifier's range-filter capability (see the type).
 	// The zero value means it participates in no range-filter auto-selection.
 	rangeFilterCompat rangeFilterCompat
+	// scheduleGated marks a model that runs only inside a schedule (today the bat
+	// model's nighttime scheduler). Such a model is never a default analysis target
+	// (DefaultTargets) and is inactive outside its schedule (IsModelActive,
+	// ModelScheduleStatus), all read through isScheduleGated. Zero value: not gated.
+	scheduleGated bool
 	// IsStock marks the auto-resolved built-in default model. It is NOT set for
 	// user-supplied models (birdnet.modelpath) or gallery models, so detection
 	// attribution can treat the shipped default as "default" even when it loads
@@ -221,6 +226,10 @@ var ModelRegistry = map[string]ModelInfo{
 		// Bat classifies its own label space; it never participates in range-filter
 		// auto-selection. Explicit (not omitted) so the table documents the decision.
 		rangeFilterCompat: rangeFilterCompatNone,
+		// Bat runs only inside the nighttime scheduler, so it is never a default
+		// analysis target and is paused outside its schedule. Read by isScheduleGated
+		// (IsModelActive, ModelScheduleStatus, DefaultTargets).
+		scheduleGated: true,
 	},
 	RegistryIDBSG: {
 		ID:               RegistryIDBSG,
