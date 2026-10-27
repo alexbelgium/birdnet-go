@@ -33,10 +33,6 @@ func GetLogger() logger.Logger {
 	return logger.Global().Module("birdweather")
 }
 
-// targetIntegratedLoudnessLUFS defines the target loudness for normalization.
-// EBU R128 standard target is -23 LUFS.
-const targetIntegratedLoudnessLUFS = -23.0
-
 // HTTP and timeout constants
 const (
 	// httpClientTimeout is the default timeout for HTTP requests
@@ -44,9 +40,10 @@ const (
 
 	// encodingTimeout bounds the native go-flac encode of a soundscape upload so a
 	// slow host (Raspberry Pi, Home Assistant add-on, tired SD card) cannot hang the
-	// upload. The audionorm loudness measurement is pure in-memory CPU work; only the
-	// encode pass runs under this budget. 60s leaves ample room, and the upload runs
-	// in a background worker, so a slow encode never blocks the analysis pipeline or UI.
+	// upload. The loudnorm measurement and the encode pass both run under this
+	// budget (loudnorm.PlanBytes stops on its deadline). 60s leaves ample room,
+	// and the upload runs in a background worker, so a slow encode never blocks
+	// the analysis pipeline or UI.
 	encodingTimeout = 60 * time.Second
 
 	// http2SendPingTimeout and http2PingTimeout enable HTTP/2 connection health
@@ -196,7 +193,7 @@ func (b *BwClient) Status() (connected bool, msg string) {
 
 // BirdweatherClientInterface defines what methods a BirdweatherClient must have
 type Interface interface {
-	Publish(note *datastore.Note, pcmData []byte) error
+	Publish(note *datastore.Note, detectedAt time.Time, pcmData []byte) error
 	UploadSoundscape(timestamp string, pcmData []byte) (soundscapeID string, err error)
 	PostDetection(soundscapeID, timestamp, commonName, scientificName string, confidence float64) error
 	TestConnection(ctx context.Context, resultChan chan<- TestResult)
@@ -811,16 +808,19 @@ func (b *BwClient) PostDetection(soundscapeID, timestamp, commonName, scientific
 }
 
 // Publish function handles the uploading of detected clips and their details to Birdweather.
-// It first parses the timestamp from the note, then uploads the soundscape, and finally posts the detection.
-func (b *BwClient) Publish(note *datastore.Note, pcmData []byte) (err error) {
+// It formats detectedAt, the detection's own instant, as the upload timestamp (note.Date and
+// note.Time are wall-clock strings that cannot tell the two occurrences of a repeated hour
+// apart, so they are not used for it), then uploads the soundscape, and finally posts the detection.
+// The instant is truncated to whole seconds, the precision BirdWeather has always received.
+// It returns a validation error, without sending anything, when pcmData is empty or detectedAt is zero.
+func (b *BwClient) Publish(note *datastore.Note, detectedAt time.Time, pcmData []byte) (err error) {
 	log := GetLogger()
 
 	// Track performance timing for telemetry
 	defer trackOperationTiming(&err, "publish", time.Now(), "common_name", note.CommonName, "scientific_name", note.ScientificName)()
 
 	log.Info("Starting publish process",
-		logger.String("date", note.Date),
-		logger.String("time", note.Time),
+		logger.Time("detected_at", detectedAt),
 		logger.String("common_name", note.CommonName),
 		logger.String("scientific_name", note.ScientificName),
 		logger.Float64("confidence", note.Confidence))
@@ -835,31 +835,28 @@ func (b *BwClient) Publish(note *datastore.Note, pcmData []byte) (err error) {
 			Build()
 	}
 
-	// Use system's local timezone for timestamp parsing
-	loc := time.Local
-
-	// Combine date and time from note to form a full timestamp string
-	dateTimeString := fmt.Sprintf("%sT%s", note.Date, note.Time)
-
-	// Parse the timestamp using the given format and the system's local timezone
-	parsedTime, err := time.ParseInLocation("2006-01-02T15:04:05", dateTimeString, loc)
-	if err != nil {
-		log.Error("Error parsing date/time for publish",
-			logger.String("date", note.Date),
-			logger.String("time", note.Time),
-			logger.Error(err))
-		return fmt.Errorf("error parsing date: %w", err)
+	if detectedAt.IsZero() {
+		return errors.Newf("detection time is not set").
+			Component("birdweather").
+			Category(errors.CategoryValidation).
+			Context("common_name", note.CommonName).
+			Context("scientific_name", note.ScientificName).
+			Build()
 	}
 
-	// Format the parsed time to the required timestamp format with timezone information
-	timestamp := parsedTime.Format("2006-01-02T15:04:05.000-0700")
+	// Whole seconds only: the upload format always carried ".000" and the soundscape end is
+	// derived from this value. Truncating an instant to the second does not touch the zone.
+	detectedAt = detectedAt.Truncate(time.Second)
+
+	// Format the instant to the required timestamp format with timezone information
+	timestamp := detectedAt.Format("2006-01-02T15:04:05.000-0700")
 	log.Debug("Formatted timestamp for publish", logger.String("timestamp", timestamp))
 
 	// If debug is enabled, save the raw PCM data to help diagnose issues
 	if b.Settings.Realtime.Birdweather.Debug {
 		debugDir := filepath.Join("debug", "birdweather", "pcm")
 		debugFilename := filepath.Join(debugDir, fmt.Sprintf("bw_pcm_debug_%s.raw",
-			parsedTime.Format("20060102_150405")))
+			detectedAt.Format("20060102_150405")))
 
 		// Create directory if it doesn't exist
 		if err := createDebugDirectory(debugDir); err != nil {
@@ -1021,7 +1018,7 @@ type audioEncodingResult struct {
 }
 
 // encodeAudioForUpload encodes the PCM soundscape to FLAC for upload using the
-// native go-flac encoder with audionorm EBU R128 loudness normalization. FFmpeg is
+// native go-flac encoder with loudnorm EBU R128 loudness normalization. FFmpeg is
 // neither used nor required; BirdWeather's FLAC-only API is served entirely in Go.
 func (b *BwClient) encodeAudioForUpload(pcmData []byte, timestamp string) (*audioEncodingResult, error) {
 	GetLogger().Debug("Encoding BirdWeather upload with native go-flac encoder",

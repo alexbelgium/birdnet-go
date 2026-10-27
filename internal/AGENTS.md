@@ -52,8 +52,10 @@ the job:
 
 - **Files** named by untrusted input: go through SecureFS (`internal/securefs`,
   `c.SFS` in API handlers). Its relative-path methods (`StatRel`,
-  `ReadDirRel`, `ServeRelativeFile`) give containment: they resolve inside an
-  `os.Root`, so neither `..` nor a symlink can escape. `ValidateRelativePath`
+  `ReadDirRel`, `ServeRelativeFile`, `OpenRegularRel`) give containment: they
+  resolve inside an `os.Root`, so neither `..` nor a symlink can escape. To read
+  a file, open it with `OpenRegularRel` (it never blocks on a FIFO and checks the
+  opened handle, not the path) and use the handle. `ValidateRelativePath`
   is only a lexical check (it cleans the path and rejects absolute and upward
   paths) and does not stop a symlink, so pass its result to those methods and
   never join it onto a directory for an `os.*` call. Some existing handlers in
@@ -79,6 +81,62 @@ check, so each one needs a `//nolint:gocritic` comment giving the reason (see
 symlinks. Pass the raw input to `IsLocal` (after any URL decoding) rather than
 cleaning it first: `filepath.Clean("")` is `"."`, which `IsLocal` accepts,
 while `IsLocal("")` is false.
+
+## Wall-clock time
+
+Anything that depends on the station's local calendar (dates, hours, "today",
+day and hour windows, bucketing by local time) goes through
+`internal/wallclock`, a leaf package that imports only `time` and `iter`. It
+takes the `*time.Location` on every call and reads no settings, so pass
+`ds.timezone` or `time.Local` per operation and settings changes keep taking
+effect immediately. A nil location means `time.Local`; the repository SQL
+builders that take a location (`WallClockDateExpr` and the hour expression
+builder next to it) are the exception and treat nil as UTC.
+
+| You need                                      | Use                                                                                                   |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Date-only logic (parse, add days, count days) | `wallclock.Date`: `ParseDate`, `AddDays`, `DaysBetween`, `Dates`                                      |
+| The instants of a local day or hour range     | `DayBounds`, `HourWindow`, `HourStart`, `At`                                                          |
+| Grouping instants by local date or hour       | `DateOf`, `FloorToHour`                                                                               |
+| A stable anchor for "today"                   | `Noon`                                                                                                |
+| SQL that buckets by local time                | `Segments` or `CoveringSegments`, then the repository builders (`WallClockDateExpr`, `zoneOffsetSQL`) |
+| An elapsed duration                           | plain `time.Duration`                                                                                 |
+
+Rules:
+
+- **Repeated and skipped times.** Wall time to instant takes the first
+  occurrence of a repeated time and the transition instant for a skipped time
+  (any shift length, including a skipped midnight or a skipped date). Instant
+  to wall time (`DateOf`, `FloorToHour`) keeps the occurrence the instant is in.
+  Never rely on `time.Date` for this: which occurrence it returns depends on
+  the zone.
+- **Never re-parse a formatted local time to get its instant back.** A wall
+  time without an offset is ambiguous during the repeated hour; carry the
+  instant instead.
+- **No `Truncate` or `Round` to an hour or a day, no `Hours() / 24`, no adding
+  `24 * time.Hour` to move to the next day.** `Truncate` works on UTC time and is
+  wrong for fractional offsets (+05:30, +05:45, -03:30); a day is not 24 hours
+  across a DST change. `time.Time.Sub` saturates at about 292 years, so count
+  days with `DaysBetween` or `CalendarDaysBetween`. The `WallClockArithmetic`
+  rule in `rules/wallclock.go` reports `Truncate` and `Round` to an hour or a
+  day, `Hours() / 24`, `d / (24 * time.Hour)` on a `time.Duration`, and adding
+  `24 * time.Hour` multiples to a `time.Time` (non-test code outside
+  `internal/wallclock` and the `testutil` packages). It does not see a duration
+  held in a variable, multi-day constants other than 24, an embedded struct,
+  a method value or a renamed `time` import, so a clean lint run is not proof.
+  Suppress a hit with `//nolint:gocritic // <specific reason>` only where the
+  arithmetic is an absolute hour grid or an elapsed duration; a known wrong hit
+  that is tracked elsewhere may be annotated only with a reason that says so.
+- **Bucket and window agree** (a row's local hour or date bucket is the window
+  that contains its instant) whenever every backward shift repeats a wall-clock
+  interval that lies inside one hour (one date). That holds for 1 hour shifts at
+  a whole hour and for the 30 minute shifts of Lord Howe and Norfolk. It does
+  not hold for Pacific/Chatham (45 minutes), Antarctica/Troll (2 hours),
+  multi-hour shifts, or shifts that cross midnight (America/St_Johns before
+  2011). This is documented existing behavior, not a bug to work around.
+- **Tests.** Sweep zones with `testutil.ToolchainZones`, which reads the
+  toolchain's own zone database and does not depend on the host, and
+  `testutil.RuleOnlyLocation` for a zone resolved from its POSIX rule.
 
 ## Design Patterns
 
@@ -108,6 +166,17 @@ while `IsLocal("")` is false.
   failing item and continue, then report the aggregate. All-or-nothing work
   (a database transaction, a migration, a config write, a backup restore)
   aborts and rolls back on the first error instead.
+
+## Database access (HARD RULE)
+
+The legacy database is deprecated and is going away; never expand it. New
+persistence is written for the v2 schema only and goes through the repository
+interfaces (`datastore.DetectionRepository` and the v2 repositories), not
+through `datastore.Interface` or the `c.DS` accessor in API code. Do not add
+columns, models, methods, optional interfaces, dual-write paths, shims or
+fallbacks to the legacy store. The full rule, what is still allowed, and how to
+add v2 persistence are in `internal/datastore/AGENTS.md`; read it before
+touching anything under `internal/datastore/` or adding a database write.
 
 ## Security
 

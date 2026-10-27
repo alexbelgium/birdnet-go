@@ -79,6 +79,7 @@ Performance Optimizations:
   import { dashboardEditMode } from '$lib/stores/dashboardEditMode';
   import BannerCard from '$lib/desktop/features/dashboard/components/BannerCard.svelte';
   import AcousticModelBanner from '$lib/desktop/features/dashboard/components/AcousticModelBanner.svelte';
+  import LegacyDatabaseBanner from '$lib/desktop/features/dashboard/components/LegacyDatabaseBanner.svelte';
   import VideoEmbedCard from '$lib/desktop/features/dashboard/components/VideoEmbedCard.svelte';
   import LazyMiniSpectrogram from '$lib/desktop/features/dashboard/components/LazyMiniSpectrogram.svelte';
   import DashboardEditMode from '$lib/desktop/features/dashboard/components/DashboardEditMode.svelte';
@@ -1375,6 +1376,7 @@ Performance Optimizations:
 
 <div class="col-span-12">
   <AcousticModelBanner class="mb-6" />
+  <LegacyDatabaseBanner class="mb-6" />
   <DashboardEditMode
     layout={currentLayout}
     editMode={isEditing}

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
+	"github.com/tphakala/birdnet-go/internal/wallclock"
 )
 
 // DetectionRepository provides access to the normalized v2 detections schema.
@@ -29,6 +30,18 @@ type DetectionRepository interface {
 	// Update modifies specific fields of a detection.
 	// Returns ErrDetectionNotFound if not found, ErrDetectionLocked if locked.
 	Update(ctx context.Context, id uint, updates map[string]any) error
+
+	// RecordClipSampleRate sets the clip sample rate (Hz) of the detection whose
+	// clip_name still equals clipName, overwriting any stored value. An empty
+	// clipName or rate <= 0 is a no-op. It ignores detection locks (the rate is
+	// clip metadata) and never reports ErrDetectionNotFound or ErrDetectionLocked.
+	RecordClipSampleRate(ctx context.Context, id uint, clipName string, rate int) error
+
+	// FillClipSampleRate sets the clip sample rate (Hz) only while it is NULL and
+	// clip_name still equals clipName, so concurrent fills converge and an exporter
+	// value is never overwritten. It reports whether a row changed. An empty
+	// clipName or rate <= 0 is a no-op. It ignores detection locks.
+	FillClipSampleRate(ctx context.Context, id uint, clipName string, rate int) (bool, error)
 
 	// Delete removes a detection by ID.
 	// Returns ErrDetectionNotFound if not found, ErrDetectionLocked if locked.
@@ -68,11 +81,6 @@ type DetectionRepository interface {
 	// Returns results, total count, and any error.
 	GetByDateRange(ctx context.Context, start, end int64, limit, offset int) ([]*entities.Detection, int64, error)
 
-	// GetByHour retrieves detections starting at a specific Unix timestamp hour.
-	// The hourStart should be the beginning of the hour (e.g., 1640000000 for a full hour).
-	// Returns results, total count, and any error.
-	GetByHour(ctx context.Context, hourStart int64, limit, offset int) ([]*entities.Detection, int64, error)
-
 	// GetByAudioSource retrieves detections for a specific audio source.
 	// Returns results, total count, and any error.
 	GetByAudioSource(ctx context.Context, sourceID uint, limit, offset int) ([]*entities.Detection, int64, error)
@@ -82,6 +90,11 @@ type DetectionRepository interface {
 	// Search finds detections matching the given filters.
 	// Returns results, total count, and any error.
 	Search(ctx context.Context, filters *SearchFilters) ([]*entities.Detection, int64, error)
+
+	// CountSearch returns the number of detections matching the given filters,
+	// the same total Search reports, without loading any rows. Sorting and
+	// pagination fields are ignored.
+	CountSearch(ctx context.Context, filters *SearchFilters) (int64, error)
 
 	// === Counts ===
 
@@ -97,9 +110,6 @@ type DetectionRepository interface {
 	// CountByDateRange returns the count of detections in a Unix timestamp range.
 	CountByDateRange(ctx context.Context, start, end int64) (int64, error)
 
-	// CountByHour returns the count of detections in a specific hour.
-	CountByHour(ctx context.Context, hourStart int64) (int64, error)
-
 	// === Aggregations ===
 
 	// GetTopSpecies returns the most frequently detected species in a time range.
@@ -110,15 +120,12 @@ type DetectionRepository interface {
 	// for the given label IDs in a single grouped query (per chunk). The result maps
 	// each label ID to its [24]int hourly counts; callers that span one species across
 	// multiple model label IDs sum the per-label arrays themselves. False positives are
-	// excluded and minConfidence filters by minimum confidence threshold. tzOffsetSeconds is
-	// the configured timezone's UTC offset, applied so detections bucket by wall-clock hour in
-	// that zone rather than the database/OS-local zone.
-	GetBatchHourlyOccurrences(ctx context.Context, labelIDs []uint, start, end int64, tzOffsetSeconds int, minConfidence float64) (map[uint][24]int, error)
-
-	// GetDailyOccurrences returns daily detection counts for a label.
-	// tzOffsetSeconds is the configured timezone's UTC offset, applied so detections bucket by
-	// wall-clock date in that zone rather than the database/OS-local zone.
-	GetDailyOccurrences(ctx context.Context, labelID uint, start, end int64, tzOffsetSeconds int) ([]DailyCount, error)
+	// excluded and minConfidence filters by minimum confidence threshold. Rows in
+	// [seg.Start, seg.End) bucket by wall-clock hour at seg.OffsetSeconds rather than the
+	// database/OS-local zone. That is exact only when the offset is constant over the segment, so
+	// callers split a range with wallclock.Segments or wallclock.CoveringSegments and merge the
+	// per-segment results.
+	GetBatchHourlyOccurrences(ctx context.Context, labelIDs []uint, seg wallclock.Segment, minConfidence float64) (map[uint][24]int, error)
 
 	// GetSpeciesFirstDetection returns the first-ever detection of a species.
 	// Returns ErrDetectionNotFound if the species has never been detected.
@@ -159,6 +166,14 @@ type DetectionRepository interface {
 
 	// SaveModelContributions stores per-model contribution data for a detection.
 	SaveModelContributions(ctx context.Context, detectionID uint, contribs []*entities.DetectionModelContribution) error
+
+	// GetModelContributionsByDetectionIDs returns the stored model contributions of
+	// the given detections, keyed by detection ID. Detections without rows have no
+	// key. Each detection's rows are ordered by hit count (highest first), then
+	// maximum confidence (highest first), then model ID. Each row's Model carries
+	// ID, Name, Version, Variant and ModelType only. Large ID sets are queried in
+	// chunks of batchQuerySize.
+	GetModelContributionsByDetectionIDs(ctx context.Context, detectionIDs []uint) (map[uint][]*entities.DetectionModelContribution, error)
 
 	// === Reviews ===
 
@@ -214,7 +229,7 @@ type DetectionRepository interface {
 	Lock(ctx context.Context, detectionID uint) error
 
 	// Unlock removes the lock from a detection.
-	// This operation is idempotent — unlocking an already-unlocked detection succeeds silently.
+	// This operation is idempotent: unlocking an already-unlocked detection succeeds silently.
 	Unlock(ctx context.Context, detectionID uint) error
 
 	// IsLocked checks if a detection is locked.
@@ -237,13 +252,14 @@ type DetectionRepository interface {
 	// modelID is optional; pass nil to include all models.
 	GetSpeciesSummary(ctx context.Context, start, end int64, modelID *uint) ([]SpeciesSummaryData, error)
 
-	// GetHourlyDistribution returns detection counts by hour. tzOffsetSeconds is the
-	// configured timezone's UTC offset, applied so detections bucket by wall-clock hour in
-	// that zone rather than the database/OS-local zone. labelIDs (every label of one species across
+	// GetHourlyDistribution returns detection counts by hour. Rows in
+	// [seg.Start, seg.End) bucket by wall-clock hour at seg.OffsetSeconds rather than the
+	// database/OS-local zone; see GetBatchHourlyOccurrences for splitting a range into segments.
+	// labelIDs (every label of one species across
 	// models) and modelID are optional filters: nil or empty labelIDs means no label filter, so a
 	// caller that resolved a species to no labels must return its own empty result (or pass the
 	// no-match sentinel) rather than forward the empty slice.
-	GetHourlyDistribution(ctx context.Context, start, end int64, tzOffsetSeconds int, labelIDs []uint, modelID *uint) ([]HourlyDistributionData, error)
+	GetHourlyDistribution(ctx context.Context, seg wallclock.Segment, labelIDs []uint, modelID *uint) ([]HourlyDistributionData, error)
 
 	// GetDetectionTimestamps returns the raw detected_at epochs (seconds) for the half-open
 	// range [start, end), excluding false positives, in no particular order. labelIDs is an
@@ -259,18 +275,11 @@ type DetectionRepository interface {
 	GetBatchConfidences(ctx context.Context, labelIDs []uint, start, end int64, minConfidence float64) (map[uint][]float64, error)
 
 	// GetDailyAnalytics returns daily statistics.
-	// tzOffsetSeconds is the configured timezone's UTC offset, applied so detections bucket by
-	// wall-clock date in that zone rather than the database/OS-local zone.
+	// Rows in [seg.Start, seg.End) bucket by wall-clock date at seg.OffsetSeconds rather than the
+	// database/OS-local zone; see GetBatchHourlyOccurrences for splitting a range into segments.
 	// labelIDs (every label of one species across models) and modelID are optional filters; nil or
 	// empty labelIDs means no label filter (see GetHourlyDistribution).
-	GetDailyAnalytics(ctx context.Context, start, end int64, tzOffsetSeconds int, labelIDs []uint, modelID *uint) ([]DailyAnalyticsData, error)
-
-	// GetDetectionTrends returns detection trends over time.
-	// period is "day", "week", or "month".
-	// tzOffsetSeconds is the configured timezone's UTC offset, applied so detections bucket by
-	// wall-clock date in that zone rather than the database/OS-local zone.
-	// modelID is optional.
-	GetDetectionTrends(ctx context.Context, period string, limit, tzOffsetSeconds int, modelID *uint) ([]DailyAnalyticsData, error)
+	GetDailyAnalytics(ctx context.Context, seg wallclock.Segment, labelIDs []uint, modelID *uint) ([]DailyAnalyticsData, error)
 
 	// GetNewSpecies returns species detected for the first time ever within the range.
 	GetNewSpecies(ctx context.Context, start, end int64, limit, offset int) ([]NewSpeciesData, error)

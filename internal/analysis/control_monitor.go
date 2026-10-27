@@ -25,6 +25,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/mqtt"
 	"github.com/tphakala/birdnet-go/internal/notification"
 	"github.com/tphakala/birdnet-go/internal/observability"
+	"github.com/tphakala/birdnet-go/internal/telemetry"
 )
 
 const (
@@ -57,6 +58,11 @@ type ControlMonitor struct {
 	// from current settings. It is provided by AudioPipelineService to avoid
 	// duplicating source setup logic.
 	reconfigureSourcesFn func()
+
+	// updateSourceGainsFn applies the configured gain of every running source to
+	// its live routes without a reconfigure or a stream probe. Set by
+	// AudioPipelineService after construction; nil skips it.
+	updateSourceGainsFn func()
 
 	// replanCadenceFn re-plans the analysis cadence without probing or diffing
 	// sources. Set by AudioPipelineService after construction; nil skips it.
@@ -297,6 +303,8 @@ func (cm *ControlMonitor) handleControlSignal(signal string) {
 		cm.handleReconfigureSoundLevel()
 	case "reconfigure_telemetry":
 		cm.handleReconfigureTelemetry()
+	case telemetry.SignalReconfigureSentry:
+		cm.handleReconfigureSentry()
 	case "reconfigure_species_tracking":
 		cm.handleReconfigureSpeciesTracking()
 	case "reconfigure_push_notifications":
@@ -305,6 +313,8 @@ func (cm *ControlMonitor) handleControlSignal(signal string) {
 		cm.handleRebuildExtendedCapture()
 	case "reconfigure_audio_sources":
 		cm.handleReconfigureAudioSources()
+	case "update_source_gains":
+		cm.handleUpdateSourceGains()
 	case "restart_audio_capture":
 		cm.handleRestartAudioCapture()
 	case "reconfigure_dynamic_thresholds":
@@ -327,6 +337,19 @@ func (cm *ControlMonitor) handleControlSignal(signal string) {
 	default:
 		GetLogger().Warn("Received unknown control signal", logger.String("signal", signal))
 	}
+}
+
+// handleUpdateSourceGains applies changed sound card and stream gains to the
+// running sources' live routes. Unlike handleReconfigureAudioSources it does not
+// diff or probe sources, restart anything, or rebuild the routes of a healthy
+// source; it only re-wires a source whose analysis route failed on the previous
+// pass, as every reconfigure does.
+func (cm *ControlMonitor) handleUpdateSourceGains() {
+	if cm.updateSourceGainsFn == nil {
+		return
+	}
+	cm.updateSourceGainsFn()
+	emitHotReload("source_gain")
 }
 
 // handleReconfigureLogDeduplication reinitializes the log deduplicator from current settings.
@@ -1080,6 +1103,18 @@ func (cm *ControlMonitor) handleReconfigureQuietHours() {
 	} else {
 		GetLogger().Warn("Quiet hours scheduler not available")
 	}
+}
+
+// handleReconfigureSentry applies a changed Error Tracking opt-in by starting or
+// closing the Sentry client.
+func (cm *ControlMonitor) handleReconfigureSentry() {
+	GetLogger().Info("Reconfiguring Sentry error tracking")
+	if err := telemetry.ReconfigureSentry(); err != nil {
+		GetLogger().Error("failed to reconfigure Sentry", logger.Error(err))
+		cm.notifyError("Failed to reconfigure error tracking", err)
+		return
+	}
+	emitHotReload("sentry")
 }
 
 // handleRestartAudioCapture signals a full audio-capture restart. Used for a
