@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"github.com/tphakala/birdnet-go/internal/wallclock"
 )
 
 // warmingSpeciesStatus is the suppressed status returned while the background
@@ -121,14 +122,9 @@ func (t *SpeciesTracker) getFirstSeasonalDetection(scientificName, currentSeason
 }
 
 // calculateDaysSince calculates calendar days between two times, returning at minimum 0.
-// Uses date-only arithmetic in UTC to avoid DST off-by-one errors.
+// It counts dates, each read in its own location, so a DST change does not shift the result.
 func calculateDaysSince(currentTime, referenceTime time.Time) int {
-	y1, m1, d1 := referenceTime.Date()
-	y2, m2, d2 := currentTime.Date()
-	start := time.Date(y1, m1, d1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(y2, m2, d2, 0, 0, 0, 0, time.UTC)
-	days := int(end.Sub(start) / (hoursPerDay * time.Hour))
-	return max(0, days)
+	return max(0, wallclock.CalendarDaysBetween(referenceTime, currentTime))
 }
 
 // applyLifetimeStatus sets lifetime tracking fields on status.
@@ -159,15 +155,19 @@ func (t *SpeciesTracker) applyYearlyStatus(status *SpeciesStatus, firstThisYear 
 }
 
 // applySeasonalStatus sets seasonal tracking fields on status.
-func (t *SpeciesTracker) applySeasonalStatus(status *SpeciesStatus, firstThisSeason *time.Time, currentTime time.Time) {
+//
+// A species carried over from the end of the previous season is never "new
+// this season"; otherwise every species heard on a season's first day,
+// residents included, would be flagged for the whole window.
+func (t *SpeciesTracker) applySeasonalStatus(status *SpeciesStatus, firstThisSeason *time.Time, carriedOver bool, currentTime time.Time) {
 	if !t.seasonalEnabled {
 		return
 	}
 	if firstThisSeason != nil {
 		status.DaysThisSeason = calculateDaysSince(currentTime, *firstThisSeason)
-		status.IsNewThisSeason = status.DaysThisSeason <= t.seasonalWindowDays
+		status.IsNewThisSeason = !carriedOver && status.DaysThisSeason <= t.seasonalWindowDays
 	} else {
-		status.IsNewThisSeason = true
+		status.IsNewThisSeason = !carriedOver
 		status.DaysThisSeason = 0
 	}
 }
@@ -194,7 +194,7 @@ func (t *SpeciesTracker) buildSpeciesStatusWithBuffer(scientificName string, cur
 
 	t.applyLifetimeStatus(status, firstSeen, exists, currentTime)
 	t.applyYearlyStatus(status, firstThisYear, currentTime)
-	t.applySeasonalStatus(status, firstThisSeason, currentTime)
+	t.applySeasonalStatus(status, firstThisSeason, t.isSeasonCarryoverLocked(scientificName, currentSeason, currentTime), currentTime)
 	t.applyNoveltyStatus(status, scientificName)
 
 	return *status
@@ -339,7 +339,7 @@ func (t *SpeciesTracker) buildSpeciesStatusLocked(scientificName string, current
 
 	t.applyLifetimeStatus(&status, firstSeen, exists, currentTime)
 	t.applyYearlyStatus(&status, firstThisYear, currentTime)
-	t.applySeasonalStatus(&status, firstThisSeason, currentTime)
+	t.applySeasonalStatus(&status, firstThisSeason, t.isSeasonCarryoverLocked(scientificName, currentSeason, currentTime), currentTime)
 	t.applyNoveltyStatus(&status, scientificName)
 
 	return status

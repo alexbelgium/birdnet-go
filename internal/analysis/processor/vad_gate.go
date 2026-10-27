@@ -5,11 +5,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tphakala/birdnet-go/internal/analysis/privacyrollup"
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/inference/vad"
 	"github.com/tphakala/birdnet-go/internal/logger"
-	"github.com/tphakala/birdnet-go/internal/observability/metrics"
 )
 
 const (
@@ -450,7 +450,8 @@ func freshTailBytes(delta time.Duration, sampleRate, pcmLen int) int {
 // runVADGate runs the dedicated Silero VAD speech gate for one chunk and, on a
 // speech hit, records it in LastHumanDetection exactly as the label-based path
 // does, stamped with the end of the audio it scored (the stored time never moves
-// backward, see recordHumanDetection). This AUGMENTS the label
+// backward, see recordHumanHitLocked; the hit carries the VAD probability and
+// the vadHitModelID attribution). This AUGMENTS the label
 // match: shouldDiscardDetection consults the same map, so a bird detection is
 // discarded if EITHER the VAD or the label trigger fires. When the VAD is
 // disabled or its model is absent, behaviour is unchanged.
@@ -530,7 +531,9 @@ func (p *Processor) runVADGate(settings *conf.Settings, chunk *chunkAudio) (span
 		p.Metrics.PrivacyFilter.SetVADLastSpeechProbability(float64(result.prob))
 	}
 
-	p.recordHumanDetection(source, audioEnd, metrics.TriggerVAD)
+	hit := vadHumanHit(audioEnd, float64(result.prob), privacyrollup.ThresholdMilli(threshold))
+	d := p.recordVADHit(settings, source, hit)
+	p.reportHitDecision(settings, source, &hit, &d)
 	return result.span, true
 }
 
