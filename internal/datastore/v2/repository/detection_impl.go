@@ -574,22 +574,6 @@ func (r *detectionRepository) GetByModel(ctx context.Context, modelID uint, limi
 	return dets, total, err
 }
 
-// GetByDateRange retrieves detections within a Unix timestamp range.
-func (r *detectionRepository) GetByDateRange(ctx context.Context, start, end int64, limit, offset int) ([]*entities.Detection, int64, error) {
-	var dets []*entities.Detection
-	var total int64
-
-	query := r.db.WithContext(ctx).Table(r.tableName()).
-		Where("detected_at >= ? AND detected_at <= ?", start, end)
-
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	err := query.Order("detected_at DESC").Limit(limit).Offset(offset).Find(&dets).Error
-	return dets, total, err
-}
-
 // GetByAudioSource retrieves detections for a specific audio source.
 func (r *detectionRepository) GetByAudioSource(ctx context.Context, sourceID uint, limit, offset int) ([]*entities.Detection, int64, error) {
 	var dets []*entities.Detection
@@ -738,6 +722,12 @@ func (r *detectionRepository) applySearchOrdering(query *gorm.DB, filters *Searc
 		query = query.Order("detected_at" + dir)
 	}
 
+	// Tiebreak on the primary key so rows with equal sort keys keep one order across
+	// offset pages. Qualified because the joined labels and reviews tables have an id too.
+	if filters.SortBy != SortFieldID {
+		query = query.Order(r.tableName() + ".id" + dir)
+	}
+
 	// Pagination
 	if filters.Limit > 0 {
 		query = query.Limit(filters.Limit)
@@ -824,15 +814,6 @@ func (r *detectionRepository) CountByModel(ctx context.Context, modelID uint) (i
 	var count int64
 	err := r.db.WithContext(ctx).Table(r.tableName()).
 		Where("model_id = ?", modelID).
-		Count(&count).Error
-	return count, err
-}
-
-// CountByDateRange returns the count of detections in a Unix timestamp range.
-func (r *detectionRepository) CountByDateRange(ctx context.Context, start, end int64) (int64, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Table(r.tableName()).
-		Where("detected_at >= ? AND detected_at <= ?", start, end).
 		Count(&count).Error
 	return count, err
 }
@@ -1280,14 +1261,15 @@ func (r *detectionRepository) GetModelContributionsByDetectionIDs(ctx context.Co
 }
 
 // SavePredictionsBatch stores predictions for multiple detections efficiently.
-// Uses ON CONFLICT DO NOTHING for idempotent migration support.
+// Rows that repeat a stored or earlier (detection, label) pair are skipped on
+// every dialect, which keeps migration reruns idempotent.
 func (r *detectionRepository) SavePredictionsBatch(ctx context.Context, preds []*entities.DetectionPrediction) error {
 	if len(preds) == 0 {
 		return nil
 	}
 	return datastore.RetryOnLock(ctx, "v2_save_predictions_batch", func() error {
 		return r.db.WithContext(ctx).Table(r.predictionsTable()).
-			Clauses(clause.OnConflict{DoNothing: true}).
+			Clauses(onConflictSkip(r.isMySQL, detectionIDColumn)).
 			CreateInBatches(preds, defaultDBBatchSize).Error
 	}, r.metrics)
 }
@@ -1400,7 +1382,7 @@ func (r *detectionRepository) SaveReviewsBatch(ctx context.Context, reviews []*e
 	}
 	return datastore.RetryOnLock(ctx, "v2_save_reviews_batch", func() error {
 		return r.db.WithContext(ctx).Table(r.reviewsTable()).
-			Clauses(clause.OnConflict{DoNothing: true}).
+			Clauses(onConflictSkip(r.isMySQL, detectionIDColumn)).
 			CreateInBatches(reviews, defaultDBBatchSize).Error
 	}, r.metrics)
 }
@@ -1505,7 +1487,7 @@ func (r *detectionRepository) SaveCommentsBatch(ctx context.Context, comments []
 	}
 	return datastore.RetryOnLock(ctx, "v2_save_comments_batch", func() error {
 		return r.db.WithContext(ctx).Table(r.commentsTable()).
-			Clauses(clause.OnConflict{DoNothing: true}).
+			Clauses(onConflictSkip(r.isMySQL, detectionIDColumn)).
 			CreateInBatches(comments, defaultDBBatchSize).Error
 	}, r.metrics)
 }
@@ -1607,7 +1589,7 @@ func (r *detectionRepository) SaveLocksBatch(ctx context.Context, locks []*entit
 	}
 	return datastore.RetryOnLock(ctx, "v2_save_locks_batch", func() error {
 		return r.db.WithContext(ctx).Table(r.locksTable()).
-			Clauses(clause.OnConflict{DoNothing: true}).
+			Clauses(onConflictSkip(r.isMySQL, detectionIDColumn)).
 			CreateInBatches(locks, defaultDBBatchSize).Error
 	}, r.metrics)
 }

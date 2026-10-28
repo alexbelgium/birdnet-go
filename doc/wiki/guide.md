@@ -8,7 +8,7 @@ BirdNET-Go is an application inspired by BirdNET-Pi and BirdNET Analyzer. It aim
 - 24/7 real-time analysis of soundcard capture
 - Real-time analysis output compatible with OBS chat log input for wildlife streams
 - BirdWeather API support for real-time analysis
-- Analysis output options: SQLite or MySQL database
+- Analysis output options: SQLite or MySQL/MariaDB database
 - Localized species labels, with extensive language support (over 30 languages)
 - Runs on Windows, Linux (including Raspberry Pi), and macOS
 - Minimal runtime dependencies; the BirdNET TensorFlow Lite model and other supporting files are embedded in the executable
@@ -331,7 +331,7 @@ realtime:
     newSpeciesWindowDays: 7 # Days to show "New Species" badge after first detection (default: 7)
     syncIntervalMinutes: 60 # How often to sync tracking data with database in minutes (default: 60)
 
-    # Yearly tracking - tracks first arrivals each calendar year
+    # Yearly tracking - tracks first arrivals each year, counted from the reset date
     yearlyTracking:
       enabled: true # Enable yearly "New This Year" tracking (default: true)
       resetMonth: 1 # Month when yearly tracking resets (1-12, default: 1 for January)
@@ -409,15 +409,22 @@ output:
     enabled: false # Enable SQLite output
     path: birdnet.db # Path to SQLite database
 
-  # MySQL database output settings
+  # MySQL or MariaDB database output settings
   mysql:
-    enabled: false # Enable MySQL output
+    enabled: false # Enable MySQL or MariaDB output
     username: birdnet # MySQL database username
     password: secret # MySQL database user password
     database: birdnet # MySQL database name
     host: localhost # MySQL database host
     port: 3306 # MySQL database port
 ```
+
+MySQL and MariaDB are supported only in releases that their upstream projects
+still maintain: MySQL 8.4 LTS, and MariaDB 10.11, 11.4, 11.8 or 12.3 (checked
+October 2026). MySQL 5.7, MySQL 8.0 and MariaDB 10.6 or older have reached end
+of life and are not supported. Create the database with the `utf8mb4` character
+set (the default on supported releases), for example
+`CREATE DATABASE birdnet CHARACTER SET utf8mb4;`.
 
 ### Command Line Interface
 
@@ -2863,7 +2870,7 @@ The system tracks three different types of "new" species appearances:
 
 ##### 📅 **New This Year** (Annual First)
 
-- **What it means**: A bird species detected for the first time this calendar year
+- **What it means**: A bird species detected for the first time since the yearly reset date (January 1 by default)
 - **Visual indicator**: Blue calendar icon
 - **When shown**: For 7 days after the first detection of the year (configurable via `yearlyTracking.windowDays`)
 - **Resets**: January 1st each year (configurable via `yearlyTracking.resetMonth` and `resetDay`)
@@ -2907,7 +2914,7 @@ The species tracking system is enabled by default with sensible settings. You ca
 
 ##### Yearly Tracking Settings
 
-Configure how the system tracks first arrivals each calendar year:
+Configure how the system tracks first arrivals each year, counted from the reset date:
 
 - **Enable Yearly Tracking** (`yearlyTracking.enabled`): Turn yearly tracking on/off (default: `true`)
 - **Reset Date** (`yearlyTracking.resetMonth` and `resetDay`): When to reset the yearly list
