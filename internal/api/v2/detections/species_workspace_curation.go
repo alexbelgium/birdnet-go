@@ -9,6 +9,7 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
@@ -118,18 +119,22 @@ func (c *Handler) SetWorkspaceMembership(ctx echo.Context) error {
 
 	c.settingsMutex.Lock()
 	defer c.settingsMutex.Unlock()
-	current := c.getSettingsOrFallback()
 	matches := func(entry string) bool { return c.excludeEntryMatches(entry, name) }
-	if slices.ContainsFunc(get(current), matches) == req.Present {
+	current, updated, err := c.updateAndSaveSettings(func(current, updated *conf.Settings) error {
+		if slices.ContainsFunc(get(current), matches) == req.Present {
+			return conf.ErrSettingsUnchanged
+		}
+		if req.Present {
+			set(updated, append(get(updated), name))
+		} else {
+			set(updated, slices.DeleteFunc(get(updated), matches))
+		}
+		return nil
+	})
+	if errors.Is(err, conf.ErrSettingsUnchanged) {
 		return ctx.JSON(http.StatusOK, WorkspaceMembershipResponse{Kind: kind, ScientificName: name, Present: req.Present})
 	}
-	updated := conf.CloneSettings(current)
-	if req.Present {
-		set(updated, append(get(updated), name))
-	} else {
-		set(updated, slices.DeleteFunc(get(updated), matches))
-	}
-	if err := c.publishAndSaveSettings(current, updated); err != nil {
+	if err != nil {
 		return c.HandleError(ctx, err, "Failed to update species list", http.StatusInternalServerError)
 	}
 	if sideEffects {
@@ -204,10 +209,11 @@ func (c *Handler) PutWorkspaceLayout(ctx echo.Context) error {
 	layout = conf.NormalizeSpeciesWorkspaceLayout(layout)
 	c.settingsMutex.Lock()
 	defer c.settingsMutex.Unlock()
-	current := c.getSettingsOrFallback()
-	updated := conf.CloneSettings(current)
-	updated.Realtime.Species.SpeciesWorkspace = layout
-	if err := c.publishAndSaveSettings(current, updated); err != nil {
+	_, _, err := c.updateAndSaveSettings(func(_, updated *conf.Settings) error {
+		updated.Realtime.Species.SpeciesWorkspace = layout
+		return nil
+	})
+	if err != nil {
 		return c.HandleError(ctx, err, "Failed to save layout", http.StatusInternalServerError)
 	}
 	return ctx.JSON(http.StatusOK, layout)

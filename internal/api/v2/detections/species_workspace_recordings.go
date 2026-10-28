@@ -12,6 +12,7 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/datastore"
+	detectionPkg "github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
@@ -191,7 +192,7 @@ func (c *Handler) GetWorkspaceRecordings(ctx echo.Context) error {
 	out.TotalPages = int((total + int64(q.Limit) - 1) / int64(q.Limit))
 	for i := range recs {
 		rec := &recs[i]
-		resp := WorkspaceRecordingResponse{DetectionResponse: c.noteToDetectionResponse(&rec.Note, true, weatherCache)}
+		resp := WorkspaceRecordingResponse{DetectionResponse: c.resultToDetectionResponse(workspaceNoteToResult(rec), true, weatherCache)}
 		if !rec.DetectedAt.IsZero() {
 			resp.Timestamp = rec.DetectedAt.Format(time.RFC3339)
 		}
@@ -201,4 +202,48 @@ func (c *Handler) GetWorkspaceRecordings(ctx echo.Context) error {
 		out.Data = append(out.Data, resp)
 	}
 	return ctx.JSON(http.StatusOK, out)
+}
+
+// workspaceNoteToResult converts a workspace recording row to the detection result that
+// resultToDetectionResponse reads. The instant is the stored one when the store records it,
+// else it is rebuilt from the row's date and time text in the server's time zone.
+func workspaceNoteToResult(rec *datastore.SpeciesWorkspaceRecording) *detectionPkg.Result {
+	note := &rec.Note
+	timestamp := rec.DetectedAt
+	if timestamp.IsZero() {
+		timestamp, _ = time.ParseInLocation(time.DateTime, note.Date+" "+note.Time, time.Local)
+	}
+	result := &detectionPkg.Result{
+		ID:        note.ID,
+		Timestamp: timestamp,
+		AudioSource: detectionPkg.AudioSource{
+			ID:          note.Source.ID,
+			DisplayName: note.Source.DisplayName,
+			SafeString:  note.Source.SafeString,
+		},
+		BeginTime: note.BeginTime,
+		EndTime:   note.EndTime,
+		Species: detectionPkg.Species{
+			ScientificName: note.ScientificName,
+			CommonName:     note.CommonName,
+			Code:           note.SpeciesCode,
+		},
+		Confidence:          note.Confidence,
+		ClipName:            note.ClipName,
+		SpectrogramClipName: note.SpectrogramClipName,
+		ClipSampleRate:      note.ClipSampleRate,
+		Unlikely:            note.Unlikely,
+		Verified:            note.Verified,
+		Locked:              note.Locked,
+		Model:               note.Model,
+	}
+	for _, comment := range note.Comments {
+		result.Comments = append(result.Comments, detectionPkg.Comment{
+			ID:        comment.ID,
+			Entry:     comment.Entry,
+			CreatedAt: comment.CreatedAt,
+			UpdatedAt: comment.UpdatedAt,
+		})
+	}
+	return result
 }
