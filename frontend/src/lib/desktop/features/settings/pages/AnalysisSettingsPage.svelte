@@ -117,7 +117,6 @@
   import { normalizeForLookup } from '$lib/utils/speciesNames';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { mapSpeciesListResponse, type SpeciesListResponse } from '$lib/utils/speciesPredictions';
-  import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import {
     Download,
     Trash2,
