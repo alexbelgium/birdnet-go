@@ -31,6 +31,7 @@
   import { settingsActions } from './lib/stores/settings.js';
   import { activateWatchdog } from './lib/stores/connectionState.svelte';
   import WizardDialog from './lib/desktop/features/wizard/WizardDialog.svelte';
+  import ReanalyzeHost from './lib/desktop/components/modals/ReanalyzeHost.svelte';
   import {
     wizardState,
     WIZARD_DISMISSED_VERSION_KEY,
@@ -902,4 +903,5 @@
   </RootLayout>
 
   <WizardDialog />
+  <ReanalyzeHost />
 {/if}

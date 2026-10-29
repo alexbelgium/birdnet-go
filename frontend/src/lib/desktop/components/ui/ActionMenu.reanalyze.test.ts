@@ -5,15 +5,20 @@ import userEvent from '@testing-library/user-event';
 import ActionMenu from './ActionMenu.svelte';
 import type { Detection } from '$lib/types/detection.types';
 
-const detection = {
+const detection: Detection = {
   id: 7,
   date: '2026-09-08',
   time: '07:14:00',
+  beginTime: '07:14:00',
+  endTime: '07:14:03',
+  speciesCode: 'eupfly1',
   scientificName: 'Ficedula hypoleuca',
   commonName: 'Pied Flycatcher',
   confidence: 0.87,
+  verified: 'unverified',
   locked: false,
-} as Detection;
+  clipName: 'clips/2026/09/pied_flycatcher.wav',
+};
 
 // The global test setup (src/test/setup.ts) mocks $lib/i18n with a fixed map and
 // echoes back any key it does not know, so asserting on the rendered LABEL would
@@ -66,5 +71,16 @@ describe('ActionMenu reanalyze item', () => {
 
     expect(screen.queryByRole('menuitem', { name: REANALYZE_KEY })).not.toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: REVIEW_LABEL })).toBeInTheDocument();
+  });
+
+  it('omits the item when the detection has no saved clip', async () => {
+    // With no clip there is nothing to reanalyze; offering it would only 404.
+    render(ActionMenu, {
+      props: { detection: { ...detection, clipName: '' }, onReview: vi.fn(), onReanalyze: vi.fn() },
+    });
+
+    await user.click(screen.getByRole('button', { name: /Actions/i }));
+
+    expect(screen.queryByRole('menuitem', { name: REANALYZE_KEY })).not.toBeInTheDocument();
   });
 });

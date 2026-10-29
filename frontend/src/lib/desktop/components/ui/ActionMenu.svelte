@@ -54,10 +54,9 @@
     /** Callback fired when user clicks review action */
     onReview?: () => void;
     /**
-     * Callback fired when the user clicks the reanalyze action. Optional: the
-     * item only renders when a caller supplies it, so existing call sites are
-     * unchanged and menus in contexts that cannot host the reanalysis flow do
-     * not advertise it.
+     * Callback fired when the user clicks the reanalyze action. The item only
+     * renders when a caller supplies it and the detection has a saved clip to
+     * reanalyze.
      */
     onReanalyze?: () => void;
     /** Callback fired when user toggles species visibility */
@@ -325,7 +324,7 @@
           </li>
         {/if}
 
-        {#if canEdit && onReanalyze}
+        {#if canEdit && onReanalyze && detection.clipName}
           <li>
             <button
               onclick={() => handleAction(onReanalyze)}

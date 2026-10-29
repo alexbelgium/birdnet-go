@@ -14,14 +14,7 @@
   import { fetchWithCSRF } from '$lib/utils/api';
   import { setDetectionVerification } from '$lib/utils/reviewDetection';
   import { loggers } from '$lib/utils/logger';
-  import {
-    Sparkles,
-    AlertCircle,
-    CircleCheck,
-    CircleX,
-    Trash2,
-    Lock,
-  } from '@lucide/svelte';
+  import { Sparkles, AlertCircle, CircleCheck, CircleX, Trash2, Lock } from '@lucide/svelte';
   import type { Detection } from '$lib/types/detection.types';
 
   interface Props {
@@ -292,13 +285,7 @@
   });
 </script>
 
-<Modal
-  {isOpen}
-  title="Reanalyze this clip"
-  size="3xl"
-  className="pt-14 sm:pt-6"
-  {onClose}
->
+<Modal {isOpen} title="Reanalyze this clip" size="3xl" className="pt-14 sm:pt-6" {onClose}>
   <!-- Keep the three main decisions in the modal chrome, level with the close X.
        They remain present while loading and while a confirmation panel is open. -->
   {#if !isLocked}
