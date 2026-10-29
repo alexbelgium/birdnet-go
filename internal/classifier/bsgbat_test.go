@@ -165,3 +165,14 @@ func readBSGBatLogits(t *testing.T, path string) [][]float32 {
 	require.NoError(t, scanner.Err())
 	return rows
 }
+
+func TestBSGBatNormalizeSilenceIsFinite(t *testing.T) {
+	t.Parallel()
+	d, dErr := newBSGBatDSP()
+	require.NoError(t, dErr)
+	out, pErr := d.preprocess(make([]float32, bsgBatInputSamples))
+	require.NoError(t, pErr)
+	for i, v := range out {
+		require.False(t, math.IsNaN(float64(v)) || math.IsInf(float64(v), 0), "index %d", i)
+	}
+}

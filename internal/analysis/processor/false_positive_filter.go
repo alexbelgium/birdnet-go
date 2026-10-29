@@ -110,7 +110,7 @@ func getRecommendedLevelForOverlap(overlap float64) (level int, overlapSufficien
 // the configured birdnet.overlap); see Processor.effectiveBaseOverlap.
 func MinDetectionsForModel(settings *conf.Settings, modelID string, baseOverlap time.Duration) int {
 	if classifier.IsBatFamily(modelID) {
-		return calculateBatMinDetections(settings)
+		return batFamilyMinDetections(settings, modelID)
 	}
 	// For a model whose analysis clip differs from the 3s BirdNET base clip (e.g.
 	// Perch 5s), derive the step from the model's own clip and effective overlap so
@@ -184,18 +184,17 @@ type visibilityThresholds map[string]int
 func precomputeVisibilityThresholds(settings *conf.Settings, baseOverlap time.Duration) visibilityThresholds {
 	birdVis := CalculateVisibilityThreshold(calculateMinDetectionsFromSettings(settings, baseOverlap))
 	batVis := CalculateVisibilityThreshold(calculateBatMinDetections(settings))
-	return visibilityThresholds{
+	vt := visibilityThresholds{
 		"":                       birdVis, // default for unknown model IDs
 		classifier.RegistryIDBat: batVis,
 	}
+	addForkBatVisibilityThresholds(vt, settings)
+	return vt
 }
 
 // getThreshold returns the visibility threshold for a model ID, falling back
 // to the bird threshold for unknown model IDs.
 func (vt visibilityThresholds) getThreshold(modelID string) int {
-	if classifier.IsBatFamily(modelID) {
-		modelID = classifier.RegistryIDBat
-	}
 	if t, ok := vt[modelID]; ok {
 		return t
 	}
