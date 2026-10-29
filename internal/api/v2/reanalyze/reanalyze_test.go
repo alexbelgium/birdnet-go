@@ -151,26 +151,39 @@ func TestReanalyzeSamples_DoesNotTruncatePerModel(t *testing.T) {
 	assert.Len(t, scores, 25)
 }
 
-func TestSelectModelsForReanalysis_DefaultSkipsUltrasonicModels(t *testing.T) {
+// batSpec mirrors the registry's bat classifier: BirdNET v2.4-sized windows of
+// raw audio delivered at 256 kHz.
+var batSpec = classifier.ModelSpec{SampleRate: 48000, ClipLength: 3 * time.Second, RawSampleRate: 256000}
+
+// selectedIDs returns the registry IDs of the selected models.
+func selectedIDs(models []loadedModel) []string {
+	ids := make([]string, 0, len(models))
+	for _, m := range models {
+		ids = append(ids, m.id)
+	}
+	return ids
+}
+
+func TestSelectModelsForReanalysis_DefaultMatchesDetectionModelType(t *testing.T) {
 	t.Parallel()
 
 	infos := []classifier.ModelInfo{
 		{ID: "BirdNET_V2.4", Name: "BirdNET v2.4", Spec: spec3s},
 		{ID: "Perch_V2", Name: "Perch v2", Spec: classifier.ModelSpec{SampleRate: 32000, ClipLength: 5 * time.Second}},
-		// Bat: expects raw 256 kHz audio that saved detection clips never carry.
-		{ID: "Bat_V1", Name: "Bat", Spec: classifier.ModelSpec{SampleRate: 256000, ClipLength: time.Second, RawSampleRate: 256000}},
+		{ID: "Bat_V1", Name: "Bat", Spec: batSpec},
 		// Degenerate spec: no usable sample rate to decode at.
 		{ID: "Broken", Name: "Broken", Spec: classifier.ModelSpec{SampleRate: 0, ClipLength: time.Second}},
 	}
 
-	got, err := selectModelsForReanalysis(infos, nil)
+	// A bird detection's clip carries no ultrasonic content: bat models are skipped.
+	got, err := selectModelsForReanalysis(infos, nil, false)
 	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"BirdNET_V2.4", "Perch_V2"}, selectedIDs(got))
 
-	ids := make([]string, 0, len(got))
-	for _, m := range got {
-		ids = append(ids, m.id)
-	}
-	assert.ElementsMatch(t, []string{"BirdNET_V2.4", "Perch_V2"}, ids)
+	// A bat detection's clip is ultrasonic: only bat models apply.
+	got, err = selectModelsForReanalysis(infos, nil, true)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"Bat_V1"}, selectedIDs(got))
 }
 
 func TestSelectModelsForReanalysis_ExplicitListDedupesAndErrorsOnUnloaded(t *testing.T) {
@@ -180,31 +193,39 @@ func TestSelectModelsForReanalysis_ExplicitListDedupesAndErrorsOnUnloaded(t *tes
 
 	// "birdnet" is the config alias for "BirdNET_V2.4"; asking for both forms must
 	// schedule the model once, not twice.
-	got, err := selectModelsForReanalysis(infos, []string{"birdnet", "BirdNET_V2.4"})
+	got, err := selectModelsForReanalysis(infos, []string{"birdnet", "BirdNET_V2.4"}, false)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "BirdNET_V2.4", got[0].id)
 
 	// An unloaded model is an error, not a silent drop: the caller asked for
 	// something specific and must learn it was not honoured.
-	_, err = selectModelsForReanalysis(infos, []string{"Perch_V2"})
+	_, err = selectModelsForReanalysis(infos, []string{"Perch_V2"}, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Perch_V2")
 }
 
-func TestSelectModelsForReanalysis_RejectsUltrasonicEvenWhenExplicitlyAsked(t *testing.T) {
+func TestSelectModelsForReanalysis_RejectsMismatchedModelEvenWhenExplicitlyAsked(t *testing.T) {
 	t.Parallel()
 
-	// The RawSampleRate filter is a hard rule, not just a default. A saved clip
-	// carries no ultrasonic content, so resampling it up to 256 kHz and running
-	// the bat model produces confident-looking nonsense — worse to show a user
-	// than an error explaining why the model cannot answer.
+	// The model-type rule is a hard rule, not just a default: a bat model fed an
+	// upsampled bird clip, or a bird model fed a bat clip, produces
+	// confident-looking nonsense, which is worse than an error explaining why.
 	infos := []classifier.ModelInfo{
-		{ID: "Bat_V1", Name: "Bat", Spec: classifier.ModelSpec{SampleRate: 256000, ClipLength: time.Second, RawSampleRate: 256000}},
+		{ID: "BirdNET_V2.4", Name: "BirdNET v2.4", Spec: spec3s},
+		{ID: "Bat_V1", Name: "Bat", Spec: batSpec},
 	}
-	_, err := selectModelsForReanalysis(infos, []string{"Bat_V1"})
+	_, err := selectModelsForReanalysis(infos, []string{"Bat_V1"}, false)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ultrasonic")
+	assert.Contains(t, err.Error(), "Bat_V1")
+
+	_, err = selectModelsForReanalysis(infos, []string{"BirdNET_V2.4"}, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BirdNET_V2.4")
+
+	got, err := selectModelsForReanalysis(infos, []string{"Bat_V1"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Bat_V1"}, selectedIDs(got))
 }
 
 func TestIsBinomialScientificName_SeparatesSpeciesFromSoundClasses(t *testing.T) {
