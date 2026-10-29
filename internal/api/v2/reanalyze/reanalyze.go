@@ -59,6 +59,12 @@ const (
 	// padding; longer clips are truncated. A hard ceiling on inference cost.
 	decodeMaxDurationSec = 60
 
+	// reanalyzeWriteDeadline is how long a reanalysis may take before its
+	// response is written. The server's WriteTimeout (30 s) is shorter than a
+	// whole clip through every model takes on a Raspberry Pi, worst of all a bat
+	// clip at 256 kHz. Matches the frontend's REANALYZE_TIMEOUT_MS.
+	reanalyzeWriteDeadline = 2 * time.Minute
+
 	// reanalyzeTopN is the maximum number of species predictions returned,
 	// ranked by the highest confidence any participating model produced.
 	reanalyzeTopN = 10
@@ -152,6 +158,13 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	req := &ReanalyzeRequest{}
 	if err := ctx.Bind(req); err != nil {
 		return c.HandleError(ctx, err, "Invalid request body", http.StatusBadRequest)
+	}
+
+	// Extend the write deadline so the server does not close the connection
+	// before inference finishes, as the support dump handler does.
+	rc := http.NewResponseController(ctx.Response().Writer)
+	if err := rc.SetWriteDeadline(time.Now().Add(reanalyzeWriteDeadline)); err != nil {
+		c.LogDebugIfEnabled("Failed to extend write deadline for reanalysis", logger.Error(err))
 	}
 
 	// Claim the single reanalysis slot before doing any work. Released in the
