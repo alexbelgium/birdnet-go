@@ -15,8 +15,8 @@ type BatONNXPaths struct {
 	LabelPath string `yaml:"labelPath" json:"labelPath"`
 }
 
-// ForkModelsConfig holds the optional fork-specific bat classifiers.
-type ForkModelsConfig struct {
+// BatModelsConfig holds the optional fork-specific bat classifiers.
+type BatModelsConfig struct {
 	// BatDetect2 configures the optional BatDetect2 UK classifier files.
 	BatDetect2 BatONNXPaths `yaml:"batdetect2" json:"batDetect2"`
 	// BSGBat configures the optional BSG-BAT European classifier files.
