@@ -158,11 +158,15 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 		return c.HandleError(ctx, fmt.Errorf("model %q is not loaded", req.ModelID),
 			"Specified model is not loaded; cannot apply correction", http.StatusBadRequest)
 	}
-	// Reject ultrasonic-only models (the bat classifier). They expect raw audio at
-	// a rate saved detection clips do not carry, so a correction attributed to one
-	// is meaningless — the same RawSampleRate filter reanalysis applies.
-	if chosen.Spec.RawSampleRate != 0 {
-		return c.HandleError(ctx, fmt.Errorf("model %q is ultrasonic-only", req.ModelID),
+	// Only a model reanalysis could have run on this detection may be credited
+	// with a correction: bat models for a bat detection, non-bat models otherwise
+	// (the same isCompatibleModel rule).
+	isBat, ok, respErr := c.detectionIsBat(ctx, idStr)
+	if !ok {
+		return respErr
+	}
+	if !isCompatibleModel(chosen.Spec, isBat) {
+		return c.HandleError(ctx, fmt.Errorf("model %q does not match the detection's model type", req.ModelID),
 			"Specified model is not applicable to this detection's audio; cannot apply correction",
 			http.StatusBadRequest)
 	}

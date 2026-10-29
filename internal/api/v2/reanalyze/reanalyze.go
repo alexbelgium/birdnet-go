@@ -6,8 +6,9 @@
 // predictions are returned in the response and never written to the datastore.
 //
 // By default the endpoint runs every currently-loaded classifier compatible with
-// the saved clip (i.e. non-ultrasonic models, since detection clips are recorded
-// at standard audio rates). Callers override that with an explicit modelIds list.
+// the detection: the bat (ultrasonic) models for a bat detection, whose clip is
+// stored losslessly at its full source rate, and every standard-audio model
+// otherwise. Callers narrow that with an explicit modelIds list.
 package reanalyze
 
 import (
@@ -30,7 +31,9 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/datastore"
+	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
+	"github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
@@ -44,9 +47,9 @@ const errComponent = "api/v2/reanalyze"
 // Not a rate limit and not defensive padding: it matches the endpoint's
 // concurrency to the hardware's. classifier.Orchestrator serialises inference
 // across every model behind one mutex, so a second concurrent reanalysis cannot
-// run faster — it can only sit on a decoded PCM buffer (up to 6 MiB per sample
-// rate) and a queued goroutine while it waits, on hosts that are frequently a
-// Raspberry Pi also running the realtime pipeline. A non-blocking claim turns
+// run faster — it can only sit on a decoded PCM buffer (tens of MiB at the bat
+// model's 256 kHz) and a queued goroutine while it waits, on hosts that are
+// frequently a Raspberry Pi also running the realtime pipeline. A non-blocking claim turns
 // that into an immediate 429 the caller can act on, instead of an invisible
 // queue. The frontend's own in-flight dedupe is per-tab and cannot substitute:
 // two browsers, or curl, bypass it entirely.
@@ -173,28 +176,37 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 		return respErr
 	}
 
+	isBat, ok, respErr := c.detectionIsBat(ctx, idStr)
+	if !ok {
+		return respErr
+	}
+
 	bn, err := c.GetBirdNETInstance()
 	if err != nil {
 		return c.HandleError(ctx, err, "Classifier not available", http.StatusServiceUnavailable)
 	}
 
-	chosen, err := selectModelsForReanalysis(bn.ModelInfos(), req.ModelIDs)
+	chosen, err := selectModelsForReanalysis(bn.ModelInfos(), req.ModelIDs, isBat)
 	if err != nil {
 		return c.HandleError(ctx, err, err.Error(), http.StatusBadRequest)
 	}
 	if len(chosen) == 0 {
-		return c.HandleError(ctx,
-			fmt.Errorf("no compatible models loaded"),
-			"No compatible classifier models are loaded for this clip",
-			http.StatusBadRequest)
+		msg := "No compatible classifier models are loaded for this clip"
+		if isBat {
+			msg = "No bat classifier model is loaded; enable it in Settings -> Models first"
+		}
+		return c.HandleError(ctx, fmt.Errorf("no compatible models loaded"), msg, http.StatusBadRequest)
 	}
 
-	// Group models by sample rate so the clip is decoded once per unique rate
+	// Group models by decode rate so the clip is decoded once per unique rate
 	// rather than once per model. BirdNET v2.4 (48k) + Perch v2 (32k) is two
-	// decodes no matter how many models share either rate.
+	// decodes no matter how many models share either rate. The bat model is fed
+	// raw audio at its EffectiveSampleRate (256 kHz), exactly as the realtime
+	// buffer feeds it.
 	bySampleRate := make(map[int][]loadedModel, len(chosen))
 	for _, m := range chosen {
-		bySampleRate[m.spec.SampleRate] = append(bySampleRate[m.spec.SampleRate], m)
+		rate := m.spec.EffectiveSampleRate()
+		bySampleRate[rate] = append(bySampleRate[rate], m)
 	}
 
 	ffmpegPath := c.CurrentSettings().Realtime.Audio.FfmpegPath
@@ -246,7 +258,7 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 			modelInfos = append(modelInfos, ReanalyzeModelInfo{
 				ID:          m.id,
 				Name:        m.name,
-				SampleRate:  m.spec.SampleRate,
+				SampleRate:  sampleRate,
 				WindowCount: windowCount,
 			})
 			for label, conf := range scores {
@@ -350,15 +362,14 @@ type loadedModel struct {
 // orchestrator's model snapshot rather than the orchestrator itself so it is
 // unit-testable without a loaded model file on disk.
 //
-// Default policy: every loaded model with Spec.RawSampleRate == 0, i.e. every
-// standard-audio model. Ultrasonic models (bat detection, RawSampleRate=256000)
-// are excluded because saved detection clips do not carry ultrasonic content, so
-// running them would produce meaningless scores.
+// Default policy: every loaded model compatible with the detection (see
+// isCompatibleModel): the bat models for a bat detection, every standard-audio
+// model otherwise.
 //
 // Explicit policy: each entry is resolved (config alias or registry ID) and must
-// be loaded. An unknown or unloaded ID is an error rather than a silent drop, so
-// the caller learns its request was not honoured.
-func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []string) ([]loadedModel, error) {
+// be loaded and compatible. An unknown, unloaded or incompatible ID is an error
+// rather than a silent drop, so the caller learns its request was not honoured.
+func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []string, isBat bool) ([]loadedModel, error) {
 	if len(requestedIDs) > 0 {
 		// Dedupe after registry-ID resolution so {"modelIds":["birdnet","BirdNET_V2.4"]}
 		// does not schedule the same model twice (both resolve to "BirdNET_V2.4"),
@@ -374,8 +385,8 @@ func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []stri
 			if !ok {
 				return nil, fmt.Errorf("model %q is not loaded; enable it in Settings -> Models first", raw)
 			}
-			if !isStandardAudioModel(info.Spec) {
-				return nil, fmt.Errorf("model %q cannot analyze a saved clip: it expects raw ultrasonic audio that recorded clips do not contain", raw)
+			if !isCompatibleModel(info.Spec, isBat) {
+				return nil, fmt.Errorf("model %q cannot analyze this detection: bat detections take only bat models, and other detections only non-bat models", raw)
 			}
 			seen[resolvedID] = struct{}{}
 			out = append(out, loadedModel{id: resolvedID, name: info.Name, spec: info.Spec})
@@ -387,7 +398,7 @@ func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []stri
 	// iteration just to read three fields.
 	var out []loadedModel
 	for i := range infos {
-		if !isStandardAudioModel(infos[i].Spec) {
+		if !isCompatibleModel(infos[i].Spec, isBat) {
 			continue
 		}
 		out = append(out, loadedModel{id: infos[i].ID, name: infos[i].Name, spec: infos[i].Spec})
@@ -395,15 +406,37 @@ func selectModelsForReanalysis(infos []classifier.ModelInfo, requestedIDs []stri
 	return out, nil
 }
 
-// isStandardAudioModel reports whether a model can say anything meaningful about
-// a saved detection clip. A non-zero RawSampleRate means the model expects raw
-// ultrasonic audio (the bat classifier wants 256 kHz); saved clips are recorded
-// at standard rates and carry no ultrasonic content, so resampling one up and
-// running the model over it produces confident-looking nonsense. Rejected for
-// the default set AND for an explicit request, because a number that means
-// nothing is worse to show a user than an error saying so.
-func isStandardAudioModel(spec classifier.ModelSpec) bool {
-	return spec.RawSampleRate == 0 && spec.SampleRate > 0
+// isCompatibleModel reports whether a model can say anything meaningful about
+// the detection's saved clip. A non-zero RawSampleRate marks an ultrasonic (bat)
+// model. A bat detection's clip is stored losslessly at its full source rate, so
+// only bat models apply to it, and a bird model would only rate its downsampled
+// audible band. Every other clip is stored at a standard rate with no ultrasonic
+// content, so a bat model fed it upsampled produces confident-looking nonsense.
+// Enforced for the default set AND for an explicit request, because a number
+// that means nothing is worse to show a user than an error saying so.
+func isCompatibleModel(spec classifier.ModelSpec, isBat bool) bool {
+	if spec.SampleRate <= 0 {
+		return false
+	}
+	return (spec.RawSampleRate > 0) == isBat
+}
+
+// detectionIsBat reports whether the detection was made by a bat model, applying
+// detection.ResolveModelType, the rule the save path records the model type with,
+// to the model the repository returns. A legacy note with no model recorded gets
+// the default (bird) model. When ok is false the error response has already been
+// written and respErr is what the handler returns (see resolveClipPath).
+func (c *Handler) detectionIsBat(ctx echo.Context, idStr string) (isBat, ok bool, respErr error) {
+	result, err := c.Repo.Get(ctx.Request().Context(), idStr)
+	switch {
+	case err != nil && isDetectionNotFoundErr(err):
+		return false, false, c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
+	case err != nil:
+		return false, false, c.HandleError(ctx, err,
+			"Failed to look up the detection's model", http.StatusInternalServerError)
+	}
+	modelType := detection.ResolveModelType(result.Model.Name, result.Model.Version)
+	return modelType == entities.ModelTypeBat, true, nil
 }
 
 // isBinomialScientificName reports whether s looks like a Latin binomial:

@@ -340,8 +340,9 @@
 
   <div class="space-y-4">
     <p class="text-sm text-base-content/70">
-      Runs every loaded classifier over the saved audio and shows what each one thinks. Nothing is
-      saved unless you apply a correction below.
+      Runs every loaded classifier that suits this detection (bat models for a bat, the others
+      otherwise) over the saved audio and shows what each one thinks. Nothing is saved unless you
+      apply a correction below.
     </p>
 
     {#if isLocked}
