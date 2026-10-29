@@ -2,7 +2,6 @@ package reanalyze
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -78,7 +77,7 @@ func TestReanalyzeSamples_PadsShortClipToOneWindow(t *testing.T) {
 func TestReanalyzeSamples_PropagatesPredictError(t *testing.T) {
 	t.Parallel()
 
-	wantErr := errors.New("model closed")
+	wantErr := bnerrors.NewStd("model closed")
 	predict := func(_ context.Context, _ string, _ [][]float32) ([]datastore.Results, error) {
 		return nil, wantErr
 	}
@@ -274,7 +273,7 @@ func TestIsDetectionNotFoundErr_CoversAllThreeDatastoreShapes(t *testing.T) {
 	assert.True(t, isDetectionNotFoundErr(fmt.Errorf("wrapped: %w", gorm.ErrRecordNotFound)), "wrapped")
 
 	// A transient database failure is emphatically NOT a 404.
-	assert.False(t, isDetectionNotFoundErr(errors.New("database is locked")))
+	assert.False(t, isDetectionNotFoundErr(bnerrors.NewStd("database is locked")))
 	assert.False(t, isDetectionNotFoundErr(nil))
 }
 
@@ -286,7 +285,7 @@ func TestIsClipNotFoundErr_IncludesDetectionAndClipCases(t *testing.T) {
 	assert.True(t, isClipNotFoundErr(os.ErrNotExist))
 	assert.True(t, isClipNotFoundErr(repository.ErrNoClipPath))
 	assert.True(t, isClipNotFoundErr(repository.ErrDetectionNotFound))
-	assert.False(t, isClipNotFoundErr(errors.New("permission denied")))
+	assert.False(t, isClipNotFoundErr(bnerrors.NewStd("permission denied")))
 }
 
 func TestAddSpeciesScore_MergesDifferentLabelSpellingsForOneSpecies(t *testing.T) {
@@ -413,7 +412,7 @@ func TestReanalyzeDetection_ReleasesTheSlotOnAnErrorPath(t *testing.T) {
 	// instead, which is the first step inside the claimed region.
 	ds, ok := core.DS.(*mocks.MockInterface)
 	require.True(t, ok, "apitest core is expected to carry a mock datastore")
-	ds.EXPECT().GetNoteClipPath("1").Return("", errors.New("database is unavailable")).Once()
+	ds.EXPECT().GetNoteClipPath("1").Return("", bnerrors.NewStd("database is unavailable")).Once()
 
 	rec := httptest.NewRecorder()
 	ctx := core.Echo.NewContext(httptest.NewRequest(http.MethodPost, "/", http.NoBody), rec)
