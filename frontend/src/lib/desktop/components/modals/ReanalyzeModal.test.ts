@@ -32,6 +32,7 @@ vi.mock('$lib/utils/api', () => ({
 }));
 
 import ReanalyzeModal from './ReanalyzeModal.svelte';
+import { t } from '$lib/i18n';
 import type { ComponentProps } from 'svelte';
 import type { Detection } from '$lib/types/detection.types';
 
@@ -95,8 +96,10 @@ const twoModelResult = {
   predictions,
 };
 
-const VERDICT_CORRECT = 'dashboard.recentDetections.actions.markCorrect';
-const VERDICT_INCORRECT = 'dashboard.recentDetections.actions.markFalsePositive';
+// Resolved through the (globally mocked) t() so the tests follow whatever label
+// the mock gives these keys rather than hardcoding either the key or the text.
+const VERDICT_CORRECT = t('dashboard.recentDetections.actions.markCorrect');
+const VERDICT_INCORRECT = t('dashboard.recentDetections.actions.markFalsePositive');
 
 function renderModal(over: Partial<ComponentProps<typeof ReanalyzeModal>> = {}) {
   return render(ReanalyzeModal, {
@@ -164,7 +167,10 @@ describe('ReanalyzeModal', () => {
     await user.click(screen.getByRole('button', { name: 'See more' }));
     expect(screen.getByText('Eurasian Blue Tit')).toBeInTheDocument();
     expect(screen.getByText('Coal Tit')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'See less' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'See less' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
   });
 
   it('uses a text-only Select control for species correction', async () => {
