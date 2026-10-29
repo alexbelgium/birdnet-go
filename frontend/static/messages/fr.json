@@ -5824,6 +5824,9 @@
       "batThreshold": {
         "label": "Seuil de détection des chauves-souris (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Activez cette option pour définir un seuil pour ce modèle. Sinon, le seuil commun aux chauves-souris s’applique."
+      },
       "bsgBatThreshold": {
         "label": "Seuil de détection des chauves-souris (BSG-BAT)",
         "sampleRateWarning": "Les captures à 192 kHz fonctionnent, mais les espèces qui émettent au-dessus de 96 kHz ne peuvent pas être identifiées et les scores sont moins fiables. Une fréquence de capture de 384 kHz est recommandée."

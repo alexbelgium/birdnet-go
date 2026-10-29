@@ -5824,6 +5824,9 @@
       "batThreshold": {
         "label": "Limiar de deteção de morcegos (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Ative para definir um limiar para este modelo. Caso contrário, aplica-se o limiar partilhado para morcegos."
+      },
       "bsgBatThreshold": {
         "label": "Limiar de deteção de morcegos (BSG-BAT)",
         "sampleRateWarning": "As capturas a 192 kHz funcionam, mas as espécies que emitem acima de 96 kHz não podem ser identificadas e as pontuações são menos fiáveis. Recomenda-se uma taxa de captura de 384 kHz."

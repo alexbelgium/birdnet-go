@@ -5824,6 +5824,9 @@
       "batThreshold": {
         "label": "Lepakkotunnistuksen kynnysarvo (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Ota käyttöön asettaaksesi tälle mallille oman rajan. Muuten käytetään lepakoiden yhteistä rajaa."
+      },
       "bsgBatThreshold": {
         "label": "Lepakkotunnistuksen kynnysarvo (BSG-BAT)",
         "sampleRateWarning": "192 kHz:n tallenteet toimivat, mutta yli 96 kHz:n taajuudella kutsuvia lajeja ei voida tunnistaa ja pisteet ovat epäluotettavampia. Suositeltu tallennustaajuus on 384 kHz."

@@ -5824,6 +5824,9 @@
       "batThreshold": {
         "label": "Flagermus-detekteringsgrænse (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Aktivér for at indstille en grænse for denne model. Ellers bruges den fælles grænse for flagermus."
+      },
       "bsgBatThreshold": {
         "label": "Flagermus-detekteringsgrænse (BSG-BAT)",
         "sampleRateWarning": "Optagelser ved 192 kHz fungerer, men arter, der kalder over 96 kHz, kan ikke identificeres, og scorerne er mindre pålidelige. En optagelsesfrekvens på 384 kHz anbefales."

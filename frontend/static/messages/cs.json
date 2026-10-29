@@ -5824,6 +5824,9 @@
       "batThreshold": {
         "label": "Práh detekce netopýrů (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Zapnutím nastavíte práh pro tento model. Jinak se použije společný práh pro netopýry."
+      },
       "bsgBatThreshold": {
         "label": "Práh detekce netopýrů (BSG-BAT)",
         "sampleRateWarning": "Záznamy při 192 kHz fungují, ale druhy, které se ozývají nad 96 kHz, nelze určit a skóre jsou méně spolehlivá. Doporučená vzorkovací frekvence záznamu je 384 kHz."

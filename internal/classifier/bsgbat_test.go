@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	bsgBatTestDataEnv       = "BSGBAT_TESTDATA_DIR"
-	bsgBatReferenceSegments = 8
-	bsgBatReferenceStride   = 250 * bsgBatHopSize
-	bsgBatFileEdgePadding   = bsgBatFFTSize / 2
-	bsgBatParityTolerance   = 0.05
+	bsgBatTestDataEnv           = "BSGBAT_TESTDATA_DIR"
+	bsgBatReferenceSegments     = 8
+	bsgBatReferenceFixtureCount = 9
+	bsgBatReferenceStride       = 250 * bsgBatHopSize
+	bsgBatFileEdgePadding       = bsgBatFFTSize / 2
+	bsgBatParityTolerance       = 0.05
 )
 
 func TestBSGBatLabelsAndWiring(t *testing.T) {
@@ -123,6 +124,19 @@ func requireBSGBatTestData(t *testing.T) string {
 	directory := os.Getenv(bsgBatTestDataEnv)
 	if directory == "" {
 		t.Skip("BSGBAT_TESTDATA_DIR is not configured")
+	}
+	// Reference parity needs both model revisions and the original WAV/logit
+	// fixtures. Model-only downloads can still run the candidate-floor test.
+	files := make([]string, 0, bsgBatReferenceFixtureCount)
+	files = append(files, "bsgbat_v0.21_r1.onnx", "bsgbat_v0.21_r3.onnx", "bsgbat_labels.txt")
+	for example := 1; example <= 3; example++ {
+		wav := filepath.Join("ref", "example"+strconv.Itoa(example)+".wav")
+		files = append(files, wav, wav+".logits")
+	}
+	for _, file := range files {
+		if _, err := os.Stat(filepath.Join(directory, file)); err != nil {
+			t.Skipf("BSG-BAT reference fixture unavailable: %s", file)
+		}
 	}
 	return directory
 }

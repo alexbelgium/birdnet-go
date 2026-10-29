@@ -5824,6 +5824,9 @@
       "batThreshold": {
         "label": "Bat Detection Threshold (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Enable to set a threshold for this model. Otherwise, the shared bat threshold applies."
+      },
       "bsgBatThreshold": {
         "label": "Bat Detection Threshold (BSG-BAT)",
         "sampleRateWarning": "Captures at 192 kHz work, but species that call above 96 kHz cannot be identified and scores are less reliable. A capture rate of 384 kHz is recommended."
