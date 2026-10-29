@@ -24,7 +24,12 @@ type batORTBase struct {
 	values    []ort.Value
 }
 
-func newBatORTSession(modelPath string, inputs, outputs []string, threads int) (*ort.DynamicAdvancedSession, error) {
+func newBatORTSession(modelID, modelPath string, inputs, outputs []string, threads int) (session *ort.DynamicAdvancedSession, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = errors.New(resultErr).Component("classifier").Category(errors.CategoryModelInit).Context("operation", "create_ort_session").Context("model", modelID).Build()
+		}
+	}()
 	opts, err := ort.NewSessionOptions()
 	if err != nil {
 		return nil, err
@@ -50,16 +55,33 @@ func newBatORTSession(modelPath string, inputs, outputs []string, threads int) (
 	return ort.NewDynamicAdvancedSession(modelPath, inputs, outputs, opts)
 }
 
-func (b *batORTBase) Spec() ModelSpec      { return b.info.Spec }
-func (b *batORTBase) ModelID() string      { return b.info.ID }
-func (b *batORTBase) ModelName() string    { return b.info.Name }
+// Spec returns the analysis buffer specification.
+func (b *batORTBase) Spec() ModelSpec { return b.info.Spec }
+
+// ModelID returns the registry identifier.
+func (b *batORTBase) ModelID() string { return b.info.ID }
+
+// ModelName returns the display name.
+func (b *batORTBase) ModelName() string { return b.info.Name }
+
+// ModelVersion returns the detection version.
 func (b *batORTBase) ModelVersion() string { return b.info.DetectionVersion }
-func (b *batORTBase) NumSpecies() int      { return len(b.labels) }
-func (b *batORTBase) Labels() []string     { return slices.Clone(b.labels) }
+
+// NumSpecies returns the species count.
+func (b *batORTBase) NumSpecies() int { return len(b.labels) }
+
+// Labels returns an independent copy of the species labels.
+func (b *batORTBase) Labels() []string { return slices.Clone(b.labels) }
+
+// RuntimeInfo reports the ORT execution backend.
 func (b *batORTBase) RuntimeInfo() (device, backend, precision string) {
 	return deviceCPU, BackendONNX, string(detectQuantization(b.modelPath))
 }
+
+// ResolvedModelPath returns the loaded ONNX model path.
 func (b *batORTBase) ResolvedModelPath() string { return b.modelPath }
+
+// Close releases the session and tensors under the prediction lock.
 func (b *batORTBase) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
