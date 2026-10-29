@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -167,18 +166,15 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 			http.StatusTooManyRequests)
 	}
 
-	// The clip lookup is also the existence check: GetNoteClipPath returns
-	// ErrDetectionNotFound for an unknown id, which resolveClipPath maps to a 404.
-	// A separate DS.Get would be a second round trip proving the same thing.
-	absClipPath, relClipPath, ok, respErr := c.resolveClipPath(ctx, idStr)
+	det, ok, respErr := c.loadDetection(ctx, idStr)
 	if !ok {
 		return respErr
 	}
-
-	isBat, ok, respErr := c.detectionIsBat(ctx, idStr)
+	absClipPath, relClipPath, ok, respErr := c.resolveClipPath(ctx, det.ClipName)
 	if !ok {
 		return respErr
 	}
+	isBat := isBatDetection(det)
 
 	bn, err := c.GetBirdNETInstance()
 	if err != nil {
@@ -420,22 +416,34 @@ func isCompatibleModel(spec classifier.ModelSpec, isBat bool) bool {
 	return (spec.RawSampleRate > 0) == isBat
 }
 
-// detectionIsBat reports whether the detection was made by a bat model, applying
-// detection.ResolveModelType, the rule the save path records the model type with,
-// to the model the repository returns. A legacy note with no model recorded gets
-// the default (bird) model. When ok is false the error response has already been
-// written and respErr is what the handler returns (see resolveClipPath).
-func (c *Handler) detectionIsBat(ctx echo.Context, idStr string) (isBat, ok bool, respErr error) {
-	result, err := c.Repo.Get(ctx.Request().Context(), idStr)
+// loadDetection fetches the detection through the repository. When ok is false
+// the error response has already been written and respErr is what the handler
+// returns; respErr alone cannot signal the failure, because HandleError returns
+// nil once it has written the response. A transient database error is a 500,
+// not a 404: telling an operator their detection is gone would be wrong and
+// alarming.
+func (c *Handler) loadDetection(ctx echo.Context, idStr string) (det *detection.Result, ok bool, respErr error) {
+	det, err := c.Repo.Get(ctx.Request().Context(), idStr)
 	switch {
 	case err != nil && isDetectionNotFoundErr(err):
-		return false, false, c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
+		return nil, false, c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
 	case err != nil:
-		return false, false, c.HandleError(ctx, err,
-			"Failed to look up the detection's model", http.StatusInternalServerError)
+		return nil, false, c.HandleError(ctx, err, "Failed to fetch detection", http.StatusInternalServerError)
 	}
-	modelType := detection.ResolveModelType(result.Model.Name, result.Model.Version)
-	return modelType == entities.ModelTypeBat, true, nil
+	return det, true, nil
+}
+
+// isBatDetection reports whether the detection was made by a bat model, applying
+// detection.ResolveModelType, the rule the save path records the model type with.
+// A detection with no model recorded gets the default (bird) model.
+func isBatDetection(det *detection.Result) bool {
+	return detection.ResolveModelType(det.Model.Name, det.Model.Version) == entities.ModelTypeBat
+}
+
+// v2SchemaActive reports whether the running datastore owns the v2 schema, the
+// only one species corrections are written to.
+func (c *Handler) v2SchemaActive() bool {
+	return c.V2Manager != nil && c.DS.SchemaVersion() == datastore.SchemaVersionV2
 }
 
 // isBinomialScientificName reports whether s looks like a Latin binomial:
@@ -590,11 +598,10 @@ func applyLocalizedCommonNames(bn *classifier.Orchestrator, preds []ReanalyzePre
 	}
 }
 
-// resolveClipPath looks up the detection's saved clip and maps it onto the media
-// SecureFS root, returning (absolute path, normalized relative path). When ok is
-// false the error response has already been written and respErr is what the
-// handler returns; respErr alone cannot signal the failure, because HandleError
-// returns nil once it has written the response.
+// resolveClipPath maps the detection's saved clip onto the media SecureFS root,
+// returning (absolute path, normalized relative path). When ok is false the
+// error response has already been written and respErr is what the handler
+// returns (see loadDetection).
 //
 // The absolute path is handed to ffmpeg, matching the four call sites in the
 // media domain that build filepath.Join(c.SFS.BaseDir(), normalizedPath) for
@@ -611,18 +618,8 @@ func applyLocalizedCommonNames(bn *classifier.Orchestrator, preds []ReanalyzePre
 // apicore.NormalizeClipPath keeps this package's upstream footprint at zero;
 // importing a sibling domain would break the api/v2 acyclic-import rule that
 // apicore's import guard enforces.
-func (c *Handler) resolveClipPath(ctx echo.Context, idStr string) (absPath, relPath string, ok bool, respErr error) {
-	clipPath, err := c.DS.GetNoteClipPath(idStr)
-	switch {
-	case err != nil && isDetectionNotFoundErr(err):
-		return "", "", false, c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
-	case err != nil && isClipNotFoundErr(err):
-		return "", "", false, c.HandleError(ctx, err,
-			"No audio clip available for this detection", http.StatusNotFound)
-	case err != nil:
-		return "", "", false, c.HandleError(ctx, err,
-			"Failed to look up clip path", http.StatusInternalServerError)
-	case clipPath == "":
+func (c *Handler) resolveClipPath(ctx echo.Context, clipPath string) (absPath, relPath string, ok bool, respErr error) {
+	if clipPath == "" {
 		return "", "", false, c.HandleError(ctx, fmt.Errorf("clip path empty"),
 			"No audio clip available for this detection", http.StatusNotFound)
 	}
@@ -649,14 +646,4 @@ func isDetectionNotFoundErr(err error) bool {
 	return errors.Is(err, repository.ErrDetectionNotFound) ||
 		errors.Is(err, gorm.ErrRecordNotFound) ||
 		errors.IsNotFound(err)
-}
-
-// isClipNotFoundErr reports whether err means the clip OR its parent detection
-// does not exist. Same sentinel set the media domain checks; duplicated here
-// rather than exported from media, because importing a sibling domain would
-// break the api/v2 acyclic-import rule that apicore's import guard enforces.
-func isClipNotFoundErr(err error) bool {
-	return isDetectionNotFoundErr(err) ||
-		errors.Is(err, os.ErrNotExist) ||
-		errors.Is(err, repository.ErrNoClipPath)
 }

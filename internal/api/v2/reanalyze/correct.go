@@ -6,20 +6,17 @@
 // and confidence in place and marks it verified='correct' in the same step.
 //
 // Persistence design — the reason this file exists rather than a datastore method:
-// the correction is written here, from the API domain package, by composing
-// primitives datastore already exports. datastore.Interface and
-// datastore.DetectionRepository are NOT extended, so no mockery mock is
-// regenerated and no upstream datastore file is touched. Two paths:
+// the correction is written here, from the API domain package, by composing the
+// exported v2 repositories against a transactional *gorm.DB from V2Manager: model
+// lookup -> label lookup -> detection Update -> review upsert. datastore.Interface
+// and datastore.DetectionRepository are NOT extended, so no mockery mock is
+// regenerated and no upstream datastore file is touched. The repositories' own
+// atomic lock guard and OnConflict semantics are reused as-is; the transaction is
+// just an envelope around them.
 //
-//   - v2 installs (DS.SchemaVersion() == datastore.SchemaVersionV2): build the
-//     three v2 repositories against a transactional *gorm.DB from V2Manager and
-//     run model lookup -> label lookup -> detection Update -> review upsert inside
-//     it. The repositories' own atomic lock guard and OnConflict semantics are
-//     reused as-is; the transaction is just an envelope around them.
-//   - legacy installs: DS.Transaction with GORM model types (datastore.Note,
-//     NoteLock, NoteReview) so table and column names are derived from the structs
-//     rather than hardcoded — a rename upstream becomes a compile error here, not
-//     a runtime SQL error.
+// Corrections are v2-only. The legacy schema is deprecated and being removed
+// upstream, so a write path for it would break this package on the merge that
+// deletes it. Legacy installs get a 501; reanalysis itself still works there.
 package reanalyze
 
 import (
@@ -43,8 +40,7 @@ import (
 )
 
 // errDetectionLocked is this package's sentinel for "the detection was locked when
-// the write ran". Both persistence paths normalise onto it so the handler maps a
-// single condition to 409 without caring which schema answered.
+// the write ran", so the handler maps that condition to 409.
 var errDetectionLocked = errors.NewStd("detection is locked")
 
 // correctionNoteTimeout bounds the audit-note write. It runs on a context
@@ -53,11 +49,6 @@ var errDetectionLocked = errors.NewStd("detection is locked")
 const correctionNoteTimeout = 5 * time.Second
 
 const (
-	// verificationCorrect is the legacy NoteReview.Verified value meaning "the
-	// operator confirmed this species". It mirrors entities.VerificationCorrect
-	// on the v2 side; the two schemas store the same string.
-	verificationCorrect = "correct"
-
 	// taxonomicClassAves is the v2 taxonomic class assigned to a newly created
 	// label for a corrected bird species (entities.DefaultTaxonomicClasses seeds it).
 	taxonomicClassAves = "Aves"
@@ -131,17 +122,17 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 			"confidence must be in [0, 1]", http.StatusBadRequest)
 	}
 
+	if !c.v2SchemaActive() {
+		return c.HandleError(ctx, fmt.Errorf("species correction requires the v2 database"),
+			"Species correction requires the v2 database; migrate the database first",
+			http.StatusNotImplemented)
+	}
+
 	// Read-side context for the structured log diff below, and the 404/409 fast
 	// paths. The authoritative lock guard runs inside the write itself, atomically.
-	existing, err := c.DS.Get(idStr)
-	if err != nil {
-		// Distinguish "no such detection" from "the fetch itself failed". A
-		// transient database error reported as 404 tells the operator their
-		// detection is gone, which is both wrong and alarming.
-		if isDetectionNotFoundErr(err) {
-			return c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
-		}
-		return c.HandleError(ctx, err, "Failed to fetch detection", http.StatusInternalServerError)
+	existing, ok, respErr := c.loadDetection(ctx, idStr)
+	if !ok {
+		return respErr
 	}
 	if existing.Locked {
 		return c.HandleError(ctx, fmt.Errorf("detection is locked"),
@@ -161,11 +152,7 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	// Only a model reanalysis could have run on this detection may be credited
 	// with a correction: bat models for a bat detection, non-bat models otherwise
 	// (the same isCompatibleModel rule).
-	isBat, ok, respErr := c.detectionIsBat(ctx, idStr)
-	if !ok {
-		return respErr
-	}
-	if !isCompatibleModel(chosen.Spec, isBat) {
+	if !isCompatibleModel(chosen.Spec, isBatDetection(existing)) {
 		return c.HandleError(ctx, fmt.Errorf("model %q does not match the detection's model type", req.ModelID),
 			"Specified model is not applicable to this detection's audio; cannot apply correction",
 			http.StatusBadRequest)
@@ -204,8 +191,8 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 		commonName = req.ScientificName
 	}
 
-	if err := c.writeSpeciesCorrection(ctx.Request().Context(), bn, uint(noteID),
-		req.ScientificName, commonName, req.Confidence, chosen.ToDetectionModelInfo(),
+	if err := c.writeSpeciesCorrectionV2(ctx.Request().Context(), uint(noteID),
+		req.ScientificName, req.Confidence, chosen.ToDetectionModelInfo(),
 	); err != nil {
 		c.LogAPIRequest(ctx, logger.LogLevelError, "Species correction failed",
 			logger.String("detection_id", idStr),
@@ -255,7 +242,7 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	// matters most. The deadline matters because this write is synchronous, ahead
 	// of ctx.JSON, so a detached context with no bound would let a stalled
 	// database hold the response and its goroutine open indefinitely.
-	if note := correctionNote(&existing, req.ScientificName, commonName, &chosen, req.Confidence); note != "" {
+	if note := correctionNote(existing, req.ScientificName, commonName, &chosen, req.Confidence); note != "" {
 		if c.Repo == nil {
 			c.LogAPIRequest(ctx, logger.LogLevelWarn, "Correction note not recorded: no detection repository",
 				logger.String("detection_id", idStr))
@@ -274,7 +261,7 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	c.LogAPIRequest(ctx, logger.LogLevelInfo, "Species correction applied",
 		logger.String("detection_id", idStr),
 		logger.String("model_id", resolvedID),
-		logger.String("from_species", existing.ScientificName),
+		logger.String("from_species", existing.Species.ScientificName),
 		logger.String("to_species", req.ScientificName),
 		logger.Float64("from_confidence", existing.Confidence),
 		logger.Float64("to_confidence", req.Confidence))
@@ -290,135 +277,14 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	})
 }
 
-// writeSpeciesCorrection persists the correction, dispatching on the schema the
-// running datastore actually owns. Both branches are all-or-nothing: the species
-// change and the 'correct' review either both commit or neither does, so a
-// detection is never left with a new species and stale verification state. Both
-// are wrapped in datastore.RetryOnLock at WHOLE-TRANSACTION granularity — a
-// MySQL deadlock rolls the transaction back, so retrying an individual statement
-// inside it (which is all the repositories' own internal RetryOnLock can do)
-// would resume against a transaction the server has already discarded.
-func (c *Handler) writeSpeciesCorrection(
-	ctx context.Context,
-	bn *classifier.Orchestrator,
-	noteID uint,
-	scientific, common string,
-	confidence float64,
-	model detection.ModelInfo,
-) error {
-	if c.DS.SchemaVersion() == datastore.SchemaVersionV2 {
-		return c.writeSpeciesCorrectionV2(ctx, noteID, scientific, confidence, model)
-	}
-	return c.writeSpeciesCorrectionLegacy(ctx, bn, noteID, scientific, common, confidence)
-}
-
-// writeSpeciesCorrectionLegacy rewrites the v1 notes row and upserts note_reviews
-// in one transaction.
-//
-// The species UPDATE carries its own NOT EXISTS(note_locks) guard so the lock
-// check and the write are atomic: a lock taken between the handler's read and
-// this write wins the race and the correction is refused, rather than silently
-// overwriting a locked detection. Table and column names come from the GORM
-// models, not string literals, so an upstream rename fails to compile here
-// instead of failing at runtime.
-func (c *Handler) writeSpeciesCorrectionLegacy(
-	ctx context.Context,
-	bn *classifier.Orchestrator,
-	noteID uint,
-	scientific, common string,
-	confidence float64,
-) error {
-	// species_code must move with the species. A stale eBird code outlives the
-	// correction into the API response and every consumer that keys on it, so
-	// resolve the new one; an empty code (species outside the primary model's
-	// taxonomy) is strictly better than the previous species' code.
-	speciesCode, _ := bn.GetSpeciesCode(scientific)
-
-	return datastore.RetryOnLock(ctx, "reanalyze_correct_species_legacy", func() error {
-		return c.DS.Transaction(func(tx *gorm.DB) error {
-			return applyLegacyCorrection(tx, noteID, scientific, common, speciesCode, confidence)
-		})
-	}, nil)
-}
-
-// applyLegacyCorrection is the body of the legacy correction transaction, split
-// out as a free function over *gorm.DB so it can be exercised against a real
-// SQLite schema in tests rather than only through a running datastore.
-func applyLegacyCorrection(tx *gorm.DB, noteID uint, scientific, common, speciesCode string, confidence float64) error {
-	locked := tx.Model(&datastore.NoteLock{}).Select("1").Where("note_id = ?", noteID)
-	result := tx.Model(&datastore.Note{}).
-		Where("id = ?", noteID).
-		Where("NOT EXISTS (?)", locked).
-		Updates(map[string]any{
-			"scientific_name": scientific,
-			"common_name":     common,
-			"species_code":    speciesCode,
-			"confidence":      confidence,
-			// The raw label belonged to the model's original call. Clearing it
-			// means "no alias was applied to this name", which is true of an
-			// operator-asserted scientific name.
-			"raw_scientific_name": "",
-		})
-	if result.Error != nil {
-		return fmt.Errorf("update note species: %w", result.Error)
-	}
-
-	if result.RowsAffected == 0 {
-		if err := classifyZeroRowUpdate(tx, noteID); err != nil {
-			return err
-		}
-		// No-op update on an unlocked row: the species is already what was asked
-		// for. Fall through and still record the review — marking it verified is
-		// the other half of what the operator requested.
-	}
-
-	// Where+Assign+FirstOrCreate is dialect-safe (SELECT, then INSERT or UPDATE),
-	// so this upsert works on SQLite and MySQL without a hand-written ON CONFLICT
-	// clause. Assign overwrites an existing row, so a detection previously marked
-	// false_positive becomes correct rather than keeping the stale verdict.
-	review := &datastore.NoteReview{NoteID: noteID, Verified: verificationCorrect}
-	if err := tx.Where("note_id = ?", noteID).
-		Assign(datastore.NoteReview{Verified: verificationCorrect, UpdatedAt: time.Now()}).
-		FirstOrCreate(review).Error; err != nil {
-		return fmt.Errorf("upsert note review: %w", err)
-	}
-	return nil
-}
-
-// classifyZeroRowUpdate decides what a zero-row species UPDATE actually meant.
-// It has THREE causes that must not be collapsed: the note is gone
-// (ErrDetectionNotFound -> 404); the note is locked, so the UPDATE's NOT EXISTS
-// guard excluded it (errDetectionLocked -> 409); or the row matched and nothing
-// changed, which MySQL also reports as zero rows and which happens whenever an
-// operator confirms the species a detection already has. Only the last returns
-// nil, meaning "carry on and record the review".
-//
-// Split out because the third case is unreachable through SQLite, which counts
-// matched rather than changed rows — so a test driving applyLegacyCorrection on
-// SQLite can never enter this branch, and deleting it would leave such a test
-// green. Calling it directly is the only way to cover all three.
-func classifyZeroRowUpdate(tx *gorm.DB, noteID uint) error {
-	var noteCount int64
-	if err := tx.Model(&datastore.Note{}).Where("id = ?", noteID).Count(&noteCount).Error; err != nil {
-		return fmt.Errorf("check note existence: %w", err)
-	}
-	if noteCount == 0 {
-		return repository.ErrDetectionNotFound
-	}
-	var lockCount int64
-	if err := tx.Model(&datastore.NoteLock{}).Where("note_id = ?", noteID).Count(&lockCount).Error; err != nil {
-		return fmt.Errorf("check note lock: %w", err)
-	}
-	if lockCount > 0 {
-		return errDetectionLocked
-	}
-	return nil
-}
-
 // writeSpeciesCorrectionV2 routes the correction through the v2 repositories: it
 // resolves the (model, label) pair the new species needs, then updates the
 // detection's label_id/model_id/confidence and upserts the review inside one
-// transaction.
+// transaction, so a detection is never left with a new species and stale
+// verification state. The transaction is wrapped in datastore.RetryOnLock at
+// WHOLE-TRANSACTION granularity: a MySQL deadlock rolls the transaction back, so
+// retrying an individual statement inside it (which is all the repositories' own
+// internal RetryOnLock can do) would resume against a discarded transaction.
 //
 // Reference-data resolution (label type, taxonomic class, label) happens OUTSIDE
 // the transaction, matching v2only.Datastore.Save, which documents the same
@@ -566,12 +432,10 @@ func speciesKnownToLoadedModels(bn *classifier.Orchestrator, scientificName stri
 // operator confirming the species a detection already has still records a review,
 // but adding a note saying "changed from X to X" would be noise.
 //
-// The model comparison is skipped when the detection carries no model info:
-// the legacy notes schema has no model column (datastore.Note.Model is
-// gorm:"-", populated only on the v2 read path), so on a legacy install "the
-// previous model" is genuinely unknown and must not be guessed at.
-func correctionNote(existing *datastore.Note, scientific, common string, model *classifier.ModelInfo, confidence float64) string {
-	speciesChanged := !strings.EqualFold(strings.TrimSpace(existing.ScientificName), strings.TrimSpace(scientific))
+// The model comparison is skipped when the detection carries no model info, so
+// an unknown previous model is never guessed at.
+func correctionNote(existing *detection.Result, scientific, common string, model *classifier.ModelInfo, confidence float64) string {
+	speciesChanged := !strings.EqualFold(strings.TrimSpace(existing.Species.ScientificName), strings.TrimSpace(scientific))
 	modelKnown := existing.Model.Name != ""
 	// Compared through the same conversion the write path uses, so the note judges
 	// the identity that is actually persisted rather than a subset of it. Variant
@@ -593,7 +457,7 @@ func correctionNote(existing *datastore.Note, scientific, common string, model *
 	switch {
 	case speciesChanged:
 		fmt.Fprintf(&b, "species changed from %s to %s",
-			formatSpecies(existing.ScientificName, existing.CommonName),
+			formatSpecies(existing.Species.ScientificName, existing.Species.CommonName),
 			formatSpecies(scientific, common))
 	default:
 		fmt.Fprintf(&b, "species confirmed as %s", formatSpecies(scientific, common))

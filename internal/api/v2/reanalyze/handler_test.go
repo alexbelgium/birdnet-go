@@ -3,6 +3,7 @@ package reanalyze_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -71,4 +72,23 @@ func TestHandlers_RejectNonNumericIDBeforeTouchingDatastore(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
 		})
 	}
+}
+
+// TestCorrectSpecies_LegacySchemaIs501 pins that corrections are v2-only: a
+// legacy install is refused before any datastore access (the strict mock fails
+// the test on any call) instead of writing to the deprecated legacy schema.
+func TestCorrectSpecies_LegacySchemaIs501(t *testing.T) {
+	core := apitest.NewCore(t)
+	h := reanalyze.New(core)
+
+	body := `{"scientificName":"Parus major","modelId":"BirdNET_V2.4","confidence":0.9}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := core.Echo.NewContext(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+
+	require.NoError(t, h.CorrectDetectionSpecies(ctx))
+	assert.Equal(t, http.StatusNotImplemented, rec.Code)
 }
