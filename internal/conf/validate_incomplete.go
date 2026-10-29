@@ -177,6 +177,7 @@ func (s *Settings) normalizeModelThresholds() {
 	reset("bat", &s.Bat.Threshold)
 	reset("perch", &s.Perch.Threshold)
 	reset("birdnetv3", &s.BirdNETV3.Threshold)
+	s.normalizeForkBatThresholds()
 }
 
 // normalizeProfiling zeroes negative pprof sampling rates on load. A negative rate

@@ -885,6 +885,12 @@ export interface NotificationSettings {
 }
 
 // Main settings form data interface - EXACTLY matching backend structure
+export interface ForkBatModelSettings {
+  modelPath?: string;
+  labelPath?: string;
+  threshold?: number;
+}
+
 export interface SettingsFormData {
   debug?: boolean;
   version?: string;
@@ -893,6 +899,7 @@ export interface SettingsFormData {
   main: MainSettings;
   birdnet: BirdNetSettings;
   bat?: BatSettings;
+  forkModels?: { batDetect2?: ForkBatModelSettings; bsgBat?: ForkBatModelSettings };
   perch?: PerchSettings;
   birdnetv3?: BirdNetV3Settings;
   input?: unknown; // Not exposed via JSON

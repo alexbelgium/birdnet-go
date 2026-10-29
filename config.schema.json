@@ -426,6 +426,10 @@
     },
     "BatONNXPaths": {
       "properties": {
+        "threshold": {
+          "type": "number",
+          "description": "Threshold overrides the shared bat threshold; zero inherits it."
+        },
         "modelPath": {
           "type": "string",
           "description": "ModelPath is the path to the ONNX classifier model."

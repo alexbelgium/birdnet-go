@@ -71,6 +71,7 @@
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import ModelVariantPicker from '$lib/desktop/features/settings/components/ModelVariantPicker.svelte';
   import ModelRegionSelector from '$lib/desktop/features/settings/components/ModelRegionSelector.svelte';
+  import BatModelThresholds from './BatModelThresholds_fork.svelte';
   import NumberField from '$lib/desktop/components/forms/NumberField.svelte';
   import FalsePositiveFilterControl, {
     type FilterLevel,
@@ -393,12 +394,14 @@
   });
   const batChange: ChangePair = $derived({
     original: {
+      forkModels: store.originalData.forkModels,
       batThreshold: store.originalData.bat?.threshold,
       batNighttimeOnly: store.originalData.bat?.nighttimeOnly,
       batUltrasonicFilter: store.originalData.bat?.ultrasonicFilter?.enabled ?? true,
       batFPFilter: store.originalData.bat?.falsePositiveFilter?.level ?? 0,
     },
     current: {
+      forkModels: store.formData.forkModels,
       batThreshold: bat.threshold,
       batNighttimeOnly: bat.nighttimeOnly,
       batUltrasonicFilter: bat.ultrasonicFilter?.enabled ?? true,
@@ -1924,6 +1927,7 @@
             helpText={t('analysis.detection.batThreshold.helpText')}
           />
           <div></div>
+          <BatModelThresholds />
 
           <Checkbox
             checked={bat.nighttimeOnly ?? true}
