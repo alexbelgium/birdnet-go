@@ -18,6 +18,20 @@ func init() {
 		Spec:          ModelSpec{SampleRate: 48000, ClipLength: 3 * time.Second, RawSampleRate: 256000, MinRawSampleRate: 96000, RecommendedSampleRate: 192000},
 		ConfigAliases: []string{conf.ModelIDBatDetect2}, rangeFilterCompat: rangeFilterCompatNone, scheduleGated: true,
 	}
+	// ORT-only models ignore the OpenVINO preference, but rebuild for thread changes.
+	openvinoCapableSecondaryBuilders[RegistryIDBatDetect2] = func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {
+		paths := settings.ForkModels.BatDetect2
+		res, err := o.resolveBatONNXFiles(RegistryIDBatDetect2, ModelRegistry[RegistryIDBatDetect2].DetectionName, settings.BirdNET.ONNXRuntimePath, modelFileSet{model: paths.ModelPath, labels: paths.LabelPath})
+		if err != nil {
+			return nil, err
+		}
+		model, err := NewBatDetect2(&BatDetect2ModelConfig{ModelPath: res.resolved.model, LabelPath: res.resolved.labels, ONNXRuntimePath: settings.BirdNET.ONNXRuntimePath, Threads: threads})
+		if err != nil {
+			return nil, err
+		}
+		return model, nil
+	}
+
 	modelLoaders[RegistryIDBatDetect2] = (*Orchestrator).loadBatDetect2
 }
 

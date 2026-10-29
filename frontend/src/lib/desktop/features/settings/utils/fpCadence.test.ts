@@ -241,3 +241,12 @@ describe('fpCadence', () => {
     });
   });
 });
+
+it('excludes every bat classifier from saved and preview bird cadence', () => {
+  const snapshot = cadence();
+  const bat = snapshot.models.find(m => m.id === BAT_MODEL_ID);
+  if (!bat) throw new Error('missing bat fixture');
+  snapshot.models.push({ ...bat, id: 'BatDetect2' }, { ...bat, id: 'BSGBat' });
+  expect(savedReadout(snapshot).map(m => m.id)).toEqual(['BirdNET_V2.4', 'BirdNET_V3.0']);
+  expect(previewReadout(snapshot, 2.8, 5).map(m => m.id)).toEqual(['BirdNET_V2.4', 'BirdNET_V3.0']);
+});

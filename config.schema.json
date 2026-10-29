@@ -412,10 +412,12 @@
     "BatONNXPaths": {
       "properties": {
         "modelPath": {
-          "type": "string"
+          "type": "string",
+          "description": "ModelPath is the path to the ONNX classifier model."
         },
         "labelPath": {
-          "type": "string"
+          "type": "string",
+          "description": "LabelPath is the path to the classifier species labels."
         }
       },
       "additionalProperties": false,
@@ -1047,10 +1049,12 @@
     "ForkModelsConfig": {
       "properties": {
         "batdetect2": {
-          "$ref": "#/$defs/BatONNXPaths"
+          "$ref": "#/$defs/BatONNXPaths",
+          "description": "BatDetect2 configures the optional BatDetect2 UK classifier files."
         },
         "bsgbat": {
-          "$ref": "#/$defs/BatONNXPaths"
+          "$ref": "#/$defs/BatONNXPaths",
+          "description": "BSGBat configures the optional BSG-BAT European classifier files."
         }
       },
       "additionalProperties": false,

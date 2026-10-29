@@ -3,12 +3,12 @@ package classifier
 import (
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"sort"
 )
 
-// isBatFamily reports whether id identifies a bat classifier that shares the
-// bat scheduling, filtering, and threshold settings.
 var batFamilyIDs = map[string]struct{}{RegistryIDBat: {}}
 
+// isBatFamily reports whether id shares bat scheduling, filtering and settings.
 func isBatFamily(id string) bool { _, ok := batFamilyIDs[id]; return ok }
 
 // IsBatFamily reports whether id identifies a supported bat classifier.
@@ -26,7 +26,7 @@ func hasScheduleGated(models map[string]*modelEntry) bool {
 func (o *Orchestrator) resolveBatONNXFiles(modelID, displayName, runtimePath string, files modelFileSet) (pathResolution, error) {
 	res := o.resolveFamilyPaths(modelID, files, true)
 	if res.resolved.model == "" || res.resolved.labels == "" {
-		return pathResolution{}, errors.Newf("%s model files not installed or configured", displayName).Component("classifier.orchestrator").Category(errors.CategoryModelInit).Context("model", modelID).Build()
+		return pathResolution{}, errors.Newf("%s model files not installed or configured", displayName).Component("classifier.orchestrator").Category(errors.CategoryModelInit).Context("operation", "load_bat_model").Context("model", modelID).Build()
 	}
 	if err := checkORTOrFail(runtimePath, displayName+" model", modelID, "classifier.orchestrator"); err != nil {
 		return pathResolution{}, err
@@ -49,8 +49,29 @@ func (o *Orchestrator) loadBatONNX(modelID, displayName, runtimePath string, fil
 	}
 	model, err := constructor(res.resolved.model, res.resolved.labels, runtimePath, threads)
 	if err != nil {
-		return errors.New(err).Component("classifier.orchestrator").Category(errors.CategoryModelInit).Context("model", modelID).Build()
+		return errors.New(err).Component("classifier.orchestrator").Category(errors.CategoryModelInit).Context("operation", "load_bat_model").Context("model", modelID).Build()
 	}
 	o.registerLoadedBatModel(model, res, before)
 	return nil
+}
+
+// orderedBatEntries puts BattyBirdNET first, then other bat models by registry ID.
+func orderedBatEntries(models map[string]*modelEntry) []*modelEntry {
+	ids := make([]string, 0, len(models))
+	for id := range models {
+		if isBatFamily(id) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if (ids[i] == RegistryIDBat) != (ids[j] == RegistryIDBat) {
+			return ids[i] == RegistryIDBat
+		}
+		return ids[i] < ids[j]
+	})
+	entries := make([]*modelEntry, 0, len(ids))
+	for _, id := range ids {
+		entries = append(entries, models[id])
+	}
+	return entries
 }

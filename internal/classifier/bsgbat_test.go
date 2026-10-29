@@ -6,12 +6,15 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/conf/conftest"
 	"github.com/tphakala/birdnet-go/internal/detection"
 )
 
@@ -62,12 +65,17 @@ func TestBSGBatReferenceParity(t *testing.T) {
 }
 
 func TestBSGBatFunctional(t *testing.T) {
+	original := conf.Setting()
+	settings := *original
+	settings.Bat.Threshold = 0
+	conftest.SetTestSettings(&settings)
+	t.Cleanup(func() { conftest.SetTestSettings(original) })
 	testDataDir := requireBSGBatTestData(t)
 	model := newBSGBatTestModel(t, filepath.Join(testDataDir, "bsgbat_v0.21_r3.onnx"), filepath.Join(testDataDir, "bsgbat_labels.txt"))
 	tests := []struct {
 		example int
 		want    string
-	}{{1, "Barbastella barbastellus"}, {2, "Pipistrellus pipistrellus"}}
+	}{{1, "Barbastella barbastellus"}, {2, "Pipistrellus pipistrellus"}, {3, "Myotis daubentonii"}}
 	for _, test := range tests {
 		samples := readBSGBatWAV(t, filepath.Join(testDataDir, "ref", "example"+strconv.Itoa(test.example)+".wav"))
 		maxLogits := make([]float32, len(model.labels))
@@ -75,8 +83,27 @@ func TestBSGBatFunctional(t *testing.T) {
 			maxLogits[i] = -math.MaxFloat32
 		}
 		for segment := range bsgBatReferenceSegments {
-			logits, err := model.runLogits(bsgBatReferenceWindow(samples, segment))
+			window := bsgBatReferenceWindow(samples, segment)
+			full, err := model.runLogits(window)
 			require.NoError(t, err)
+			full = slices.Clone(full)
+			results, err := model.Predict(t.Context(), [][]float32{window[:bsgBatRawSampleRate]})
+			require.NoError(t, err)
+			require.NotEmpty(t, results)
+			logits := model.output.GetData()
+			maxDifference := 0.0
+			bestFull := 0
+			for class := range model.labels {
+				if full[class] > full[bestFull] {
+					bestFull = class
+				}
+			}
+			for class := range full {
+				maxDifference = math.Max(maxDifference, math.Abs(float64(full[class]-logits[class])))
+			}
+			assert.Equal(t, model.labels[bestFull], results[0].Species, "example%d segment%d", test.example, segment)
+			t.Logf("example%d segment%d padded-vs-full max logit diff: %.6f", test.example, segment, maxDifference)
+
 			for class := range maxLogits {
 				maxLogits[class] = max(maxLogits[class], logits[class])
 			}
