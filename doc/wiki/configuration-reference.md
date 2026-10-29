@@ -151,10 +151,10 @@ ForkModelsConfig holds the optional fork-specific bat classifiers.
 
 | Setting | Type | Description |
 |---------|------|-------------|
-| `forkmodels.batdetect2.modelPath` | string |  |
-| `forkmodels.batdetect2.labelPath` | string |  |
-| `forkmodels.bsgbat.modelPath` | string |  |
-| `forkmodels.bsgbat.labelPath` | string |  |
+| `forkmodels.batdetect2.modelPath` | string | ModelPath is the path to the ONNX classifier model. |
+| `forkmodels.batdetect2.labelPath` | string | LabelPath is the path to the classifier species labels. |
+| `forkmodels.bsgbat.modelPath` | string | ModelPath is the path to the ONNX classifier model. |
+| `forkmodels.bsgbat.labelPath` | string | LabelPath is the path to the classifier species labels. |
 
 ## lowmemory
 

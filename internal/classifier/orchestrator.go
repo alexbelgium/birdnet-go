@@ -1172,12 +1172,7 @@ func (o *Orchestrator) GetAllProbableSpeciesWithSettings(date time.Time, week fl
 	// honoring the exclude list, so multi-model (BattyBirdNET) setups see their
 	// bat species in the active/probable list instead of a bird-only view.
 	o.mu.RLock()
-	batEntries := make([]*modelEntry, 0, 2)
-	for id, entry := range o.models {
-		if isBatFamily(id) {
-			batEntries = append(batEntries, entry)
-		}
-	}
+	batEntries := orderedBatEntries(o.models)
 	o.mu.RUnlock()
 	for _, batEntry := range batEntries {
 		batEntry.mu.Lock()

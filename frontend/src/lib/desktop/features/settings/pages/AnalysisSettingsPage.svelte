@@ -53,7 +53,7 @@
     watchAcousticModels,
   } from '$lib/stores/acousticModels.svelte';
   import {
-    BAT_MODEL_ID,
+    BAT_MODEL_IDS,
     FILTER_ACTIVE_MIN_LEVEL,
     REFERENCE_WINDOW_SECONDS,
     baseClipMinDetections,
@@ -737,7 +737,9 @@
   // server or before the audio pipeline has published a plan; the control's
   // description then falls back to the count from the configured overlap.
   const cadence = $derived(analysisCadence());
-  const cadenceHasBirdModels = $derived(cadence?.models.some(m => m.id !== BAT_MODEL_ID) ?? false);
+  const cadenceHasBirdModels = $derived(
+    cadence?.models.some(m => !BAT_MODEL_IDS.has(m.id)) ?? false
+  );
   const savedFpLevel = $derived(store.originalData.realtime?.falsePositiveFilter?.level ?? 0);
   const savedOverlap = $derived(store.originalData.birdnet?.overlap ?? 0);
   const formOverlap = $derived(birdnet?.overlap ?? 0);

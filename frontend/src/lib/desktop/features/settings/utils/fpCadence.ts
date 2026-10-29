@@ -45,6 +45,8 @@ const OVERLAP_TOLERANCE_SECONDS = 0.001;
 
 /** Registry ID of the bat model, which has its own fixed cadence and filter. */
 export const BAT_MODEL_ID = 'Bat';
+/** Bat classifiers share their own filter and settings section. */
+export const BAT_MODEL_IDS = new Set([BAT_MODEL_ID, 'BatDetect2', 'BSGBat']);
 
 /** Lowest filter level at which the backend caps the cadence (cadence.FilterActive). */
 export const FILTER_ACTIVE_MIN_LEVEL = 1;
@@ -113,7 +115,7 @@ export interface CadenceReadoutRow {
 
 /** Bird models the readout covers; the bat model has its own filter and section. */
 function birdModels(cadence: AnalysisCadenceInfo): AnalysisCadenceModel[] {
-  return cadence.models.filter(m => m.id !== BAT_MODEL_ID);
+  return cadence.models.filter(m => !BAT_MODEL_IDS.has(m.id));
 }
 
 /** Readout of the running configuration, from the server's own counts. */

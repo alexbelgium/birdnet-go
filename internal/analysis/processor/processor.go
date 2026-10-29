@@ -1016,7 +1016,7 @@ func (p *Processor) applyUltrasonicFilter(settings *conf.Settings, item classifi
 	}
 
 	resolved := p.resolveAudioSource(item.Source)
-	sourceRate := resolved.SampleRate
+	sourceRate := ultrasonicPCMRate(item.ModelID, resolved.SampleRate)
 	if !ultrasonic.HasUltrasonicBand(sourceRate, filterCfg.FrequencySplitHz) {
 		return
 	}

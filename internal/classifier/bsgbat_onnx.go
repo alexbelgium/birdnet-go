@@ -22,63 +22,72 @@ const (
 	errTypeBatInvalidInput = "invalid_input"
 )
 
+// BSGBatModelConfig configures a BSG-BAT model instance.
 type BSGBatModelConfig struct {
-	ModelPath, LabelPath, ONNXRuntimePath string
-	Threads                               int
+	// ModelPath is the ONNX classifier model path.
+	ModelPath string
+	// LabelPath is the species label file path.
+	LabelPath string
+	// ONNXRuntimePath optionally selects the ONNX Runtime library.
+	ONNXRuntimePath string
+	// Threads sets the intra-operation CPU thread budget.
+	Threads int
 }
 
+// BSGBat runs the BSG-BAT European species classifier.
 type BSGBat struct {
 	*batORTBase
 	dsp           *bsgBatDSP
 	input, output *ort.Tensor[float32]
 }
 
+// NewBSGBat creates a BSG-BAT model instance.
 func NewBSGBat(cfg *BSGBatModelConfig) (*BSGBat, error) {
 	if cfg == nil {
-		return nil, errors.Newf("BSG-BAT configuration is required").Category(errors.CategoryValidation).Build()
+		return nil, errors.Newf("BSG-BAT configuration is required").Component("classifier").Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Category(errors.CategoryValidation).Build()
 	}
 	if err := inference.InitONNXRuntime(cfg.ONNXRuntimePath); err != nil {
-		return nil, errors.New(err).Category(errors.CategoryModelInit).Build()
+		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
 	}
 	rawLabels, err := inferenceonnx.LoadLabels(cfg.LabelPath)
 	if err != nil {
-		return nil, errors.New(err).Category(errors.CategoryModelInit).Build()
+		return nil, errors.New(err).Component("classifier").Context("operation", "validate_bsgbat_labels").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
 	}
 	if len(rawLabels) != bsgBatOutputClasses {
-		return nil, errors.Newf("BSG-BAT label count is %d, want %d", len(rawLabels), bsgBatOutputClasses).Category(errors.CategoryValidation).Build()
+		return nil, errors.Newf("BSG-BAT label count is %d, want %d", len(rawLabels), bsgBatOutputClasses).Component("classifier").Context("operation", "validate_bsgbat_labels").Context("model", RegistryIDBSGBat).Category(errors.CategoryValidation).Build()
 	}
 	labels := make([]string, 0, bsgBatOutputClasses-1)
 	for i, name := range rawLabels {
 		if name == bsgBatBackgroundLabel {
 			if i != bsgBatOutputClasses-1 {
-				return nil, errors.Newf("BSG-BAT background label must be last").Category(errors.CategoryValidation).Build()
+				return nil, errors.Newf("BSG-BAT background label must be last").Component("classifier").Context("operation", "validate_bsgbat_labels").Context("model", RegistryIDBSGBat).Category(errors.CategoryValidation).Build()
 			}
 			continue
 		}
 		common, ok := batCommonNames[name]
 		if !ok {
-			return nil, errors.Newf("unknown BSG-BAT scientific name %q", name).Category(errors.CategoryValidation).Build()
+			return nil, errors.Newf("unknown BSG-BAT scientific name %q", name).Component("classifier").Context("operation", "validate_bsgbat_labels").Context("model", RegistryIDBSGBat).Category(errors.CategoryValidation).Build()
 		}
 		labels = append(labels, name+"_"+common)
 	}
 	dsp, err := newBSGBatDSP()
 	if err != nil {
-		return nil, errors.New(err).Category(errors.CategoryModelInit).Build()
+		return nil, errors.New(err).Component("classifier").Context("operation", "validate_bsgbat_labels").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
 	}
-	session, err := newBatORTSession(cfg.ModelPath, []string{bsgBatInputName}, []string{bsgBatOutputName}, cfg.Threads)
+	session, err := newBatORTSession(RegistryIDBSGBat, cfg.ModelPath, []string{bsgBatInputName}, []string{bsgBatOutputName}, cfg.Threads)
 	if err != nil {
-		return nil, errors.New(err).Category(errors.CategoryModelInit).Build()
+		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
 	}
 	input, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 1, bsgBatFrames, bsgBatMelBands))
 	if err != nil {
 		_ = session.Destroy()
-		return nil, err
+		return nil, errors.New(err).Component("classifier").Category(errors.CategoryModelInit).Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Build()
 	}
 	output, err := ort.NewEmptyTensor[float32](ort.NewShape(1, bsgBatOutputClasses))
 	if err != nil {
 		_ = input.Destroy()
 		_ = session.Destroy()
-		return nil, err
+		return nil, errors.New(err).Component("classifier").Category(errors.CategoryModelInit).Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Build()
 	}
 	info := ModelRegistry[RegistryIDBSGBat]
 	info.NumSpecies = len(labels)
@@ -98,23 +107,24 @@ func (b *BSGBat) runLogits(samples []float32) ([]float32, error) {
 	return b.output.GetData(), nil
 }
 
+// Predict classifies one second of ultrasonic PCM.
 func (b *BSGBat) Predict(ctx context.Context, samples [][]float32) ([]datastore.Results, error) {
 	span, _ := startPredictSpan(ctx, RegistryIDBSGBat, samples)
 	defer span.Finish()
 	start := time.Now()
 	if len(samples) == 0 || len(samples[0]) == 0 {
 		span.markErrored(errTypeEmptySample)
-		return nil, errors.Newf("empty audio sample").Category(errors.CategoryValidation).Build()
+		return nil, errors.Newf("empty audio sample").Component("classifier").Context("operation", "predict").Context("model", RegistryIDBSGBat).Category(errors.CategoryValidation).Build()
 	}
 	if len(samples[0]) != bsgBatRawSampleRate {
 		span.markErrored(errTypeBatInvalidInput)
-		return nil, errors.Newf("BSG-BAT requires %d samples, got %d", bsgBatRawSampleRate, len(samples[0])).Category(errors.CategoryValidation).Build()
+		return nil, errors.Newf("BSG-BAT requires %d samples, got %d", bsgBatRawSampleRate, len(samples[0])).Component("classifier").Context("operation", "predict").Context("model", RegistryIDBSGBat).Category(errors.CategoryValidation).Build()
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.session == nil {
 		span.markErrored(errTypeClassifierNil)
-		return nil, errors.Newf("BSG-BAT classifier is closed").Category(errors.CategoryModelInit).Build()
+		return nil, errors.Newf("BSG-BAT classifier is closed").Component("classifier").Context("operation", "predict").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
 	}
 	padded := make([]float32, bsgBatInputSamples)
 	copy(padded, samples[0])
@@ -123,7 +133,7 @@ func (b *BSGBat) Predict(ctx context.Context, samples [][]float32) ([]datastore.
 	}
 	logits, err := b.runLogits(padded)
 	if err != nil {
-		err = errors.New(err).Category(errors.CategoryAudio).Context("model", RegistryIDBSGBat).Build()
+		err = errors.New(err).Component("classifier").Context("operation", "predict").Context("model", RegistryIDBSGBat).Category(errors.CategoryAudio).Build()
 		recordPredictionFailure(span, RegistryIDBSGBat, errTypeBatInvokeFailed, start, err)
 		return nil, err
 	}

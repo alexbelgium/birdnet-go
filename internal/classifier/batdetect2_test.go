@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/audiocore/resample"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/conf/conftest"
 	"github.com/tphakala/birdnet-go/internal/detection"
 )
 
@@ -80,18 +81,30 @@ func TestBatDetect2RealAudio(t *testing.T) {
 		t.Skip("BATDETECT2_EXAMPLES_DIR is not configured")
 	}
 	testDataDir := os.Getenv(batDetect2TestDataEnv)
+	if testDataDir == "" {
+		t.Skip("BATDETECT2_TESTDATA_DIR is not configured")
+	}
+	for _, path := range []string{filepath.Join(testDataDir, "batdetect2-uk-same.onnx"), filepath.Join(testDataDir, "labels.json")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Skipf("required file unavailable: %s", path)
+		}
+	}
 	model, err := NewBatDetect2(&BatDetect2ModelConfig{ModelPath: filepath.Join(testDataDir, "batdetect2-uk-same.onnx"), LabelPath: filepath.Join(testDataDir, "labels.json"), ONNXRuntimePath: os.Getenv("ONNX_RUNTIME_PATH"), Threads: 1})
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, model.Close()) })
-	settings := conf.Setting()
-	oldThreshold := settings.Bat.Threshold
+	original := conf.Setting()
+	settings := *original
 	settings.Bat.Threshold = 0
-	t.Cleanup(func() { settings.Bat.Threshold = oldThreshold })
+	conftest.SetTestSettings(&settings)
+	t.Cleanup(func() { conftest.SetTestSettings(original) })
 	wants := map[string]string{"MYOMYS": "Myotis mystacinus", "EPTSER": "Eptesicus serotinus", "RHIFER": "Rhinolophus ferrumequinum"}
 	for code, want := range wants {
 		t.Run(code, func(t *testing.T) {
 			matches, globErr := filepath.Glob(filepath.Join(examplesDir, "*"+code+"*.wav"))
 			require.NoError(t, globErr)
+			if len(matches) == 0 {
+				t.Skip("reference audio unavailable")
+			}
 			require.Len(t, matches, 1)
 			data, readErr := os.ReadFile(matches[0])
 			require.NoError(t, readErr)
@@ -114,4 +127,13 @@ func TestBatDetect2RealAudio(t *testing.T) {
 			t.Logf("%s confidence: %.3f", code, results[0].Confidence)
 		})
 	}
+}
+
+func TestBatDetect2NMSAcrossSeam(t *testing.T) {
+	const width = 563
+	det := make([]float32, width)
+	det[255], det[256] = .8, .9
+	assert.Equal(t, []batDetect2Peak{{.9, 0, 256}}, batDetect2NMS(det, 1, width, width))
+	det[255] = .9
+	assert.Len(t, batDetect2NMS(det, 1, width, width), 2)
 }
