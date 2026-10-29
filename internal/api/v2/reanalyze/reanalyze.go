@@ -294,8 +294,18 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	// depending on which classifier happened to supply the aggregate first.
 	applyLocalizedCommonNames(bn, predictions, c.CurrentLocale())
 
+	// Ties break on the names: predictions come out of a map, so without a
+	// tie-break equal scores at the top-N cutoff would pick different species
+	// on identical requests.
 	sort.Slice(predictions, func(i, j int) bool {
-		return predictions[i].MaxConfidence() > predictions[j].MaxConfidence()
+		ci, cj := predictions[i].MaxConfidence(), predictions[j].MaxConfidence()
+		if ci != cj {
+			return ci > cj
+		}
+		if predictions[i].ScientificName != predictions[j].ScientificName {
+			return predictions[i].ScientificName < predictions[j].ScientificName
+		}
+		return predictions[i].CommonName < predictions[j].CommonName
 	})
 	if len(predictions) > reanalyzeTopN {
 		predictions = predictions[:reanalyzeTopN]
