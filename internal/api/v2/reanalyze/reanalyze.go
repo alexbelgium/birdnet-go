@@ -168,9 +168,9 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 	// The clip lookup is also the existence check: GetNoteClipPath returns
 	// ErrDetectionNotFound for an unknown id, which resolveClipPath maps to a 404.
 	// A separate DS.Get would be a second round trip proving the same thing.
-	absClipPath, relClipPath, err := c.resolveClipPath(ctx, idStr)
-	if err != nil {
-		return err
+	absClipPath, relClipPath, ok, respErr := c.resolveClipPath(ctx, idStr)
+	if !ok {
+		return respErr
 	}
 
 	bn, err := c.GetBirdNETInstance()
@@ -559,8 +559,10 @@ func applyLocalizedCommonNames(bn *classifier.Orchestrator, preds []ReanalyzePre
 }
 
 // resolveClipPath looks up the detection's saved clip and maps it onto the media
-// SecureFS root, returning (absolute path, normalized relative path). On failure
-// it returns an already-formed echo error response, so callers `return err`.
+// SecureFS root, returning (absolute path, normalized relative path). When ok is
+// false the error response has already been written and respErr is what the
+// handler returns; respErr alone cannot signal the failure, because HandleError
+// returns nil once it has written the response.
 //
 // The absolute path is handed to ffmpeg, matching the four call sites in the
 // media domain that build filepath.Join(c.SFS.BaseDir(), normalizedPath) for
@@ -577,32 +579,32 @@ func applyLocalizedCommonNames(bn *classifier.Orchestrator, preds []ReanalyzePre
 // apicore.NormalizeClipPath keeps this package's upstream footprint at zero;
 // importing a sibling domain would break the api/v2 acyclic-import rule that
 // apicore's import guard enforces.
-func (c *Handler) resolveClipPath(ctx echo.Context, idStr string) (absPath, relPath string, err error) {
+func (c *Handler) resolveClipPath(ctx echo.Context, idStr string) (absPath, relPath string, ok bool, respErr error) {
 	clipPath, err := c.DS.GetNoteClipPath(idStr)
 	switch {
 	case err != nil && isDetectionNotFoundErr(err):
-		return "", "", c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
+		return "", "", false, c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
 	case err != nil && isClipNotFoundErr(err):
-		return "", "", c.HandleError(ctx, err,
+		return "", "", false, c.HandleError(ctx, err,
 			"No audio clip available for this detection", http.StatusNotFound)
 	case err != nil:
-		return "", "", c.HandleError(ctx, err,
+		return "", "", false, c.HandleError(ctx, err,
 			"Failed to look up clip path", http.StatusInternalServerError)
 	case clipPath == "":
-		return "", "", c.HandleError(ctx, fmt.Errorf("clip path empty"),
+		return "", "", false, c.HandleError(ctx, fmt.Errorf("clip path empty"),
 			"No audio clip available for this detection", http.StatusNotFound)
 	}
 
 	normalized := apicore.NormalizeClipPath(clipPath, c.CurrentSettings().Realtime.Audio.Export.Path)
 	if normalized == "" {
-		return "", "", c.HandleError(ctx, fmt.Errorf("empty normalized clip path"),
+		return "", "", false, c.HandleError(ctx, fmt.Errorf("empty normalized clip path"),
 			"Invalid clip path", http.StatusBadRequest)
 	}
 	rel, err := c.SFS.ValidateRelativePath(normalized)
 	if err != nil {
-		return "", "", c.HandleError(ctx, err, "Invalid clip path", http.StatusBadRequest)
+		return "", "", false, c.HandleError(ctx, err, "Invalid clip path", http.StatusBadRequest)
 	}
-	return filepath.Join(c.SFS.BaseDir(), rel), rel, nil
+	return filepath.Join(c.SFS.BaseDir(), rel), rel, true, nil
 }
 
 // isDetectionNotFoundErr reports whether err means the detection row itself does
