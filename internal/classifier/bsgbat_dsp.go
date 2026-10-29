@@ -51,6 +51,12 @@ func (d *bsgBatDSP) preprocess(samples []float32) ([]float32, error) {
 		variance += delta * delta
 	}
 	stdDev := math.Sqrt(variance / float64(len(values)))
+	if stdDev == 0 {
+		// A constant spectrogram (e.g. digital silence) normalises to all zeros:
+		// every value equals its band median, so the clipped output is 0.
+		clear(d.output)
+		return d.output, nil
+	}
 	for band := range bsgBatMelBands {
 		for frame := range bsgBatFrames {
 			d.column[frame] = values[frame*bsgBatMelBands+band]
