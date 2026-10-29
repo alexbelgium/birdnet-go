@@ -49,9 +49,11 @@ var errDetectionLocked = errors.NewStd("detection is locked")
 const correctionNoteTimeout = 5 * time.Second
 
 const (
-	// taxonomicClassAves is the v2 taxonomic class assigned to a newly created
-	// label for a corrected bird species (entities.DefaultTaxonomicClasses seeds it).
-	taxonomicClassAves = "Aves"
+	// taxonomicClassAves and taxonomicClassChiroptera are the v2 taxonomic
+	// classes a newly created label gets for a bird or a bat model
+	// (entities.DefaultTaxonomicClasses seeds both).
+	taxonomicClassAves       = "Aves"
+	taxonomicClassChiroptera = "Chiroptera"
 )
 
 // CorrectSpeciesRequest is the JSON body of
@@ -343,17 +345,20 @@ func (c *Handler) writeSpeciesCorrectionV2(
 	if err != nil {
 		return fmt.Errorf("v2 label_types lookup failed: %w", err)
 	}
-	// Aves is the default taxonomic class for a corrected label, matching what
-	// Save assigns to a bird detection. A label that already exists keeps
-	// whatever class and type it was created with — GetOrCreate only applies
-	// these to a genuinely new row — so a Perch non-bird sound class that has
-	// been seen before is not reclassified by a correction.
-	var avesClassID *uint
-	if avesClass, classErr := taxClassRepo.GetByName(ctx, taxonomicClassAves); classErr == nil && avesClass != nil {
-		avesClassID = &avesClass.ID
+	// A newly created label takes the taxonomic class the save path gives a label
+	// from this model type (repository.ConvertToV2Detection): Aves for a bird
+	// model, Chiroptera for a bat model, none for a multi-taxa model such as
+	// Perch, whose labels span birds, frogs and insects. A label that already
+	// exists keeps the class it was created with; GetOrCreate only applies this
+	// to a genuinely new row.
+	var classID *uint
+	if className := taxonomicClassForModelType(aiModel.ModelType); className != "" {
+		if class, classErr := taxClassRepo.GetByName(ctx, className); classErr == nil && class != nil {
+			classID = &class.ID
+		}
 	}
 
-	label, err := labelRepo.GetOrCreate(ctx, scientific, aiModel.ID, speciesType.ID, avesClassID)
+	label, err := labelRepo.GetOrCreate(ctx, scientific, aiModel.ID, speciesType.ID, classID)
 	if err != nil {
 		return fmt.Errorf("v2 labels lookup failed: %w", err)
 	}
@@ -399,6 +404,19 @@ func (c *Handler) writeSpeciesCorrectionV2(
 			return nil
 		})
 	}, nil)
+}
+
+// taxonomicClassForModelType returns the taxonomic class name the save path
+// assigns to a new label from a model of this type, or "" for none.
+func taxonomicClassForModelType(t entities.ModelType) string {
+	switch t {
+	case entities.ModelTypeBird:
+		return taxonomicClassAves
+	case entities.ModelTypeBat:
+		return taxonomicClassChiroptera
+	default:
+		return ""
+	}
 }
 
 // speciesKnownToLoadedModels reports whether scientificName appears in the union

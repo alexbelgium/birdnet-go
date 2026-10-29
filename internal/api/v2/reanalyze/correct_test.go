@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tphakala/birdnet-go/internal/classifier"
+	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/detection"
 )
 
@@ -126,4 +127,14 @@ func TestCorrectionNote_SameModelIdentityIsStillNoChange(t *testing.T) {
 	}
 
 	assert.Empty(t, correctionNote(existing, "Parus major", "Great Tit", &stock, 0.8))
+}
+
+func TestTaxonomicClassForModelType_MatchesTheSavePath(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "Aves", taxonomicClassForModelType(entities.ModelTypeBird))
+	assert.Equal(t, "Chiroptera", taxonomicClassForModelType(entities.ModelTypeBat))
+	// Multi-taxa models (Perch) span classes, so a new label gets none rather
+	// than being filed as a bird.
+	assert.Empty(t, taxonomicClassForModelType(entities.ModelTypeMulti))
 }
