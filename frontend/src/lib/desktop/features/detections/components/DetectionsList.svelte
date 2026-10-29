@@ -682,6 +682,7 @@
             {onDetailsClick}
             isExcluded={isSpeciesExcluded(detection.commonName)}
             onReview={() => detectionActions.handleReview(detection)}
+            onReanalyze={() => detectionActions.handleReanalyze(detection)}
             onMarkCorrect={() => detectionActions.handleMarkCorrect(detection)}
             onMarkFalsePositive={() => detectionActions.handleMarkFalsePositive(detection)}
             onToggleSpecies={() => detectionActions.handleToggleSpecies(detection)}
