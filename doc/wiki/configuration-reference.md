@@ -147,7 +147,7 @@ ModelsConfig holds global model enablement and management settings.
 
 ## forkmodels
 
-ForkModelsConfig holds the optional fork-specific bat classifiers.
+BatModelsConfig holds the optional fork-specific bat classifiers.
 
 | Setting | Type | Description |
 |---------|------|-------------|
