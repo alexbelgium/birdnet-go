@@ -10,9 +10,9 @@
 // leaf-package APIs, so adding the feature costs the shared codebase exactly one
 // facade wiring block (import, field, constructor, initRoutes entry) and nothing
 // else. In particular the correction write does NOT extend datastore.Interface or
-// datastore.DetectionRepository: it composes the existing exported primitives
-// (datastore.Interface.Transaction for legacy installs, the exported v2
-// repositories for v2 installs) from inside this package. See correct.go.
+// datastore.DetectionRepository: it composes the exported v2 repositories from
+// inside this package, and is v2-only. Reads go through the DetectionRepository.
+// See correct.go.
 package reanalyze
 
 import (

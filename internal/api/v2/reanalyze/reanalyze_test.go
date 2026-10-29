@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
+	"github.com/tphakala/birdnet-go/internal/detection"
 	bnerrors "github.com/tphakala/birdnet-go/internal/errors"
 )
 
@@ -277,17 +277,6 @@ func TestIsDetectionNotFoundErr_CoversAllThreeDatastoreShapes(t *testing.T) {
 	assert.False(t, isDetectionNotFoundErr(nil))
 }
 
-func TestIsClipNotFoundErr_IncludesDetectionAndClipCases(t *testing.T) {
-	t.Parallel()
-
-	// A missing clip and a missing parent detection both mean "there is nothing
-	// to reanalyze", so both are 404 — but only the second is "Detection not found".
-	assert.True(t, isClipNotFoundErr(os.ErrNotExist))
-	assert.True(t, isClipNotFoundErr(repository.ErrNoClipPath))
-	assert.True(t, isClipNotFoundErr(repository.ErrDetectionNotFound))
-	assert.False(t, isClipNotFoundErr(bnerrors.NewStd("permission denied")))
-}
-
 func TestAddSpeciesScore_MergesDifferentLabelSpellingsForOneSpecies(t *testing.T) {
 	t.Parallel()
 
@@ -408,11 +397,11 @@ func TestReanalyzeDetection_ReleasesTheSlotOnAnErrorPath(t *testing.T) {
 	// The failure has to happen AFTER the slot is claimed for this to test
 	// anything. Id parsing and body binding both run before the claim, so a
 	// malformed request would return without ever touching the slot and this
-	// test would pass even with the release deleted. Fail the clip lookup
+	// test would pass even with the release deleted. Fail the detection lookup
 	// instead, which is the first step inside the claimed region.
 	ds, ok := core.DS.(*mocks.MockInterface)
 	require.True(t, ok, "apitest core is expected to carry a mock datastore")
-	ds.EXPECT().GetNoteClipPath("1").Return("", bnerrors.NewStd("database is unavailable")).Once()
+	ds.EXPECT().Get("1").Return(datastore.Note{}, bnerrors.NewStd("database is unavailable")).Once()
 
 	rec := httptest.NewRecorder()
 	ctx := core.Echo.NewContext(httptest.NewRequest(http.MethodPost, "/", http.NoBody), rec)
@@ -429,4 +418,34 @@ func TestReanalyzeDetection_ReleasesTheSlotOnAnErrorPath(t *testing.T) {
 	default:
 		t.Fatal("reanalysis slot was not released after an error inside the claimed region")
 	}
+}
+
+func TestReanalyzeDetection_DetectionWithoutAClipIs404(t *testing.T) {
+	// Not parallel: it takes the process-wide admission slot.
+	core := apitest.NewCore(t)
+	h := New(core)
+
+	ds, ok := core.DS.(*mocks.MockInterface)
+	require.True(t, ok, "apitest core is expected to carry a mock datastore")
+	ds.EXPECT().Get("1").Return(datastore.Note{ID: 1, Date: "2026-05-01", Time: "06:30:00", ScientificName: "Parus major"}, nil).Once()
+
+	rec := httptest.NewRecorder()
+	ctx := core.Echo.NewContext(httptest.NewRequest(http.MethodPost, "/", http.NoBody), rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	require.NoError(t, h.ReanalyzeDetection(ctx))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestIsBatDetection_FollowsTheSavePathModelTypeRule(t *testing.T) {
+	t.Parallel()
+
+	bat := &detection.Result{Model: detection.ModelInfo{Name: "BattyBirdNET", Version: "1.0"}}
+	assert.True(t, isBatDetection(bat))
+
+	bird := &detection.Result{Model: detection.ModelInfo{Name: "BirdNET", Version: "2.4"}}
+	assert.False(t, isBatDetection(bird))
+
+	// No model recorded: the default model, a bird.
+	assert.False(t, isBatDetection(&detection.Result{}))
 }
