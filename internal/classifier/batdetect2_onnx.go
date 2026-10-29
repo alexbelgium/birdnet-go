@@ -5,17 +5,16 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/inference"
 	inferenceonnx "github.com/tphakala/birdnet-go/internal/inference/onnx"
+	"github.com/tphakala/birdnet-go/internal/labels/bat"
 	ort "github.com/yalue/onnxruntime_go"
 )
 
 const (
 	batDetect2DetectionThreshold float32 = 0.01
-	batDetect2ClassThreshold     float32 = 0.1
 	batDetect2TopKPerSecond              = 100
 	batDetect2ExpectedSamples            = 144000
 	batDetect2InputName                  = "input"
@@ -78,8 +77,8 @@ func NewBatDetect2(cfg *BatDetect2ModelConfig) (*BatDetect2, error) {
 		if !ok {
 			return nil, errors.Newf("unknown BatDetect2 label code %q", code).Component("classifier").Context("operation", "validate_batdetect2_labels").Context("model", RegistryIDBatDetect2).Category(errors.CategoryValidation).Build()
 		}
-		commonName, ok := batCommonNames[scientificName]
-		if !ok {
+		commonName := bat.CommonName(scientificName)
+		if commonName == "" {
 			return nil, errors.Newf("unknown bat scientific name %q", scientificName).Component("classifier").Context("operation", "validate_batdetect2_labels").Context("model", RegistryIDBatDetect2).Category(errors.CategoryValidation).Build()
 		}
 		labels[i] = scientificName + "_" + commonName
@@ -180,15 +179,14 @@ func (b *BatDetect2) Predict(ctx context.Context, samples [][]float32) ([]datast
 	for _, peak := range peaks {
 		for c := range b.labels {
 			score := b.fullClasses[c*fullPlane+peak.y*width+peak.x]
-			if score >= batDetect2ClassThreshold {
+			if score >= BatCandidateFloor {
 				maxScores[c] = max(maxScores[c], score)
 			}
 		}
 	}
-	threshold := float32(conf.Setting().Bat.Threshold)
 	results := make([]datastore.Results, 0, len(b.labels))
 	for i, score := range maxScores {
-		if score >= threshold && score >= batDetect2ClassThreshold {
+		if score >= BatCandidateFloor {
 			results = append(results, datastore.Results{Species: b.labels[i], Confidence: score})
 		}
 	}

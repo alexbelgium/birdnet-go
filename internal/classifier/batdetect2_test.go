@@ -13,6 +13,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/conf/conftest"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/labels/bat"
 )
 
 const batDetect2TestDataEnv = "BATDETECT2_TESTDATA_DIR"
@@ -43,7 +44,7 @@ func TestBatDetect2LabelsAndWiring(t *testing.T) {
 	require.Len(t, batDetect2CodeLabels, 17)
 	seen := make(map[string]bool, 17)
 	for _, scientificName := range batDetect2CodeLabels {
-		assert.NotEmpty(t, batCommonNames[scientificName])
+		assert.NotEmpty(t, bat.CommonName(scientificName))
 		assert.False(t, seen[scientificName])
 		seen[scientificName] = true
 	}

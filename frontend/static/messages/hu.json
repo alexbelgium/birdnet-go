@@ -5607,6 +5607,9 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 megbízhatósági küszöbérték"
+      },
+      "batThresholdOverride": {
+        "helpText": "Bekapcsolva külön küszöb állítható be ehhez a modellhez. Egyébként a denevérek közös küszöbe érvényes."
       }
     },
     "rangeFilter": {

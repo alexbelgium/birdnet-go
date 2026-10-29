@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/inference"
 	inferenceonnx "github.com/tphakala/birdnet-go/internal/inference/onnx"
+	"github.com/tphakala/birdnet-go/internal/labels/bat"
 	ort "github.com/yalue/onnxruntime_go"
 )
 
@@ -64,8 +64,8 @@ func NewBSGBat(cfg *BSGBatModelConfig) (*BSGBat, error) {
 			}
 			continue
 		}
-		common, ok := batCommonNames[name]
-		if !ok {
+		common := bat.CommonName(name)
+		if common == "" {
 			return nil, errors.Newf("unknown BSG-BAT scientific name %q", name).Component("classifier").Context("operation", "validate_bsgbat_labels").Context("model", RegistryIDBSGBat).Category(errors.CategoryValidation).Build()
 		}
 		labels = append(labels, name+"_"+common)
@@ -142,11 +142,10 @@ func (b *BSGBat) Predict(ctx context.Context, samples [][]float32) ([]datastore.
 		recordPredictionFailure(span, RegistryIDBSGBat, errTypeBatNonFinite, start, err)
 		return nil, err
 	}
-	threshold := float32(conf.Setting().Bat.Threshold)
 	results := make([]datastore.Results, 0, len(b.labels))
 	for i, label := range b.labels {
 		p := float32(customSigmoid(float64(logits[i]), 1))
-		if p >= threshold {
+		if p >= BatCandidateFloor {
 			results = append(results, datastore.Results{Species: label, Confidence: p})
 		}
 	}

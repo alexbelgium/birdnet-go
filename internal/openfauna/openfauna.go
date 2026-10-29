@@ -134,7 +134,7 @@ func decodeTranslationRows(src io.Reader, fn translationRowFunc) error {
 				Context("operation", "read_translations_row").
 				Build()
 		}
-		if cbErr := fn(rec[transColScientific], rec[transColLocale], rec[transColCommon]); cbErr != nil {
+		if cbErr := fn(rec[transColScientific], rec[transColLocale], batTranslationName(rec[transColScientific], rec[transColCommon])); cbErr != nil {
 			return cbErr
 		}
 	}

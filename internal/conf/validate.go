@@ -382,6 +382,8 @@ func validateModelThresholds(settings *Settings) error {
 		value float64
 	}{
 		{"bat.threshold", settings.Bat.Threshold},
+		{"forkmodels.batdetect2.threshold", settings.ForkModels.BatDetect2.Threshold},
+		{"forkmodels.bsgbat.threshold", settings.ForkModels.BSGBat.Threshold},
 		{"perch.threshold", settings.Perch.Threshold},
 		{"birdnetv3.threshold", settings.BirdNETV3.Threshold},
 	}

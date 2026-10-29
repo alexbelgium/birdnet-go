@@ -151,8 +151,10 @@ BatModelsConfig holds the optional fork-specific bat classifiers.
 
 | Setting | Type | Description |
 |---------|------|-------------|
+| `forkmodels.batdetect2.threshold` | number | Threshold overrides the shared bat threshold; zero inherits it. |
 | `forkmodels.batdetect2.modelPath` | string | ModelPath is the path to the ONNX classifier model. |
 | `forkmodels.batdetect2.labelPath` | string | LabelPath is the path to the classifier species labels. |
+| `forkmodels.bsgbat.threshold` | number | Threshold overrides the shared bat threshold; zero inherits it. |
 | `forkmodels.bsgbat.modelPath` | string | ModelPath is the path to the ONNX classifier model. |
 | `forkmodels.bsgbat.labelPath` | string | LabelPath is the path to the classifier species labels. |
 

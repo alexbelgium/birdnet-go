@@ -5595,7 +5595,7 @@
         "helpText": "Jazyk používaný pro běžné názvy druhů v rozhraní."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Přepsat práh spolehlivosti",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,9 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Zapnutím nastavíte práh pro tento model. Jinak se použije společný práh pro netopýry."
       }
     },
     "rangeFilter": {

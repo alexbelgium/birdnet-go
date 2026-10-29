@@ -969,12 +969,12 @@ func (p *Processor) processResults(settings *conf.Settings, item classifier.Resu
 		// Check if detection should be filtered
 		shouldSkip, _ := p.shouldFilterDetection(settings, result, commonName, scientificName, speciesLowercase, baseThreshold, item.Source.ID, item.ModelID)
 
-		// Record every prediction above the base confidence threshold in the
+		// Record predictions above the base threshold (or fork bat candidate floor) in the
 		// per-model "Last heard" diagnostic feed, including non-avian classes,
 		// human vocalizations, and out-of-range birds, tagged with whether the
 		// species passes the range filter. This is independent of whether the
 		// detection is saved below (saved detections also clear this bar).
-		if result.Confidence > baseThreshold {
+		if recordModelPrediction(item.ModelID, result.Confidence, baseThreshold) {
 			inRange := !shouldApplyRangeFilter(item.ModelID, settings) || settings.IsSpeciesIncluded(result.Species)
 			p.updateLastDetection(item.ModelID, commonName, scientificName, float64(result.Confidence), feedTime, inRange, feedThrottle)
 		}
@@ -1556,7 +1556,7 @@ func (p *Processor) getBaseConfidenceThreshold(settings *conf.Settings, commonNa
 // primary BirdNET threshold applies.
 func modelGlobalConfidenceThreshold(settings *conf.Settings, modelID string) float32 {
 	if classifier.IsBatFamily(modelID) {
-		return float32(settings.Bat.Threshold)
+		return float32(conf.BatModelThreshold(settings, modelID))
 	}
 	switch modelID {
 	case classifier.RegistryIDPerchV2:

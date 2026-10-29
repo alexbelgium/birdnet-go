@@ -5595,7 +5595,7 @@
         "helpText": "Idioma utilizado para os nomes comuns das espécies na interface."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Substituir o limiar de confiança",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,9 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Ative para definir um limiar para este modelo. Caso contrário, aplica-se o limiar partilhado para morcegos."
       }
     },
     "rangeFilter": {
