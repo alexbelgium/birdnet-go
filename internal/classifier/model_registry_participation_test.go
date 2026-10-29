@@ -74,11 +74,13 @@ func TestParticipatesInRangeFilter_ExpectedPerModel(t *testing.T) {
 	t.Parallel()
 
 	want := map[string]bool{
-		"BirdNET_V2.4":      true, // MData range filter over the v2.4 label set
-		RegistryIDBirdNETV3: true, // mapped geomodel v3
-		RegistryIDPerchV2:   true, // mapped geomodel v3, scientific-name labels
-		RegistryIDBat:       false,
-		RegistryIDBSG:       false,
+		"BirdNET_V2.4":       true, // MData range filter over the v2.4 label set
+		RegistryIDBirdNETV3:  true, // mapped geomodel v3
+		RegistryIDPerchV2:    true, // mapped geomodel v3, scientific-name labels
+		RegistryIDBat:        false,
+		RegistryIDBatDetect2: false,
+		RegistryIDBSGBat:     false,
+		RegistryIDBSG:        false,
 	}
 	for id, expected := range want {
 		t.Run(id, func(t *testing.T) {

@@ -72,7 +72,7 @@ func ConfiguredBaseOverlap(s *conf.Settings) time.Duration {
 // [0, ClipLength - minAnalysisStep] so the derived read size is always
 // strictly positive.
 func ResolveModelOverlap(modelID string, spec ModelSpec, baseOverlap time.Duration) time.Duration {
-	if modelID == RegistryIDBat {
+	if isBatFamily(modelID) {
 		return spec.ClipLength / 2
 	}
 

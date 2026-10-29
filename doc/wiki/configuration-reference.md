@@ -145,6 +145,17 @@ ModelsConfig holds global model enablement and management settings.
 | `models.directory` | string | base directory for downloaded model files |
 | `models.autoenablemigrated` | boolean | AutoEnableMigrated is an internal marker recording that the classifier's one-shot legacy model auto-enable has run for this config file, so it never re-runs. Do not edit by hand; a managed read-only config may set it true (with configversion: 2) to keep an explicit models.enabled from being re-seeded. Set by the classifier; hidden from the JSON API; the companion-marker rationale (why not ConfigVersion) lives in internal/conf/migrations.go. |
 
+## forkmodels
+
+ForkModelsConfig holds the optional fork-specific bat classifiers.
+
+| Setting | Type | Description |
+|---------|------|-------------|
+| `forkmodels.batdetect2.modelPath` | string |  |
+| `forkmodels.batdetect2.labelPath` | string |  |
+| `forkmodels.bsgbat.modelPath` | string |  |
+| `forkmodels.bsgbat.labelPath` | string |  |
+
 ## lowmemory
 
 LowMemoryConfig is the manual override for the runtime memory policy.

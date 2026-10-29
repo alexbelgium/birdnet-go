@@ -47,7 +47,7 @@ func DefaultModelInfo() ModelInfo {
 // and everything else (BirdNET v2.4, BSG, unknown) is bird.
 func ResolveModelType(name, version string) entities.ModelType {
 	switch {
-	case name == "BattyBirdNET":
+	case name == "BattyBirdNET" || forkBatModelNames[name]:
 		return entities.ModelTypeBat
 	case name == "Perch":
 		return entities.ModelTypeMulti
