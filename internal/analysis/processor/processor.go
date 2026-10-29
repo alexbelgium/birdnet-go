@@ -990,7 +990,7 @@ func (p *Processor) processResults(settings *conf.Settings, item classifier.Resu
 
 	// Run ultrasonic validation filter on bat detections. Computed once per chunk
 	// since all detections share the same source audio.
-	if len(detections) > 0 && item.ModelID == classifier.RegistryIDBat {
+	if len(detections) > 0 && classifier.IsBatFamily(item.ModelID) {
 		p.applyUltrasonicFilter(settings, item, detections)
 	}
 
@@ -1555,9 +1555,10 @@ func (p *Processor) getBaseConfidenceThreshold(settings *conf.Settings, commonNa
 // otherwise, and for every other model (including the primary BirdNET), the
 // primary BirdNET threshold applies.
 func modelGlobalConfidenceThreshold(settings *conf.Settings, modelID string) float32 {
-	switch modelID {
-	case classifier.RegistryIDBat:
+	if classifier.IsBatFamily(modelID) {
 		return float32(settings.Bat.Threshold)
+	}
+	switch modelID {
 	case classifier.RegistryIDPerchV2:
 		if settings.Perch.OverrideThreshold {
 			return float32(settings.Perch.Threshold)

@@ -543,14 +543,14 @@ func (o *Orchestrator) SetSunCalc(sc *suncalc.SunCalc) {
 	s := newNighttimeScheduler(sc)
 	o.scheduler.Store(s)
 
-	// Only start the scheduler if the bat model is actually loaded.
-	if _, hasBat := o.models[RegistryIDBat]; hasBat {
+	// Only start the scheduler if a bat-family model is actually loaded.
+	if hasScheduleGated(o.models) {
 		o.startBatScheduler(s)
 	}
 }
 
 // scheduleReasonNight is the human-readable reason ModelScheduleStatus returns
-// when a model is paused by the nighttime schedule (currently only the bat model).
+// when a model is paused by the shared nighttime schedule.
 const scheduleReasonNight = "Night schedule"
 
 // isScheduleGated reports whether registryID runs only inside a schedule (today
@@ -1172,9 +1172,14 @@ func (o *Orchestrator) GetAllProbableSpeciesWithSettings(date time.Time, week fl
 	// honoring the exclude list, so multi-model (BattyBirdNET) setups see their
 	// bat species in the active/probable list instead of a bird-only view.
 	o.mu.RLock()
-	batEntry, hasBat := o.models[RegistryIDBat]
+	batEntries := make([]*modelEntry, 0, 2)
+	for id, entry := range o.models {
+		if isBatFamily(id) {
+			batEntries = append(batEntries, entry)
+		}
+	}
 	o.mu.RUnlock()
-	if hasBat {
+	for _, batEntry := range batEntries {
 		batEntry.mu.Lock()
 		var batLabels []string
 		if batEntry.instance != nil {
@@ -2048,10 +2053,10 @@ func (o *Orchestrator) LoadModel(registryID string) error {
 		log.Info("Model loaded dynamically",
 			logger.String("registry_id", registryID))
 
-		// Start nighttime scheduler if bat model was just loaded and suncalc is available.
+		// Start the nighttime scheduler if a bat-family model was just loaded and suncalc is available.
 		// Create a fresh scheduler to handle the unload/reload case where the
 		// previous scheduler's stopChan was closed.
-		if registryID == RegistryIDBat {
+		if isScheduleGated(registryID) {
 			if old := o.scheduler.Load(); old != nil && old.sunCalc != nil {
 				old.stop()
 				s := newNighttimeScheduler(old.sunCalc)
@@ -2350,7 +2355,7 @@ func (o *Orchestrator) UnloadModel(registryID string) error {
 	// teardown (the topology-reconfigure debounce window) is diagnosed as
 	// "unloaded" rather than a bare unknown model. Cleared on the next load.
 	o.modelUnloaded.Store(registryID, struct{}{})
-	if registryID == RegistryIDBat {
+	if isScheduleGated(registryID) && !hasScheduleGated(o.models) {
 		if s := o.scheduler.Load(); s != nil {
 			s.stop()
 		}

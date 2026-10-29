@@ -409,6 +409,19 @@
       "type": "object",
       "description": "BatConfig holds configuration for bat detection using BirdNET v2.4 embeddings."
     },
+    "BatONNXPaths": {
+      "properties": {
+        "modelPath": {
+          "type": "string"
+        },
+        "labelPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "BatONNXPaths holds an ONNX bat model and label file pair."
+    },
     "BirdNETConfig": {
       "properties": {
         "version": {
@@ -1030,6 +1043,19 @@
       "additionalProperties": false,
       "type": "object",
       "description": "FileOutput represents file logging configuration."
+    },
+    "ForkModelsConfig": {
+      "properties": {
+        "batdetect2": {
+          "$ref": "#/$defs/BatONNXPaths"
+        },
+        "bsgbat": {
+          "$ref": "#/$defs/BatONNXPaths"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "ForkModelsConfig holds the optional fork-specific bat classifiers."
     },
     "HealthCheckConfig": {
       "properties": {
@@ -2254,6 +2280,10 @@
         "models": {
           "$ref": "#/$defs/ModelsConfig",
           "description": "Global model enablement and management"
+        },
+        "forkmodels": {
+          "$ref": "#/$defs/ForkModelsConfig",
+          "description": "Fork-specific bat classifiers."
         },
         "lowmemory": {
           "$ref": "#/$defs/LowMemoryConfig",
