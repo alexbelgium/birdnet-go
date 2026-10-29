@@ -13,7 +13,6 @@ package reanalyze
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -647,8 +646,8 @@ func (c *Handler) resolveClipPath(ctx echo.Context, idStr string) (absPath, relP
 // gorm.ErrRecordNotFound — checking only the sentinels turns a legacy 404 into a
 // 500.
 func isDetectionNotFoundErr(err error) bool {
-	return stderrors.Is(err, repository.ErrDetectionNotFound) ||
-		stderrors.Is(err, gorm.ErrRecordNotFound) ||
+	return errors.Is(err, repository.ErrDetectionNotFound) ||
+		errors.Is(err, gorm.ErrRecordNotFound) ||
 		errors.IsNotFound(err)
 }
 
@@ -658,6 +657,6 @@ func isDetectionNotFoundErr(err error) bool {
 // break the api/v2 acyclic-import rule that apicore's import guard enforces.
 func isClipNotFoundErr(err error) bool {
 	return isDetectionNotFoundErr(err) ||
-		stderrors.Is(err, os.ErrNotExist) ||
-		stderrors.Is(err, repository.ErrNoClipPath)
+		errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, repository.ErrNoClipPath)
 }

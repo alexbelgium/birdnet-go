@@ -24,7 +24,6 @@ package reanalyze
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -39,13 +38,14 @@ import (
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
 // errDetectionLocked is this package's sentinel for "the detection was locked when
 // the write ran". Both persistence paths normalise onto it so the handler maps a
 // single condition to 409 without caring which schema answered.
-var errDetectionLocked = stderrors.New("detection is locked")
+var errDetectionLocked = errors.NewStd("detection is locked")
 
 // correctionNoteTimeout bounds the audit-note write. It runs on a context
 // detached from the request, so without its own deadline a stalled database
@@ -217,12 +217,12 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 		// with a generic client message so schema internals do not leak. The real
 		// error is in the structured log above.
 		switch {
-		case stderrors.Is(err, errDetectionLocked):
+		case errors.Is(err, errDetectionLocked):
 			return c.HandleError(ctx, err,
 				"Failed to correct species: detection is locked", http.StatusConflict)
-		case stderrors.Is(err, repository.ErrDetectionNotFound):
+		case errors.Is(err, repository.ErrDetectionNotFound):
 			return c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
-		case stderrors.Is(err, repository.ErrModelNotFound), stderrors.Is(err, repository.ErrLabelNotFound):
+		case errors.Is(err, repository.ErrModelNotFound), errors.Is(err, repository.ErrLabelNotFound):
 			return c.HandleError(ctx, err,
 				"The chosen model does not know this species; cannot apply correction",
 				http.StatusBadRequest)
@@ -503,7 +503,7 @@ func (c *Handler) writeSpeciesCorrectionV2(
 				"model_id":   aiModel.ID,
 				"confidence": confidence,
 			}); err != nil {
-				if !stderrors.Is(err, repository.ErrDetectionLocked) {
+				if !errors.Is(err, repository.ErrDetectionLocked) {
 					return fmt.Errorf("v2 detection update failed: %w", err)
 				}
 				// Update reports ErrDetectionLocked for ANY zero-row update on a
