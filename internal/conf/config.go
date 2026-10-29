@@ -1967,7 +1967,7 @@ type Settings struct {
 	BSG       BSGConfig       `yaml:"bsg" json:"bsg"`             // BSG regional bird model configuration
 	Models    ModelsConfig    `yaml:"models" json:"models"`       // Global model enablement and management
 
-	ForkModels ForkModelsConfig `yaml:"forkmodels" json:"forkModels"` // Fork-specific bat classifiers.
+	ForkModels BatModelsConfig `yaml:"forkmodels" json:"forkModels"` // Fork-specific bat classifiers.
 
 	LowMemory LowMemoryConfig `yaml:"lowmemory" json:"lowMemory" mapstructure:"lowmemory"` // Low-memory mode override (auto/on/off) for constrained systems
 

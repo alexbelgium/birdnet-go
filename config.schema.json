@@ -409,6 +409,21 @@
       "type": "object",
       "description": "BatConfig holds configuration for bat detection using BirdNET v2.4 embeddings."
     },
+    "BatModelsConfig": {
+      "properties": {
+        "batdetect2": {
+          "$ref": "#/$defs/BatONNXPaths",
+          "description": "BatDetect2 configures the optional BatDetect2 UK classifier files."
+        },
+        "bsgbat": {
+          "$ref": "#/$defs/BatONNXPaths",
+          "description": "BSGBat configures the optional BSG-BAT European classifier files."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "BatModelsConfig holds the optional fork-specific bat classifiers."
+    },
     "BatONNXPaths": {
       "properties": {
         "modelPath": {
@@ -1045,21 +1060,6 @@
       "additionalProperties": false,
       "type": "object",
       "description": "FileOutput represents file logging configuration."
-    },
-    "ForkModelsConfig": {
-      "properties": {
-        "batdetect2": {
-          "$ref": "#/$defs/BatONNXPaths",
-          "description": "BatDetect2 configures the optional BatDetect2 UK classifier files."
-        },
-        "bsgbat": {
-          "$ref": "#/$defs/BatONNXPaths",
-          "description": "BSGBat configures the optional BSG-BAT European classifier files."
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "description": "ForkModelsConfig holds the optional fork-specific bat classifiers."
     },
     "HealthCheckConfig": {
       "properties": {
@@ -2286,7 +2286,7 @@
           "description": "Global model enablement and management"
         },
         "forkmodels": {
-          "$ref": "#/$defs/ForkModelsConfig",
+          "$ref": "#/$defs/BatModelsConfig",
           "description": "Fork-specific bat classifiers."
         },
         "lowmemory": {
