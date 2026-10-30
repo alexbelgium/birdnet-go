@@ -32,6 +32,12 @@ type BSGBatModelConfig struct {
 	ONNXRuntimePath string
 	// Threads sets the intra-operation CPU thread budget.
 	Threads int
+	// Backend selects auto, onnx, or openvino using the global BirdNET preference.
+	Backend string
+	// OpenVINOPath optionally selects the OpenVINO C library.
+	OpenVINOPath string
+	// OpenVINODevice selects auto, cpu, or gpu.
+	OpenVINODevice string
 }
 
 // BSGBat runs the BSG-BAT European species classifier.
@@ -39,15 +45,15 @@ type BSGBat struct {
 	*batORTBase
 	dsp           *bsgBatDSP
 	input, output *ort.Tensor[float32]
+	ovClassifier  inference.Classifier
+	device        string
+	precision     string
 }
 
 // NewBSGBat creates a BSG-BAT model instance.
 func NewBSGBat(cfg *BSGBatModelConfig) (*BSGBat, error) {
 	if cfg == nil {
 		return nil, errors.Newf("BSG-BAT configuration is required").Component("classifier").Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Category(errors.CategoryValidation).Build()
-	}
-	if err := inference.InitONNXRuntime(cfg.ONNXRuntimePath); err != nil {
-		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
 	}
 	rawLabels, err := inferenceonnx.LoadLabels(cfg.LabelPath)
 	if err != nil {
@@ -74,6 +80,17 @@ func NewBSGBat(cfg *BSGBatModelConfig) (*BSGBat, error) {
 	if err != nil {
 		return nil, errors.New(err).Component("classifier").Context("operation", "validate_bsgbat_labels").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
 	}
+	info := ModelRegistry[RegistryIDBSGBat]
+	info.NumSpecies = len(labels)
+	base := &batORTBase{labels: labels, info: info, modelPath: cfg.ModelPath}
+	// The graph includes the background logit; only the public species list drops it.
+	if classifier, device, precision, ok := tryBSGBatOpenVINO(cfg, rawLabels); ok {
+		base.info.Backend = BackendOpenVINO
+		return &BSGBat{batORTBase: base, dsp: dsp, ovClassifier: classifier, device: device, precision: precision}, nil
+	}
+	if err := inference.InitONNXRuntime(cfg.ONNXRuntimePath); err != nil {
+		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
+	}
 	session, err := newBatORTSession(RegistryIDBSGBat, cfg.ModelPath, []string{bsgBatInputName}, []string{bsgBatOutputName}, cfg.Threads)
 	if err != nil {
 		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
@@ -89,9 +106,8 @@ func NewBSGBat(cfg *BSGBatModelConfig) (*BSGBat, error) {
 		_ = session.Destroy()
 		return nil, errors.New(err).Component("classifier").Category(errors.CategoryModelInit).Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Build()
 	}
-	info := ModelRegistry[RegistryIDBSGBat]
-	info.NumSpecies = len(labels)
-	base := &batORTBase{session: session, labels: labels, info: info, modelPath: cfg.ModelPath, values: []ort.Value{input, output}}
+	base.session = session
+	base.values = []ort.Value{input, output}
 	return &BSGBat{batORTBase: base, dsp: dsp, input: input, output: output}, nil
 }
 
@@ -99,6 +115,9 @@ func (b *BSGBat) runLogits(samples []float32) ([]float32, error) {
 	data, err := b.dsp.preprocess(samples)
 	if err != nil {
 		return nil, err
+	}
+	if b.ovClassifier != nil {
+		return b.ovClassifier.Predict(data)
 	}
 	copy(b.input.GetData(), data)
 	if err := b.session.Run([]ort.Value{b.input}, []ort.Value{b.output}); err != nil {
@@ -122,7 +141,7 @@ func (b *BSGBat) Predict(ctx context.Context, samples [][]float32) ([]datastore.
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.session == nil {
+	if b.session == nil && b.ovClassifier == nil {
 		span.markErrored(errTypeClassifierNil)
 		return nil, errors.Newf("BSG-BAT classifier is closed").Component("classifier").Context("operation", "predict").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
 	}

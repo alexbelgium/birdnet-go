@@ -50,6 +50,17 @@ type Classifier interface {
 	Close() error
 }
 
+// MultiOutputClassifier reads several output ports from one inference request.
+// Output slices are independent Go allocations in Options.OutputIndices order.
+// Like Classifier, it is not goroutine-safe.
+type MultiOutputClassifier interface {
+	Classifier
+	// PredictOutputs runs one inference and returns the selected output tensors.
+	PredictOutputs(samples []float32) ([][]float32, error)
+	// OutputSizes returns an independent copy of the selected output element counts.
+	OutputSizes() []int
+}
+
 // Options configures a Classifier.
 type Options struct {
 	// PrecisionHint is the OpenVINO INFERENCE_PRECISION_HINT (e.g. "f16").
@@ -64,4 +75,8 @@ type Options struct {
 	// for single-output models like BirdNET v2.4; 3 for the Perch v2 multi-output
 	// graph whose species logits are the 4th output.
 	OutputIndex int
+	// OutputIndices optionally selects multiple output ports for PredictOutputs.
+	// When set, it overrides OutputIndex; PredictRaw and NumClasses use its first
+	// port. An empty slice preserves the single-output behavior.
+	OutputIndices []int
 }
