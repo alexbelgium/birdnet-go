@@ -113,6 +113,7 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"ForkModels":                      {categories: []hotReloadCategory{hotReloadRestart}},
 	"ForkModels.BatDetect2.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
 	"ForkModels.BSGBat.Threshold":     {categories: []hotReloadCategory{hotReloadFresh}},
+	"ForkModels.BSGBat.BackgroundMax": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// --- BSG-BAT ---
 	// Parent is restart like Perch: model and label path changes reload the model.

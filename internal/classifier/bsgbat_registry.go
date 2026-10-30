@@ -47,6 +47,7 @@ func (o *Orchestrator) loadBSGBat(threads int) error {
 
 func bsgBatConfigFor(settings *conf.Settings, modelPath, labelPath string, threads int) *BSGBatModelConfig {
 	return &BSGBatModelConfig{
+		Settings:  settings,
 		ModelPath: modelPath, LabelPath: labelPath, Threads: threads,
 		ONNXRuntimePath: settings.BirdNET.ONNXRuntimePath,
 		Backend:         settings.BirdNET.Backend, OpenVINOPath: settings.BirdNET.OpenVINOPath,

@@ -437,10 +437,6 @@
         "batdetect2": {
           "$ref": "#/$defs/BatONNXPaths",
           "description": "BatDetect2 configures the optional BatDetect2 UK classifier files."
-        },
-        "bsgbat": {
-          "$ref": "#/$defs/BatONNXPaths",
-          "description": "BSGBat configures the optional BSG-BAT European classifier files."
         }
       },
       "additionalProperties": false,
