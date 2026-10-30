@@ -156,3 +156,129 @@ func TestIsBirdCapableModel(t *testing.T) {
 	assert.True(t, IsBirdCapableModel(RegistryIDBSG))
 	assert.True(t, IsBirdCapableModel("unknown-model"), "an unknown ID falls back to the BirdNET default")
 }
+
+// TestIsBatCapableModel pins IsBatCapableModel as IsBirdCapableModel's exact
+// complement: the two must never both report true (or both false) for the
+// same ID, or a species could end up a confirming peer under neither rule, or
+// under both.
+func TestIsBatCapableModel(t *testing.T) {
+	t.Parallel()
+
+	ids := []string{RegistryIDBat, birdNETModelID, RegistryIDBirdNETV3, RegistryIDPerchV2, RegistryIDBSG, "unknown-model"}
+	for _, id := range ids {
+		assert.NotEqual(t, IsBirdCapableModel(id), IsBatCapableModel(id), "id %q", id)
+	}
+	assert.True(t, IsBatCapableModel(RegistryIDBat))
+}
+
+// TestSpeciesSharedByBatModels mirrors TestSpeciesSharedByBirdModels for the
+// bat-capable path. The fixture orchestrator has exactly one bat model loaded,
+// which is today's real topology (RegistryIDBat is a single architectural
+// slot): a quorum of one is satisfiable, so a lone bat model keeps today's
+// single-model behaviour, and a quorum of two is not, so the rule would apply
+// the moment a second bat model became loadable without any further change
+// here.
+func TestSpeciesSharedByBatModels(t *testing.T) {
+	t.Parallel()
+
+	const batSpecies = "Pipistrellus pipistrellus"
+
+	tests := []struct {
+		name      string
+		species   string
+		minModels int
+		want      bool
+	}{
+		{
+			name:      "the lone bat model satisfies a quorum of one",
+			species:   batSpecies,
+			minModels: 1,
+			want:      true,
+		},
+		{
+			name:      "the lone bat model is not a quorum of two",
+			species:   batSpecies,
+			minModels: 2,
+			want:      false,
+		},
+		{
+			name:      "a bird species is known to no bat model",
+			species:   greatTitSpecies,
+			minModels: 1,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			shared, ok := newBirdModelOrchestrator(t).SpeciesSharedByBatModels(tt.species, nil, tt.minModels)
+
+			require.True(t, ok, "support must be evaluable for a fully loaded orchestrator")
+			assert.Equal(t, tt.want, shared)
+		})
+	}
+}
+
+// TestSpeciesSharedByBatModels_SecondBatModel proves the quorum math itself
+// once two bat-capable models are loaded, independent of whether today's
+// catalog can produce that topology. It registers a second, temporary
+// ModelRegistry entry that resolves to ModelTypeBat so the fixture can load a
+// second bat-capable instance under a distinct ID, mirroring how
+// TestSpeciesSharedByBirdModels already proves the >=2 case for birds.
+func TestSpeciesSharedByBatModels_SecondBatModel(t *testing.T) {
+	const secondBatID = "test-second-bat-model"
+	ModelRegistry[secondBatID] = ModelInfo{ID: secondBatID, Name: "BattyBirdNET", DetectionName: "BattyBirdNET", DetectionVersion: "1.0"}
+	t.Cleanup(func() { delete(ModelRegistry, secondBatID) })
+	require.True(t, IsBatCapableModel(secondBatID), "fixture must actually resolve as bat-capable")
+
+	const batSpecies = "Pipistrellus pipistrellus"
+	o := newTestOrchestrator(t,
+		&mockModelInstance{id: RegistryIDBat, labels: []string{batSpecies}},
+		&mockModelInstance{id: secondBatID, labels: []string{batSpecies}},
+	)
+
+	shared, ok := o.SpeciesSharedByBatModels(batSpecies, nil, 2)
+	require.True(t, ok)
+	assert.True(t, shared, "two bat models sharing the species must satisfy a quorum of two")
+
+	// One of the two not knowing the species still settles it the way a single
+	// bird model that cannot predict the species does.
+	o2 := newTestOrchestrator(t,
+		&mockModelInstance{id: RegistryIDBat, labels: []string{batSpecies}},
+		&mockModelInstance{id: secondBatID, labels: []string{"Myotis daubentonii"}},
+	)
+	shared, ok = o2.SpeciesSharedByBatModels(batSpecies, nil, 2)
+	require.True(t, ok)
+	assert.False(t, shared)
+}
+
+// TestSpeciesSharedByBatModels_Unevaluable mirrors
+// TestSpeciesSharedByBirdModels_Unevaluable for the bat-capable path.
+func TestSpeciesSharedByBatModels_Unevaluable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil orchestrator", func(t *testing.T) {
+		t.Parallel()
+		var o *Orchestrator
+		_, ok := o.SpeciesSharedByBatModels("Pipistrellus pipistrellus", nil, 1)
+		assert.False(t, ok)
+	})
+
+	t.Run("empty species name", func(t *testing.T) {
+		t.Parallel()
+		o := newTestOrchestrator(t, &mockModelInstance{id: RegistryIDBat, labels: []string{"Pipistrellus pipistrellus"}})
+		_, ok := o.SpeciesSharedByBatModels("", nil, 1)
+		assert.False(t, ok)
+	})
+
+	t.Run("model mid-reload has no readable labels", func(t *testing.T) {
+		t.Parallel()
+		o := newTestOrchestrator(t, &mockModelInstance{id: RegistryIDBat, labels: []string{"Pipistrellus pipistrellus"}})
+		// An entry whose instance was torn down by a reload in flight.
+		o.models[RegistryIDBat] = &modelEntry{}
+		_, ok := o.SpeciesSharedByBatModels("Pipistrellus pipistrellus", nil, 1)
+		assert.False(t, ok)
+	})
+}

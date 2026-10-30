@@ -262,15 +262,18 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 
-	// Bats and the non-species sound classes keep today's behaviour untouched.
-	if !classifier.IsBirdCapableModel(item.BestModelID) || nonbird.IsNonSpeciesLabel(result.RawLabel) {
+	// The non-species sound classes keep today's behaviour untouched. Bats are
+	// not excluded here: item.BestModelID tells whether this is a bat detection,
+	// and every check below reads that instead of assuming bird.
+	if nonbird.IsNonSpeciesLabel(result.RawLabel) {
 		return firstDailyNormal, firstDailyCandidate{}
 	}
+	isBat := classifier.IsBatCapableModel(item.BestModelID)
 
 	// Already agreed on by enough models: nothing for this rule to decide. Checked
 	// first because it is a pure in-memory count and it is the common outcome for
 	// a genuine new species.
-	if p.countConfirmingModels(settings, item) >= firstDailyMinModels {
+	if p.countConfirmingModels(settings, item, isBat) >= firstDailyMinModels {
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 
@@ -292,14 +295,22 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 
-	// Birds only. An unknown taxon is not evidence of a non-bird, so it fails open.
-	if isBird, known := classifier.IsBirdSpecies(scientificName); !known || !isBird {
-		return firstDailyNormal, firstDailyCandidate{}
+	// Birds and bats only. A bat detection is already unambiguous — Bat models
+	// carry no other taxon's labels, so the model that produced it is proof
+	// enough. A non-bat detection still needs the taxonomy check: a multi-taxa
+	// model (Perch, BirdNET v3.0+) also predicts insects, amphibians and other
+	// mammals, which stay out of scope. An unknown taxon is not evidence of a
+	// non-bird, so it fails open.
+	if !isBat {
+		if isBird, known := classifier.IsBirdSpecies(scientificName); !known || !isBird {
+			return firstDailyNormal, firstDailyCandidate{}
+		}
 	}
 
-	// Only meaningful when every relevant active bird model could have confirmed
-	// it. A species one model cannot predict could never reach two confirmations.
-	if !p.speciesSharedByActiveBirdModels(item.Source, scientificName) {
+	// Only meaningful when every relevant active model of the same family could
+	// have confirmed it. A species one model cannot predict could never reach two
+	// confirmations.
+	if !p.speciesSharedByActiveModels(item.Source, scientificName, isBat) {
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 
@@ -400,15 +411,27 @@ func (p *Processor) noteAcceptedDetection(item *PendingDetection) {
 	p.firstDaily.queueApproval(firstDailyCandidate{day: result.Date(), scientificName: result.Species.ScientificName})
 }
 
-// countConfirmingModels counts the bird-capable models whose best score for this
-// species reached that model's normal (non-dynamic) threshold. The dynamically
-// adjusted threshold is deliberately not used: a model that only cleared a
-// lowered bar is not independent confirmation.
-func (p *Processor) countConfirmingModels(settings *conf.Settings, item *PendingDetection) int {
+// countConfirmingModels counts the models of item's family (bat when isBat,
+// bird-capable otherwise) whose best score for this species reached that
+// model's normal (non-dynamic) threshold. The dynamically adjusted threshold is
+// deliberately not used: a model that only cleared a lowered bar is not
+// independent confirmation.
+//
+// The family filter is still needed even though ModelContributions should
+// never mix taxa in practice (a bat model's labels and a bird-capable model's
+// labels are disjoint, so the same species cannot appear via both): it applies
+// the same eligible-model predicate speciesSharedByActiveModels uses, so a
+// confirming count and a support check for the same item never classify a
+// given model ID differently.
+func (p *Processor) countConfirmingModels(settings *conf.Settings, item *PendingDetection, isBat bool) int {
+	eligible := classifier.IsBirdCapableModel
+	if isBat {
+		eligible = classifier.IsBatCapableModel
+	}
 	species := item.Detection.Result.Species
 	count := 0
 	for modelID, contrib := range item.ModelContributions {
-		if !classifier.IsBirdCapableModel(modelID) {
+		if !eligible(modelID) {
 			continue
 		}
 		normal := p.getBaseConfidenceThreshold(settings, species.CommonName, species.ScientificName, modelID)
@@ -467,17 +490,30 @@ func dynamicThresholdKey(commonName, scientificName string) string {
 	return key
 }
 
-// speciesSharedByActiveBirdModels reports whether enough relevant bird models are
-// active and all of them can predict the species.
-func (p *Processor) speciesSharedByActiveBirdModels(sourceID, scientificName string) bool {
+// speciesSharedByActiveModels reports whether enough relevant active models of
+// the species' family (bat when isBat, bird-capable otherwise) are active and
+// all of them can predict the species.
+func (p *Processor) speciesSharedByActiveModels(sourceID, scientificName string, isBat bool) bool {
 	modelIDs := p.sourceModelIDs(sourceID)
+	// The family is part of the key: it is what selects between the bird and bat
+	// orchestrator queries below, and a species name is never ambiguous between
+	// the two in practice, but keying on it costs nothing and rules out any
+	// cross-family memo collision outright.
 	cacheKey := firstDailySupportKey(modelIDs, scientificName)
+	if isBat {
+		cacheKey = "bat|" + cacheKey
+	}
 
 	if shared, cached := p.firstDaily.lookupSupport(cacheKey); cached {
 		return shared
 	}
 
-	shared, ok := p.Bn.SpeciesSharedByBirdModels(scientificName, modelIDs, firstDailyMinModels)
+	var shared, ok bool
+	if isBat {
+		shared, ok = p.Bn.SpeciesSharedByBatModels(scientificName, modelIDs, firstDailyMinModels)
+	} else {
+		shared, ok = p.Bn.SpeciesSharedByBirdModels(scientificName, modelIDs, firstDailyMinModels)
+	}
 	if !ok {
 		// Transient: a model mid-reload. Do not memoize it, or one bad moment would
 		// disable the rule for this species until the TTL expires.

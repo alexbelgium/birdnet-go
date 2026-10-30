@@ -1,7 +1,8 @@
-// species_consensus.go exposes the per-model species support and taxonomic-class
-// lookups used by the processor's first-daily-detection consensus rule. Both are
-// read-only queries over data the orchestrator and the OpenFauna dataset already
-// hold; nothing here participates in inference.
+// species_consensus.go exposes the per-model species support, model-family and
+// taxonomic-class lookups used by the processor's first-daily-detection
+// consensus rule for both birds and bats. All of it is read-only queries over
+// data the orchestrator and the OpenFauna dataset already hold; nothing here
+// participates in inference.
 package classifier
 
 import (
@@ -62,10 +63,29 @@ func IsBirdSpecies(scientificName string) (isBird, known bool) {
 // taxonomic class, so a future model is classified by the same rule rather than
 // by an allow-list here that it would silently fall out of.
 //
-// An unknown model ID resolves to the BirdNET default, i.e. bird-capable.
+// An unknown model ID resolves to the BirdNET default, i.e. bird-capable. This
+// also reports true for a multi-taxa model (Perch, BirdNET v3.0+): it predicts
+// birds alongside other taxa, so it is a valid peer for bird confirmation.
 func IsBirdCapableModel(modelID string) bool {
+	return resolveModelFamily(modelID) != entities.ModelTypeBat
+}
+
+// IsBatCapableModel reports whether a model classifies bats. Unlike the
+// multi-taxa models bird confirmation also accepts, a bat model's label set is
+// exclusively bat species, so this is also a definitive "scientificName is a
+// bat species" signal: no taxonomy lookup can tell that apart from a species
+// OpenFauna simply has not catalogued (see IsBirdSpecies), but the model that
+// produced the detection can.
+func IsBatCapableModel(modelID string) bool {
+	return resolveModelFamily(modelID) == entities.ModelTypeBat
+}
+
+// resolveModelFamily is the shared model-type lookup IsBirdCapableModel and
+// IsBatCapableModel are both defined in terms of, so the two can never disagree
+// about a given model ID.
+func resolveModelFamily(modelID string) entities.ModelType {
 	info := DetectionModelInfoForID(modelID)
-	return detection.ResolveModelType(info.Name, info.Version) != entities.ModelTypeBat
+	return detection.ResolveModelType(info.Name, info.Version)
 }
 
 // SpeciesSharedByBirdModels reports whether at least minModels bird-capable
@@ -80,11 +100,24 @@ func IsBirdCapableModel(modelID string) bool {
 // ok is false when the answer cannot be trusted (no orchestrator, unusable
 // species name, or a model whose labels cannot be read because its instance is
 // mid-reload). Callers must fail open on it rather than read shared=false.
+func (o *Orchestrator) SpeciesSharedByBirdModels(scientificName string, restrictTo []string, minModels int) (shared, ok bool) {
+	return o.speciesSharedByModelFamily(scientificName, restrictTo, minModels, IsBirdCapableModel)
+}
+
+// SpeciesSharedByBatModels is SpeciesSharedByBirdModels' bat-capable
+// counterpart, for the same consensus rule applied to a bat detection.
+func (o *Orchestrator) SpeciesSharedByBatModels(scientificName string, restrictTo []string, minModels int) (shared, ok bool) {
+	return o.speciesSharedByModelFamily(scientificName, restrictTo, minModels, IsBatCapableModel)
+}
+
+// speciesSharedByModelFamily is SpeciesSharedByBirdModels and
+// SpeciesSharedByBatModels' shared implementation, parameterized on which
+// models are eligible peers.
 //
 // Locking follows AllLabels: model IDs and entry pointers are snapshotted under
 // o.mu, which is released before any entry.mu is taken. Instances are captured
 // under entry.mu, then Labels is called after releasing it, matching AllLabels.
-func (o *Orchestrator) SpeciesSharedByBirdModels(scientificName string, restrictTo []string, minModels int) (shared, ok bool) {
+func (o *Orchestrator) speciesSharedByModelFamily(scientificName string, restrictTo []string, minModels int, eligible func(string) bool) (shared, ok bool) {
 	if o == nil || minModels < 1 {
 		return false, false
 	}
@@ -97,7 +130,7 @@ func (o *Orchestrator) SpeciesSharedByBirdModels(scientificName string, restrict
 	refs := make([]entryRef, 0, len(o.models))
 	for id, entry := range o.models {
 		// IsModelActive reads an atomic, not o.mu, so it is safe under the RLock.
-		if !IsBirdCapableModel(id) || !o.IsModelActive(id) {
+		if !eligible(id) || !o.IsModelActive(id) {
 			continue
 		}
 		if restrictTo != nil && !slices.Contains(restrictTo, id) {
