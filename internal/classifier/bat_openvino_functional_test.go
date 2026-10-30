@@ -47,7 +47,8 @@ func TestBatOpenVINOEmbeddingRegressionParity(t *testing.T) {
 		ONNXRuntimePath: os.Getenv("ONNX_RUNTIME_PATH"), Threads: 1,
 		Backend: conf.BackendPrefOpenVINO, OpenVINOPath: os.Getenv("OV_TEST_LIB"), OpenVINODevice: conf.OVDeviceCPU,
 	}
-	t.Cleanup(func() { assert.NoError(t, inference.DestroyOpenVINO()) })
+	// The shared OpenVINO core lives until process shutdown, as in production.
+	// Close model handles below; do not tear down the runtime between fixtures.
 	ovModel, err := NewBat(&cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, ovModel.Close()) })

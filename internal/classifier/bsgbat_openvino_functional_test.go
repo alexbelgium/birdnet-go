@@ -44,7 +44,8 @@ func TestBSGBatOpenVINOParity(t *testing.T) {
 		Backend: conf.BackendPrefOpenVINO, OpenVINOPath: os.Getenv("OV_TEST_LIB"), OpenVINODevice: device,
 	}
 	// A successful OV load must not depend on ORT being loadable.
-	t.Cleanup(func() { assert.NoError(t, inference.DestroyOpenVINO()) })
+	// The shared OpenVINO core lives until process shutdown, as in production.
+	// Close model handles below; do not tear down the runtime between fixtures.
 	ovModel, err := NewBSGBat(&cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, ovModel.Close()) })
