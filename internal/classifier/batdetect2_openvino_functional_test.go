@@ -28,7 +28,8 @@ func TestBatDetect2OpenVINOParity(t *testing.T) {
 		ONNXRuntimePath: filepath.Join(t.TempDir(), "missing-ort.so"), Threads: 1,
 		Backend: conf.BackendPrefOpenVINO, OpenVINOPath: os.Getenv("OV_TEST_LIB"), OpenVINODevice: conf.OVDeviceCPU,
 	}
-	t.Cleanup(func() { assert.NoError(t, inference.DestroyOpenVINO()) })
+	// The shared OpenVINO core lives until process shutdown, as in production.
+	// Close model handles below; do not tear down the runtime between fixtures.
 	ovModel, err := NewBatDetect2(&cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, ovModel.Close()) })
