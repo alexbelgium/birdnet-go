@@ -85,6 +85,11 @@ func (b *batORTBase) ResolvedModelPath() string { return b.modelPath }
 func (b *batORTBase) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.closeLocked()
+}
+
+// closeLocked releases ORT resources while the caller holds mu.
+func (b *batORTBase) closeLocked() error {
 	var result error
 	for _, value := range b.values {
 		result = errors.Join(result, value.Destroy())

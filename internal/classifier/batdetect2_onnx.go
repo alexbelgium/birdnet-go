@@ -41,11 +41,19 @@ type BatDetect2ModelConfig struct {
 	ONNXRuntimePath string
 	// Threads sets the intra-operation CPU thread budget.
 	Threads int
+	// Backend selects auto, onnx, or openvino using the global BirdNET preference.
+	Backend string
+	// OpenVINOPath optionally selects the OpenVINO C library.
+	OpenVINOPath string
+	// OpenVINODevice selects auto, cpu, or gpu.
+	OpenVINODevice string
 }
 
 // BatDetect2 runs the BatDetect2 spectrogram detector and species classifier.
 type BatDetect2 struct {
 	*batORTBase
+	ovClassifier                     inference.MultiOutputClassifier
+	device, precision                string
 	dsp                              *batDetect2DSP
 	input, detection, classes        *ort.Tensor[float32]
 	tile, fullDetection, fullClasses []float32
@@ -55,9 +63,6 @@ type BatDetect2 struct {
 func NewBatDetect2(cfg *BatDetect2ModelConfig) (*BatDetect2, error) {
 	if cfg == nil {
 		return nil, errors.Newf("BatDetect2 configuration is required").Component("classifier").Context("operation", "initialize_batdetect2").Context("model", RegistryIDBatDetect2).Category(errors.CategoryValidation).Build()
-	}
-	if err := inference.InitONNXRuntime(cfg.ONNXRuntimePath); err != nil {
-		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_batdetect2").Context("model", RegistryIDBatDetect2).Category(errors.CategoryModelInit).Build()
 	}
 	rawLabels, err := inferenceonnx.LoadLabels(cfg.LabelPath)
 	if err != nil {
@@ -83,16 +88,25 @@ func NewBatDetect2(cfg *BatDetect2ModelConfig) (*BatDetect2, error) {
 		}
 		labels[i] = scientificName + "_" + commonName
 	}
-	session, err := newBatORTSession(RegistryIDBatDetect2, cfg.ModelPath, []string{batDetect2InputName}, []string{batDetect2DetectionOutput, batDetect2ClassOutput}, cfg.Threads)
+	dsp, err := newBatDetect2DSP(batDetect2ExpectedSamples)
 	if err != nil {
-		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_batdetect2").Context("model", RegistryIDBatDetect2).Category(errors.CategoryModelInit).Context("model_path", cfg.ModelPath).Build()
+		return nil, errors.New(err).Component("classifier").Category(errors.CategoryModelInit).Context("operation", "initialize_batdetect2").Context("model", RegistryIDBatDetect2).Build()
 	}
 	info := ModelRegistry[RegistryIDBatDetect2]
 	info.NumSpecies = len(labels)
-	dsp, err := newBatDetect2DSP(batDetect2ExpectedSamples)
+	base := &batORTBase{labels: labels, info: info, modelPath: cfg.ModelPath}
+	model := &BatDetect2{batORTBase: base, dsp: dsp, tile: make([]float32, batDetect2ImageHeight*batDetect2TileWidth), fullDetection: make([]float32, len(dsp.image)), fullClasses: make([]float32, len(labels)*len(dsp.image))}
+	if classifier, device, precision, ok := tryBatDetect2OpenVINO(cfg, len(labels)); ok {
+		base.info.Backend = BackendOpenVINO
+		model.ovClassifier, model.device, model.precision = classifier, device, precision
+		return model, nil
+	}
+	if err := inference.InitONNXRuntime(cfg.ONNXRuntimePath); err != nil {
+		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_batdetect2").Context("model", RegistryIDBatDetect2).Category(errors.CategoryModelInit).Build()
+	}
+	session, err := newBatORTSession(RegistryIDBatDetect2, cfg.ModelPath, []string{batDetect2InputName}, []string{batDetect2DetectionOutput, batDetect2ClassOutput}, cfg.Threads)
 	if err != nil {
-		_ = session.Destroy()
-		return nil, errors.New(err).Component("classifier").Category(errors.CategoryModelInit).Context("operation", "initialize_batdetect2").Context("model", RegistryIDBatDetect2).Build()
+		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_batdetect2").Context("model", RegistryIDBatDetect2).Category(errors.CategoryModelInit).Context("model_path", cfg.ModelPath).Build()
 	}
 	input, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 1, batDetect2ImageHeight, batDetect2TileWidth))
 	if err != nil {
@@ -112,11 +126,19 @@ func NewBatDetect2(cfg *BatDetect2ModelConfig) (*BatDetect2, error) {
 		_ = session.Destroy()
 		return nil, errors.New(err).Component("classifier").Category(errors.CategoryModelInit).Context("operation", "initialize_batdetect2").Context("model", RegistryIDBatDetect2).Build()
 	}
-	base := &batORTBase{session: session, labels: labels, info: info, modelPath: cfg.ModelPath, values: []ort.Value{input, detection, classes}}
-	return &BatDetect2{batORTBase: base, dsp: dsp, input: input, detection: detection, classes: classes, tile: make([]float32, batDetect2ImageHeight*batDetect2TileWidth), fullDetection: make([]float32, len(dsp.image)), fullClasses: make([]float32, len(labels)*len(dsp.image))}, nil
+	base.session, base.values = session, []ort.Value{input, detection, classes}
+	model.input, model.detection, model.classes = input, detection, classes
+	return model, nil
 }
 
 func (b *BatDetect2) runTile(tile []float32) (detection, classProbabilities []float32, err error) {
+	if b.ovClassifier != nil {
+		outputs, err := b.ovClassifier.PredictOutputs(tile)
+		if err != nil {
+			return nil, nil, err
+		}
+		return outputs[batDetect2DetectionOutputIndex], outputs[batDetect2ClassOutputIndex], nil
+	}
 	copy(b.input.GetData(), tile)
 	if err := b.session.Run([]ort.Value{b.input}, []ort.Value{b.detection, b.classes}); err != nil {
 		return nil, nil, err
@@ -139,7 +161,7 @@ func (b *BatDetect2) Predict(ctx context.Context, samples [][]float32) ([]datast
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.session == nil {
+	if b.session == nil && b.ovClassifier == nil {
 		span.markErrored(errTypeClassifierNil)
 		return nil, errors.Newf("BatDetect2 classifier is closed").Component("classifier").Context("operation", "predict").Context("model", RegistryIDBatDetect2).Category(errors.CategoryModelInit).Build()
 	}
