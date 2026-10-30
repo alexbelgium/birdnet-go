@@ -1,7 +1,6 @@
 package processor
 
 import (
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
 const (
@@ -72,6 +72,12 @@ func newConsensusDetection(modelID, rawLabel string, confidences map[string]floa
 // these cases focused on the gate's own decisions.
 func markSpeciesShared(p *Processor, shared bool) {
 	p.firstDaily.storeSupport(firstDailySupportKey(nil, consensusSpecies), shared)
+}
+
+// markSpeciesSharedBat is markSpeciesShared's bat-family counterpart: it seeds
+// the memo under the key speciesSharedByActiveModels uses when isBat is true.
+func markSpeciesSharedBat(p *Processor, shared bool) {
+	p.firstDaily.storeSupport("bat|"+firstDailySupportKey(nil, consensusSpecies), shared)
 }
 
 // markMemo seeds the per-day answer warmFirstDailyAcceptance would have left.
@@ -163,10 +169,26 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 			memo:        &absent,
 		},
 		{
-			name:        "bat detections are untouched",
+			// Mirrors "first daily detection with only one model is discarded":
+			// bats get the same two-model rule once two bat models share the
+			// species, which the production codebase cannot produce today (there
+			// is exactly one bat model slot) but the gate must still apply it
+			// correctly if that ever changes.
+			name:        "bat detection with only one model is discarded when two bat models share the species",
 			confidences: map[string]float64{classifier.RegistryIDBat: 0.8},
 			modelID:     classifier.RegistryIDBat,
 			shared:      true,
+			memo:        &absent,
+			wantDiscard: true,
+		},
+		{
+			// Mirrors "species not shared by every active bird model is
+			// untouched": today's real topology, where only one bat model can be
+			// active, so the quorum of two is never met and the rule degrades to
+			// normal single-model behaviour.
+			name:        "bat detection not shared by two bat models is untouched",
+			confidences: map[string]float64{classifier.RegistryIDBat: 0.8},
+			modelID:     classifier.RegistryIDBat,
 			memo:        &absent,
 		},
 		{
@@ -185,7 +207,11 @@ func TestShouldDiscardFirstDailyDetection(t *testing.T) {
 
 			// No datastore: the gate must decide entirely from memory.
 			p := &Processor{}
-			markSpeciesShared(p, tt.shared)
+			if classifier.IsBatCapableModel(tt.modelID) {
+				markSpeciesSharedBat(p, tt.shared)
+			} else {
+				markSpeciesShared(p, tt.shared)
+			}
 			if tt.memo != nil {
 				markMemo(p, *tt.memo)
 			}
@@ -215,7 +241,7 @@ func TestCountConfirmingModels_ActionOnlyConfigUsesGlobalThreshold(t *testing.T)
 		classifier.RegistryIDPerchV2: 0.3,
 	})
 
-	assert.Equal(t, 1, (&Processor{}).countConfirmingModels(settings, item))
+	assert.Equal(t, 1, (&Processor{}).countConfirmingModels(settings, item, false))
 }
 
 func TestShouldDiscardFirstDailyDetection_Whitelist(t *testing.T) {
@@ -518,7 +544,7 @@ func TestWarmFirstDailyAcceptance_AcceptedSpecies(t *testing.T) {
 func TestWarmFirstDailyAcceptance_DatastoreErrorFailsOpen(t *testing.T) {
 	settings := newConsensusSettings()
 	p := &Processor{
-		Ds:                expectSpeciesCount(t, &dbResult{err: errors.New("database is locked")}),
+		Ds:                expectSpeciesCount(t, &dbResult{err: errors.NewStd("database is locked")}),
 		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
 	}
 	markSpeciesShared(p, true)
