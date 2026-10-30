@@ -211,13 +211,12 @@ static void ovbind_model_free(ov_model_t* model) {
     OVB.model_free(model);
 }
 
-// OVBIND_RESHAPE_RANK is the expected input rank [batch, samples].
-#define OVBIND_RESHAPE_RANK 2
-// OVBIND_BATCH_DIM_INDEX / OVBIND_SAMPLE_DIM_INDEX index the input dimensions.
+// OVBIND_MIN_INPUT_RANK permits waveform and spectrogram inputs with a batch axis.
+#define OVBIND_MIN_INPUT_RANK 2
+// OVBIND_BATCH_DIM_INDEX indexes the batch dimension.
 #define OVBIND_BATCH_DIM_INDEX 0
-#define OVBIND_SAMPLE_DIM_INDEX 1
-// OVBIND_ERR_BAD_INPUT_SHAPE is returned when the input is not a rank-2 shape
-// with a static sample dimension. It is deliberately far outside the ov_status_e
+// OVBIND_ERR_BAD_INPUT_SHAPE is returned for dynamic or invalid non-batch
+// dimensions. It is deliberately far outside the ov_status_e
 // range (OK..-17, all small negatives) so it cannot collide with a genuine
 // OpenVINO status, letting the Go caller distinguish "bad model shape" from a
 // real reshape failure and report a clear error instead of a stale
@@ -225,12 +224,14 @@ static void ovbind_model_free(ov_model_t* model) {
 #define OVBIND_ERR_BAD_INPUT_SHAPE (-1000)
 
 // ovbind_reshape_static_batch1 reshapes the model's single input to a static
-// [1, samples] shape and writes the derived sample count to *out_samples. The
+// batch-1 shape, preserving every non-batch dimension, and writes the derived
+// element count and shape to *out_samples and *out_shape. The caller frees the
+// shape on success. This supports both waveform and mel spectrogram models. The
 // BirdNET v2.4 model has a dynamic batch dimension, so the partial input shape
 // (not the static shape) must be read; only the sample dimension is static.
 // All ov_partial_shape_t / ov_output_const_port_t handling stays in C so cgo
 // never touches the dynamically allocated dims arrays. Returns OK on success.
-static ov_status_e ovbind_reshape_static_batch1(const ov_model_t* model, int64_t* out_samples) {
+static ov_status_e ovbind_reshape_static_batch1(const ov_model_t* model, int64_t* out_samples, ov_shape_t* out_shape) {
     ov_output_const_port_t* port = NULL;
     ov_status_e st = OVB.model_const_input(model, &port);
     if (st != OK) {
@@ -244,30 +245,36 @@ static ov_status_e ovbind_reshape_static_batch1(const ov_model_t* model, int64_t
         return st;
     }
 
-    // Require a static rank of 2 and a static (min == max), positive sample
-    // dimension. ov_rank_t is an ov_dimension_t, so a static rank has min == max.
-    if (ps.rank.min != ps.rank.max || ps.rank.max != OVBIND_RESHAPE_RANK ||
-        ps.dims[OVBIND_SAMPLE_DIM_INDEX].min != ps.dims[OVBIND_SAMPLE_DIM_INDEX].max ||
-        ps.dims[OVBIND_SAMPLE_DIM_INDEX].min <= 0) {
+    // Only the batch axis may be dynamic. Reject invalid dimensions and products
+    // that would overflow the element count or the C float input allocation.
+    if (ps.rank.min != ps.rank.max || ps.rank.max < OVBIND_MIN_INPUT_RANK) {
         OVB.partial_shape_free(&ps);
         return OVBIND_ERR_BAD_INPUT_SHAPE;
     }
-    int64_t samples = ps.dims[OVBIND_SAMPLE_DIM_INDEX].max;
+    int64_t samples = 1;
+    for (int64_t i = OVBIND_BATCH_DIM_INDEX + 1; i < ps.rank.max; i++) {
+        int64_t d = ps.dims[i].max;
+        if (ps.dims[i].min != d || d <= 0 || samples > INT64_MAX / d ||
+            (uint64_t)samples > SIZE_MAX / sizeof(float) / (uint64_t)d) {
+            OVB.partial_shape_free(&ps);
+            return OVBIND_ERR_BAD_INPUT_SHAPE;
+        }
+        samples *= d;
+    }
+    ps.dims[OVBIND_BATCH_DIM_INDEX].min = 1;
+    ps.dims[OVBIND_BATCH_DIM_INDEX].max = 1;
+    st = OVB.model_reshape_single_input(model, ps);
     OVB.partial_shape_free(&ps);
-
-    ov_dimension_t nd[OVBIND_RESHAPE_RANK];
-    nd[OVBIND_BATCH_DIM_INDEX].min = 1;
-    nd[OVBIND_BATCH_DIM_INDEX].max = 1;
-    nd[OVBIND_SAMPLE_DIM_INDEX].min = samples;
-    nd[OVBIND_SAMPLE_DIM_INDEX].max = samples;
-
-    ov_partial_shape_t nps;
-    st = OVB.partial_shape_create(OVBIND_RESHAPE_RANK, nd, &nps);
     if (st != OK) {
         return st;
     }
-    st = OVB.model_reshape_single_input(model, nps);
-    OVB.partial_shape_free(&nps);
+    port = NULL;
+    st = OVB.model_const_input(model, &port);
+    if (st != OK) {
+        return st;
+    }
+    st = OVB.const_port_get_shape(port, out_shape);
+    OVB.output_const_port_free(port);
     if (st == OK) {
         *out_samples = samples;
     }
@@ -417,6 +424,7 @@ import "unsafe" //nolint:gocritic // dupImport: false positive with cgo import "
 
 import (
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -452,8 +460,6 @@ func LoadedLibraryPath() (path string, loaded bool) {
 const (
 	// inputPortIndex is the index of the single audio input tensor.
 	inputPortIndex = 0
-	// expectedInputRank is the rank of the model input shape, [batch, samples].
-	expectedInputRank = 2
 	// float32Bytes is the size in bytes of one float32 element.
 	float32Bytes = 4
 )
@@ -561,36 +567,38 @@ func DestroyOV() error {
 // callers serialize access. The process-global core is shared and is not owned
 // here.
 type classifier struct {
-	compiled    *C.ov_compiled_model_t
-	req         *C.ov_infer_request_t
-	inBuf       unsafe.Pointer
-	samples     int
-	outputIndex int
-	numClasses  int
+	compiled      *C.ov_compiled_model_t
+	req           *C.ov_infer_request_t
+	inBuf         unsafe.Pointer
+	samples       int
+	outputIndex   int
+	numClasses    int
+	outputIndices []int
+	outputSizes   []int
 }
 
 // reshapeToStaticBatch1 reshapes the model's single input to a static
-// [1, samples] shape and returns the per-segment sample count. The sample count
-// is read from the model's partial input shape (its sample dimension is static
-// even though the batch dimension is dynamic), so it is derived rather than
+// batch-1 shape and returns the per-segment element count and tensor shape. The
+// element count is read from the model's partial input shape (non-batch axes
+// are static even though the batch dimension is dynamic), so it is derived rather than
 // hardcoded. The reshape mirrors the spike's "key" step: OpenVINO cannot
 // compile or infer a dynamic-batch model without a static input shape. The
 // read-validate-reshape sequence runs atomically in C so cgo never handles the
 // dynamically allocated partial-shape dims.
-func reshapeToStaticBatch1(model *C.ov_model_t, modelPath string) (int, error) {
-	var samples C.int64_t
-	st := C.ovbind_reshape_static_batch1(model, &samples)
+func reshapeToStaticBatch1(model *C.ov_model_t, modelPath string) (sampleCount int, shape C.ov_shape_t, err error) {
+	var count C.int64_t
+	st := C.ovbind_reshape_static_batch1(model, &count, &shape)
 	if ovOK(st) {
-		return int(samples), nil
+		return int(count), shape, nil
 	}
 	// A bad input shape is signalled by a distinct out-of-range sentinel rather
 	// than a genuine ov_status_e, so report it directly: the reshape was never
 	// reached and ov_get_last_err_msg would return a stale or empty message.
 	if int(st) == int(C.OVBIND_ERR_BAD_INPUT_SHAPE) {
-		return 0, errors.Newf("openvino: model input is not a static rank-2 shape; cannot reshape for batch-1 inference").
+		return 0, shape, errors.Newf("openvino: model input requires a static rank >= 2 and positive static non-batch dimensions without overflow; cannot reshape for batch-1 inference").
 			Category(errors.CategoryModelInit).Build()
 	}
-	return 0, lastErr("ov_model_reshape_single_input", st, modelPath)
+	return 0, shape, lastErr("ov_model_reshape_single_input", st, modelPath)
 }
 
 // NewClassifier reads modelPath, compiles it for opts.Device (CPU or GPU) at
@@ -629,9 +637,15 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 		return nil, errors.Newf("openvino: unsupported device %q (want %q or %q)", device, DeviceCPU, DeviceGPU).
 			Category(errors.CategoryModelInit).Build()
 	}
-	if opts.OutputIndex < 0 {
-		return nil, errors.Newf("openvino: negative output index %d", opts.OutputIndex).
-			Category(errors.CategoryModelInit).Build()
+	indices := slices.Clone(opts.OutputIndices)
+	if len(indices) == 0 {
+		indices = []int{opts.OutputIndex}
+	}
+	for _, index := range indices {
+		if index < 0 {
+			return nil, errors.Newf("openvino: negative output index %d", index).
+				Category(errors.CategoryModelInit).Build()
+		}
 	}
 
 	threads := ""
@@ -649,13 +663,14 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 		return nil, lastErr("ov_core_read_model", st, modelPath)
 	}
 
-	// Reshape the input to static [1, samples] before compiling. BirdNET v2.4
+	// Reshape the input to static batch 1 before compiling. BirdNET v2.4
 	// has a dynamic batch dimension, which OpenVINO cannot compile or infer.
-	samples, err := reshapeToStaticBatch1(model, modelPath)
+	samples, shape, err := reshapeToStaticBatch1(model, modelPath)
 	if err != nil {
 		C.ovbind_model_free(model)
 		return nil, err
 	}
+	defer C.ovbind_shape_free(&shape)
 
 	cDev := C.CString(device)
 	defer C.free(unsafe.Pointer(cDev))
@@ -679,14 +694,18 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 	// model (static after the batch-1 reshape). NumClasses reflects the model,
 	// not the label list, so the caller can validate the label count against it
 	// (issue #1112) and a wrong OutputIndex is rejected before any inference.
-	var classCount C.int64_t
-	if st := C.ovbind_output_class_count(compiled, C.size_t(opts.OutputIndex), &classCount); !ovOK(st) {
-		C.ovbind_compiled_model_free(compiled)
-		if int(st) == int(C.OVBIND_ERR_BAD_OUTPUT) {
-			return nil, errors.Newf("openvino: output index %d is out of range or has a non-static shape", opts.OutputIndex).
-				Category(errors.CategoryModelInit).Build()
+	outputSizes := make([]int, len(indices))
+	for i, index := range indices {
+		var count C.int64_t
+		if st := C.ovbind_output_class_count(compiled, C.size_t(index), &count); !ovOK(st) {
+			C.ovbind_compiled_model_free(compiled)
+			if int(st) == int(C.OVBIND_ERR_BAD_OUTPUT) {
+				return nil, errors.Newf("openvino: output index %d is out of range or has a non-static shape", index).
+					Category(errors.CategoryModelInit).Build()
+			}
+			return nil, lastErr("ov_compiled_model_output shape", st, modelPath)
 		}
-		return nil, lastErr("ov_compiled_model_output shape", st, modelPath)
+		outputSizes[i] = int(count)
 	}
 
 	var req *C.ov_infer_request_t
@@ -704,24 +723,13 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 		return nil, errors.Newf("openvino: failed to allocate %d-sample input buffer", samples).Build()
 	}
 
-	dims := []C.int64_t{1, C.int64_t(samples)}
-	var shape C.ov_shape_t
-	if st := C.ovbind_shape_create(expectedInputRank, &dims[0], &shape); !ovOK(st) {
-		C.free(inBuf)
-		C.ovbind_infer_request_free(req)
-		C.ovbind_compiled_model_free(compiled)
-		return nil, lastErr("ov_shape_create", st)
-	}
-
 	var inTensor *C.ov_tensor_t
 	if st := C.ovbind_tensor_create_from_host_ptr(C.F32, shape, inBuf, &inTensor); !ovOK(st) {
-		C.ovbind_shape_free(&shape)
 		C.free(inBuf)
 		C.ovbind_infer_request_free(req)
 		C.ovbind_compiled_model_free(compiled)
 		return nil, lastErr("ov_tensor_create_from_host_ptr", st)
 	}
-	C.ovbind_shape_free(&shape)
 
 	if st := C.ovbind_set_input_tensor(req, inputPortIndex, inTensor); !ovOK(st) {
 		C.ovbind_tensor_free(inTensor)
@@ -735,12 +743,14 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 	C.ovbind_tensor_free(inTensor)
 
 	return &classifier{
-		compiled:    compiled,
-		req:         req,
-		inBuf:       inBuf,
-		samples:     samples,
-		outputIndex: opts.OutputIndex,
-		numClasses:  int(classCount),
+		compiled:      compiled,
+		req:           req,
+		inBuf:         inBuf,
+		samples:       samples,
+		outputIndex:   indices[0],
+		numClasses:    outputSizes[0],
+		outputIndices: indices,
+		outputSizes:   outputSizes,
 	}, nil
 }
 
@@ -754,22 +764,55 @@ func (c *classifier) PredictRaw(samples []float32) ([]float32, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	if err := c.infer(samples); err != nil {
+		return nil, err
+	}
+	return c.readOutput(c.outputIndex)
+}
+
+// PredictOutputs returns every selected output from the same inference.
+func (c *classifier) PredictOutputs(samples []float32) ([][]float32, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := c.infer(samples); err != nil {
+		return nil, err
+	}
+	outputs := make([][]float32, len(c.outputIndices))
+	for i, index := range c.outputIndices {
+		out, err := c.readOutput(index)
+		if err != nil {
+			return nil, err
+		}
+		outputs[i] = out
+	}
+	return outputs, nil
+}
+
+// OutputSizes returns the selected output element counts.
+func (c *classifier) OutputSizes() []int { return slices.Clone(c.outputSizes) }
+
+// infer runs while the caller is pinned to an OS thread for error retrieval.
+func (c *classifier) infer(samples []float32) error {
 	if c.req == nil || c.inBuf == nil {
-		return nil, ErrOpenVINOUnavailable
+		return ErrOpenVINOUnavailable
 	}
 	if len(samples) != c.samples {
-		return nil, errors.Newf("openvino: input length %d does not match model input %d", len(samples), c.samples).Build()
+		return errors.Newf("openvino: input length %d does not match model input %d", len(samples), c.samples).Build()
 	}
 
 	dst := unsafe.Slice((*float32)(c.inBuf), c.samples)
 	copy(dst, samples)
 
 	if st := C.ovbind_infer(c.req); !ovOK(st) {
-		return nil, lastErr("ov_infer_request_infer", st)
+		return lastErr("ov_infer_request_infer", st)
 	}
 
+	return nil
+}
+
+func (c *classifier) readOutput(index int) ([]float32, error) {
 	var outTensor *C.ov_tensor_t
-	if st := C.ovbind_get_output_tensor(c.req, C.size_t(c.outputIndex), &outTensor); !ovOK(st) {
+	if st := C.ovbind_get_output_tensor(c.req, C.size_t(index), &outTensor); !ovOK(st) {
 		return nil, lastErr("ov_infer_request_get_output_tensor_by_index", st)
 	}
 	defer C.ovbind_tensor_free(outTensor)

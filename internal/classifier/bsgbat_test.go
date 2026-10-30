@@ -143,7 +143,7 @@ func requireBSGBatTestData(t *testing.T) string {
 
 func newBSGBatTestModel(t *testing.T, modelPath, labelPath string) *BSGBat {
 	t.Helper()
-	model, err := NewBSGBat(&BSGBatModelConfig{ModelPath: modelPath, LabelPath: labelPath, ONNXRuntimePath: os.Getenv("ONNX_RUNTIME_PATH"), Threads: 1})
+	model, err := NewBSGBat(&BSGBatModelConfig{ModelPath: modelPath, LabelPath: labelPath, ONNXRuntimePath: os.Getenv("ONNX_RUNTIME_PATH"), Threads: 1, Backend: conf.BackendPrefONNX})
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, model.Close()) })
 	return model

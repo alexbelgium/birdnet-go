@@ -19,14 +19,14 @@ func init() {
 			MinRawSampleRate: 96000, RecommendedSampleRate: 384000},
 		ConfigAliases: []string{conf.ModelIDBSGBat}, rangeFilterCompat: rangeFilterCompatNone, scheduleGated: true,
 	}
-	// ORT-only models ignore the OpenVINO preference, but rebuild for thread changes.
+	// Rebuild on global backend, OpenVINO device, and thread changes.
 	openvinoCapableSecondaryBuilders[RegistryIDBSGBat] = func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {
 		paths := settings.ForkModels.BSGBat
 		res, err := o.resolveBatONNXFiles(RegistryIDBSGBat, ModelRegistry[RegistryIDBSGBat].DetectionName, settings.BirdNET.ONNXRuntimePath, modelFileSet{model: paths.ModelPath, labels: paths.LabelPath})
 		if err != nil {
 			return nil, err
 		}
-		model, err := NewBSGBat(&BSGBatModelConfig{ModelPath: res.resolved.model, LabelPath: res.resolved.labels, ONNXRuntimePath: settings.BirdNET.ONNXRuntimePath, Threads: threads})
+		model, err := NewBSGBat(bsgBatConfigFor(settings, res.resolved.model, res.resolved.labels, threads))
 		if err != nil {
 			return nil, err
 		}
@@ -41,6 +41,15 @@ func (o *Orchestrator) loadBSGBat(threads int) error {
 	return o.loadBatONNX(RegistryIDBSGBat, ModelRegistry[RegistryIDBSGBat].DetectionName, settings.BirdNET.ONNXRuntimePath,
 		modelFileSet{model: settings.ForkModels.BSGBat.ModelPath, labels: settings.ForkModels.BSGBat.LabelPath}, threads,
 		func(modelPath, labelPath, runtimePath string, modelThreads int) (ModelInstance, error) {
-			return NewBSGBat(&BSGBatModelConfig{ModelPath: modelPath, LabelPath: labelPath, ONNXRuntimePath: runtimePath, Threads: modelThreads})
+			return NewBSGBat(bsgBatConfigFor(settings, modelPath, labelPath, modelThreads))
 		})
+}
+
+func bsgBatConfigFor(settings *conf.Settings, modelPath, labelPath string, threads int) *BSGBatModelConfig {
+	return &BSGBatModelConfig{
+		ModelPath: modelPath, LabelPath: labelPath, Threads: threads,
+		ONNXRuntimePath: settings.BirdNET.ONNXRuntimePath,
+		Backend:         settings.BirdNET.Backend, OpenVINOPath: settings.BirdNET.OpenVINOPath,
+		OpenVINODevice: settings.BirdNET.OpenVINODevice,
+	}
 }
