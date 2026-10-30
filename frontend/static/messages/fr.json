@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Activez cette option pour définir un seuil pour ce modèle. Sinon, le seuil commun aux chauves-souris s’applique."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Rejeter toutes les détections dans une fenêtre lorsque son score de bruit de fond dépasse ce seuil. 0 = désactivé ; sinon, utiliser 0.5–1.0 (les valeurs inférieures à 0.5 désactivent le filtre). Valeur suggérée : 0.99. À 0.98, davantage de bruit est supprimé, mais certains cris réels peuvent être perdus.",
+        "label": "BSG-BAT : Seuil de rejet du bruit de fond"
       }
     },
     "rangeFilter": {

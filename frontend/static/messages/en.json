@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Enable to set a threshold for this model. Otherwise, the shared bat threshold applies."
+      },
+      "bsgBatBackgroundMax": {
+        "label": "BSG-BAT: Background rejection limit",
+        "helpText": "Reject all detections in a window when its Background score exceeds this limit. 0 = off; otherwise use 0.5–1.0 (values below 0.5 turn it off). Suggested: 0.99. At 0.98, more noise is removed, but some real calls may be lost."
       }
     },
     "rangeFilter": {

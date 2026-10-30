@@ -157,6 +157,7 @@ BatModelsConfig holds the optional fork-specific bat classifiers.
 | `forkmodels.bsgbat.threshold` | number | Threshold overrides the shared bat threshold; zero inherits it. |
 | `forkmodels.bsgbat.modelPath` | string | ModelPath is the path to the ONNX classifier model. |
 | `forkmodels.bsgbat.labelPath` | string | LabelPath is the path to the classifier species labels. |
+| `forkmodels.bsgbat.backgroundmax` | number | BackgroundMax rejects windows whose Background sigmoid exceeds this value. Zero disables rejection (default); otherwise use 0.5 to 1.0. Suggested: 0.99. |
 
 ## lowmemory
 

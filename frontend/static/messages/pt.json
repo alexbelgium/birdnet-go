@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Ative para definir um limiar para este modelo. Caso contrário, aplica-se o limiar partilhado para morcegos."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Rejeitar todas as deteções numa janela quando a sua pontuação de fundo ultrapassar este limite. 0 = desativado; caso contrário, use 0.5–1.0 (valores inferiores a 0.5 desativam o filtro). Valor sugerido: 0.99. Com 0.98, é removido mais ruído, mas algumas vocalizações reais podem perder-se.",
+        "label": "BSG-BAT: Limite de rejeição de fundo"
       }
     },
     "rangeFilter": {

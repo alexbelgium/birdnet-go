@@ -115,6 +115,29 @@
       "type": "object",
       "description": "AudioSourceConfig represents a single audio capture device with per-source settings."
     },
+    "BSGBatModelsConfig": {
+      "properties": {
+        "threshold": {
+          "type": "number",
+          "description": "Threshold overrides the shared bat threshold; zero inherits it."
+        },
+        "modelPath": {
+          "type": "string",
+          "description": "ModelPath is the path to the ONNX classifier model."
+        },
+        "labelPath": {
+          "type": "string",
+          "description": "LabelPath is the path to the classifier species labels."
+        },
+        "backgroundmax": {
+          "type": "number",
+          "description": "BackgroundMax rejects windows whose Background sigmoid exceeds this value. Zero disables rejection (default); otherwise use 0.5 to 1.0. Suggested: 0.99."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "BSGBatModelsConfig holds the BSG-BAT files and prediction filters."
+    },
     "BSGConfig": {
       "properties": {
         "modelpath": {
@@ -416,7 +439,7 @@
           "description": "BatDetect2 configures the optional BatDetect2 UK classifier files."
         },
         "bsgbat": {
-          "$ref": "#/$defs/BatONNXPaths",
+          "$ref": "#/$defs/BSGBatModelsConfig",
           "description": "BSGBat configures the optional BSG-BAT European classifier files."
         }
       },
