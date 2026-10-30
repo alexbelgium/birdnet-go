@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Zapnutím nastavíte prah pre tento model. Inak sa použije spoločný prah pre netopiere."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Odmietnuť všetky detekcie v časovom okne, keď jeho skóre pozadia prekročí túto hranicu. 0 = vypnuté; inak použite 0.5–1.0 (hodnoty pod 0.5 vypnú filter). Odporúčaná hodnota: 0.99. Pri 0.98 sa odstráni viac šumu, ale niektoré skutočné hlasy sa môžu stratiť.",
+        "label": "BSG-BAT: Hranica odmietnutia pozadia"
       }
     },
     "rangeFilter": {

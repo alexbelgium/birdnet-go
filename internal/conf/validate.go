@@ -396,5 +396,5 @@ func validateModelThresholds(settings *Settings) error {
 				Build()
 		}
 	}
-	return nil
+	return validateBSGBatBackgroundMax(settings.ForkModels.BSGBat.BackgroundMax)
 }

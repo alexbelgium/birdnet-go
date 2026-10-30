@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Ota käyttöön asettaaksesi tälle mallille oman rajan. Muuten käytetään lepakoiden yhteistä rajaa."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Hylkää kaikki aikaikkunan havainnot, kun sen taustapistemäärä ylittää tämän rajan. 0 = pois käytöstä; muuten käytä arvoa 0.5–1.0 (alle 0.5 olevat arvot poistavat suodattimen käytöstä). Suositus: 0.99. Arvo 0.98 poistaa enemmän kohinaa, mutta joitakin todellisia ääniä voi jäädä havaitsematta.",
+        "label": "BSG-BAT: Taustan hylkäysraja"
       }
     },
     "rangeFilter": {

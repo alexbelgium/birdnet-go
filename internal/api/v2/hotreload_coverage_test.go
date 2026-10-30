@@ -108,6 +108,7 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"ForkModels":                      {categories: []hotReloadCategory{hotReloadRestart}},
 	"ForkModels.BatDetect2.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
 	"ForkModels.BSGBat.Threshold":     {categories: []hotReloadCategory{hotReloadFresh}},
+	"ForkModels.BSGBat.BackgroundMax": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// --- BSG ---
 	"BSG": {categories: []hotReloadCategory{hotReloadRestart}},

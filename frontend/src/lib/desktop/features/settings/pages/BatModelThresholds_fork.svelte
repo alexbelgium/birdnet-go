@@ -5,6 +5,8 @@
   import NumberField from '$lib/desktop/components/forms/NumberField.svelte';
 
   const minimumThreshold = 0.1;
+  const minimumBackgroundMax = 0.5;
+  const backgroundMaxStep = 0.005;
   const models = [
     { key: 'batDetect2', name: 'BatDetect2' },
     { key: 'bsgBat', name: 'BSG-BAT' },
@@ -18,6 +20,15 @@
     settingsActions.updateSection('forkModels', {
       ...current,
       [key]: { ...model, threshold },
+    });
+  }
+
+  function updateBackgroundMax(value: number) {
+    const current = store.formData.forkModels;
+    const backgroundMax = value > 0 && value < minimumBackgroundMax ? 0 : value;
+    settingsActions.updateSection('forkModels', {
+      ...current,
+      bsgBat: { ...current?.bsgBat, backgroundMax },
     });
   }
 </script>
@@ -42,4 +53,16 @@
     disabled={store.isLoading || store.isSaving || threshold === 0}
     helpText={t('analysis.detection.batThresholdOverride.helpText')}
   />
+  {#if model.key === 'bsgBat'}
+    <NumberField
+      label={t('analysis.detection.bsgBatBackgroundMax.label')}
+      value={store.formData.forkModels?.bsgBat?.backgroundMax ?? 0}
+      onUpdate={updateBackgroundMax}
+      min={0}
+      max={1}
+      step={backgroundMaxStep}
+      disabled={store.isLoading || store.isSaving}
+      helpText={t('analysis.detection.bsgBatBackgroundMax.helpText')}
+    />
+  {/if}
 {/each}

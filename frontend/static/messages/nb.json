@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Aktiver for å angi en grense for denne modellen. Ellers brukes den felles grensen for flaggermus."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Avvis alle registreringer i et tidsvindu når bakgrunnsskåren overstiger denne grensen. 0 = av; bruk ellers 0.5–1.0 (verdier under 0.5 slår av filteret). Forslag: 0.99. Ved 0.98 fjernes mer støy, men noen ekte rop kan gå tapt.",
+        "label": "BSG-BAT: Grense for bakgrunnsavvisning"
       }
     },
     "rangeFilter": {

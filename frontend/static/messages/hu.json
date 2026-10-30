@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Bekapcsolva külön küszöb állítható be ehhez a modellhez. Egyébként a denevérek közös küszöbe érvényes."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Az időablak összes észlelésének elvetése, ha a háttérpontszám meghaladja ezt a határértéket. 0 = kikapcsolva; egyébként 0.5–1.0 használható (a 0.5 alatti értékek kikapcsolják a szűrőt). Javasolt érték: 0.99. A 0.98 több zajt távolít el, de néhány valódi hang is elveszhet.",
+        "label": "BSG-BAT: Háttérkizárási határérték"
       }
     },
     "rangeFilter": {

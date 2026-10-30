@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Włącz, aby ustawić próg dla tego modelu. W przeciwnym razie obowiązuje wspólny próg dla nietoperzy."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Odrzuć wszystkie wykrycia w oknie czasowym, gdy jego wynik tła przekracza ten próg. 0 = wyłączone; w przeciwnym razie użyj 0.5–1.0 (wartości poniżej 0.5 wyłączają filtr). Zalecana wartość: 0.99. Przy 0.98 usuwane jest więcej szumu, ale niektóre rzeczywiste głosy mogą zostać utracone.",
+        "label": "BSG-BAT: Próg odrzucania tła"
       }
     },
     "rangeFilter": {

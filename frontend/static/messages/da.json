@@ -5610,6 +5610,10 @@
       },
       "batThresholdOverride": {
         "helpText": "Aktivér for at indstille en grænse for denne model. Ellers bruges den fælles grænse for flagermus."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Afvis alle registreringer i et vindue, når dets baggrundsscore overstiger denne grænse. 0 = fra; brug ellers 0.5–1.0 (værdier under 0.5 slår filteret fra). Forslag: 0.99. Ved 0.98 fjernes mere støj, men nogle ægte kald kan gå tabt.",
+        "label": "BSG-BAT: Grænse for baggrundsafvisning"
       }
     },
     "rangeFilter": {

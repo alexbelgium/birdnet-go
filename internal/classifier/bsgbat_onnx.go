@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/inference"
@@ -24,6 +25,8 @@ const (
 
 // BSGBatModelConfig configures a BSG-BAT model instance.
 type BSGBatModelConfig struct {
+	// Settings supplies fallback settings before a process-wide snapshot is published.
+	Settings *conf.Settings
 	// ModelPath is the ONNX classifier model path.
 	ModelPath string
 	// LabelPath is the species label file path.
@@ -43,6 +46,7 @@ type BSGBatModelConfig struct {
 // BSGBat runs the BSG-BAT European species classifier.
 type BSGBat struct {
 	*batORTBase
+	settings      *conf.Settings
 	dsp           *bsgBatDSP
 	input, output *ort.Tensor[float32]
 	ovClassifier  inference.Classifier
@@ -83,10 +87,14 @@ func NewBSGBat(cfg *BSGBatModelConfig) (*BSGBat, error) {
 	info := ModelRegistry[RegistryIDBSGBat]
 	info.NumSpecies = len(labels)
 	base := &batORTBase{labels: labels, info: info, modelPath: cfg.ModelPath}
+	settings := cfg.Settings
+	if settings == nil {
+		settings = &conf.Settings{}
+	}
 	// The graph includes the background logit; only the public species list drops it.
 	if classifier, device, precision, ok := tryBSGBatOpenVINO(cfg, rawLabels); ok {
 		base.info.Backend = BackendOpenVINO
-		return &BSGBat{batORTBase: base, dsp: dsp, ovClassifier: classifier, device: device, precision: precision}, nil
+		return &BSGBat{batORTBase: base, settings: settings, dsp: dsp, ovClassifier: classifier, device: device, precision: precision}, nil
 	}
 	if err := inference.InitONNXRuntime(cfg.ONNXRuntimePath); err != nil {
 		return nil, errors.New(err).Component("classifier").Context("operation", "initialize_bsgbat").Context("model", RegistryIDBSGBat).Category(errors.CategoryModelInit).Build()
@@ -108,7 +116,7 @@ func NewBSGBat(cfg *BSGBatModelConfig) (*BSGBat, error) {
 	}
 	base.session = session
 	base.values = []ort.Value{input, output}
-	return &BSGBat{batORTBase: base, dsp: dsp, input: input, output: output}, nil
+	return &BSGBat{batORTBase: base, settings: settings, dsp: dsp, input: input, output: output}, nil
 }
 
 func (b *BSGBat) runLogits(samples []float32) ([]float32, error) {
@@ -160,6 +168,12 @@ func (b *BSGBat) Predict(ctx context.Context, samples [][]float32) ([]datastore.
 		err = newNonFiniteScoreError(nonFiniteScore{modelID: RegistryIDBSGBat, index: idx, count: len(logits)}, b.RuntimeInfo)
 		recordPredictionFailure(span, RegistryIDBSGBat, errTypeBatNonFinite, start, err)
 		return nil, err
+	}
+	settings := conf.CurrentOrFallback(b.settings)
+	backgroundMax := settings.ForkModels.BSGBat.BackgroundMax
+	if backgroundMax > 0 && customSigmoid(float64(logits[bsgBatOutputClasses-1]), 1) > backgroundMax {
+		recordPredictionSuccess(span, 0, start)
+		return nil, nil
 	}
 	results := make([]datastore.Results, 0, len(b.labels))
 	for i, label := range b.labels {
