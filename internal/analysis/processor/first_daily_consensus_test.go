@@ -40,6 +40,7 @@ func newConsensusSettings() *conf.Settings {
 	settings := &conf.Settings{}
 	settings.BirdNET.Threshold = 0.5
 	settings.Realtime.FirstDailyConsensus.Enabled = true
+	settings.Realtime.FirstDailyConsensus.BatEnabled = true
 	return settings
 }
 
@@ -644,6 +645,7 @@ func TestWarmFirstDailyAcceptance_DropsStaleGeneration(t *testing.T) {
 	p.warmFirstDailyAcceptance(consensusAt, settings)
 	<-started
 	settings.Realtime.FirstDailyConsensus.Enabled = false
+	settings.Realtime.FirstDailyConsensus.BatEnabled = false
 	p.warmFirstDailyAcceptance(consensusAt, settings)
 	settings.Realtime.FirstDailyConsensus.Enabled = true
 	close(release)
@@ -681,4 +683,82 @@ func TestWarmFirstDailyAcceptance_SkipsIneligibleDetections(t *testing.T) {
 	}
 
 	p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+}
+
+func TestFirstDailyConsensusFamilySettings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                        string
+		birdEnabled, batEnabled     bool
+		birdWhitelist, batWhitelist []string
+		birdGated, batGated         bool
+	}{
+		{name: "both default off"},
+		{name: "birds only", birdEnabled: true, birdGated: true},
+		{name: "bats only", batEnabled: true, batGated: true},
+		{name: "bird whitelist only exempts birds", birdEnabled: true, batEnabled: true, birdWhitelist: []string{consensusSpecies}, batGated: true},
+		{name: "bat whitelist only exempts bats", birdEnabled: true, batEnabled: true, batWhitelist: []string{consensusSpecies}, birdGated: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			settings := newConsensusSettings()
+			settings.Realtime.FirstDailyConsensus = conf.FirstDailyConsensusSettings{
+				Enabled: tt.birdEnabled, BatEnabled: tt.batEnabled,
+				Whitelist: tt.birdWhitelist, BatWhitelist: tt.batWhitelist,
+			}
+			p := &Processor{}
+			markSpeciesShared(p, true)
+			markSpeciesSharedBat(p, true)
+			markMemo(p, false)
+			for _, family := range []struct {
+				model string
+				gated bool
+			}{
+				{birdNETModel, tt.birdGated}, {classifier.RegistryIDBat, tt.batGated},
+			} {
+				discard, _ := p.shouldDiscardFirstDailyDetection(newConsensusDetection(family.model, "", map[string]float64{family.model: 0.8}), settings)
+				assert.Equal(t, family.gated, discard, family.model)
+			}
+		})
+	}
+}
+
+func TestWarmFirstDailyAcceptanceEnabledFamilies(t *testing.T) {
+	t.Parallel()
+	for _, enabledModel := range []string{birdNETModel, classifier.RegistryIDBat} {
+		t.Run(enabledModel, func(t *testing.T) {
+			t.Parallel()
+			for _, model := range []string{birdNETModel, classifier.RegistryIDBat} {
+				t.Run(model, func(t *testing.T) {
+					t.Parallel()
+					settings := newConsensusSettings()
+					settings.Realtime.FirstDailyConsensus.Enabled = enabledModel == birdNETModel
+					settings.Realtime.FirstDailyConsensus.BatEnabled = enabledModel == classifier.RegistryIDBat
+					ds := mocks.NewMockInterface(t)
+					if model == enabledModel {
+						ds.EXPECT().CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).Return(int64(0), nil).Once()
+					}
+					p := &Processor{Ds: ds, pendingDetections: pendingDue(newConsensusDetection(model, "", map[string]float64{model: 0.8}))}
+					markSpeciesShared(p, true)
+					markSpeciesSharedBat(p, true)
+					markMemo(p, false)
+					generation := p.firstDaily.generation
+					// One family remaining enabled must retain the memo and generation.
+					p.warmFirstDailyAcceptance(consensusAt, settings)
+					_, settled := p.firstDaily.acceptedToday(consensusDay, consensusSpecies)
+					assert.True(t, settled)
+					assert.Equal(t, generation, p.firstDaily.generation)
+					p.firstDaily.checked = nil
+					p.warmFirstDailyAcceptance(consensusAt, settings)
+					if model == enabledModel {
+						require.Eventually(t, func() bool { return len(p.firstDaily.lookups) == 1 }, time.Second, time.Millisecond)
+						p.firstDaily.applyCompletedLookups()
+					} else {
+						assert.Empty(t, p.firstDaily.inFlight)
+					}
+				})
+			}
+		})
+	}
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/svelte';
 import { get, type Writable } from 'svelte/store';
 import type { CatalogEntry } from '$lib/types/models';
 import type { RealtimeSettings } from '$lib/stores/settings';
@@ -661,18 +661,33 @@ describe('AnalysisSettingsPage first-daily consensus whitelist', () => {
     }));
   });
 
-  it('renders the saved whitelist and writes additions with the existing settings object', async () => {
+  it('renders the saved whitelist and preserves bat settings when adding birds', async () => {
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: {
+        enabled: true,
+        whitelist: ['Great Tit'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle'],
+      },
+    });
     render(AnalysisSettingsPage);
 
     expect(await screen.findByText('Great Tit')).toBeInTheDocument();
-    const input = screen.getByLabelText('Add an exempt species');
+    const input = screen.getByLabelText('Add an exempt bird species');
     await fireEvent.input(input, { target: { value: 'Parus major' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Add species' }));
+    await waitFor(() => expect(input).toBeEnabled());
+    await fireEvent.click(
+      within(input.closest('fieldset') ?? document.body).getByRole('button', {
+        name: 'Add species',
+      })
+    );
 
     expect(settingsActions.updateSection).toHaveBeenCalledWith('realtime', {
       firstDailyConsensus: {
         enabled: true,
         whitelist: ['Great Tit', 'Parus major'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle'],
       },
     });
   });
@@ -683,9 +698,78 @@ describe('AnalysisSettingsPage first-daily consensus whitelist', () => {
     });
     render(AnalysisSettingsPage);
 
-    const input = screen.getByLabelText('Add an exempt species');
+    const input = screen.getByLabelText('Add an exempt bird species');
     expect(input).toBeDisabled();
-    const reason = screen.getByText('Turn on the option above to edit the species whitelist.');
+    const reason = screen.getByText('Turn on the option above to edit the bird species whitelist.');
+    expect(input.closest('fieldset')).toHaveAttribute('aria-describedby', reason.id);
+  });
+
+  it('loads predictions for bats alone and preserves bird settings when editing bats', async () => {
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: {
+        enabled: false,
+        whitelist: ['Great Tit'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle'],
+      },
+    });
+    render(AnalysisSettingsPage);
+
+    expect(await screen.findByText('Common Pipistrelle')).toBeInTheDocument();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/v2/range/species/list'));
+    expect(screen.getByLabelText('Add an exempt bird species')).toBeDisabled();
+    const input = screen.getByLabelText('Add an exempt bat species');
+    await waitFor(() => expect(input).toBeEnabled());
+    await fireEvent.input(input, { target: { value: 'Pipistrellus pygmaeus' } });
+    await waitFor(() => expect(input).toBeEnabled());
+    await fireEvent.click(
+      within(input.closest('fieldset') ?? document.body).getByRole('button', {
+        name: 'Add species',
+      })
+    );
+    expect(settingsActions.updateSection).toHaveBeenLastCalledWith('realtime', {
+      firstDailyConsensus: {
+        enabled: false,
+        whitelist: ['Great Tit'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle', 'Pipistrellus pygmaeus'],
+      },
+    });
+  });
+
+  it.each(['bird', 'bat'])(
+    'preserves the other family when toggling %s consensus',
+    async family => {
+      const consensus = {
+        enabled: true,
+        whitelist: ['Great Tit'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle'],
+      };
+      (realtimeSettings as Writable<Record<string, unknown>>).set({
+        firstDailyConsensus: consensus,
+      });
+      render(AnalysisSettingsPage);
+      await fireEvent.click(
+        screen.getByRole('checkbox', {
+          name: `Require two models for a ${family} species' first detection of the day`,
+        })
+      );
+      expect(settingsActions.updateSection).toHaveBeenLastCalledWith('realtime', {
+        firstDailyConsensus: {
+          ...consensus,
+          ...(family === 'bird' ? { enabled: false } : { batEnabled: false }),
+        },
+      });
+    }
+  );
+
+  it('disables the bat editor independently and links its explanation', async () => {
+    render(AnalysisSettingsPage);
+    await waitFor(() => expect(screen.getByLabelText('Add an exempt bird species')).toBeEnabled());
+    const input = screen.getByLabelText('Add an exempt bat species');
+    expect(input).toBeDisabled();
+    const reason = screen.getByText('Turn on the option above to edit the bat species whitelist.');
     expect(input.closest('fieldset')).toHaveAttribute('aria-describedby', reason.id);
   });
 

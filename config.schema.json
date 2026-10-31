@@ -1035,19 +1035,30 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "true to require a second model to confirm a species' first detection each day"
+          "description": "true to require a second bird model to confirm a species' first detection each day"
         },
         "whitelist": {
           "items": {
             "type": "string"
           },
           "type": "array",
-          "description": "species exempt from the first-daily consensus rule, by common or scientific name"
+          "description": "bird species exempt from the first-daily consensus rule, by common or scientific name"
+        },
+        "batenabled": {
+          "type": "boolean",
+          "description": "true to require a second bat model to confirm a species' first detection each day"
+        },
+        "batwhitelist": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "bat species exempt from the first-daily consensus rule, by common or scientific name"
         }
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "FirstDailyConsensusSettings configures the first-daily-detection consensus rule: the first accepted detection of a bird species each day must be confirmed by a second model that also cleared its normal threshold."
+      "description": "FirstDailyConsensusSettings configures independent bird and bat consensus rules: the first accepted detection of a species each day must be confirmed by a second model that also cleared its normal threshold."
     },
     "HealthCheckConfig": {
       "properties": {

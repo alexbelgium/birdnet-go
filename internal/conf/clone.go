@@ -75,6 +75,7 @@ func CloneSettings(src *Settings) *Settings {
 
 	// Realtime.FirstDailyConsensus.
 	dst.Realtime.FirstDailyConsensus.Whitelist = slices.Clone(src.Realtime.FirstDailyConsensus.Whitelist)
+	dst.Realtime.FirstDailyConsensus.BatWhitelist = slices.Clone(src.Realtime.FirstDailyConsensus.BatWhitelist)
 
 	// Realtime.RTSP.
 	dst.Realtime.RTSP.Streams = cloneStreamConfigs(src.Realtime.RTSP.Streams)

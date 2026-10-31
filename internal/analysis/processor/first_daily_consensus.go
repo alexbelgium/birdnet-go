@@ -1,5 +1,6 @@
-// first_daily_consensus.go gates the first accepted detection of each bird
-// species per calendar day behind confirmation from a second model.
+// first_daily_consensus.go gates the first accepted detection of each bird or bat
+// species per calendar day behind confirmation from a second model of its family.
+// Bird and bat rules are independently opt-in, with separate whitelists.
 //
 // A single model crossing its threshold once is the weakest evidence the
 // pipeline produces, and it is exactly the evidence that creates a "new species
@@ -245,7 +246,13 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 
 	// Opt-in. Read from the per-cycle settings snapshot, so toggling it takes
 	// effect on the next flush without a restart.
-	if !settings.Realtime.FirstDailyConsensus.Enabled {
+	isBat := classifier.IsBatCapableModel(item.BestModelID)
+	consensus := &settings.Realtime.FirstDailyConsensus
+	enabled, whitelist := consensus.Enabled, consensus.Whitelist
+	if isBat {
+		enabled, whitelist = consensus.BatEnabled, consensus.BatWhitelist
+	}
+	if !enabled {
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 
@@ -258,7 +265,7 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 	// Whitelisted species always retain normal single-model behaviour. Keep this
 	// before taxonomy, model-support and datastore work so an exemption is free
 	// apart from the same canonical name matching used by the species exclude list.
-	if isSpeciesExcluded(result.Species.CommonName, scientificName, settings.Realtime.FirstDailyConsensus.Whitelist) {
+	if isSpeciesExcluded(result.Species.CommonName, scientificName, whitelist) {
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 
@@ -268,7 +275,6 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 	if nonbird.IsNonSpeciesLabel(result.RawLabel) {
 		return firstDailyNormal, firstDailyCandidate{}
 	}
-	isBat := classifier.IsBatCapableModel(item.BestModelID)
 
 	// Already agreed on by enough models: nothing for this rule to decide. Checked
 	// first because it is a pure in-memory count and it is the common outcome for
@@ -328,7 +334,7 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 }
 
 // shouldDiscardFirstDailyDetection reports whether item is the first detection of
-// a bird species today with only one model behind it, and so should be held back
+// a bird or bat species today with only one model behind it, and so should be held back
 // until a second model agrees.
 //
 // Discarding here is deliberately terminal for this pending entry only: the
@@ -373,7 +379,7 @@ func (p *Processor) shouldDiscardFirstDailyDetection(item *PendingDetection, set
 func (p *Processor) warmFirstDailyAcceptance(_ time.Time, settings *conf.Settings) {
 	// The feature boundary sits here, not in the per-item predicate: shipped off
 	// by default, this must cost one branch per tick, not a lock plus a sweep.
-	if !settings.Realtime.FirstDailyConsensus.Enabled {
+	if !settings.Realtime.FirstDailyConsensus.Enabled && !settings.Realtime.FirstDailyConsensus.BatEnabled {
 		p.firstDaily.disable()
 		return
 	}
@@ -554,7 +560,8 @@ func (c *firstDailyConsensus) disable() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// Re-enabling must query again because detections accepted while the rule was
-	// off were never queued as approvals here.
+	// off were cleared at this boundary. Keep the generation shared: disabling
+	// one family leaves the other family’s answers and pending lookups intact.
 	c.checked = nil
 	c.approved = nil
 	c.generation++

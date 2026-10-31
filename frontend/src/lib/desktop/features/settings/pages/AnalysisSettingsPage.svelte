@@ -339,6 +339,8 @@
   let firstDailyConsensus = $derived({
     enabled: $realtimeSettings?.firstDailyConsensus?.enabled ?? false,
     whitelist: $realtimeSettings?.firstDailyConsensus?.whitelist ?? [],
+    batEnabled: $realtimeSettings?.firstDailyConsensus?.batEnabled ?? false,
+    batWhitelist: $realtimeSettings?.firstDailyConsensus?.batWhitelist ?? [],
   });
   let bat = $derived(
     $batSettings ?? {
@@ -381,6 +383,8 @@
       firstDailyConsensus: store.originalData.realtime?.firstDailyConsensus?.enabled ?? false,
       firstDailyConsensusWhitelist:
         store.originalData.realtime?.firstDailyConsensus?.whitelist ?? [],
+      batEnabled: store.originalData.realtime?.firstDailyConsensus?.batEnabled ?? false,
+      batWhitelist: store.originalData.realtime?.firstDailyConsensus?.batWhitelist ?? [],
     },
     current: {
       threshold: birdnet?.threshold,
@@ -388,6 +392,8 @@
       fpFilter: falsePositiveFilter.level,
       firstDailyConsensus: firstDailyConsensus.enabled,
       firstDailyConsensusWhitelist: firstDailyConsensus.whitelist,
+      batEnabled: firstDailyConsensus.batEnabled,
+      batWhitelist: firstDailyConsensus.batWhitelist,
     },
   });
   const perchChange: ChangePair = $derived({
@@ -756,6 +762,18 @@
     });
   }
 
+  function updateFirstDailyConsensusBatEnabled(batEnabled: boolean) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { ...firstDailyConsensus, batEnabled },
+    });
+  }
+
+  function updateFirstDailyConsensusBatWhitelist(batWhitelist: string[]) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { ...firstDailyConsensus, batWhitelist },
+    });
+  }
+
   let speciesListLoading = $state(false);
   let speciesListLoaded = false;
   let speciesListFailed = false;
@@ -784,7 +802,7 @@
 
       // If the rule was disabled while this request was in flight, the effect's
       // disabled branch has already run. Re-arm here for the next enable.
-      if (!firstDailyConsensus.enabled) {
+      if (!firstDailyConsensus.enabled && !firstDailyConsensus.batEnabled) {
         speciesListLoaded = false;
         speciesListFailed = false;
       }
@@ -794,7 +812,7 @@
   }
 
   $effect(() => {
-    if (!firstDailyConsensus.enabled) {
+    if (!firstDailyConsensus.enabled && !firstDailyConsensus.batEnabled) {
       // Retry a failed request on the next enable, not continuously while on.
       if (speciesListFailed) {
         speciesListLoaded = false;
@@ -802,7 +820,7 @@
       }
       return;
     }
-    if (firstDailyConsensus.enabled && !speciesListLoaded && !speciesListLoading) {
+    if (!speciesListLoaded && !speciesListLoading) {
       speciesListLoaded = true;
       loadSpeciesPredictions();
     }
@@ -1959,7 +1977,7 @@
       <div class="mt-6">
         <Checkbox
           checked={firstDailyConsensus.enabled}
-          label="Require two models for a species' first detection of the day"
+          label="Require two models for a bird species' first detection of the day"
           disabled={store.isLoading || store.isSaving}
           helpText="Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting. Only applies to species that at least two active models analyzing an audio source can identify, except species on the whitelist or while dynamic thresholding has lowered that species' threshold. Non-bird species, non-animal sounds, species only one model knows, and setups running a single bird model are not affected."
           onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
@@ -1978,11 +1996,11 @@
             predictions={speciesPredictions}
             predictionsLoading={speciesListLoading}
             localizeLabel={localizeSpeciesLabel}
-            listLabel="Species exempt from first-daily consensus"
-            addLabel="Add an exempt species"
+            listLabel="Bird species exempt from first-daily consensus"
+            addLabel="Add an exempt bird species"
             addPlaceholder="Type a common or scientific name"
             addHelpText="Whitelisted species always use the normal single-model threshold behavior."
-            addButtonText="Add species"
+            addButtonText="Add bird species"
             hasChanges={hasSettingsChanged(
               store.originalData.realtime?.firstDailyConsensus?.whitelist ?? [],
               firstDailyConsensus.whitelist
@@ -1993,7 +2011,49 @@
         {#if !firstDailyConsensus.enabled}
           <SettingsNote>
             <span id="first-daily-consensus-whitelist-disabled">
-              Turn on the option above to edit the species whitelist.
+              Turn on the option above to edit the bird species whitelist.
+            </span>
+          </SettingsNote>
+        {/if}
+      </div>
+      <div class="mt-6">
+        <Checkbox
+          checked={firstDailyConsensus.batEnabled}
+          label="Require two models for a bat species' first detection of the day"
+          disabled={store.isLoading || store.isSaving}
+          helpText="Reduces false new-species entries at the cost of occasionally delaying a genuine first bat detection. Only applies to bat species that at least two active bat models analyzing an audio source can identify, except bat species on the whitelist or while dynamic thresholding has lowered that species' threshold. Species only one bat model knows and setups running a single bat model are not affected."
+          onchange={enabled => updateFirstDailyConsensusBatEnabled(enabled)}
+        />
+
+        <fieldset
+          disabled={!firstDailyConsensus.batEnabled || store.isLoading || store.isSaving}
+          class="contents"
+          aria-describedby={firstDailyConsensus.batEnabled
+            ? undefined
+            : 'first-daily-consensus-bat-whitelist-disabled'}
+        >
+          <SpeciesListEditor
+            species={firstDailyConsensus.batWhitelist}
+            disabled={!firstDailyConsensus.batEnabled || store.isLoading || store.isSaving}
+            predictions={speciesPredictions}
+            predictionsLoading={speciesListLoading}
+            localizeLabel={localizeSpeciesLabel}
+            listLabel="Bat species exempt from first-daily consensus"
+            addLabel="Add an exempt bat species"
+            addPlaceholder="Type a common or scientific name"
+            addHelpText="Whitelisted species always use the normal single-model threshold behavior."
+            addButtonText="Add bat species"
+            hasChanges={hasSettingsChanged(
+              store.originalData.realtime?.firstDailyConsensus?.batWhitelist ?? [],
+              firstDailyConsensus.batWhitelist
+            )}
+            onSpeciesChange={updateFirstDailyConsensusBatWhitelist}
+          />
+        </fieldset>
+        {#if !firstDailyConsensus.batEnabled}
+          <SettingsNote>
+            <span id="first-daily-consensus-bat-whitelist-disabled">
+              Turn on the option above to edit the bat species whitelist.
             </span>
           </SettingsNote>
         {/if}
