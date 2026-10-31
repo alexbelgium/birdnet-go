@@ -461,6 +461,7 @@ func (m *SQLiteManager) Initialize() error {
 		reportInitFailure("sqlite", "seedDefaultModel", err, m.dbPath)
 		return err
 	}
+	ensureSpeciesWorkspaceIndex(m.db, m.log)
 	return nil
 }
 

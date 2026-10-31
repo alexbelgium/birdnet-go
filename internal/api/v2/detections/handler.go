@@ -191,6 +191,7 @@ func (c *Handler) RegisterDetectionRoutes(g *echo.Group) {
 	batchGroup.POST("/review", c.BatchReviewDetections)
 	batchGroup.POST("/lock", c.BatchLockDetections)
 	batchGroup.POST("/resolve", c.BatchResolveDetections)
+	c.RegisterSpeciesWorkspaceRoutes(g)
 }
 
 // validateDateOrder validates that start date is not after end date.
