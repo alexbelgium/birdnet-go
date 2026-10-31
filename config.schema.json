@@ -1031,6 +1031,35 @@
       "type": "object",
       "description": "FileOutput represents file logging configuration."
     },
+    "FirstDailyConsensusSettings": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "true to require a second bird model to confirm a species' first detection each day"
+        },
+        "whitelist": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "bird species exempt from the first-daily consensus rule, by common or scientific name"
+        },
+        "batenabled": {
+          "type": "boolean",
+          "description": "true to require a second bat model to confirm a species' first detection each day"
+        },
+        "batwhitelist": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "bat species exempt from the first-daily consensus rule, by common or scientific name"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "FirstDailyConsensusSettings configures independent bird and bat consensus rules: the first accepted detection of a species each day must be confirmed by a second model that also cleared its normal threshold."
+    },
     "HealthCheckConfig": {
       "properties": {
         "enabled": {
@@ -1937,6 +1966,10 @@
         "daylightfilter": {
           "$ref": "#/$defs/DaylightFilterSettings",
           "description": "Daylight filter settings"
+        },
+        "firstdailyconsensus": {
+          "$ref": "#/$defs/FirstDailyConsensusSettings",
+          "description": "Require a second model to confirm each species' first detection of the day"
         },
         "rtsp": {
           "$ref": "#/$defs/RTSPSettings",

@@ -284,6 +284,11 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 		// the per-detection filter and the detection-card toggle match. Idempotent for
 		// an already-canonical list, so this does not spuriously trigger a rebuild.
 		updated.Realtime.Species.Exclude = c.canonicalizeExcludeList(updated.Realtime.Species.Exclude)
+		// The first-daily consensus whitelist is entered in the same species editor and
+		// matched by the same helper, so it needs the same locale-independent form or a
+		// later birdnet.locale change silently drops the exemption.
+		updated.Realtime.FirstDailyConsensus.Whitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.Whitelist)
+		updated.Realtime.FirstDailyConsensus.BatWhitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.BatWhitelist)
 
 		// Ensure LocationConfigured is set when birdnet coordinates are present.
 		// Backward compatibility with older frontends that don't send the flag.
@@ -488,6 +493,8 @@ func (c *Controller) UpdateSectionSettings(ctx echo.Context) error {
 		// range-filter rebuild via rangeFilterSettingsChanged.
 		if strings.EqualFold(section, SettingsSectionRealtime) || strings.EqualFold(section, SettingsSectionSpecies) {
 			updated.Realtime.Species.Exclude = c.canonicalizeExcludeList(updated.Realtime.Species.Exclude)
+			updated.Realtime.FirstDailyConsensus.Whitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.Whitelist)
+			updated.Realtime.FirstDailyConsensus.BatWhitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.BatWhitelist)
 		}
 
 		// Validate the clone before publishing. No rollback needed on validation
