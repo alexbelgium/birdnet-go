@@ -312,6 +312,8 @@ func setDefaultConfig() {
 	// First daily consensus configuration
 	viper.SetDefault("realtime.firstdailyconsensus.enabled", false)
 	viper.SetDefault("realtime.firstdailyconsensus.whitelist", []string{})
+	viper.SetDefault("realtime.firstdailyconsensus.batenabled", false)
+	viper.SetDefault("realtime.firstdailyconsensus.batwhitelist", []string{})
 
 	viper.SetDefault("realtime.dogbarkfilter.enabled", false)
 	viper.SetDefault("realtime.dogbarkfilter.debug", false)

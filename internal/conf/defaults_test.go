@@ -131,3 +131,22 @@ func TestRetryTemplateMatchesCodeDefaults(t *testing.T) {
 		})
 	}
 }
+
+// TestFirstDailyConsensusDisabledByDefault pins both opt-in family defaults.
+func TestFirstDailyConsensusDisabledByDefault(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+	setDefaultConfig()
+	for _, key := range []string{
+		"realtime.firstdailyconsensus.enabled",
+		"realtime.firstdailyconsensus.batenabled",
+	} {
+		require.False(t, viper.GetBool(key), key)
+	}
+	for _, key := range []string{
+		"realtime.firstdailyconsensus.whitelist",
+		"realtime.firstdailyconsensus.batwhitelist",
+	} {
+		require.Empty(t, viper.GetStringSlice(key), key)
+	}
+}

@@ -34,7 +34,6 @@
     privacyFilterSettings,
     dogBarkFilterSettings,
     daylightFilterSettings,
-    realtimeSettings,
   } from '$lib/stores/settings';
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import { api, ApiError } from '$lib/utils/api';

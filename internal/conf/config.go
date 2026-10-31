@@ -802,16 +802,19 @@ type FalsePositiveFilterSettings struct {
 	Level int `yaml:"level" json:"level"` // Filtering aggressivity level (0-5): 0=Off, 1=Lenient, 2=Moderate, 3=Balanced, 4=Strict, 5=Maximum
 }
 
-// FirstDailyConsensusSettings configures the first-daily-detection consensus
-// rule: the first accepted detection of a bird species each day must be
-// confirmed by a second model that also cleared its normal threshold.
+// FirstDailyConsensusSettings configures independent bird and bat consensus rules:
+// the first accepted detection of a species each day must be confirmed by a
+// second model that also cleared its normal threshold.
 //
-// The rule only applies to species every active bird-capable model can predict;
-// bats, non-bird taxa, whitelisted species, and species unique to one model are
-// never affected. See internal/analysis/processor/first_daily_consensus.go.
+// Each rule only applies to species every active model of that family can
+// predict. Other taxa, family-whitelisted species, and species unique to one
+// model are unaffected. Both families are disabled by default.
+// See internal/analysis/processor/first_daily_consensus.go.
 type FirstDailyConsensusSettings struct {
-	Enabled   bool     `yaml:"enabled" json:"enabled"`     // true to require a second model to confirm a species' first detection each day
-	Whitelist []string `yaml:"whitelist" json:"whitelist"` // species exempt from the first-daily consensus rule, by common or scientific name
+	Enabled      bool     `yaml:"enabled" json:"enabled"`           // true to require a second bird model to confirm a species' first detection each day
+	Whitelist    []string `yaml:"whitelist" json:"whitelist"`       // bird species exempt from the first-daily consensus rule, by common or scientific name
+	BatEnabled   bool     `yaml:"batenabled" json:"batEnabled"`     // true to require a second bat model to confirm a species' first detection each day
+	BatWhitelist []string `yaml:"batwhitelist" json:"batWhitelist"` // bat species exempt from the first-daily consensus rule, by common or scientific name
 }
 
 // Validate checks if the filter level is within the valid range (0-5).
