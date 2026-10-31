@@ -777,6 +777,7 @@
         "markCorrect": "Megjelölés helyesként",
         "markFalsePositive": "Megjelölés téves pozitívként",
         "review": "Észlelés áttekintése",
+        "reanalyze": "Észlelés újraelemzése",
         "showSpecies": "Faj megjelenítése",
         "ignoreSpecies": "Faj figyelmen kívül hagyása",
         "lockDetection": "Észlelés zárolása",

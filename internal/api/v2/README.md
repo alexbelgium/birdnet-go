@@ -149,6 +149,13 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | POST   | `/detections/batch/lock`      | `BatchLockDetections`    | ✅   | Bulk lock or unlock detections                                                                                             |
 | POST   | `/detections/batch/resolve`   | `BatchResolveDetections` | ✅   | Resolve query params to detection IDs                                                                                      |
 
+### Reanalysis (`reanalyze/`)
+
+| Method | Route                             | Handler                   | Auth | Description                                                                                    |
+| ------ | --------------------------------- | ------------------------- | ---- | ---------------------------------------------------------------------------------------------- |
+| POST   | `/detections/:id/reanalyze`       | `ReanalyzeDetection`      | ✅   | Re-run the loaded classifiers matching the detection (bat or non-bat) over its clip; read-only |
+| POST   | `/detections/:id/correct-species` | `CorrectDetectionSpecies` | ✅   | Apply a reanalysis result as the detection's species and mark it verified (v2 database only)   |
+
 ### Integrations (`integrations/integrations.go`)
 
 | Method | Route                                        | Handler                         | Auth | Description                                    |

@@ -297,6 +297,7 @@
               onMarkCorrect={() => actions.handleMarkCorrect(detection)}
               onMarkFalsePositive={() => actions.handleMarkFalsePositive(detection)}
               onReview={() => actions.handleReview(detection)}
+              onReanalyze={() => actions.handleReanalyze(detection)}
               onToggleSpecies={() => actions.handleToggleSpecies(detection)}
               onToggleLock={() => actions.handleToggleLock(detection)}
               onDelete={() => actions.handleDelete(detection)}

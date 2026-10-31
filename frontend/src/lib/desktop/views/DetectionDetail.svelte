@@ -27,11 +27,14 @@
   import { hasReviewPermission, isAuthenticated } from '$lib/utils/auth';
   import { formatLocalDateTime } from '$lib/utils/date';
   import { buildAppUrl, getCurrentPathWithQuery } from '$lib/utils/urlHelpers';
+  import { navigation } from '$lib/stores/navigation.svelte';
+  import { openReanalyze } from '$lib/stores/reanalyze.svelte';
   import { loggers } from '$lib/utils/logger';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import SourceBadge from '$lib/desktop/features/dashboard/components/SourceBadge.svelte';
   import {
     Download,
+    Sparkles,
     Camera,
     Clock,
     History,
@@ -703,6 +706,27 @@
             <Download class="w-4 h-4" />
             <span>{t('media.audio.download')}</span>
           </a>
+        </div>
+      {/if}
+
+      <!-- Reanalyze with the loaded models. Gated on the same clipName the
+           Download button is gated on: with no clip there is nothing to re-run
+           inference over. -->
+      {#if det.clipName && $isAuthenticated}
+        <div class="meta-section">
+          <button
+            type="button"
+            class="meta-download"
+            onclick={() =>
+              openReanalyze(det, {
+                onChanged: () => fetchDetection(),
+                onDeleted: () => navigation.navigate('/ui/detections'),
+              })}
+            aria-label={`Reanalyze this ${displayName} clip`}
+          >
+            <Sparkles class="w-4 h-4" />
+            <span>Reanalyze</span>
+          </button>
         </div>
       {/if}
     </div>
