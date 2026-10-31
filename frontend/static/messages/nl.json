@@ -5595,7 +5595,7 @@
         "helpText": "Taal voor de gangbare soortnamen in de interface."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Betrouwbaarheidsdrempel overschrijven",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,13 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Schakel in om een drempel voor dit model in te stellen. Anders geldt de gedeelde drempel voor vleermuizen."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Verwerp alle detecties in een tijdvenster als de achtergrondscore deze grens overschrijdt. 0 = uit; gebruik anders 0.5–1.0 (waarden onder 0.5 schakelen het filter uit). Aanbevolen: 0.99. Bij 0.98 wordt meer ruis verwijderd, maar kunnen sommige echte roepen verloren gaan.",
+        "label": "BSG-BAT: Grens voor achtergrondafwijzing"
       }
     },
     "rangeFilter": {

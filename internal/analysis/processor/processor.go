@@ -983,12 +983,12 @@ func (p *Processor) processResults(settings *conf.Settings, item classifier.Resu
 		// Check if detection should be filtered
 		shouldSkip, _ := p.shouldFilterDetection(settings, result, commonName, scientificName, speciesLowercase, baseThreshold, item.Source.ID, item.ModelID)
 
-		// Record every prediction above the base confidence threshold in the
+		// Record predictions above the base threshold (or fork bat candidate floor) in the
 		// per-model "Last heard" diagnostic feed, including non-avian classes,
 		// human vocalizations, and out-of-range birds, tagged with whether the
 		// species passes the range filter. This is independent of whether the
 		// detection is saved below (saved detections also clear this bar).
-		if result.Confidence > baseThreshold {
+		if recordModelPrediction(item.ModelID, result.Confidence, baseThreshold) {
 			inRange := !shouldApplyRangeFilter(item.ModelID, settings) || settings.IsSpeciesIncluded(result.Species)
 			p.updateLastDetection(item.ModelID, commonName, scientificName, float64(result.Confidence), feedTime, inRange, feedThrottle)
 		}
@@ -1004,7 +1004,7 @@ func (p *Processor) processResults(settings *conf.Settings, item classifier.Resu
 
 	// Run ultrasonic validation filter on bat detections. Computed once per chunk
 	// since all detections share the same source audio.
-	if len(detections) > 0 && item.ModelID == classifier.RegistryIDBat {
+	if len(detections) > 0 && classifier.IsBatFamily(item.ModelID) {
 		p.applyUltrasonicFilter(settings, item, detections)
 	}
 
@@ -1030,7 +1030,7 @@ func (p *Processor) applyUltrasonicFilter(settings *conf.Settings, item classifi
 	}
 
 	resolved := p.resolveAudioSource(item.Source)
-	sourceRate := resolved.SampleRate
+	sourceRate := ultrasonicPCMRate(item.ModelID, resolved.SampleRate)
 	if !ultrasonic.HasUltrasonicBand(sourceRate, filterCfg.FrequencySplitHz) {
 		return
 	}
@@ -1569,9 +1569,10 @@ func (p *Processor) getBaseConfidenceThreshold(settings *conf.Settings, commonNa
 // otherwise, and for every other model (including the primary BirdNET), the
 // primary BirdNET threshold applies.
 func modelGlobalConfidenceThreshold(settings *conf.Settings, modelID string) float32 {
+	if classifier.IsBatFamily(modelID) {
+		return float32(conf.BatModelThreshold(settings, modelID))
+	}
 	switch modelID {
-	case classifier.RegistryIDBat:
-		return float32(settings.Bat.Threshold)
 	case classifier.RegistryIDPerchV2:
 		if settings.Perch.OverrideThreshold {
 			return float32(settings.Perch.Threshold)

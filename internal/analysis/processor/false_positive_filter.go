@@ -101,15 +101,15 @@ func getRecommendedLevelForOverlap(overlap float64) (level int, overlapSufficien
 // MinDetectionsForModel returns the confirmation count the false positive filter
 // requires for a model at the given effective base overlap, routing to the
 // correct minDetections calculation based on the model ID. The flush path and the
-// API readouts both use it, so the readouts match the filter. Bat models use a fixed 50% overlap (1.5s step) instead
-// of the user-configurable BirdNET overlap, and read from a separate filter
-// config. For the 3s BirdNET model the bird path's step (3.0 - overlap) matches
+// API readouts both use it, so the readouts match the filter. All bat-family
+// models share the bat filter confirmation count, independently of model cadence
+// and the user-configurable BirdNET overlap. For the 3s BirdNET model the bird path's step (3.0 - overlap) matches
 // the buffer's cadence, which follows the effective base overlap (issue #4096).
 //
 // baseOverlap is the effective base overlap (the published cadence plan's, else
 // the configured birdnet.overlap); see Processor.effectiveBaseOverlap.
 func MinDetectionsForModel(settings *conf.Settings, modelID string, baseOverlap time.Duration) int {
-	if modelID == classifier.RegistryIDBat {
+	if classifier.IsBatFamily(modelID) {
 		return calculateBatMinDetections(settings)
 	}
 	// For a model whose analysis clip differs from the 3s BirdNET base clip (e.g.
@@ -193,6 +193,9 @@ func precomputeVisibilityThresholds(settings *conf.Settings, baseOverlap time.Du
 // getThreshold returns the visibility threshold for a model ID, falling back
 // to the bird threshold for unknown model IDs.
 func (vt visibilityThresholds) getThreshold(modelID string) int {
+	if classifier.IsBatFamily(modelID) {
+		modelID = classifier.RegistryIDBat
+	}
 	if t, ok := vt[modelID]; ok {
 		return t
 	}

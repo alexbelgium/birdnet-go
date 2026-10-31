@@ -145,6 +145,20 @@ ModelsConfig holds global model enablement and management settings.
 | `models.directory` | string | base directory for downloaded model files |
 | `models.autoenablemigrated` | boolean | AutoEnableMigrated is an internal marker recording that the classifier's one-shot legacy model auto-enable has run for this config file, so it never re-runs. Do not edit by hand; a managed read-only config may set it true (with configversion: 2) to keep an explicit models.enabled from being re-seeded. Set by the classifier; hidden from the JSON API; the companion-marker rationale (why not ConfigVersion) lives in internal/conf/migrations.go. |
 
+## forkmodels
+
+BatModelsConfig holds the optional fork-specific bat classifiers.
+
+| Setting | Type | Description |
+|---------|------|-------------|
+| `forkmodels.batdetect2.threshold` | number | Threshold overrides the shared bat threshold; zero inherits it. |
+| `forkmodels.batdetect2.modelPath` | string | ModelPath is the path to the ONNX classifier model. |
+| `forkmodels.batdetect2.labelPath` | string | LabelPath is the path to the classifier species labels. |
+| `forkmodels.bsgbat.threshold` | number | Threshold overrides the shared bat threshold; zero inherits it. |
+| `forkmodels.bsgbat.modelPath` | string | ModelPath is the path to the ONNX classifier model. |
+| `forkmodels.bsgbat.labelPath` | string | LabelPath is the path to the classifier species labels. |
+| `forkmodels.bsgbat.backgroundmax` | number | BackgroundMax rejects windows whose Background sigmoid exceeds this value. Zero disables rejection (default); otherwise use 0.5 to 1.0. Suggested: 0.99. |
+
 ## lowmemory
 
 LowMemoryConfig is the manual override for the runtime memory policy.

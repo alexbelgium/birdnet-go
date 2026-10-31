@@ -5595,7 +5595,7 @@
         "helpText": "Jazyk používaný pro běžné názvy druhů v rozhraní."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Přepsat práh spolehlivosti",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,13 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Zapnutím nastavíte práh pro tento model. Jinak se použije společný práh pro netopýry."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Odmítnout všechny detekce v okně, pokud jeho skóre pozadí překročí tuto mez. 0 = vypnuto; jinak použijte 0.5–1.0 (hodnoty pod 0.5 filtr vypnou). Doporučeno: 0.99. Při 0.98 se odstraní více šumu, ale některé skutečné hlasy mohou být ztraceny.",
+        "label": "BSG-BAT: Mez pro odmítnutí pozadí"
       }
     },
     "rangeFilter": {

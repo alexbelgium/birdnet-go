@@ -5595,7 +5595,7 @@
         "helpText": "Sprache für die gebräuchlichen Artnamen in der Benutzeroberfläche."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Konfidenzschwellenwert überschreiben",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,13 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Aktivieren, um einen Schwellenwert für dieses Modell festzulegen. Andernfalls gilt der gemeinsame Schwellenwert für Fledermäuse."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Alle Erkennungen in einem Zeitfenster verwerfen, wenn dessen Hintergrundwert diesen Grenzwert überschreitet. 0 = aus; ansonsten 0.5–1.0 verwenden (Werte unter 0.5 schalten den Filter aus). Empfehlung: 0.99. Bei 0.98 wird mehr Rauschen entfernt, aber einige echte Rufe können verloren gehen.",
+        "label": "BSG-BAT: Grenzwert für Hintergrundunterdrückung"
       }
     },
     "rangeFilter": {

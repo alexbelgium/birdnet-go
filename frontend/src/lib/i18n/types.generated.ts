@@ -4095,6 +4095,9 @@ export type TranslationKey =
   | 'analysis.detection.secondaryThreshold.followsBirdnet'
   | 'analysis.detection.perchThreshold.label'
   | 'analysis.detection.birdnetv3Threshold.label'
+  | 'analysis.detection.batThresholdOverride.helpText'
+  | 'analysis.detection.bsgBatBackgroundMax.label'
+  | 'analysis.detection.bsgBatBackgroundMax.helpText'
   | 'analysis.rangeFilter.birdOnlyNote'
   | 'analysis.rangeFilter.status.title'
   | 'analysis.rangeFilter.status.geomodelInfo' // params: version, species

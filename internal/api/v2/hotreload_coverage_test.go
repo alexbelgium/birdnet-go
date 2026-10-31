@@ -104,7 +104,11 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"Bat": {categories: []hotReloadCategory{hotReloadFresh}},
 	// The bat base threshold is read live per detection like the other model bases,
 	// so a change takes effect at the next detection with no recalc action.
-	"Bat.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
+	"Bat.Threshold":                   {categories: []hotReloadCategory{hotReloadFresh}},
+	"ForkModels":                      {categories: []hotReloadCategory{hotReloadRestart}},
+	"ForkModels.BatDetect2.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
+	"ForkModels.BSGBat.Threshold":     {categories: []hotReloadCategory{hotReloadFresh}},
+	"ForkModels.BSGBat.BackgroundMax": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// --- BSG ---
 	"BSG": {categories: []hotReloadCategory{hotReloadRestart}},

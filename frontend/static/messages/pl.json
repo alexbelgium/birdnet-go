@@ -5595,7 +5595,7 @@
         "helpText": "Język używany do nazw zwyczajowych gatunków w interfejsie."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Zastąp próg pewności",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,13 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Włącz, aby ustawić próg dla tego modelu. W przeciwnym razie obowiązuje wspólny próg dla nietoperzy."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Odrzuć wszystkie wykrycia w oknie czasowym, gdy jego wynik tła przekracza ten próg. 0 = wyłączone; w przeciwnym razie użyj 0.5–1.0 (wartości poniżej 0.5 wyłączają filtr). Zalecana wartość: 0.99. Przy 0.98 usuwane jest więcej szumu, ale niektóre rzeczywiste głosy mogą zostać utracone.",
+        "label": "BSG-BAT: Próg odrzucania tła"
       }
     },
     "rangeFilter": {

@@ -5595,7 +5595,7 @@
         "helpText": "Lingua utilizzata per i nomi comuni delle specie nell'interfaccia."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Sovrascrivi la soglia di confidenza",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,13 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Attiva per impostare una soglia per questo modello. Altrimenti si applica la soglia condivisa per i pipistrelli."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Scarta tutti i rilevamenti in una finestra quando il suo punteggio di rumore di fondo supera questo limite. 0 = disattivato; altrimenti usare 0.5–1.0 (i valori inferiori a 0.5 disattivano il filtro). Valore suggerito: 0.99. Con 0.98 viene eliminato più rumore, ma si possono perdere alcuni richiami reali.",
+        "label": "BSG-BAT: Limite di esclusione del rumore di fondo"
       }
     },
     "rangeFilter": {

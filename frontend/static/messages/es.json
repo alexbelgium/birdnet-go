@@ -5595,7 +5595,7 @@
         "helpText": "Idioma utilizado para los nombres comunes de especies en la interfaz."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Anular el umbral de confianza",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,13 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Activa esta opción para definir un umbral para este modelo. De lo contrario, se aplica el umbral compartido para murciélagos."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Descartar todas las detecciones de una ventana cuando su puntuación de fondo supere este límite. 0 = desactivado; en caso contrario, use 0.5–1.0 (los valores inferiores a 0.5 lo desactivan). Valor sugerido: 0.99. Con 0.98 se elimina más ruido, pero pueden perderse algunas llamadas reales.",
+        "label": "BSG-BAT: Límite de rechazo de fondo"
       }
     },
     "rangeFilter": {

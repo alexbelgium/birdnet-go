@@ -5595,7 +5595,7 @@
         "helpText": "Valoda, kas tiek izmantota sugu nosaukumiem interfeisā."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Pārrakstīt ticamības slieksni",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5607,6 +5607,13 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Iespējojiet, lai šim modelim iestatītu slieksni. Pretējā gadījumā tiek izmantots kopīgais sikspārņu slieksnis."
+      },
+      "bsgBatBackgroundMax": {
+        "helpText": "Noraidīt visus konstatējumus laika logā, ja tā fona vērtējums pārsniedz šo robežvērtību. 0 = izslēgts; citādi izmantojiet 0.5–1.0 (vērtības zem 0.5 izslēdz filtru). Ieteikums: 0.99. Pie 0.98 tiek noņemts vairāk trokšņa, taču var tikt zaudēti daži īsti saucieni.",
+        "label": "BSG-BAT: Fona noraidīšanas robežvērtība"
       }
     },
     "rangeFilter": {

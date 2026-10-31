@@ -310,6 +310,7 @@ func TestHotReloadRestartFieldsCovered(t *testing.T) {
 		"Perch":                   "perch model path; not wired",
 		"BirdNETV3":               "BirdNET v3.0 model path; not wired",
 		"BSG":                     "BSG model path; not wired",
+		"ForkModels":              "fork model paths; not wired",
 		"Realtime.Audio.Watchdog": "no UI controls (project decision)",
 		"LowMemory":               "startup-only memory policy; not exposed via the live settings API",
 	}

@@ -53,7 +53,7 @@
     watchAcousticModels,
   } from '$lib/stores/acousticModels.svelte';
   import {
-    BAT_MODEL_ID,
+    BAT_MODEL_IDS,
     FILTER_ACTIVE_MIN_LEVEL,
     REFERENCE_WINDOW_SECONDS,
     baseClipMinDetections,
@@ -71,6 +71,7 @@
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import ModelVariantPicker from '$lib/desktop/features/settings/components/ModelVariantPicker.svelte';
   import ModelRegionSelector from '$lib/desktop/features/settings/components/ModelRegionSelector.svelte';
+  import BatModelThresholds from './BatModelThresholds_fork.svelte';
   import NumberField from '$lib/desktop/components/forms/NumberField.svelte';
   import FalsePositiveFilterControl, {
     type FilterLevel,
@@ -393,12 +394,14 @@
   });
   const batChange: ChangePair = $derived({
     original: {
+      forkModels: store.originalData.forkModels,
       batThreshold: store.originalData.bat?.threshold,
       batNighttimeOnly: store.originalData.bat?.nighttimeOnly,
       batUltrasonicFilter: store.originalData.bat?.ultrasonicFilter?.enabled ?? true,
       batFPFilter: store.originalData.bat?.falsePositiveFilter?.level ?? 0,
     },
     current: {
+      forkModels: store.formData.forkModels,
       batThreshold: bat.threshold,
       batNighttimeOnly: bat.nighttimeOnly,
       batUltrasonicFilter: bat.ultrasonicFilter?.enabled ?? true,
@@ -737,7 +740,9 @@
   // server or before the audio pipeline has published a plan; the control's
   // description then falls back to the count from the configured overlap.
   const cadence = $derived(analysisCadence());
-  const cadenceHasBirdModels = $derived(cadence?.models.some(m => m.id !== BAT_MODEL_ID) ?? false);
+  const cadenceHasBirdModels = $derived(
+    cadence?.models.some(m => !BAT_MODEL_IDS.has(m.id)) ?? false
+  );
   const savedFpLevel = $derived(store.originalData.realtime?.falsePositiveFilter?.level ?? 0);
   const savedOverlap = $derived(store.originalData.birdnet?.overlap ?? 0);
   const formOverlap = $derived(birdnet?.overlap ?? 0);
@@ -1922,6 +1927,7 @@
             helpText={t('analysis.detection.batThreshold.helpText')}
           />
           <div></div>
+          <BatModelThresholds />
 
           <Checkbox
             checked={bat.nighttimeOnly ?? true}
