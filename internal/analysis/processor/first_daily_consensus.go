@@ -36,7 +36,7 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/conf"
-	"github.com/tphakala/birdnet-go/internal/labels/nonbird"
+	"github.com/tphakala/birdnet-go/internal/labels/soundevent"
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
@@ -272,7 +272,7 @@ func (p *Processor) firstDailyGateApplies(item *PendingDetection, settings *conf
 	// The non-species sound classes keep today's behaviour untouched. Bats are
 	// not excluded here: item.BestModelID tells whether this is a bat detection,
 	// and every check below reads that instead of assuming bird.
-	if nonbird.IsNonSpeciesLabel(result.RawLabel) {
+	if soundevent.IsLabel(result.RawLabel) {
 		return firstDailyNormal, firstDailyCandidate{}
 	}
 
