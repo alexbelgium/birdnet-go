@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/tphakala/birdnet-go/internal/errors"
-	inferenceonnx "github.com/tphakala/birdnet-go/internal/inference/onnx"
 	ort "github.com/yalue/onnxruntime_go"
 )
 
@@ -47,9 +46,6 @@ func newBatORTSession(modelID, modelPath string, inputs, outputs []string, threa
 		return nil, err
 	}
 	if err := opts.AddSessionConfigEntry(ortAllowInterOpSpinning, ortSpinningDisabled); err != nil {
-		return nil, err
-	}
-	if err := inferenceonnx.DisableKleidiAIIfNeeded(opts); err != nil {
 		return nil, err
 	}
 	return ort.NewDynamicAdvancedSession(modelPath, inputs, outputs, opts)

@@ -18,6 +18,7 @@ func init() {
 		Spec: ModelSpec{SampleRate: bsgBatRawSampleRate, ClipLength: time.Second, RawSampleRate: bsgBatRawSampleRate,
 			MinRawSampleRate: 96000, RecommendedSampleRate: 384000},
 		ConfigAliases: []string{conf.ModelIDBSGBat}, rangeFilterCompat: rangeFilterCompatNone, scheduleGated: true,
+		taxonGroup: TaxonGroupBat,
 	}
 	// Rebuild on global backend, OpenVINO device, and thread changes.
 	openvinoCapableSecondaryBuilders[RegistryIDBSGBat] = func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {
