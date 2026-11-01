@@ -114,7 +114,7 @@ func (s *ShoutrrrProvider) ValidateConfig() error {
 			}
 		}
 		if len(nonTGURLs) > 0 {
-			ntSender, ntErr := shoutrrr.CreateSender(nonTGURLs...)
+			ntSender, ntErr := shoutrrr.CreateSenderWithOptions(stypes.SenderOptions{}, nonTGURLs...)
 			if ntErr != nil {
 				return privacy.WrapError(ntErr)
 			}
