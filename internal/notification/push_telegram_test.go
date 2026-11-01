@@ -328,7 +328,7 @@ func TestShoutrrrProvider_SendPhoto_WithTelegramURL(t *testing.T) {
 
 // largeSendPhotoSuccessResponse returns a realistic Telegram sendPhoto success
 // response — a full Message object with a multi-size photo array and caption
-// entities — whose JSON exceeds maxErrorBodySize (1 KB), as real responses do.
+// entities — whose JSON exceeds the historical 1 KB error-body cap, as real responses do.
 func largeSendPhotoSuccessResponse() string {
 	fileID := strings.Repeat("A", 120) // real file_ids are long base64-ish blobs
 	uniqueID := strings.Repeat("B", 24)
@@ -349,8 +349,9 @@ func largeSendPhotoSuccessResponse() string {
 // and the photo was misread as a failure — triggering a second, text delivery.
 func TestShoutrrrProvider_SendPhoto_LargeSuccessResponse(t *testing.T) {
 	t.Parallel()
+	const legacyErrorBodyMaxBytes = 1024
 	body := largeSendPhotoSuccessResponse()
-	require.Greater(t, len(body), maxErrorBodySize, "test body must exceed the old 1 KB cap to be a valid regression test")
+	require.Greater(t, len(body), legacyErrorBodyMaxBytes, "test body must exceed the old 1 KB cap to be a valid regression test")
 
 	handler := newTelegramAPIHandler(t)
 	handler.responseBody = body
