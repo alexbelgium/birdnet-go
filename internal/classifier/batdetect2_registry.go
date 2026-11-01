@@ -17,6 +17,7 @@ func init() {
 		Description: "BatDetect2 UK bat species classifier", NumSpecies: 17,
 		Spec:          ModelSpec{SampleRate: 48000, ClipLength: 3 * time.Second, RawSampleRate: 256000, MinRawSampleRate: 96000, RecommendedSampleRate: 192000},
 		ConfigAliases: []string{conf.ModelIDBatDetect2}, rangeFilterCompat: rangeFilterCompatNone, scheduleGated: true,
+		taxonGroup: TaxonGroupBat,
 	}
 	// Rebuild on global backend, OpenVINO device, library, and thread changes.
 	openvinoCapableSecondaryBuilders[RegistryIDBatDetect2] = func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {

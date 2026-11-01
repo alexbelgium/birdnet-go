@@ -305,6 +305,8 @@ func TestModelRegistry_EveryEntryHasTaxonGroup(t *testing.T) {
 		RegistryIDPerchV2:    TaxonGroupBird,
 		RegistryIDBSG:        TaxonGroupBird,
 		RegistryIDBat:        TaxonGroupBat,
+		RegistryIDBatDetect2: TaxonGroupBat,
+		RegistryIDBSGBat:     TaxonGroupBat,
 	}
 	for id := range ModelRegistry {
 		assert.Contains(t, want, id, "registry entry %q needs a taxon group in this table", id)
