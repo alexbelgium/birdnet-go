@@ -27,6 +27,7 @@
 package processor
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -72,6 +73,10 @@ const (
 	// more warm passes. Completed results remain in-flight until the next pass
 	// applies them, so this also bounds the result channel.
 	firstDailyMaxConcurrentLookups = 4
+
+	// firstDailyLookupTimeout bounds one background acceptance lookup. A lookup
+	// that times out fails open, like any other datastore error.
+	firstDailyLookupTimeout = 10 * time.Second
 )
 
 // firstDailyConsensus is the small amount of state the rule keeps. The zero
@@ -383,7 +388,7 @@ func (p *Processor) warmFirstDailyAcceptance(_ time.Time, settings *conf.Setting
 		p.firstDaily.disable()
 		return
 	}
-	if p.Ds == nil {
+	if p.Repo == nil {
 		return
 	}
 	p.firstDaily.applyCompletedLookups()
@@ -606,7 +611,7 @@ func (p *Processor) startFirstDailyLookup(candidate firstDailyCandidate) {
 		return
 	}
 	c.inFlight[candidate] = struct{}{}
-	generation, results, ds := c.generation, c.lookups, p.Ds
+	generation, results, repo := c.generation, c.lookups, p.Repo
 	c.mu.Unlock()
 
 	go func() {
@@ -617,7 +622,10 @@ func (p *Processor) startFirstDailyLookup(candidate firstDailyCandidate) {
 			}
 			results <- result
 		}()
-		result.count, result.err = ds.CountSpeciesDetections(candidate.scientificName, candidate.day, "", 0)
+		ctx, cancel := context.WithTimeout(context.Background(), firstDailyLookupTimeout)
+		defer cancel()
+		// Only the total is needed; limit 1 keeps the row fetch to a single detection.
+		_, result.count, result.err = repo.GetBySpecies(ctx, candidate.scientificName, candidate.day, "", 0, 1, 0)
 	}()
 }
 

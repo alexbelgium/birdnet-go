@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -23,8 +24,8 @@ const (
 )
 
 var (
-	consensusAt  = time.Date(2026, 6, 11, 8, 0, 0, 0, time.UTC)
-	consensusDay = consensusAt.Format(time.DateOnly)
+	firstDailyAt = time.Date(2026, 6, 11, 8, 0, 0, 0, time.UTC)
+	consensusDay = firstDailyAt.Format(time.DateOnly)
 )
 
 // dbResult is what the datastore reports for the species today.
@@ -53,7 +54,7 @@ func newConsensusDetection(modelID, rawLabel string, confidences map[string]floa
 	return &PendingDetection{
 		Detection: Detections{
 			Result: detection.Result{
-				Timestamp: consensusAt,
+				Timestamp: firstDailyAt,
 				Species: detection.Species{
 					CommonName:     consensusCommon,
 					ScientificName: consensusSpecies,
@@ -92,12 +93,12 @@ func markMemo(p *Processor, accepted bool) {
 
 // expectSpeciesCount wires a datastore that answers the "already accepted today"
 // query exactly once.
-func expectSpeciesCount(t *testing.T, db *dbResult) *mocks.MockInterface {
+func expectSpeciesCount(t *testing.T, db *dbResult) *mocks.MockDetectionRepository {
 	t.Helper()
-	ds := mocks.NewMockInterface(t)
+	ds := mocks.NewMockDetectionRepository(t)
 	ds.EXPECT().
-		CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).
-		Return(db.count, db.err).
+		GetBySpecies(mock.Anything, consensusSpecies, consensusDay, "", 0, 1, 0).
+		Return(nil, db.count, db.err).
 		Once()
 	return ds
 }
@@ -105,7 +106,7 @@ func expectSpeciesCount(t *testing.T, db *dbResult) *mocks.MockInterface {
 // pendingDue puts item in the pending map with a deadline already passed, which
 // is the set warmFirstDailyAcceptance considers.
 func pendingDue(item *PendingDetection) map[string]PendingDetection {
-	item.FlushDeadline = consensusAt.Add(-time.Second)
+	item.FlushDeadline = firstDailyAt.Add(-time.Second)
 	return map[string]PendingDetection{pendingKeyForDetection(consensusSource, &item.Detection): *item}
 }
 
@@ -321,7 +322,7 @@ func TestShouldDiscardFirstDailyDetection_DynamicThreshold(t *testing.T) {
 func TestFirstDailyConsensusDefersApprovalUntilNextCycle(t *testing.T) {
 	for _, approvalFirst := range []bool{false, true} {
 		t.Run(map[bool]string{false: "gate first", true: "approval first"}[approvalFirst], func(t *testing.T) {
-			p := &Processor{Ds: mocks.NewMockInterface(t)}
+			p := &Processor{Repo: mocks.NewMockDetectionRepository(t)}
 			markSpeciesShared(p, true)
 			markMemo(p, false)
 			item := newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})
@@ -335,7 +336,7 @@ func TestFirstDailyConsensusDefersApprovalUntilNextCycle(t *testing.T) {
 			}
 			assert.True(t, discard, "same-cycle verdict must not depend on map iteration order")
 
-			p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+			p.warmFirstDailyAcceptance(firstDailyAt, newConsensusSettings())
 			discard, _ = p.shouldDiscardFirstDailyDetection(item, newConsensusSettings())
 			assert.False(t, discard, "the approval must become visible next cycle")
 		})
@@ -497,16 +498,16 @@ func TestFirstDailyConsensusRechecksEligibilityAgainstStaleMemo(t *testing.T) {
 func TestWarmFirstDailyAcceptance(t *testing.T) {
 	settings := newConsensusSettings()
 	p := &Processor{
-		Ds:                expectSpeciesCount(t, &dbResult{count: 0}),
+		Repo:              expectSpeciesCount(t, &dbResult{count: 0}),
 		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
 	}
 	markSpeciesShared(p, true)
 
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 	require.Eventually(t, func() bool { return len(p.firstDaily.lookups) == 1 }, time.Second, time.Millisecond)
 	_, settled := p.firstDaily.acceptedToday(consensusDay, consensusSpecies)
 	assert.False(t, settled, "a background result is applied only by a later warm pass")
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 
 	discard, reason := p.shouldDiscardFirstDailyDetection(
 		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.7}), settings)
@@ -521,14 +522,14 @@ func TestWarmFirstDailyAcceptance(t *testing.T) {
 func TestWarmFirstDailyAcceptance_AcceptedSpecies(t *testing.T) {
 	settings := newConsensusSettings()
 	p := &Processor{
-		Ds:                expectSpeciesCount(t, &dbResult{count: 3}),
+		Repo:              expectSpeciesCount(t, &dbResult{count: 3}),
 		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
 	}
 	markSpeciesShared(p, true)
 
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 	require.Eventually(t, func() bool {
-		p.warmFirstDailyAcceptance(consensusAt, settings)
+		p.warmFirstDailyAcceptance(firstDailyAt, settings)
 		accepted, settled := p.firstDaily.acceptedToday(consensusDay, consensusSpecies)
 		return settled && accepted
 	}, time.Second, time.Millisecond)
@@ -545,19 +546,19 @@ func TestWarmFirstDailyAcceptance_AcceptedSpecies(t *testing.T) {
 func TestWarmFirstDailyAcceptance_DatastoreErrorFailsOpen(t *testing.T) {
 	settings := newConsensusSettings()
 	p := &Processor{
-		Ds:                expectSpeciesCount(t, &dbResult{err: errors.NewStd("database is locked")}),
+		Repo:              expectSpeciesCount(t, &dbResult{err: errors.NewStd("database is locked")}),
 		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
 	}
 	markSpeciesShared(p, true)
 
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 	require.Eventually(t, func() bool {
 		p.firstDaily.mu.Lock()
 		defer p.firstDaily.mu.Unlock()
 		return len(p.firstDaily.inFlight) == 0 || len(p.firstDaily.lookups) > 0
 	}, time.Second, time.Millisecond)
 	p.pendingDetections = nil
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 
 	discard, _ := p.shouldDiscardFirstDailyDetection(
 		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
@@ -575,12 +576,12 @@ func TestWarmFirstDailyAcceptance_SkipsWhenDisabled(t *testing.T) {
 	settings.BirdNET.Threshold = 0.5
 
 	p := &Processor{
-		Ds:                mocks.NewMockInterface(t),
+		Repo:              mocks.NewMockDetectionRepository(t),
 		pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8})),
 	}
 	markSpeciesShared(p, true)
 
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 
 	discard, _ := p.shouldDiscardFirstDailyDetection(
 		newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}), settings)
@@ -593,14 +594,14 @@ func TestWarmFirstDailyAcceptance_StartsBeforeDeadline(t *testing.T) {
 	item.FlushDeadline = time.Now().Add(time.Minute)
 
 	p := &Processor{
-		Ds: expectSpeciesCount(t, &dbResult{count: 0}),
+		Repo: expectSpeciesCount(t, &dbResult{count: 0}),
 		pendingDetections: map[string]PendingDetection{
 			pendingKeyForDetection(consensusSource, &item.Detection): *item,
 		},
 	}
 	markSpeciesShared(p, true)
 
-	p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+	p.warmFirstDailyAcceptance(firstDailyAt, newConsensusSettings())
 	require.Eventually(t, func() bool { return len(p.firstDaily.lookups) == 1 }, time.Second, time.Millisecond)
 }
 
@@ -609,15 +610,18 @@ func TestWarmFirstDailyAcceptance_DedupesInFlightAndDoesNotBlock(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
 	var once sync.Once
-	ds := mocks.NewMockInterface(t)
-	ds.EXPECT().CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).
-		Run(func(string, string, string, int) { once.Do(func() { close(started) }); <-release }).
-		Return(int64(0), nil).Once()
-	p := &Processor{Ds: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
+	ds := mocks.NewMockDetectionRepository(t)
+	ds.EXPECT().GetBySpecies(mock.Anything, consensusSpecies, consensusDay, "", 0, 1, 0).
+		Run(func(context.Context, string, string, string, int, int, int) {
+			once.Do(func() { close(started) })
+			<-release
+		}).
+		Return(nil, int64(0), nil).Once()
+	p := &Processor{Repo: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
 	markSpeciesShared(p, true)
 
 	done := make(chan struct{})
-	go func() { p.warmFirstDailyAcceptance(consensusAt, settings); close(done) }()
+	go func() { p.warmFirstDailyAcceptance(firstDailyAt, settings); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(100 * time.Millisecond):
@@ -625,9 +629,9 @@ func TestWarmFirstDailyAcceptance_DedupesInFlightAndDoesNotBlock(t *testing.T) {
 		t.Fatal("warm pass blocked on datastore lookup")
 	}
 	<-started
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 	time.Sleep(20 * time.Millisecond)
-	ds.AssertNumberOfCalls(t, "CountSpeciesDetections", 1)
+	ds.AssertNumberOfCalls(t, "GetBySpecies", 1)
 	close(release)
 }
 
@@ -635,34 +639,34 @@ func TestWarmFirstDailyAcceptance_DropsStaleGeneration(t *testing.T) {
 	settings := newConsensusSettings()
 	release := make(chan struct{})
 	started := make(chan struct{})
-	ds := mocks.NewMockInterface(t)
-	ds.EXPECT().CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).
-		Run(func(string, string, string, int) { close(started); <-release }).Return(int64(2), nil).Once()
-	ds.EXPECT().CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).Return(int64(0), nil).Once()
-	p := &Processor{Ds: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
+	ds := mocks.NewMockDetectionRepository(t)
+	ds.EXPECT().GetBySpecies(mock.Anything, consensusSpecies, consensusDay, "", 0, 1, 0).
+		Run(func(context.Context, string, string, string, int, int, int) { close(started); <-release }).Return(nil, int64(2), nil).Once()
+	ds.EXPECT().GetBySpecies(mock.Anything, consensusSpecies, consensusDay, "", 0, 1, 0).Return(nil, int64(0), nil).Once()
+	p := &Processor{Repo: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
 	markSpeciesShared(p, true)
 
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 	<-started
 	settings.Realtime.FirstDailyConsensus.Enabled = false
 	settings.Realtime.FirstDailyConsensus.BatEnabled = false
-	p.warmFirstDailyAcceptance(consensusAt, settings)
+	p.warmFirstDailyAcceptance(firstDailyAt, settings)
 	settings.Realtime.FirstDailyConsensus.Enabled = true
 	close(release)
 
 	require.Eventually(t, func() bool {
-		p.warmFirstDailyAcceptance(consensusAt, settings)
+		p.warmFirstDailyAcceptance(firstDailyAt, settings)
 		accepted, settled := p.firstDaily.acceptedToday(consensusDay, consensusSpecies)
 		return settled && !accepted
 	}, time.Second, time.Millisecond)
 }
 
 func TestWarmFirstDailyAcceptance_PanicClearsInFlight(t *testing.T) {
-	ds := mocks.NewMockInterface(t)
-	ds.EXPECT().CountSpeciesDetections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Panic("boom").Once()
-	p := &Processor{Ds: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
+	ds := mocks.NewMockDetectionRepository(t)
+	ds.EXPECT().GetBySpecies(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Panic("boom").Once()
+	p := &Processor{Repo: ds, pendingDetections: pendingDue(newConsensusDetection(birdNETModel, "", map[string]float64{birdNETModel: 0.8}))}
 	markSpeciesShared(p, true)
-	p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+	p.warmFirstDailyAcceptance(firstDailyAt, newConsensusSettings())
 	require.Eventually(t, func() bool {
 		p.firstDaily.applyCompletedLookups()
 		p.firstDaily.mu.Lock()
@@ -678,11 +682,11 @@ func TestWarmFirstDailyAcceptance_SkipsIneligibleDetections(t *testing.T) {
 	t.Parallel()
 
 	p := &Processor{
-		Ds:                mocks.NewMockInterface(t),
+		Repo:              mocks.NewMockDetectionRepository(t),
 		pendingDetections: pendingDue(newConsensusDetection(classifier.RegistryIDBat, "", map[string]float64{classifier.RegistryIDBat: 0.8})),
 	}
 
-	p.warmFirstDailyAcceptance(consensusAt, newConsensusSettings())
+	p.warmFirstDailyAcceptance(firstDailyAt, newConsensusSettings())
 }
 
 func TestFirstDailyConsensusFamilySettings(t *testing.T) {
@@ -735,22 +739,22 @@ func TestWarmFirstDailyAcceptanceEnabledFamilies(t *testing.T) {
 					settings := newConsensusSettings()
 					settings.Realtime.FirstDailyConsensus.Enabled = enabledModel == birdNETModel
 					settings.Realtime.FirstDailyConsensus.BatEnabled = enabledModel == classifier.RegistryIDBat
-					ds := mocks.NewMockInterface(t)
+					ds := mocks.NewMockDetectionRepository(t)
 					if model == enabledModel {
-						ds.EXPECT().CountSpeciesDetections(consensusSpecies, consensusDay, "", 0).Return(int64(0), nil).Once()
+						ds.EXPECT().GetBySpecies(mock.Anything, consensusSpecies, consensusDay, "", 0, 1, 0).Return(nil, int64(0), nil).Once()
 					}
-					p := &Processor{Ds: ds, pendingDetections: pendingDue(newConsensusDetection(model, "", map[string]float64{model: 0.8}))}
+					p := &Processor{Repo: ds, pendingDetections: pendingDue(newConsensusDetection(model, "", map[string]float64{model: 0.8}))}
 					markSpeciesShared(p, true)
 					markSpeciesSharedBat(p, true)
 					markMemo(p, false)
 					generation := p.firstDaily.generation
 					// One family remaining enabled must retain the memo and generation.
-					p.warmFirstDailyAcceptance(consensusAt, settings)
+					p.warmFirstDailyAcceptance(firstDailyAt, settings)
 					_, settled := p.firstDaily.acceptedToday(consensusDay, consensusSpecies)
 					assert.True(t, settled)
 					assert.Equal(t, generation, p.firstDaily.generation)
 					p.firstDaily.checked = nil
-					p.warmFirstDailyAcceptance(consensusAt, settings)
+					p.warmFirstDailyAcceptance(firstDailyAt, settings)
 					if model == enabledModel {
 						require.Eventually(t, func() bool { return len(p.firstDaily.lookups) == 1 }, time.Second, time.Millisecond)
 						p.firstDaily.applyCompletedLookups()
