@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 )
 
 // TestGetNewSpecies_ExcludesFalsePositives guards the "New Species Detected" chart against counting
@@ -69,6 +71,35 @@ func TestGetNewSpecies_RealDetectionBeforeWindowIsNotNew(t *testing.T) {
 	got, err := repo.GetNewSpecies(ctx, 500, 5000, 100, 0)
 	require.NoError(t, err)
 	assert.Empty(t, got, "species first detected before the window is not new")
+}
+
+// TestGetNewSpecies_AcrossModelsAndLifetime pins that the candidate restriction keeps the
+// species-level semantics: prior history under another model's label disqualifies a species,
+// and a reported species keeps its lifetime last detection, which lies after the window.
+func TestGetNewSpecies_AcrossModelsAndLifetime(t *testing.T) {
+	db := setupInsightsTestDB(t)
+	repo := NewDetectionRepository(db, nil, false, false)
+	ctx := t.Context()
+	require.NoError(t, db.Create(&entities.AIModel{ID: 2, Name: "Perch", Version: "2", ModelType: entities.ModelTypeBird}).Error)
+
+	// Turdus merula was heard by model 2 before the window: not new, although model 1's label is.
+	oldOther := seedLabelForModel(t, db, "Turdus merula", 2)
+	seedDetection(t, db, oldOther, 100, 0.9)
+	seedDetection(t, db, seedLabel(t, db, "Turdus merula"), 1000, 0.8)
+
+	// Parus major is new; its later detections, under both models, set its last-seen.
+	newLabel := seedLabel(t, db, "Parus major")
+	seedDetection(t, db, newLabel, 1500, 0.7)
+	seedDetection(t, db, seedLabelForModel(t, db, "Parus major", 2), 8000, 0.6)
+
+	got, err := repo.GetNewSpecies(ctx, 500, 5000, 100, 0)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Parus major", got[0].ScientificName)
+	assert.Equal(t, newLabel, got[0].LabelID)
+	assert.Equal(t, int64(1500), got[0].FirstDetected)
+	assert.Equal(t, int64(8000), got[0].LastDetected)
+	assert.Equal(t, 1, got[0].CountInPeriod)
 }
 
 // TestGetNewSpecies_CountInPeriod pins count_in_period to the number of detections of the
