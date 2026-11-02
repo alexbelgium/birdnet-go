@@ -60,12 +60,44 @@ func TestBatModelThresholdOverridesReadCurrentSettings(t *testing.T) {
 	assert.InDelta(t, .6, modelGlobalConfidenceThreshold(settings, classifier.RegistryIDBatDetect2), 1e-6)
 }
 
-func TestForkBatCandidateDiagnostics(t *testing.T) {
-	t.Parallel()
-	for _, id := range []string{classifier.RegistryIDBatDetect2, classifier.RegistryIDBSGBat} {
-		assert.True(t, recordModelPrediction(id, .4, .7))
-		assert.False(t, recordModelPrediction(id, .09, .7))
+// TestProcessResults_BatFeedHonorsThreshold drives one chunk per bat model
+// through processResults. It is not parallel because mergeTestProcessor resets
+// the global settings.
+func TestProcessResults_BatFeedHonorsThreshold(t *testing.T) {
+	const (
+		threshold   = 0.5
+		aboveConf   = 0.89
+		belowConf   = 0.2
+		aboveSci    = "Tadarida teniotis"
+		belowSci    = "Nyctalus noctula"
+		chunkSource = "bat-src"
+		commonAbove = "European free-tailed bat"
+		commonBelow = "Common noctule"
+	)
+	for _, id := range []string{classifier.RegistryIDBat, classifier.RegistryIDBatDetect2, classifier.RegistryIDBSGBat} {
+		t.Run(id, func(t *testing.T) {
+			p := mergeTestProcessor(t)
+			p.Bn = &classifier.Orchestrator{}
+			settings := altRangeSnapshot()
+			settings.Bat.Threshold = threshold
+			end := time.Now()
+			item := classifier.Results{
+				Source:    datastore.AudioSource{ID: chunkSource},
+				ModelID:   id,
+				StartTime: end.Add(-mergeTestClip),
+				Audio:     classifier.AudioTiming{EndAt: end},
+				Results: []datastore.Results{
+					{Species: aboveSci + "_" + commonAbove, Confidence: aboveConf},
+					{Species: belowSci + "_" + commonBelow, Confidence: belowConf},
+				},
+			}
+
+			detections := p.processResults(settings, item)
+
+			require.Len(t, detections, 1)
+			feed := p.GetRecentDetections(id)
+			require.Len(t, feed, 1, "the feed must not list a prediction below the threshold")
+			assert.Equal(t, aboveSci, feed[0].ScientificName)
+		})
 	}
-	assert.False(t, recordModelPrediction(classifier.RegistryIDBat, .4, .7))
-	assert.False(t, recordModelPrediction(classifier.RegistryIDBirdNETV24, .4, .7))
 }
