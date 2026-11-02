@@ -178,6 +178,17 @@ type Processor struct {
 	// no synchronization needed for concurrent reads.
 	BufferMgr *buffer.Manager
 
+	// scoredRuns records, per audio source and model, the audio the model has
+	// scored without a gap, for the model consensus filter. Guarded by
+	// scoredRunsMu, a leaf lock: nothing else is acquired while it is held, and it
+	// is never held together with pendingMutex.
+	scoredRuns   map[scoredRunKey]scoredRun
+	scoredRunsMu sync.Mutex
+
+	// consensusModelsFn replaces the production model view of the consensus filter.
+	// It is a test hook and nil in production.
+	consensusModelsFn func() consensusModels
+
 	// Backup system fields (optional)
 	backupManager   any // Use interface{} to avoid import cycle
 	backupScheduler any // Use interface{} to avoid import cycle
@@ -773,7 +784,8 @@ func (p *Processor) startDetectionProcessor() {
 // with new or higher-confidence instances and setting an appropriate flush deadline.
 // It also runs the VAD speech gate on the chunk and, once the chunk's speech hits
 // are written, publishes the audio the chunk's detectors scored as privacy
-// coverage.
+// coverage. Last, once the window's hits are merged, it records the audio the
+// window scored for the model consensus filter.
 //
 //nolint:gocritic // hugeParam: Pass by value is intentional - avoids pointer dereferencing in hot path
 func (p *Processor) processDetections(item classifier.Results) {
@@ -842,6 +854,11 @@ func (p *Processor) processDetections(item classifier.Results) {
 	for i := range detectionResults {
 		p.mergePendingHit(&item, &detectionResults[i], hitAt, detectionWindow)
 	}
+
+	// Record the audio this window scored only after its hits are merged, so the
+	// consensus filter never sees a model as having scored audio whose hits are
+	// still in flight.
+	p.recordScoredRun(&item)
 
 	// Broadcast updated pending detections snapshot for "currently hearing" UI.
 	// This runs after all new detections are incorporated into pendingDetections.
@@ -1310,9 +1327,13 @@ func isSpeciesExcluded(commonName, scientificName string, excludeList []string) 
 }
 
 // createDetection creates a detection object with all necessary information.
-// Its stored alternate predictions are limited to those that pass the range
-// filter under the given settings snapshot (see passesRangeFilter); sound-event,
-// human and dog classes are exempt.
+// Every finite alternate prediction is carried on the returned Detections, so no
+// pipeline stage sees a trimmed list. Alternates that fail the range filter under
+// the given settings snapshot (see passesRangeFilter; sound-event, human and dog
+// classes are exempt) are tagged OutOfRange. The save step (storedAlternates)
+// drops tagged rows and rows below BirdNET.AlternateMinConfidence; the primary
+// detection and the privacy and dog filters, which read the classifier results,
+// are unaffected.
 // Its ClipName is chosen from the Result's own model and sample rate, the fields
 // the audio exporter reads.
 //
@@ -1355,8 +1376,8 @@ func (p *Processor) createDetection(settings *conf.Settings, item classifier.Res
 
 	// Convert additional results from datastore.Results to detection.AdditionalResult.
 	// Exclude the primary species since it's already stored as Detection.LabelID,
-	// and keep only alternates that pass the same range rule as the primary,
-	// judged against this chunk's settings snapshot.
+	// and tag alternates that fail the same range rule as the primary, judged
+	// against this chunk's settings snapshot, so the save step can drop them.
 	keep := func(rawLabel string) bool {
 		return passesRangeFilter(item.ModelID, settings, rawLabel) || isRangeExemptLabel(rawLabel)
 	}
@@ -1459,7 +1480,10 @@ func (p *Processor) resolveAudioSource(source datastore.AudioSource) detection.A
 // The primary species is excluded since it's already stored as Detection.LabelID.
 // Custom BirdNET classifiers can have the same species at multiple positions in the label file,
 // producing duplicate entries in prediction results that would cause UNIQUE constraint violations.
-// Rows for which keep returns false are dropped; createDetection passes the range-filter rule.
+// Rows for which keep returns false are tagged OutOfRange instead of dropped; createDetection
+// passes the range-filter rule and storedAlternates drops the tagged rows at the save step.
+// When raw labels of one scientific name differ in verdict, the kept row wins the dedup
+// regardless of confidence, so the species stays stored.
 func convertToAdditionalResults(results []datastore.Results, primaryScientificName string, keep func(rawLabel string) bool) []detection.AdditionalResult {
 	additional := make([]detection.AdditionalResult, 0, len(results))
 	seen := make(map[string]int, len(results)) // scientificName → index in additional
@@ -1471,9 +1495,7 @@ func convertToAdditionalResults(results []datastore.Results, primaryScientificNa
 		if !isFiniteConfidence(r.Confidence) {
 			continue
 		}
-		if !keep(r.Species) {
-			continue
-		}
+		outOfRange := !keep(r.Species)
 		sp := detection.ParseSpeciesString(r.Species)
 		// Canonicalize the candidate's scientific name so the primary species is
 		// excluded even when this prediction carries it under a legacy/alias name.
@@ -1484,12 +1506,18 @@ func convertToAdditionalResults(results []datastore.Results, primaryScientificNa
 			continue
 		}
 		if idx, exists := seen[sp.ScientificName]; exists {
-			// Keep the higher confidence entry
-			if float64(r.Confidence) > additional[idx].Confidence {
+			// A kept row beats an out-of-range one; otherwise keep the higher confidence.
+			cur := additional[idx]
+			replace := float64(r.Confidence) > cur.Confidence
+			if cur.OutOfRange != outOfRange {
+				replace = cur.OutOfRange
+			}
+			if replace {
 				additional[idx] = detection.AdditionalResult{
 					Species:    sp,
 					Confidence: float64(r.Confidence),
 					RawLabel:   r.Species,
+					OutOfRange: outOfRange,
 				}
 			}
 			continue
@@ -1499,6 +1527,7 @@ func convertToAdditionalResults(results []datastore.Results, primaryScientificNa
 			Species:    sp,
 			Confidence: float64(r.Confidence),
 			RawLabel:   r.Species,
+			OutOfRange: outOfRange,
 		})
 	}
 	return additional
@@ -1737,8 +1766,10 @@ func (p *Processor) buildClipPath(settings *conf.Settings, scientificName string
 // privacyfilter.debug on, a summary of the detectors that counted hits
 // reaching the clip (priv.contributions, which is listed whenever the latest hit
 // reaches the clip); the counts are lower bounds once the attribution list has
-// dropped a reaching hit at its cap (priv.hitCountsLowerBound).
-func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *conf.Settings, minDetections int, priv *privacyCheck) (shouldDiscard bool, reason string) {
+// dropped a reaching hit at its cap (priv.hitCountsLowerBound). The model
+// consensus filter runs last so the other filters keep their discard attribution;
+// cons is the tick's model view (see prepareModelConsensus) and nil skips it.
+func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *conf.Settings, minDetections int, priv *privacyCheck, cons *consensusTick) (shouldDiscard bool, reason string) {
 	// Check minimum detection count
 	if item.Count < minDetections {
 		GetLogger().Debug("Detection discarded due to insufficient count",
@@ -1856,6 +1887,10 @@ func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *con
 	// filters above decide first.
 	if discard, reason := p.shouldDiscardFirstDailyDetection(item, settings); discard {
 		return true, reason
+	}
+
+	if cons != nil && p.discardForModelConsensus(item, settings, cons) {
+		return true, reasonModelConsensus
 	}
 
 	return false, ""
@@ -2031,8 +2066,9 @@ func (p *Processor) effectiveBaseOverlap(settings *conf.Settings) time.Duration 
 // privacyCheck): the discard checks compare its speech hit, and a detection that
 // passes them is approved only when the coverage gate allows it, otherwise it
 // stays pending and is re-checked on the next tick. An approved detection is built
-// from the same settings snapshot the check used. Returns the count of pending and
-// flushed detections for logging.
+// from the same settings snapshot the check used. The model view of the model
+// consensus filter is prepared once per tick, before pendingMutex is taken.
+// Returns the count of pending and flushed detections for logging.
 func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 	now := time.Now()
 	settings := p.currentSettings()
@@ -2043,6 +2079,9 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 	// under their own brief read lock, before the exclusive lock below is taken, so
 	// a slow query cannot stall detection ingestion for the flush cycle's duration.
 	p.warmFirstDailyAcceptance(now, settings)
+
+	// Built before pendingMutex is taken: it may wait on the orchestrator.
+	cons := p.prepareModelConsensus(settings)
 
 	var terminalNotifs []SSEPendingDetection
 	var broadcastSnapshot []SSEPendingDetection
@@ -2069,7 +2108,7 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 		// coverage that includes it, so coverage seen here never lacks its hits.
 		priv := p.checkPrivacy(settings, &item, now)
 
-		if shouldDiscard, reason := p.shouldDiscardDetection(&item, settings, itemMinDetections, &priv); shouldDiscard {
+		if shouldDiscard, reason := p.shouldDiscardDetection(&item, settings, itemMinDetections, &priv, cons); shouldDiscard {
 			// Aggregate daylight-filter discards into the periodic pipeline-stats
 			// summary so a user who sees zero saved detections has an at-a-glance
 			// signal that a filter is eating them. The per-detection log stays at
@@ -2402,7 +2441,7 @@ func (p *Processor) getDefaultActions(det *Detections, settings *conf.Settings) 
 			processor:         p,            // Add processor reference for source name resolution
 			DetectionCtx:      detectionCtx, // Share context for downstream actions
 			Result:            det.Result,   // Domain model (single source of truth)
-			Results:           det.Results,  // Domain model - converted to legacy format at save time
+			Results:           det.Results,  // Domain model - all alternates, trimmed at save
 			Ds:                p.Ds,         // Legacy - kept for backward compatibility
 			Repo:              p.Repo,       // New - preferred path for database operations
 			CorrelationID:     det.CorrelationID,
