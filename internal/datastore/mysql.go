@@ -59,7 +59,9 @@ func (store *MySQLStore) Open() (retErr error) {
 
 	// Log database opening (with sanitized DSN)
 	sanitizedCfg := dsnCfg.Clone()
-	sanitizedCfg.Passwd = redactedPassword
+	if sanitizedCfg.Passwd != "" {
+		sanitizedCfg.Passwd = redactedPassword
+	}
 	GetLogger().Info("Opening MySQL database connection",
 		logger.String("dsn", sanitizedCfg.FormatDSN()))
 
