@@ -986,12 +986,12 @@ func (p *Processor) processResults(settings *conf.Settings, item classifier.Resu
 		// Check if detection should be filtered
 		shouldSkip, _ := p.shouldFilterDetection(settings, result, commonName, scientificName, speciesLowercase, baseThreshold, item.Source.ID, item.ModelID)
 
-		// Record predictions above the base threshold (or fork bat candidate floor) in the
+		// Record every prediction above the base confidence threshold in the
 		// per-model "Last heard" diagnostic feed, including non-avian classes,
 		// human vocalizations, and out-of-range birds, tagged with whether the
 		// species passes the range filter. This is independent of whether the
 		// detection is saved below (saved detections also clear this bar).
-		if recordModelPrediction(item.ModelID, result.Confidence, baseThreshold) {
+		if result.Confidence > baseThreshold {
 			inRange := passesRangeFilter(item.ModelID, settings, result.Species)
 			p.updateLastDetection(item.ModelID, commonName, scientificName, float64(result.Confidence), feedTime, inRange, feedThrottle)
 		}
