@@ -20,6 +20,9 @@ import (
 // MySQL connection pool constants are defined in mysql_pool.go and shared
 // with the v2 store to keep both within MySQL's max_connections budget.
 
+// redactedPassword stands in for the password in the logged DSN.
+const redactedPassword = "***"
+
 // validTableNameRegex matches valid table names: alphanumeric, underscores, and dashes only
 var validTableNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
@@ -49,18 +52,16 @@ func (store *MySQLStore) Open() (retErr error) {
 		return err // validateMySQLConfig returns a properly formatted error
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		store.Settings.Output.MySQL.Username, store.Settings.Output.MySQL.Password,
-		MySQLAddr(store.Settings.Output.MySQL.Host, store.Settings.Output.MySQL.Port),
-		store.Settings.Output.MySQL.Database)
+	mysqlSettings := &store.Settings.Output.MySQL
+	dsnCfg := NewMySQLConfig(mysqlSettings.Username, mysqlSettings.Password,
+		mysqlSettings.Host, mysqlSettings.Port, mysqlSettings.Database)
+	dsn := dsnCfg.FormatDSN()
 
 	// Log database opening (with sanitized DSN)
-	sanitizedDSN := fmt.Sprintf("%s:***@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		store.Settings.Output.MySQL.Username,
-		MySQLAddr(store.Settings.Output.MySQL.Host, store.Settings.Output.MySQL.Port),
-		store.Settings.Output.MySQL.Database)
+	sanitizedCfg := dsnCfg.Clone()
+	sanitizedCfg.Passwd = redactedPassword
 	GetLogger().Info("Opening MySQL database connection",
-		logger.String("dsn", sanitizedDSN))
+		logger.String("dsn", sanitizedCfg.FormatDSN()))
 
 	// Configure GORM logger with metrics if available
 	// Use 1 second threshold to accommodate migration batch queries (800-900ms typical).

@@ -552,6 +552,17 @@ func refusedRetrySafeError() error {
 	return fmt.Errorf("failed to save detection: %w: %w", datastore.ErrDetectionSaveRetrySafe, refused)
 }
 
+// TestIsRetryableSaveError_Deadline pins that a save the store's deadline ended
+// before anything was written is retried, while a deadline without the store's
+// retry-safe marker, which may follow a COMMIT the server applied, is not.
+func TestIsRetryableSaveError_Deadline(t *testing.T) {
+	t.Parallel()
+
+	stalled := fmt.Errorf("failed to get/create model: %w", context.DeadlineExceeded)
+	assert.True(t, isRetryableSaveError(fmt.Errorf("%w: %w", datastore.ErrDetectionSaveRetrySafe, stalled)))
+	assert.False(t, isRetryableSaveError(stalled))
+}
+
 // TestDatabaseAction_RetrySafeFailureSavesOnceWithoutRegating drives the three
 // job attempts of a detection whose first two saves are refused. The species
 // interval is far longer than the test, so a retry that asked the event tracker
