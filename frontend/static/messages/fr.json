@@ -1546,6 +1546,8 @@
           "creating": "Création...",
           "createBackup": "Créer une sauvegarde",
           "noBackups": "Aucune sauvegarde",
+          "loadFailed": "Impossible de charger l'historique des sauvegardes",
+          "createFailed": "Impossible de démarrer la sauvegarde",
           "download": "Télécharger",
           "failed": "Échoué",
           "columns": {
@@ -1573,6 +1575,8 @@
         "starting": "Démarrage de la migration...",
         "status": {
           "idle": "Prêt à démarrer",
+          "checking": "Vérification des prérequis",
+          "notReady": "Pas prêt",
           "initializing": "Initialisation",
           "dual_write": "Double écriture active",
           "migrating": "Migration des données primaires",
@@ -1604,6 +1608,8 @@
           "recordsLabel": "Enregistrements",
           "sizeLabel": "Taille",
           "prerequisitesNotMet": "Prérequis non remplis - résolvez les problèmes critiques ci-dessous",
+          "prerequisitesUnavailable": "Les vérifications pré-migration ne se sont pas terminées. Voir Vérifications pré-migration ci-dessous.",
+          "prerequisitesFailedList": "Résolvez d'abord ces vérifications : {checks}",
           "validatingTitle": "Validation des données",
           "validatingBody": "Comparaison de {count} enregistrements avec la base de données V2...",
           "dirtyRecordsCatchup": "{count} enregistrements modifiés - tentative de réconciliation",
@@ -1705,6 +1711,9 @@
           "warningsCount": "{count} avertissement(s)",
           "running": "Exécution des vérifications pré-migration...",
           "checkingStep": "Étape {current} sur {total}",
+          "currentCheck": "Vérification de {name} ({seconds} s)",
+          "slowHint": "Les grandes bases de données peuvent prendre plusieurs minutes.",
+          "runFailed": "Les vérifications préalables à la migration ne se sont pas terminées : {error}",
           "passedCount": "{passed}/{total} réussis",
           "criticalCount": "{count} critique(s)",
           "warningCount": "{count} avertissement(s)",
@@ -3720,9 +3729,10 @@
           "result": "Résultat du test",
           "error": "Test échoué",
           "batCompatible": "Compatible chauves-souris",
-          "batIncompatible": "Non compatible chauves-souris"
+          "batIncompatible": "Non compatible chauves-souris",
+          "minRateWarning": "Les modèles sélectionnés nécessitent une fréquence de capture d'au moins {rate} kHz. Ce flux est en dessous."
         },
-        "batWarning": "Les modèles de chauves-souris nécessitent des flux avec un codec sans perte (PCM) et un taux d'échantillonnage d'au moins 96 kHz. Utilisez le bouton Tester le flux ci-dessus pour vérifier la compatibilité.",
+        "batWarning": "Les modèles de chauves-souris nécessitent des flux avec un codec sans perte (PCM) et un taux d'échantillonnage d'au moins 96 kHz. BSG-BAT nécessite au moins 192 kHz. Utilisez le bouton Tester le flux ci-dessus pour vérifier la compatibilité.",
         "codecWarning": {
           "lossy": "Les codecs avec perte (AAC, Opus, MP3) détruisent les fréquences ultrasoniques au-dessus de ~20 kHz, rendant le flux inadapté à la détection des chauves-souris."
         },
@@ -3898,6 +3908,21 @@
         "truePeakHelp": "Niveau de pic réel maximal pour éviter l'écrêtage numérique (-10 à 0 dBTP). -2 dBTP fournit une marge de sécurité pour la plupart des systèmes de lecture.",
         "noteTitle": "Norme EBU R128",
         "noteDescription": "La normalisation audio suit la norme de diffusion EBU R128, garantissant des niveaux de lecture cohérents sur différents appareils et évitant l'écrêtage."
+      },
+      "exportDenoise": {
+        "title": "Réduction de bruit des clips enregistrés",
+        "description": "Réduit le bruit de fond des clips lors de leur enregistrement.",
+        "enable": "Réduire le bruit des clips à l'enregistrement",
+        "enableHelp": "L'audio capturé est débruité en mémoire avant l'écriture du fichier du clip. La détection s'effectue toujours sur l'audio d'origine.",
+        "requiresRecording": "Activez l'enregistrement des clips dans l'onglet Enregistrement pour utiliser la réduction de bruit des clips.",
+        "strengthLabel": "Intensité de la réduction de bruit",
+        "strengthHelp": "Léger conserve le plus du son d'origine et fort supprime le plus de bruit. Léger-moyen convient à la plupart des enregistrements.",
+        "strengthDisabledHelp": "Activez la réduction de bruit des clips ci-dessus pour choisir une intensité.",
+        "warningTitle": "Les clips enregistrés ne peuvent pas être restaurés",
+        "warningPermanent": "L'audio d'origine n'est pas conservé. Les clips sont débruités définitivement à l'enregistrement, y compris les enregistrements de chauves-souris.",
+        "warningBats": "La réduction de bruit peut atténuer les cris faibles de chauves-souris ; les cris forts ne sont pas affectés.",
+        "warningImported": "Les enregistrements importés ne sont pas concernés.",
+        "lossyNote": "La réduction de bruit donne les meilleurs résultats sur les clips FLAC ou WAV. En dessous de {minBitrate} kbps, les artefacts du codec limitent la propreté du résultat."
       },
       "audioClipRetention": {
         "title": "Rétention des clips audio",
@@ -5211,6 +5236,7 @@
         "denoise": "Réduction du bruit",
         "denoiseOff": "Désactivé",
         "denoiseLight": "Léger",
+        "denoiseLightMedium": "Léger-moyen",
         "denoiseMedium": "Moyen",
         "denoiseHeavy": "Fort",
         "normalize": "Normaliser l'audio",
@@ -5335,7 +5361,8 @@
     },
     "migration": {
       "notConfigured": "La migration n'est pas configurée",
-      "preFlightFailed": "Les vérifications préalables ont échoué",
+      "preFlightFailed": "Échec de la vérification préalable à la migration : {check}",
+      "prerequisitesNotReady": "Lancez les vérifications préalables à la migration et attendez qu'elles réussissent avant de démarrer la migration.",
       "invalidBody": "Corps de requête invalide",
       "recordCountFailed": "Impossible de déterminer le nombre total d'enregistrements",
       "startFailed": "Impossible de démarrer la migration",
@@ -5565,8 +5592,20 @@
         "helpText": "Score de confiance minimum (0.0 - 1.0) requis pour qu'une détection soit enregistrée."
       },
       "batThreshold": {
-        "label": "Seuil de détection des chauves-souris",
-        "helpText": "Score de confiance minimum pour les détections d'espèces de chauves-souris. S'applique uniquement aux modèles classificateurs de chauves-souris."
+        "label": "Seuil de détection des chauves-souris (BattyBirdNET)",
+        "helpText": "Score de confiance minimum pour les détections d'espèces de chauves-souris de BattyBirdNET. BSG-BAT a son propre seuil."
+      },
+      "bsgBatThreshold": {
+        "label": "Seuil de détection des chauves-souris (BSG-BAT)",
+        "helpText": "Score de confiance minimum pour les détections d'espèces de chauves-souris de BSG-BAT.",
+        "sampleRateWarning": "Les captures à 192 kHz fonctionnent, mais les espèces qui émettent au-dessus de 96 kHz ne peuvent pas être identifiées et les scores sont moins fiables. Une fréquence de capture de 384 kHz est recommandée."
+      },
+      "bsgBatStep": {
+        "label": "Pas d'analyse BSG-BAT (trames)",
+        "helpText": "Trames de 2 ms entre les fenêtres d'analyse BSG-BAT, de 100 (0,2 s) à 512 (1,024 s, sans chevauchement). La valeur par défaut de 250 (0,5 s) est le pas de référence. Avec 375 (0,75 s), environ 85 % des événements sont trouvés pour les deux tiers du processeur ; avec 512, environ 70 à 75 % pour la moitié du processeur, pour les appareils qui ne suivent pas.",
+        "readout": "Pas : {seconds} s entre les fenêtres d'analyse.",
+        "readoutWithFilter": "Pas : {seconds} s entre les fenêtres d'analyse. Niveau du filtre chauves-souris {level} : {count} confirmations requises.",
+        "restartNote": "L'enregistrement d'un nouveau pas redémarre la capture audio."
       },
       "batFilter": {
         "label": "Filtre passe-haut pour chauves-souris",
@@ -5589,6 +5628,7 @@
           "strict": "Filtrage maximal pour la plus grande précision."
         },
         "detectionCount": "{count} confirmations requises. {description}",
+        "detectionCountByModel": "{batty} confirmations requises pour BattyBirdNET, {bsgBat} pour BSG-BAT. {description}",
         "warningOff": "Sans filtrage, la probabilité de faux positifs est élevée. L'activation du filtrage améliore considérablement la précision."
       },
       "locale": {

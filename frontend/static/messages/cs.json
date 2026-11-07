@@ -1546,6 +1546,8 @@
           "creating": "Vytváření...",
           "createBackup": "Vytvořit zálohu",
           "noBackups": "Zatím žádné zálohy",
+          "loadFailed": "Historii záloh se nepodařilo načíst",
+          "createFailed": "Zálohu se nepodařilo spustit",
           "download": "Stáhnout",
           "failed": "Selhalo",
           "columns": {
@@ -1573,6 +1575,8 @@
         "starting": "Zahajuje se migrace...",
         "status": {
           "idle": "Připraveno ke spuštění",
+          "checking": "Kontrola předpokladů",
+          "notReady": "Nepřipraveno",
           "initializing": "Inicializace",
           "dual_write": "Duální zápis aktivní",
           "migrating": "Migrace primární",
@@ -1604,6 +1608,8 @@
           "recordsLabel": "Záznamy",
           "sizeLabel": "Velikost",
           "prerequisitesNotMet": "Předpoklady nesplněny - vyřešte kritické problémy níže",
+          "prerequisitesUnavailable": "Kontroly před migrací nebyly dokončeny. Viz Kontroly před migrací níže.",
+          "prerequisitesFailedList": "Nejdříve vyřešte tyto kontroly: {checks}",
           "validatingTitle": "Ověřování dat",
           "validatingBody": "Porovnávání {count} původních záznamů s databází V2...",
           "dirtyRecordsCatchup": "{count} nesynchronizovaných záznamů - proběhne pokus o dodatečné srovnání",
@@ -1705,6 +1711,9 @@
           "warningsCount": "{count} varování",
           "running": "Probíhají kontroly před migrací...",
           "checkingStep": "Krok {current} z {total}",
+          "currentCheck": "Kontroluje se {name} ({seconds} s)",
+          "slowHint": "Velké databáze mohou trvat několik minut.",
+          "runFailed": "Kontroly před migrací nebyly dokončeny: {error}",
           "passedCount": "{passed}/{total} úspěšných",
           "criticalCount": "{count} kritických",
           "warningCount": "{count} varování",
@@ -3720,9 +3729,10 @@
           "result": "Výsledek testu",
           "error": "Test selhal",
           "batCompatible": "Kompatibilní s netopýry",
-          "batIncompatible": "Nekompatibilní s netopýry"
+          "batIncompatible": "Nekompatibilní s netopýry",
+          "minRateWarning": "Vybrané modely vyžadují vzorkovací frekvenci záznamu alespoň {rate} kHz. Tento stream je pod touto hodnotou."
         },
-        "batWarning": "Modely netopýrů vyžadují streamy s bezeztrátovým kodekem (PCM) a vzorkovací frekvencí alespoň 96 kHz. Pomocí tlačítka Testovat stream výše ověřte kompatibilitu.",
+        "batWarning": "Modely netopýrů vyžadují streamy s bezeztrátovým kodekem (PCM) a vzorkovací frekvencí alespoň 96 kHz. BSG-BAT vyžaduje alespoň 192 kHz. Pomocí tlačítka Testovat stream výše ověřte kompatibilitu.",
         "codecWarning": {
           "lossy": "Ztrátové kodeky (AAC, Opus, MP3) ničí ultrazvukové frekvence nad ~20 kHz, čímž se stream stává nevhodným pro detekci netopýrů."
         },
@@ -3898,6 +3908,21 @@
         "truePeakHelp": "Maximální úroveň True Peak pro zabránění digitálnímu ořezání (clippingu) (-10 až 0 dBTP). -2 dBTP poskytuje bezpečnou rezervu pro většinu přehrávacích systémů.",
         "noteTitle": "Standard EBU R128",
         "noteDescription": "Normalizace zvuku se řídí vysílacím standardem EBU R128, čímž zajišťuje konzistentní úrovně přehrávání na různých zařízeních a zabraňuje ořezání."
+      },
+      "exportDenoise": {
+        "title": "Odšumění uložených klipů",
+        "description": "Potlačí hluk na pozadí v klipech při jejich ukládání.",
+        "enable": "Odšumit klipy při ukládání",
+        "enableHelp": "Zachycený zvuk se odšumí v paměti dříve, než se zapíše soubor klipu. Detekce vždy pracuje s původním zvukem.",
+        "requiresRecording": "Pro použití odšumění klipů povolte nahrávání klipů na kartě Nahrávání.",
+        "strengthLabel": "Síla odšumění",
+        "strengthHelp": "Slabé zachová nejvíce původního zvuku, silné odstraní nejvíce hluku. Středně slabé vyhovuje většině nahrávek.",
+        "strengthDisabledHelp": "Pro volbu síly zapněte výše odšumění klipů.",
+        "warningTitle": "Uložené klipy nelze obnovit",
+        "warningPermanent": "Původní zvuk se neuchovává. Klipy se při uložení odšumí trvale, včetně nahrávek netopýrů.",
+        "warningBats": "Odšumění může zeslabit slabá volání netopýrů; silná volání zůstanou beze změny.",
+        "warningImported": "Importované nahrávky nejsou dotčeny.",
+        "lossyNote": "Odšumění funguje nejlépe u klipů FLAC nebo WAV. Pod {minBitrate} kb/s omezují čistotu výsledku artefakty kodeku."
       },
       "audioClipRetention": {
         "title": "Uchování zvukových klipů",
@@ -5211,6 +5236,7 @@
         "denoise": "Odšumění",
         "denoiseOff": "Vypnuto",
         "denoiseLight": "Slabé",
+        "denoiseLightMedium": "Středně slabé",
         "denoiseMedium": "Střední",
         "denoiseHeavy": "Silné",
         "normalize": "Normalizovat zvuk",
@@ -5335,7 +5361,8 @@
     },
     "migration": {
       "notConfigured": "Migrace není nakonfigurována",
-      "preFlightFailed": "Předběžné kontroly selhaly",
+      "preFlightFailed": "Kontrola před migrací selhala: {check}",
+      "prerequisitesNotReady": "Spusťte kontroly před migrací a počkejte, až projdou, než migraci spustíte.",
       "invalidBody": "Neplatné tělo požadavku",
       "recordCountFailed": "Celkový počet záznamů se nepodařilo určit",
       "startFailed": "Migraci se nepodařilo spustit",
@@ -5565,8 +5592,20 @@
         "helpText": "Minimální skóre spolehlivosti (0,0 - 1,0) potřebné pro zaznamenání detekce."
       },
       "batThreshold": {
-        "label": "Práh detekce netopýrů",
-        "helpText": "Minimální skóre spolehlivosti pro detekce druhů netopýrů. Platí pouze pro klasifikační modely netopýrů."
+        "label": "Práh detekce netopýrů (BattyBirdNET)",
+        "helpText": "Minimální skóre spolehlivosti pro detekce druhů netopýrů modelem BattyBirdNET. BSG-BAT má vlastní práh."
+      },
+      "bsgBatThreshold": {
+        "label": "Práh detekce netopýrů (BSG-BAT)",
+        "helpText": "Minimální skóre spolehlivosti pro detekce druhů netopýrů modelem BSG-BAT.",
+        "sampleRateWarning": "Záznamy při 192 kHz fungují, ale druhy, které se ozývají nad 96 kHz, nelze určit a skóre jsou méně spolehlivá. Doporučená vzorkovací frekvence záznamu je 384 kHz."
+      },
+      "bsgBatStep": {
+        "label": "Krok analýzy BSG-BAT (snímky)",
+        "helpText": "Počet snímků po 2 ms mezi analyzovanými okny BSG-BAT, od 100 (0,2 s) do 512 (1,024 s, bez překryvu). Výchozí hodnota 250 (0,5 s) je referenční krok. Při 375 (0,75 s) se najde asi 85 % událostí za dvě třetiny výkonu procesoru; při 512 zhruba 70 až 75 % při asi polovině výkonu procesoru, pro zařízení, která nestíhají.",
+        "readout": "Krok: {seconds} s mezi analyzovanými okny.",
+        "readoutWithFilter": "Krok: {seconds} s mezi analyzovanými okny. Úroveň filtru pro netopýry {level}: požadováno potvrzení {count}.",
+        "restartNote": "Uložení nového kroku restartuje zachytávání zvuku."
       },
       "batFilter": {
         "label": "Horní propust pro audio netopýrů",
@@ -5589,6 +5628,7 @@
           "strict": "Maximální filtrování pro nejvyšší přesnost."
         },
         "detectionCount": "Vyžaduje se {count} potvrzení. {description}",
+        "detectionCountByModel": "BattyBirdNET vyžaduje potvrzení: {batty}, BSG-BAT: {bsgBat}. {description}",
         "warningOff": "Bez filtrování je vysoká pravděpodobnost falešných detekcí. Zapnutí filtrování výrazně zlepšuje přesnost."
       },
       "locale": {

@@ -163,7 +163,13 @@ The `Orchestrator` divides the configured thread count across all loaded models 
 
 ### Nighttime Scheduling
 
-Bat models support a nighttime-only mode. When `settings.Bat.NighttimeOnly=true`, the `analysisBufferMonitor` checks `orchestrator.IsModelActive("Bat")` before calling `ProcessData()`. The nighttime scheduler uses solar position calculations to determine sunrise/sunset.
+Bat models support a nighttime-only mode. When `settings.Bat.NighttimeOnly=true`, the `analysisBufferMonitor` checks `orchestrator.IsModelActive` for each bat model (Bat and BSG-BAT) before calling `ProcessData()`. The nighttime scheduler uses solar position calculations to determine sunrise/sunset.
+
+### BSG-BAT Analysis Step
+
+BSG-BAT scores a 512-frame window (1.0247 s at 384 kHz) and advances it by a configurable step, `bsgbat.stepframes`, counted in mel frames of 768 samples (2 ms each). The accepted range is 100 to 512 frames (0.2 s to 1.024 s) and 0 means the default of 250 frames (0.5 s). The minimum is twice the 100 ms buffer poll, because the monitor reads at most one window per poll. A larger step cuts the number of inferences per second, at the cost of fewer windows per detection. Changing the step restarts audio capture, but does not reload the model.
+
+The bat false positive filter count follows the step as `ceil(6 / step seconds * level fraction)`. At level 2 it is 4 windows at 250 frames and 2 at 512 frames; at level 5 it is 9 at 250 frames and 5 at 512 frames. At 512 frames a 6 s span holds only 5 or 6 windows, so level 5 needs all of them in the worst case. Unlike the other models, the BSG-BAT analysis ring holds two windows, so a step close to the window length does not overwrite audio that has not been read yet.
 
 ## Stage 4: Detection Processing
 
@@ -257,6 +263,10 @@ At flush time, the total hit count is the **sum across all models**. This means:
 - **Cross-model agreement**: When both models independently identify the same species, the combined evidence is stronger, reducing false positives from single-model artifacts
 
 The `BestModelID` field tracks which model produced the highest individual confidence score. This model is credited as the primary detector in the database record, while per-model contributions are stored separately in the `DetectionModelContribution` table.
+
+### Model Consensus Filter
+
+The optional model consensus filter (`realtime.modelconsensus`, off by default) is the last discard check when a pending detection is flushed. It discards the detection unless at least `minmodels` distinct models of its taxon group contributed hits to it. Only eligible models count towards the requirement: a model must be able to classify the species, pass the range filter for it, and have scored all the audio the agreeing models heard without a gap. A model that is still behind in processing is not counted as eligible until it catches up. The requirement is capped at the number of eligible models, so a species that only one model can detect always passes, and so does a detection whose source gives no capture timestamps. Bird and bat models are never counted towards each other. See the [guide](guide.md) for the settings.
 
 ### Range Filter (BirdNET Geomodel v3.0)
 

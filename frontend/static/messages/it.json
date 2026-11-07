@@ -1546,6 +1546,8 @@
           "creating": "Creazione in corso...",
           "createBackup": "Crea backup",
           "noBackups": "Nessun backup ancora",
+          "loadFailed": "Impossibile caricare la cronologia dei backup",
+          "createFailed": "Impossibile avviare il backup",
           "download": "Scarica",
           "failed": "Fallito",
           "columns": {
@@ -1573,6 +1575,8 @@
         "starting": "Avvio migrazione...",
         "status": {
           "idle": "Pronto per Iniziare",
+          "checking": "Verifica dei prerequisiti",
+          "notReady": "Non pronto",
           "initializing": "Inizializzazione",
           "dual_write": "Scrittura Doppia Attiva",
           "migrating": "Migrazione Primaria",
@@ -1604,6 +1608,8 @@
           "recordsLabel": "Record",
           "sizeLabel": "Dimensione",
           "prerequisitesNotMet": "Prerequisiti non soddisfatti - risolvi i problemi critici qui sotto",
+          "prerequisitesUnavailable": "I controlli pre-migrazione non sono terminati. Vedi Controlli Pre-Migrazione qui sotto.",
+          "prerequisitesFailedList": "Risolvi prima questi controlli: {checks}",
           "validatingTitle": "Validazione dati",
           "validatingBody": "Confronto di {count} record legacy con il database V2...",
           "dirtyRecordsCatchup": "{count} record non sincronizzati - verrà tentata la riconciliazione",
@@ -1705,6 +1711,9 @@
           "warningsCount": "{count} avviso/i",
           "running": "Esecuzione controlli pre-migrazione...",
           "checkingStep": "Passo {current} di {total}",
+          "currentCheck": "Controllo di {name} ({seconds} s)",
+          "slowHint": "I database grandi possono richiedere diversi minuti.",
+          "runFailed": "I controlli prima della migrazione non sono terminati: {error}",
           "passedCount": "{passed}/{total} superati",
           "criticalCount": "{count} critici",
           "warningCount": "{count} avviso/i",
@@ -3720,9 +3729,10 @@
           "result": "Risultato del test",
           "error": "Test fallito",
           "batCompatible": "Compatibile con pipistrelli",
-          "batIncompatible": "Non compatibile con pipistrelli"
+          "batIncompatible": "Non compatibile con pipistrelli",
+          "minRateWarning": "I modelli selezionati richiedono una frequenza di acquisizione di almeno {rate} kHz. Questo flusso è al di sotto."
         },
-        "batWarning": "I modelli per pipistrelli richiedono flussi con un codec lossless (PCM) e una frequenza di campionamento di almeno 96 kHz. Usa il pulsante Testa stream sopra per verificare la compatibilità.",
+        "batWarning": "I modelli per pipistrelli richiedono flussi con un codec lossless (PCM) e una frequenza di campionamento di almeno 96 kHz. BSG-BAT richiede almeno 192 kHz. Usa il pulsante Testa stream sopra per verificare la compatibilità.",
         "codecWarning": {
           "lossy": "I codec con perdita (AAC, Opus, MP3) distruggono le frequenze ultrasoniche sopra i ~20 kHz, rendendo lo stream inadatto al rilevamento dei pipistrelli."
         },
@@ -3898,6 +3908,21 @@
         "truePeakHelp": "Livello picco reale massimo per prevenire clipping digitale (-10 a 0 dBTP). -2 dBTP fornisce margine sicurezza per la maggior parte dei sistemi riproduzione.",
         "noteTitle": "Standard EBU R128",
         "noteDescription": "La normalizzazione audio segue lo standard broadcast EBU R128, assicurando livelli riproduzione coerenti tra diversi dispositivi e prevenendo clipping."
+      },
+      "exportDenoise": {
+        "title": "Riduzione del rumore delle clip salvate",
+        "description": "Riduce il rumore di fondo nelle clip durante il salvataggio.",
+        "enable": "Riduci il rumore delle clip al salvataggio",
+        "enableHelp": "L'audio catturato viene ripulito dal rumore in memoria prima che il file della clip venga scritto. Il rilevamento usa sempre l'audio originale.",
+        "requiresRecording": "Abilita la registrazione delle clip nella scheda Registrazione per usare la riduzione del rumore delle clip.",
+        "strengthLabel": "Intensità della riduzione del rumore",
+        "strengthHelp": "Leggero conserva più suono originale e forte rimuove più rumore. Leggero-medio va bene per la maggior parte delle registrazioni.",
+        "strengthDisabledHelp": "Attiva sopra la riduzione del rumore delle clip per scegliere un'intensità.",
+        "warningTitle": "Le clip salvate non possono essere ripristinate",
+        "warningPermanent": "L'audio originale non viene conservato. Le clip vengono ripulite dal rumore in modo permanente al salvataggio, comprese le registrazioni di pipistrelli.",
+        "warningBats": "La riduzione del rumore può attenuare i richiami deboli dei pipistrelli; i richiami forti non sono interessati.",
+        "warningImported": "Le registrazioni importate non sono interessate.",
+        "lossyNote": "La riduzione del rumore funziona meglio con clip FLAC o WAV. Sotto {minBitrate} kbps, gli artefatti del codec limitano la pulizia del risultato."
       },
       "audioClipRetention": {
         "title": "Conservazione Clip Audio",
@@ -5211,6 +5236,7 @@
         "denoise": "Riduzione rumore",
         "denoiseOff": "Disattivato",
         "denoiseLight": "Leggero",
+        "denoiseLightMedium": "Leggero-medio",
         "denoiseMedium": "Medio",
         "denoiseHeavy": "Pesante",
         "normalize": "Normalizza audio",
@@ -5335,7 +5361,8 @@
     },
     "migration": {
       "notConfigured": "La migrazione non è configurata",
-      "preFlightFailed": "Controlli preliminari non superati",
+      "preFlightFailed": "Controllo prima della migrazione non riuscito: {check}",
+      "prerequisitesNotReady": "Esegui i controlli prima della migrazione e attendi che siano superati prima di avviare la migrazione.",
       "invalidBody": "Corpo della richiesta non valido",
       "recordCountFailed": "Impossibile determinare il numero totale di record",
       "startFailed": "Impossibile avviare la migrazione",
@@ -5565,8 +5592,20 @@
         "helpText": "Punteggio di confidenza minimo (0.0 - 1.0) richiesto affinché un rilevamento venga registrato."
       },
       "batThreshold": {
-        "label": "Soglia di rilevamento pipistrelli",
-        "helpText": "Punteggio di confidenza minimo per i rilevamenti delle specie di pipistrelli. Si applica solo ai modelli classificatori di pipistrelli."
+        "label": "Soglia di rilevamento pipistrelli (BattyBirdNET)",
+        "helpText": "Punteggio di confidenza minimo per i rilevamenti delle specie di pipistrelli di BattyBirdNET. BSG-BAT ha una propria soglia."
+      },
+      "bsgBatThreshold": {
+        "label": "Soglia di rilevamento pipistrelli (BSG-BAT)",
+        "helpText": "Punteggio di confidenza minimo per i rilevamenti delle specie di pipistrelli di BSG-BAT.",
+        "sampleRateWarning": "Le registrazioni a 192 kHz funzionano, ma le specie che emettono sopra i 96 kHz non possono essere identificate e i punteggi sono meno affidabili. Si consiglia una frequenza di acquisizione di 384 kHz."
+      },
+      "bsgBatStep": {
+        "label": "Passo di analisi BSG-BAT (frame)",
+        "helpText": "Frame da 2 ms tra le finestre di analisi di BSG-BAT, da 100 (0,2 s) a 512 (1,024 s, nessuna sovrapposizione). Il valore predefinito di 250 (0,5 s) è il passo di riferimento. Con 375 (0,75 s) si trova circa l'85% degli eventi con due terzi della CPU; con 512 circa il 70-75% con circa metà della CPU, per i dispositivi che non riescono a tenere il passo.",
+        "readout": "Passo: {seconds} s tra le finestre di analisi.",
+        "readoutWithFilter": "Passo: {seconds} s tra le finestre di analisi. Livello del filtro pipistrelli {level}: {count} conferme richieste.",
+        "restartNote": "Il salvataggio di un nuovo passo riavvia l'acquisizione audio."
       },
       "batFilter": {
         "label": "Filtro passa-alto audio pipistrelli",
@@ -5589,6 +5628,7 @@
           "strict": "Filtraggio massimo per la massima precisione."
         },
         "detectionCount": "{count} conferme richieste. {description}",
+        "detectionCountByModel": "{batty} conferme richieste per BattyBirdNET, {bsgBat} per BSG-BAT. {description}",
         "warningOff": "Senza filtraggio c'è un'alta probabilità di falsi positivi. L'attivazione del filtraggio migliora significativamente la precisione."
       },
       "locale": {

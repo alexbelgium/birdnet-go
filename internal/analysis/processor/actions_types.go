@@ -136,7 +136,7 @@ type DatabaseAction struct {
 	Ds                datastore.Interface           // Legacy - to be removed after migration
 	Repo              datastore.DetectionRepository // New - preferred for database operations
 	Result            detection.Result              // Domain model (single source of truth)
-	Results           []detection.AdditionalResult  // Secondary predictions (converted to legacy format at save time)
+	Results           []detection.AdditionalResult  // All finite alternates; storedAlternates trims them at save
 	EventTracker      *EventTracker
 	NewSpeciesTracker *species.SpeciesTracker // Add reference to new species tracker
 	processor         *Processor              // Add reference to processor for source name resolution
@@ -193,6 +193,20 @@ type SaveAudioAction struct {
 	// written through after the encode; nil only for a processor built without a
 	// repository (tests).
 	clipRates clipSampleRateRecorder
+	// denoiseAttempted is set before the export-stage denoise runs, so a retried
+	// export (Extended Capture defers and retries; a.pcmData survives between
+	// attempts) never denoises the same PCM twice, whether the first attempt
+	// succeeded, failed or timed out.
+	denoiseAttempted bool
+	// denoisePreset is the preset a successful export-stage denoise used, for the
+	// success log; empty when the clip was written as captured.
+	denoisePreset string
+	// denoiseTimeout overrides exportDenoiseTimeout when positive. Test seam.
+	denoiseTimeout time.Duration
+	// denoise and encode are test seams; nil selects transcode.DenoisePCM16 and
+	// runEncoder. They let a test see exactly what PCM each stage receives.
+	denoise pcmDenoiser
+	encode  clipEncoderFunc
 	// plannedRate is the clip sample rate stored with the detection at save time
 	// (plannedClipSampleRate); the action corrects it when the encode wrote another.
 	plannedRate   int

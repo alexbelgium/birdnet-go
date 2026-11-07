@@ -196,7 +196,7 @@ func (c *Handler) CorrectDetectionSpecies(ctx echo.Context) error {
 	if err := c.writeSpeciesCorrectionV2(ctx.Request().Context(), uint(noteID),
 		req.ScientificName, req.Confidence, chosen.ToDetectionModelInfo(),
 	); err != nil {
-		c.LogAPIRequest(ctx, logger.LogLevelError, "Species correction failed",
+		c.logFailure(ctx, "Species correction failed",
 			logger.String("detection_id", idStr),
 			logger.String("model_id", resolvedID),
 			logger.String("scientific_name", req.ScientificName),

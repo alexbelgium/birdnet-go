@@ -285,6 +285,10 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 		// an already-canonical list, so this does not spuriously trigger a rebuild.
 		updated.Realtime.Species.Exclude = c.canonicalizeExcludeList(updated.Realtime.Species.Exclude)
 
+		// The model consensus species list is matched like the exclude list, so store
+		// it in the same canonical form.
+		updated.Realtime.ModelConsensus.Species = c.canonicalizeExcludeList(updated.Realtime.ModelConsensus.Species)
+
 		// Ensure LocationConfigured is set when birdnet coordinates are present.
 		// Backward compatibility with older frontends that don't send the flag.
 		if updated.BirdNET.Latitude != 0 || updated.BirdNET.Longitude != 0 {
@@ -488,6 +492,11 @@ func (c *Controller) UpdateSectionSettings(ctx echo.Context) error {
 		// range-filter rebuild via rangeFilterSettingsChanged.
 		if strings.EqualFold(section, SettingsSectionRealtime) || strings.EqualFold(section, SettingsSectionSpecies) {
 			updated.Realtime.Species.Exclude = c.canonicalizeExcludeList(updated.Realtime.Species.Exclude)
+		}
+
+		// The model consensus species list lives in the realtime section only.
+		if strings.EqualFold(section, SettingsSectionRealtime) {
+			updated.Realtime.ModelConsensus.Species = c.canonicalizeExcludeList(updated.Realtime.ModelConsensus.Species)
 		}
 
 		// Validate the clone before publishing. No rollback needed on validation
@@ -1007,6 +1016,8 @@ func getSettingsSectionValue(settings *conf.Settings, section string) (any, erro
 		return &settings.BirdNETV3, nil
 	case "bat":
 		return &settings.Bat, nil
+	case "bsgbat":
+		return &settings.BSGBat, nil
 	case "models":
 		return &settings.Models, nil
 	case "taxonomysynonyms":
@@ -2402,6 +2413,7 @@ var settingsChangeChecks = []settingsChangeCheck{
 	{"BirdNET", "reload_birdnet", birdnetSettingsChanged, "Reloading BirdNET model with new settings...", notification.MsgSettingsReloadingBirdnet, ToastTypeInfo, toastDurationLong},
 	{"Models.Enabled", "reconcile_models", modelsEnabledChanged, "Applying enabled model changes...", "", ToastTypeInfo, toastDurationLong},
 	{"Analysis overlap", actionRestartAudioCapture, analysisOverlapChanged, "Restarting audio capture to apply new overlap...", "", ToastTypeInfo, toastDurationMedium},
+	{"BSG-BAT step", actionRestartAudioCapture, bsgBatStepChanged, "Restarting audio capture to apply the new BSG-BAT step...", "", ToastTypeInfo, toastDurationMedium},
 	{"FP filter cadence", actionReconfigureAudioSources, falsePositiveFilterActiveChanged, "Re-planning the analysis cadence...", "", ToastTypeInfo, toastDurationMedium},
 	{"Range filter", "rebuild_range_filter", rangeFilterSettingsChanged, "Rebuilding species range filter...", notification.MsgSettingsRebuildingRangeFilter, ToastTypeInfo, toastDurationMedium},
 	{"Species interval", "update_detection_intervals", intervalSettingsChanged, "Updating detection intervals...", notification.MsgSettingsUpdatingIntervals, ToastTypeInfo, toastDurationShort},
@@ -2651,6 +2663,15 @@ func birdnetSettingsChanged(oldSettings, currentSettings *conf.Settings) bool {
 // rebuilds the model instance, not the source buffers).
 func analysisOverlapChanged(oldSettings, currentSettings *conf.Settings) bool {
 	return oldSettings.BirdNET.Overlap != currentSettings.BirdNET.Overlap
+}
+
+// bsgBatStepChanged reports whether the resolved BSG-BAT analysis step changed.
+// The step sizes every BSG-BAT analysis buffer and SameCadence compares only the
+// effective overlap, so this triggers restart_audio_capture like
+// analysisOverlapChanged. It compares resolved steps rather than the raw field:
+// the API path stores a raw 0 unnormalized, and 0 means the default.
+func bsgBatStepChanged(oldSettings, currentSettings *conf.Settings) bool {
+	return classifier.BSGBatStepSamples(oldSettings) != classifier.BSGBatStepSamples(currentSettings)
 }
 
 // falsePositiveFilterActiveChanged reports whether the bird false positive filter
