@@ -233,7 +233,7 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 		samples, err := decodeClipMonoPCM16(
 			ctx.Request().Context(), ffmpegPath, absClipPath, sampleRate, decodeMaxDurationSec)
 		if err != nil {
-			c.LogAPIRequest(ctx, logger.LogLevelError, "Failed to decode clip for reanalysis",
+			c.logFailure(ctx, "Failed to decode clip for reanalysis",
 				logger.String("detection_id", idStr),
 				logger.String("clip_path", relClipPath),
 				logger.Int("sample_rate", sampleRate),
@@ -256,7 +256,7 @@ func (c *Handler) ReanalyzeDetection(ctx echo.Context) error {
 			scores, windowCount, err := reanalyzeSamples(
 				ctx.Request().Context(), bn.PredictModel, m.id, m.spec, samples)
 			if err != nil {
-				c.LogAPIRequest(ctx, logger.LogLevelError, "Reanalysis inference failed",
+				c.logFailure(ctx, "Reanalysis inference failed",
 					logger.String("detection_id", idStr),
 					logger.String("model_id", m.id),
 					logger.Error(err))
@@ -451,6 +451,9 @@ func (c *Handler) loadDetection(ctx echo.Context, idStr string) (det *detection.
 	case err != nil && isDetectionNotFoundErr(err):
 		return nil, false, c.HandleError(ctx, err, "Detection not found", http.StatusNotFound)
 	case err != nil:
+		c.logFailure(ctx, "Failed to fetch detection",
+			logger.String("detection_id", idStr),
+			logger.Error(err))
 		return nil, false, c.HandleError(ctx, err, "Failed to fetch detection", http.StatusInternalServerError)
 	}
 	return det, true, nil
@@ -516,8 +519,9 @@ func resolveModelID(raw string) string {
 // real orchestrator, which would require a model file on disk.
 type predictModelFn func(ctx context.Context, modelID string, sample [][]float32) ([]datastore.Results, error)
 
-// reanalyzeSamples slides a clip-length window across the decoded audio at 50%
-// overlap (matching the realtime pipeline) and dispatches each window to predict.
+// reanalyzeSamples slides the model's analysis window across the decoded audio,
+// stepping by the model's fixed step or at 50% overlap (matching the realtime
+// pipeline), and dispatches each window to predict.
 // Per raw label it keeps the maximum confidence seen across all windows.
 //
 // Returns (label -> max confidence, window count, error). Ranking and top-N
@@ -537,11 +541,14 @@ func reanalyzeSamples(
 			Build()
 	}
 
-	// Nanosecond math rather than Seconds()*SampleRate: the registry only ships
-	// whole-second windows today (3s BirdNET, 5s Perch), so this is future-proofing
-	// for a fractional-window model, but it costs nothing and removes a silent
-	// off-by-N-samples failure mode if one ever appears.
-	clipLen := int(spec.ClipLength.Nanoseconds() * int64(spec.SampleRate) / int64(time.Second))
+	// The window and step come from the spec exactly as the realtime analysis
+	// buffer takes them (ModelSpec.BufferDimensions): ClipSampleCount for the
+	// window and StepSamples, when set, for the step. Deriving the window from
+	// ClipLength instead is wrong for a model whose window is not a whole number
+	// of seconds: BSG-BAT's 393472 samples at 384 kHz is a ClipLength that
+	// truncates to the nanosecond, so the derived window came out one sample
+	// short and the model rejected every window.
+	clipLen := spec.ClipSampleCount()
 	if clipLen <= 0 {
 		return nil, 0, errors.Newf("model %q has invalid clip length", modelID).
 			Component(errComponent).
@@ -558,7 +565,12 @@ func reanalyzeSamples(
 		samples = padded
 	}
 
-	stride := clipLen / 2
+	// A model with a fixed step (BSG-BAT) uses it; any other walks at 50%
+	// overlap, as the realtime pipeline does by default.
+	stride := spec.StepSamples
+	if stride <= 0 || stride > clipLen {
+		stride = clipLen / 2
+	}
 	if stride <= 0 {
 		stride = clipLen
 	}

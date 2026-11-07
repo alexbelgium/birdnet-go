@@ -19,7 +19,13 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
+	"github.com/tphakala/birdnet-go/internal/logger"
 )
+
+// logModule is the logger module reanalysis failures are written to. It has no
+// dedicated output entry, so it goes to the main application log and the
+// console, where an operator looks first.
+const logModule = "reanalyze"
 
 // Handler serves the api/v2 reanalysis endpoints. It embeds the shared
 // *apicore.Core by pointer (never by value — Core holds atomics and mutexes)
@@ -53,4 +59,16 @@ func (c *Handler) RegisterRoutes(g *echo.Group) {
 	detectionGroup := g.Group("/detections", c.AuthMiddleware)
 	detectionGroup.POST("/:id/reanalyze", c.ReanalyzeDetection)
 	detectionGroup.POST("/:id/correct-species", c.CorrectDetectionSpecies)
+}
+
+// logFailure records a failed reanalysis or correction. The api module writes
+// only to the access log, which an operator watching the console or the main
+// application log never sees, so a 500 left nothing they could find. The failure
+// is therefore written to both: the access log entry keeps the request context,
+// and the reanalyze module entry makes it visible where people look.
+func (c *Handler) logFailure(ctx echo.Context, msg string, fields ...logger.Field) {
+	c.LogAPIRequest(ctx, logger.LogLevelError, msg, fields...)
+	if log := logger.Global().Module(logModule); log != nil {
+		log.Error(msg, fields...)
+	}
 }

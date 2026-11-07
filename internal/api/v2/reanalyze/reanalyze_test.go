@@ -368,6 +368,34 @@ func TestReanalyzeSamples_NoExtraWindowWhenTheClipAlignsToTheStride(t *testing.T
 	assert.Equal(t, 3, calls)
 }
 
+func TestReanalyzeSamples_UsesTheSpecWindowAndStepForBSGBat(t *testing.T) {
+	t.Parallel()
+
+	// BSG-BAT's window is a sample count that is not a whole number of
+	// nanoseconds at 384 kHz, so a window derived from ClipLength came out one
+	// sample short and the model rejected every one of them with a 500. Use the
+	// real registry spec so a change to it is covered too.
+	spec := classifier.ModelRegistry[classifier.RegistryIDBSGBat].Spec
+	require.Positive(t, spec.ClipSamples)
+	require.Positive(t, spec.StepSamples)
+
+	// Exactly two fixed steps past one window: three strided windows, no tail.
+	samples := make([]float32, spec.ClipSamples+2*spec.StepSamples)
+	var lengths []int
+	predict := func(_ context.Context, _ string, window [][]float32) ([]datastore.Results, error) {
+		lengths = append(lengths, len(window[0]))
+		return nil, nil
+	}
+
+	_, windows, err := reanalyzeSamples(t.Context(), predict, classifier.RegistryIDBSGBat, spec, samples)
+	require.NoError(t, err)
+	assert.Equal(t, 3, windows, "the walk advances by the model's fixed step, not half a window")
+	require.Len(t, lengths, windows)
+	for i, n := range lengths {
+		assert.Equal(t, spec.ClipSamples, n, "window %d must be exactly the model's input length", i)
+	}
+}
+
 func TestReanalyzeDetection_RefusesWhenAnotherReanalysisHoldsTheSlot(t *testing.T) {
 	// Not parallel: it takes the process-wide admission slot.
 	core := apitest.NewCore(t)
