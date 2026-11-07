@@ -5621,7 +5621,7 @@
         "helpText": "Språk brukt for artsnavnene i grensesnittet."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Overstyr konfidensgrensen",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5633,6 +5633,9 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Aktiver for å angi en grense for denne modellen. Ellers brukes den felles grensen for flaggermus."
       }
     },
     "rangeFilter": {

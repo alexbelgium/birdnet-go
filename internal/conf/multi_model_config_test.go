@@ -208,7 +208,7 @@ func TestApplyModelValidation_AcceptsCatalogAliases(t *testing.T) {
 	// the early-load path without an "unknown model ID" warning. Regression for
 	// Sentry BIRDNET-GO-2FZ.
 	settings := &Settings{}
-	settings.Models.Enabled = []string{"birdnet", "perch-v2", "birdnet-v3.0", "birdnet-v2.4", "bsg-bat"}
+	settings.Models.Enabled = []string{"birdnet", "perch-v2", "birdnet-v3.0", "birdnet-v2.4", "bsg-bat", "bsgbat"}
 
 	err := settings.applyModelValidation()
 	require.NoError(t, err)
@@ -224,15 +224,16 @@ func TestValidAudioModels_AcceptsCatalogAliases(t *testing.T) {
 	assert.True(t, ValidAudioModels["birdnet-v2.4"])
 	assert.True(t, ValidAudioModels["bsg-bat"])
 	assert.True(t, ValidAudioModels["bsg_bat"])
+	assert.True(t, ValidAudioModels["bsgbat"])
 }
 
 func TestMigrateModelIDAliases_CanonicalizesCatalogIDs(t *testing.T) {
 	t.Parallel()
 
 	settings := &Settings{}
-	settings.Models.Enabled = []string{"birdnet", "perch-v2", "birdnet-v3.0", "bsg-bat"}
+	settings.Models.Enabled = []string{"birdnet", "perch-v2", "birdnet-v3.0", "bsgbat"}
 	settings.Realtime.Audio.Sources = []AudioSourceConfig{
-		{Name: "Mic1", Model: "perch-v2", Models: []string{"birdnet-v2.4", "bsg-finland", "BSG-BAT"}},
+		{Name: "Mic1", Model: "perch-v2", Models: []string{"birdnet-v2.4", "bsg-finland", "bsgbat"}},
 	}
 	settings.Realtime.RTSP.Streams = []StreamConfig{
 		{URL: "rtsp://x", Models: []string{"perch-v2"}},

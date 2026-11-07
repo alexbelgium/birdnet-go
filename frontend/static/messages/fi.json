@@ -5621,7 +5621,7 @@
         "helpText": "Kieli, jolla lajien yleisnimistö näytetään käyttöliittymässä."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Ohita yhteinen luottamusraja",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5633,6 +5633,9 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Ota käyttöön asettaaksesi tälle mallille oman rajan. Muuten käytetään lepakoiden yhteistä rajaa."
       }
     },
     "rangeFilter": {

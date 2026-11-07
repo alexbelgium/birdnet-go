@@ -5621,7 +5621,7 @@
         "helpText": "Lingua utilizzata per i nomi comuni delle specie nell'interfaccia."
       },
       "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
+        "label": "Sovrascrivi la soglia di confidenza",
         "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
       },
       "secondaryThreshold": {
@@ -5633,6 +5633,9 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "batThresholdOverride": {
+        "helpText": "Attiva per impostare una soglia per questo modello. Altrimenti si applica la soglia condivisa per i pipistrelli."
       }
     },
     "rangeFilter": {

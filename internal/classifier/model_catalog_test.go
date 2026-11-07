@@ -359,7 +359,7 @@ func TestCatalogByCategory(t *testing.T) {
 	assert.Len(t, grouped[CategoryWildlife], 2, "expected 2 visible wildlife catalog entries (perch-v2, birdnet-v3.0)")
 	assert.Len(t, grouped[CategoryBird], 1, "expected 1 visible bird catalog entry (birdnet-v2.4)")
 	assert.Len(t, grouped[CategoryGeomodel], 1, "expected 1 visible geomodel catalog entry")
-	assert.Len(t, grouped[CategoryBat], 12, "expected 12 bat catalog entries (11 BattyBirdNET regions and BSG-BAT)")
+	assert.Len(t, grouped[CategoryBat], 13, "expected 13 bat catalog entries (11 BattyBirdNET regions, BSG-BAT, and BatDetect2)")
 }
 
 func TestEmbeddedCatalog_BatEntriesHaveEmbeddingsFile(t *testing.T) {
@@ -403,10 +403,10 @@ func TestEmbeddedCatalog_BatEntriesHaveEmbeddingsFile(t *testing.T) {
 func TestEmbeddedCatalog_EntryCount(t *testing.T) {
 	t.Parallel()
 
-	// 2 wildlife + 2 bird + 1 geomodel + 12 bat = 17 total
+	// 2 wildlife + 2 bird + 1 geomodel + 13 bat = 18 total
 	// (bird: bsg-finland + the collapsed hidden BirdNET v2.4 foundation entry;
-	// bat: 11 BattyBirdNET regions + BSG-BAT)
-	assert.Len(t, EmbeddedCatalog, 17, "expected 17 total catalog entries")
+	// bat: 11 BattyBirdNET regions + BSG-BAT + BatDetect2)
+	assert.Len(t, EmbeddedCatalog, 18, "expected 18 total catalog entries")
 }
 
 func TestVisibleCatalog_ExcludesHiddenEntries(t *testing.T) {
