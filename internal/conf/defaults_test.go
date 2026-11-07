@@ -134,6 +134,25 @@ func TestRetryTemplateMatchesCodeDefaults(t *testing.T) {
 	}
 }
 
+// TestFirstDailyConsensusDisabledByDefault pins both opt-in family defaults.
+func TestFirstDailyConsensusDisabledByDefault(t *testing.T) {
+	t.Cleanup(viper.Reset)
+	viper.Reset()
+	setDefaultConfig()
+	for _, key := range []string{
+		"realtime.firstdailyconsensus.enabled",
+		"realtime.firstdailyconsensus.batenabled",
+	} {
+		require.False(t, viper.GetBool(key), key)
+	}
+	for _, key := range []string{
+		"realtime.firstdailyconsensus.whitelist",
+		"realtime.firstdailyconsensus.batwhitelist",
+	} {
+		require.Empty(t, viper.GetStringSlice(key), key)
+	}
+}
+
 // TestAlternateMinConfidenceDefault pins the default of
 // birdnet.alternateminconfidence in the viper defaults and in the embedded
 // config.yaml, and that a saved 0 stays in the YAML so the default cannot come

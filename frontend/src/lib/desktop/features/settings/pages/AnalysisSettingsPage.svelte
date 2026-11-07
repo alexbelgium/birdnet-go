@@ -76,6 +76,7 @@
     type FilterLevel,
   } from '$lib/desktop/components/forms/FalsePositiveFilterControl.svelte';
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import SpeciesListEditor from '$lib/desktop/components/forms/SpeciesListEditor.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import FlagIcon, { type FlagLocale } from '$lib/desktop/components/ui/FlagIcon.svelte';
@@ -113,6 +114,9 @@
   import { generateId } from '$lib/utils/uuid';
   import { loggers } from '$lib/utils/logger';
   import { t } from '$lib/i18n';
+  import { normalizeForLookup } from '$lib/utils/speciesNames';
+  import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
+  import { mapSpeciesListResponse, type SpeciesListResponse } from '$lib/utils/speciesPredictions';
   import {
     Download,
     Trash2,
@@ -332,6 +336,12 @@
     }
   );
   let falsePositiveFilter = $derived($realtimeSettings?.falsePositiveFilter ?? { level: 0 });
+  let firstDailyConsensus = $derived({
+    enabled: $realtimeSettings?.firstDailyConsensus?.enabled ?? false,
+    whitelist: $realtimeSettings?.firstDailyConsensus?.whitelist ?? [],
+    batEnabled: $realtimeSettings?.firstDailyConsensus?.batEnabled ?? false,
+    batWhitelist: $realtimeSettings?.firstDailyConsensus?.batWhitelist ?? [],
+  });
   let bat = $derived(
     $batSettings ?? {
       enabled: false,
@@ -370,11 +380,20 @@
       threshold: store.originalData.birdnet?.threshold,
       locale: store.originalData.birdnet?.locale,
       fpFilter: store.originalData.realtime?.falsePositiveFilter?.level ?? 0,
+      firstDailyConsensus: store.originalData.realtime?.firstDailyConsensus?.enabled ?? false,
+      firstDailyConsensusWhitelist:
+        store.originalData.realtime?.firstDailyConsensus?.whitelist ?? [],
+      batEnabled: store.originalData.realtime?.firstDailyConsensus?.batEnabled ?? false,
+      batWhitelist: store.originalData.realtime?.firstDailyConsensus?.batWhitelist ?? [],
     },
     current: {
       threshold: birdnet?.threshold,
       locale: birdnet?.locale,
       fpFilter: falsePositiveFilter.level,
+      firstDailyConsensus: firstDailyConsensus.enabled,
+      firstDailyConsensusWhitelist: firstDailyConsensus.whitelist,
+      batEnabled: firstDailyConsensus.batEnabled,
+      batWhitelist: firstDailyConsensus.batWhitelist,
     },
   });
   const perchChange: ChangePair = $derived({
@@ -730,6 +749,82 @@
       );
     }
   }
+
+  function updateFirstDailyConsensusEnabled(enabled: boolean) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { ...firstDailyConsensus, enabled },
+    });
+  }
+
+  function updateFirstDailyConsensusWhitelist(whitelist: string[]) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { ...firstDailyConsensus, whitelist },
+    });
+  }
+
+  function updateFirstDailyConsensusBatEnabled(batEnabled: boolean) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { ...firstDailyConsensus, batEnabled },
+    });
+  }
+
+  function updateFirstDailyConsensusBatWhitelist(batWhitelist: string[]) {
+    settingsActions.updateSection('realtime', {
+      firstDailyConsensus: { ...firstDailyConsensus, batWhitelist },
+    });
+  }
+
+  let speciesListLoading = $state(false);
+  let speciesListLoaded = false;
+  let speciesListFailed = false;
+  let speciesPredictions = $state<string[]>([]);
+  let speciesScientificMap = $state(new Map<string, string>());
+
+  function localizeSpeciesLabel(value: string): string {
+    return localizeSpeciesName(speciesScientificMap.get(normalizeForLookup(value)), value);
+  }
+
+  async function loadSpeciesPredictions() {
+    speciesListLoading = true;
+    try {
+      const data = await api.get<SpeciesListResponse>('/api/v2/range/species/list');
+      const mapped = mapSpeciesListResponse(data);
+      speciesPredictions = mapped.values;
+      speciesScientificMap = mapped.scientificNames;
+    } catch (err) {
+      logger.warn('Failed to load species list for first-daily consensus', err, {
+        component: 'AnalysisSettingsPage',
+        action: 'loadSpeciesPredictions',
+      });
+      speciesPredictions = [];
+      speciesScientificMap = new Map();
+      speciesListFailed = true;
+
+      // If the rule was disabled while this request was in flight, the effect's
+      // disabled branch has already run. Re-arm here for the next enable.
+      if (!firstDailyConsensus.enabled && !firstDailyConsensus.batEnabled) {
+        speciesListLoaded = false;
+        speciesListFailed = false;
+      }
+    } finally {
+      speciesListLoading = false;
+    }
+  }
+
+  $effect(() => {
+    if (!firstDailyConsensus.enabled && !firstDailyConsensus.batEnabled) {
+      // Retry a failed request on the next enable, not continuously while on.
+      if (speciesListFailed) {
+        speciesListLoaded = false;
+        speciesListFailed = false;
+      }
+      return;
+    }
+    if (!speciesListLoaded && !speciesListLoading) {
+      speciesListLoaded = true;
+      loadSpeciesPredictions();
+    }
+  });
 
   // ── False Positive Filter cadence readout ─────────────────────────────
   // The planned analysis cadence comes from GET /api/v2/system/inference and
@@ -1871,6 +1966,98 @@
           </div>
         </SettingsNote>
       {/if}
+
+      <!--
+        First Daily Detection Consensus. Copy is intentionally hard-coded English
+        rather than a t() key: this is a fork-local feature, and routing it through
+        i18n would mean editing en.json, all 15 other locale catalogues and the
+        generated types on every upstream sync. Keeping it self-contained trades
+        translation for a clean merge.
+      -->
+      <div class="mt-6">
+        <Checkbox
+          checked={firstDailyConsensus.enabled}
+          label="Require two models for a bird species' first detection of the day"
+          disabled={store.isLoading || store.isSaving}
+          helpText="Reduces false new-species entries at the cost of occasionally delaying a genuine first sighting. Only applies to species that at least two active models analyzing an audio source can identify, except species on the whitelist or while dynamic thresholding has lowered that species' threshold. Non-bird species, non-animal sounds, species only one model knows, and setups running a single bird model are not affected."
+          onchange={enabled => updateFirstDailyConsensusEnabled(enabled)}
+        />
+
+        <fieldset
+          disabled={!firstDailyConsensus.enabled || store.isLoading || store.isSaving}
+          class="contents"
+          aria-describedby={firstDailyConsensus.enabled
+            ? undefined
+            : 'first-daily-consensus-whitelist-disabled'}
+        >
+          <SpeciesListEditor
+            species={firstDailyConsensus.whitelist}
+            disabled={!firstDailyConsensus.enabled || store.isLoading || store.isSaving}
+            predictions={speciesPredictions}
+            predictionsLoading={speciesListLoading}
+            localizeLabel={localizeSpeciesLabel}
+            listLabel="Bird species exempt from first-daily consensus"
+            addLabel="Add an exempt bird species"
+            addPlaceholder="Type a common or scientific name"
+            addHelpText="Whitelisted species always use the normal single-model threshold behavior."
+            addButtonText="Add bird species"
+            hasChanges={hasSettingsChanged(
+              store.originalData.realtime?.firstDailyConsensus?.whitelist ?? [],
+              firstDailyConsensus.whitelist
+            )}
+            onSpeciesChange={updateFirstDailyConsensusWhitelist}
+          />
+        </fieldset>
+        {#if !firstDailyConsensus.enabled}
+          <SettingsNote>
+            <span id="first-daily-consensus-whitelist-disabled">
+              Turn on the option above to edit the bird species whitelist.
+            </span>
+          </SettingsNote>
+        {/if}
+      </div>
+      <div class="mt-6">
+        <Checkbox
+          checked={firstDailyConsensus.batEnabled}
+          label="Require two models for a bat species' first detection of the day"
+          disabled={store.isLoading || store.isSaving}
+          helpText="Reduces false new-species entries at the cost of occasionally delaying a genuine first bat detection. Only applies to bat species that at least two active bat models analyzing an audio source can identify, except bat species on the whitelist or while dynamic thresholding has lowered that species' threshold. Species only one bat model knows and setups running a single bat model are not affected."
+          onchange={enabled => updateFirstDailyConsensusBatEnabled(enabled)}
+        />
+
+        <fieldset
+          disabled={!firstDailyConsensus.batEnabled || store.isLoading || store.isSaving}
+          class="contents"
+          aria-describedby={firstDailyConsensus.batEnabled
+            ? undefined
+            : 'first-daily-consensus-bat-whitelist-disabled'}
+        >
+          <SpeciesListEditor
+            species={firstDailyConsensus.batWhitelist}
+            disabled={!firstDailyConsensus.batEnabled || store.isLoading || store.isSaving}
+            predictions={speciesPredictions}
+            predictionsLoading={speciesListLoading}
+            localizeLabel={localizeSpeciesLabel}
+            listLabel="Bat species exempt from first-daily consensus"
+            addLabel="Add an exempt bat species"
+            addPlaceholder="Type a common or scientific name"
+            addHelpText="Whitelisted species always use the normal single-model threshold behavior."
+            addButtonText="Add bat species"
+            hasChanges={hasSettingsChanged(
+              store.originalData.realtime?.firstDailyConsensus?.batWhitelist ?? [],
+              firstDailyConsensus.batWhitelist
+            )}
+            onSpeciesChange={updateFirstDailyConsensusBatWhitelist}
+          />
+        </fieldset>
+        {#if !firstDailyConsensus.batEnabled}
+          <SettingsNote>
+            <span id="first-daily-consensus-bat-whitelist-disabled">
+              Turn on the option above to edit the bat species whitelist.
+            </span>
+          </SettingsNote>
+        {/if}
+      </div>
     </SettingsSection>
 
     <!-- 2. Perch v2 threshold override (only when the Perch model is installed) -->

@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/svelte';
+import { get, type Writable } from 'svelte/store';
 import type { CatalogEntry } from '$lib/types/models';
+import type { RealtimeSettings } from '$lib/stores/settings';
 import { CHANNEL_STABLE } from '$lib/utils/variantSelection';
 
 // Page-level coverage for the model-gallery install-error split:
@@ -87,10 +89,11 @@ vi.mock('$lib/utils/api', async () => {
 import AnalysisSettingsPage from './AnalysisSettingsPage.svelte';
 import * as modelsApi from '$lib/utils/modelsApi';
 import { MODEL_OPERATION_IN_PROGRESS_KEY } from '$lib/utils/modelsApi';
-import { settingsStore, settingsActions } from '$lib/stores/settings';
+import { settingsStore, settingsActions, realtimeSettings } from '$lib/stores/settings';
 import { invalidateModels } from '$lib/stores/models.svelte';
 import { toastActions } from '$lib/stores/toast';
 import { t } from '$lib/i18n';
+import { api } from '$lib/utils/api';
 import { navigation } from '$lib/stores/navigation.svelte';
 import { ApiError } from '$lib/utils/api';
 
@@ -620,5 +623,175 @@ describe('AnalysisSettingsPage model gallery optimize + permanent card', () => {
     // built-in badge and the baseline hardware chip. (The review dialog, also in the
     // DOM, renders it again for the offer's from-variant, so assert a lower bound.)
     expect(screen.getAllByText('analysis.gallery.builtIn').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('AnalysisSettingsPage first-daily consensus whitelist', () => {
+  let initialSettings: Parameters<typeof settingsStore.set>[0];
+  let initialRealtime: RealtimeSettings | undefined;
+
+  beforeAll(() => {
+    initialSettings = get(settingsStore);
+    initialRealtime = get(realtimeSettings);
+  });
+
+  afterEach(() => {
+    cleanup();
+    settingsStore.set(initialSettings);
+    (realtimeSettings as Writable<RealtimeSettings | undefined>).set(initialRealtime);
+  });
+
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.mocked(modelsApi.fetchCatalog).mockResolvedValue({ catalog: [] });
+    vi.mocked(modelsApi.fetchInstalled).mockResolvedValue([]);
+    vi.mocked(modelsApi.fetchModelRegions).mockRejectedValue(new Error('no regions in test'));
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: { enabled: true, whitelist: ['Great Tit'] },
+    });
+    settingsStore.update(s => ({
+      ...s,
+      originalData: {
+        ...s.originalData,
+        realtime: {
+          firstDailyConsensus: { enabled: true, whitelist: ['Great Tit'] },
+        },
+      },
+    }));
+  });
+
+  it('renders the saved whitelist and preserves bat settings when adding birds', async () => {
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: {
+        enabled: true,
+        whitelist: ['Great Tit'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle'],
+      },
+    });
+    render(AnalysisSettingsPage);
+
+    expect(await screen.findByText('Great Tit')).toBeInTheDocument();
+    const input = screen.getByLabelText('Add an exempt bird species');
+    await fireEvent.input(input, { target: { value: 'Parus major' } });
+    await waitFor(() => expect(input).toBeEnabled());
+    await fireEvent.click(
+      within(input.closest('fieldset') ?? document.body).getByRole('button', {
+        name: 'Add species',
+      })
+    );
+
+    expect(settingsActions.updateSection).toHaveBeenCalledWith('realtime', {
+      firstDailyConsensus: {
+        enabled: true,
+        whitelist: ['Great Tit', 'Parus major'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle'],
+      },
+    });
+  });
+
+  it('disables the whitelist editor while the rule is off and explains why', () => {
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: { enabled: false, whitelist: [] },
+    });
+    render(AnalysisSettingsPage);
+
+    const input = screen.getByLabelText('Add an exempt bird species');
+    expect(input).toBeDisabled();
+    const reason = screen.getByText('Turn on the option above to edit the bird species whitelist.');
+    expect(input.closest('fieldset')).toHaveAttribute('aria-describedby', reason.id);
+  });
+
+  it('loads predictions for bats alone and preserves bird settings when editing bats', async () => {
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: {
+        enabled: false,
+        whitelist: ['Great Tit'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle'],
+      },
+    });
+    render(AnalysisSettingsPage);
+
+    expect(await screen.findByText('Common Pipistrelle')).toBeInTheDocument();
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/v2/range/species/list'));
+    expect(screen.getByLabelText('Add an exempt bird species')).toBeDisabled();
+    const input = screen.getByLabelText('Add an exempt bat species');
+    await waitFor(() => expect(input).toBeEnabled());
+    await fireEvent.input(input, { target: { value: 'Pipistrellus pygmaeus' } });
+    await waitFor(() => expect(input).toBeEnabled());
+    await fireEvent.click(
+      within(input.closest('fieldset') ?? document.body).getByRole('button', {
+        name: 'Add species',
+      })
+    );
+    expect(settingsActions.updateSection).toHaveBeenLastCalledWith('realtime', {
+      firstDailyConsensus: {
+        enabled: false,
+        whitelist: ['Great Tit'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle', 'Pipistrellus pygmaeus'],
+      },
+    });
+  });
+
+  it.each(['bird', 'bat'])(
+    'preserves the other family when toggling %s consensus',
+    async family => {
+      const consensus = {
+        enabled: true,
+        whitelist: ['Great Tit'],
+        batEnabled: true,
+        batWhitelist: ['Common Pipistrelle'],
+      };
+      (realtimeSettings as Writable<Record<string, unknown>>).set({
+        firstDailyConsensus: consensus,
+      });
+      render(AnalysisSettingsPage);
+      await fireEvent.click(
+        screen.getByRole('checkbox', {
+          name: `Require two models for a ${family} species' first detection of the day`,
+        })
+      );
+      expect(settingsActions.updateSection).toHaveBeenLastCalledWith('realtime', {
+        firstDailyConsensus: {
+          ...consensus,
+          ...(family === 'bird' ? { enabled: false } : { batEnabled: false }),
+        },
+      });
+    }
+  );
+
+  it('disables the bat editor independently and links its explanation', async () => {
+    render(AnalysisSettingsPage);
+    await waitFor(() => expect(screen.getByLabelText('Add an exempt bird species')).toBeEnabled());
+    const input = screen.getByLabelText('Add an exempt bat species');
+    expect(input).toBeDisabled();
+    const reason = screen.getByText('Turn on the option above to edit the bat species whitelist.');
+    expect(input.closest('fieldset')).toHaveAttribute('aria-describedby', reason.id);
+  });
+
+  it('retries a failed prediction load after the rule is disabled and re-enabled', async () => {
+    let speciesCalls = 0;
+    vi.mocked(api.get).mockImplementation(async url => {
+      if (url !== '/api/v2/range/species/list') return {};
+      speciesCalls++;
+      if (speciesCalls === 1) throw new Error('temporary failure');
+      return { species: [] };
+    });
+    render(AnalysisSettingsPage);
+    await waitFor(() => expect(speciesCalls).toBe(1));
+
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: { enabled: false, whitelist: [] },
+    });
+    await Promise.resolve();
+    (realtimeSettings as Writable<Record<string, unknown>>).set({
+      firstDailyConsensus: { enabled: true, whitelist: [] },
+    });
+
+    await waitFor(() => expect(speciesCalls).toBe(2));
   });
 });
