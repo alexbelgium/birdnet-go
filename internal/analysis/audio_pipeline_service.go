@@ -1997,7 +1997,7 @@ func (p *AudioPipelineService) buildSourceConfigs(fallbackSources map[string]str
 			// this change surfaces).
 			GetLogger().Error("stream probe failed with no previously known sample rate; bat model audio is captured at the minimum bat capture rate until the source is re-probed",
 				logger.String("stream", stream.Name),
-				logger.Int("target_sample_rate", conf.SampleRate),
+				logger.Int("output_sample_rate", sampleRate),
 				logger.Int("channels", sourceChannels),
 				logger.Bool("channels_retained", channelsRetained),
 				logger.String("operation", "probe_stream"))

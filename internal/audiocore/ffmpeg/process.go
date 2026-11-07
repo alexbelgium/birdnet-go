@@ -239,8 +239,7 @@ func buildOutputArgs(args []string, cfg *StreamConfig) []string {
 		"-f", format,
 	)
 	args = appendChannelArgs(args, cfg.ChannelMode, cfg.SourceChannels, numChannels)
-	args = append(args, "-ar", sampleRate)
-	args = append(args, "-hide_banner", "pipe:1")
+	args = append(args, "-ar", sampleRate, "-hide_banner", "pipe:1")
 
 	return args
 }
