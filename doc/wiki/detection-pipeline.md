@@ -163,7 +163,7 @@ The `Orchestrator` divides the configured thread count across all loaded models 
 
 ### Nighttime Scheduling
 
-Bat models support a nighttime-only mode. When `settings.Bat.NighttimeOnly=true`, the `analysisBufferMonitor` checks `orchestrator.IsModelActive("Bat")` before calling `ProcessData()`. The nighttime scheduler uses solar position calculations to determine sunrise/sunset.
+Bat models support a nighttime-only mode. When `settings.Bat.NighttimeOnly=true`, the `analysisBufferMonitor` checks `orchestrator.IsModelActive` for each bat model (Bat and BSG-BAT) before calling `ProcessData()`. The nighttime scheduler uses solar position calculations to determine sunrise/sunset.
 
 ## Stage 4: Detection Processing
 
@@ -257,6 +257,10 @@ At flush time, the total hit count is the **sum across all models**. This means:
 - **Cross-model agreement**: When both models independently identify the same species, the combined evidence is stronger, reducing false positives from single-model artifacts
 
 The `BestModelID` field tracks which model produced the highest individual confidence score. This model is credited as the primary detector in the database record, while per-model contributions are stored separately in the `DetectionModelContribution` table.
+
+### Model Consensus Filter
+
+The optional model consensus filter (`realtime.modelconsensus`, off by default) is the last discard check when a pending detection is flushed. It discards the detection unless at least `minmodels` distinct models of its taxon group contributed hits to it. Only eligible models count towards the requirement: a model must be able to classify the species, pass the range filter for it, and have scored all the audio the agreeing models heard without a gap. A model that is still behind in processing is not counted as eligible until it catches up. The requirement is capped at the number of eligible models, so a species that only one model can detect always passes, and so does a detection whose source gives no capture timestamps. Bird and bat models are never counted towards each other. See the [guide](guide.md) for the settings.
 
 ### Range Filter (BirdNET Geomodel v3.0)
 

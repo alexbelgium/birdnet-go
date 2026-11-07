@@ -388,7 +388,7 @@ func altResults(labels ...string) []datastore.Results {
 	return results
 }
 
-func TestCreateDetection_StoresOnlyAlternatesInRange(t *testing.T) {
+func TestCreateDetection_TagsAlternatesOutOfRange(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -447,13 +447,126 @@ func TestCreateDetection_StoresOnlyAlternatesInRange(t *testing.T) {
 			settings.BirdNET.LocationConfigured = !tt.noRange
 			det := p.createDetection(settings, item, primary, primarySci, "Primary", "", primary.Species)
 
-			got := make([]string, len(det.Results))
-			for i, r := range det.Results {
-				got[i] = r.Species.ScientificName
+			// Every alternate rides along; the range verdict is a tag the save
+			// step acts on.
+			require.Len(t, det.Results, len(tt.labels)-1)
+			got := make([]string, 0, len(det.Results))
+			for _, r := range det.Results {
+				if !r.OutOfRange {
+					got = append(got, r.Species.ScientificName)
+				}
 			}
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestConvertToAdditionalResults_KeepsEveryFiniteRowAndTagsOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	const (
+		speciesA = "Parus major_Great Tit"
+		speciesB = "Turdus merula_Common Blackbird"
+		lowConf  = 0.001
+	)
+	// Only speciesB passes the range rule.
+	keepB := func(raw string) bool { return raw == speciesB }
+	got := convertToAdditionalResults([]datastore.Results{
+		{Species: speciesA, Confidence: lowConf},
+		{Species: speciesB, Confidence: lowConf},
+	}, "", keepB)
+
+	require.Len(t, got, 2, "no row is dropped by confidence or range at this step")
+	assert.True(t, got[0].OutOfRange, "rejected by keep is tagged")
+	assert.False(t, got[1].OutOfRange, "accepted by keep is not tagged")
+}
+
+func TestConvertToAdditionalResults_DedupPrefersKeptOverOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	// Two raw labels of one scientific name with different range verdicts: the
+	// kept row must survive even when the out-of-range row scores higher, so the
+	// save step still stores the species.
+	const (
+		keptLabel     = "Parus major_Great Tit"
+		outLabel      = "Parus major_Talitiainen"
+		keptConf      = 0.2
+		outConf       = 0.9
+		weakerOutConf = 0.1
+	)
+	keep := func(raw string) bool { return raw == keptLabel }
+
+	tests := []struct {
+		name      string
+		input     []datastore.Results
+		wantRaw   string
+		wantConf  float64
+		wantOutOf bool
+	}{
+		{
+			name:     "kept row wins over a higher out-of-range row seen later",
+			input:    []datastore.Results{{Species: keptLabel, Confidence: keptConf}, {Species: outLabel, Confidence: outConf}},
+			wantRaw:  keptLabel,
+			wantConf: keptConf,
+		},
+		{
+			name:     "kept row wins over a higher out-of-range row seen first",
+			input:    []datastore.Results{{Species: outLabel, Confidence: outConf}, {Species: keptLabel, Confidence: keptConf}},
+			wantRaw:  keptLabel,
+			wantConf: keptConf,
+		},
+		{
+			name:      "equal status keeps the higher confidence",
+			input:     []datastore.Results{{Species: outLabel, Confidence: weakerOutConf}, {Species: outLabel, Confidence: outConf}},
+			wantRaw:   outLabel,
+			wantConf:  outConf,
+			wantOutOf: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := convertToAdditionalResults(tt.input, "", keep)
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.wantRaw, got[0].RawLabel)
+			assert.InDelta(t, tt.wantConf, got[0].Confidence, 1e-6)
+			assert.Equal(t, tt.wantOutOf, got[0].OutOfRange)
+		})
+	}
+}
+
+func TestCreateDetection_AlternateMinConfidenceDoesNotTrim(t *testing.T) {
+	t.Parallel()
+
+	const (
+		cutoff     = 0.1
+		lowConf    = 0.05
+		primaryLow = 0.07
+	)
+	p := &Processor{Settings: &conf.Settings{}, Bn: &classifier.Orchestrator{}}
+	item := classifier.Results{
+		StartTime: time.Now(),
+		ModelID:   classifier.RegistryIDBirdNETV24,
+		Results: []datastore.Results{
+			{Species: altBlackbirdLabel, Confidence: primaryLow},
+			{Species: altGunLabel, Confidence: lowConf},
+			{Species: altHumanLabel, Confidence: lowConf},
+			{Species: altGreatTitLabel, Confidence: altAlternateConf},
+		},
+	}
+	settings := &conf.Settings{}
+	settings.BirdNET.AlternateMinConfidence = cutoff
+	primary := item.Results[0]
+	det := p.createDetection(settings, item, primary, "Turdus merula", "Primary", "", primary.Species)
+
+	// The cutoff is applied at the save step, so later stages see every
+	// alternate and the primary is never affected.
+	assert.InDelta(t, primaryLow, det.Result.Confidence, 1e-6)
+	got := make([]string, len(det.Results))
+	for i, r := range det.Results {
+		got[i] = r.Species.ScientificName
+	}
+	assert.Equal(t, []string{"Gun", "Homo sapiens", "Parus major"}, got)
 }
 
 // TestProcessResults_RangeRuleSharedByFeedPrimaryAndAlternates drives one chunk
@@ -487,9 +600,9 @@ func TestProcessResults_RangeRuleSharedByFeedPrimaryAndAlternates(t *testing.T) 
 
 	require.Len(t, detections, 1, "the out-of-range species fails the primary gate")
 	assert.Equal(t, blackbirdSci, detections[0].Result.Species.ScientificName)
-	for _, r := range detections[0].Results {
-		assert.NotEqual(t, altKiskadeeSci, r.Species.ScientificName, "out-of-range alternate must not be stored")
-	}
+	require.Len(t, detections[0].Results, 1)
+	assert.Equal(t, altKiskadeeSci, detections[0].Results[0].Species.ScientificName)
+	assert.True(t, detections[0].Results[0].OutOfRange, "out-of-range alternate must be tagged so the save step drops it")
 
 	inRange := map[string]bool{}
 	for _, d := range p.GetRecentDetections(classifier.RegistryIDBirdNETV24) {

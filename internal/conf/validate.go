@@ -73,12 +73,14 @@ var ValidAudioModels = map[string]bool{
 	ModelIDPerchV2:   true,
 	ModelIDBat:       true,
 	ModelIDBSG:       true,
+	ModelIDBSGBat:    true,
 	// Catalog-style aliases (see consts.go) so a source model set to the
 	// hyphenated catalog ID validates rather than failing startup.
 	ModelIDBirdNETCatalog:   true,
 	ModelIDBirdNETV3Catalog: true,
 	ModelIDPerchV2Catalog:   true,
 	ModelIDBSGCatalog:       true,
+	ModelIDBSGBatCatalog:    true,
 }
 
 // ValidationError is the set of fatal validation findings produced by
@@ -336,7 +338,8 @@ func validateUltrasonicFilter(settings *Settings) error {
 // and the BirdNET/RangeFilter threshold checks in validate_services.go, which is
 // the same reason checkRange guards NaN: a NaN comparison is always false and
 // would otherwise slip past the bounds test. defaultModelThreshold is what an
-// out-of-range value is reset to on load (see normalizeModelThresholds).
+// out-of-range value is reset to on load (see normalizeModelThresholds). They
+// also bound birdnet.alternateminconfidence, the stored-alternate cutoff.
 const (
 	minModelThreshold     = 0.0
 	maxModelThreshold     = 1.0
@@ -384,6 +387,7 @@ func validateModelThresholds(settings *Settings) error {
 		{"bat.threshold", settings.Bat.Threshold},
 		{"perch.threshold", settings.Perch.Threshold},
 		{"birdnetv3.threshold", settings.BirdNETV3.Threshold},
+		{"bsgbat.threshold", settings.BSGBat.Threshold},
 	}
 	for _, c := range checks {
 		if math.IsNaN(c.value) || math.IsInf(c.value, 0) || c.value < minModelThreshold || c.value > maxModelThreshold {
