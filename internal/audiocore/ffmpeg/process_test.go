@@ -453,21 +453,20 @@ func TestBuildFFmpegArgs_ChannelModeEmpty(t *testing.T) {
 	assertFlagValue(t, args, "-ac", "1")
 }
 
-// TestBuildFFmpegArgs_OutputResampling verifies that -ar is emitted only when
-// the source sample rate is unknown or differs from the target, and omitted
-// when the probed source rate already matches the target. -ac must always be
-// present so multi-channel sources still downmix to mono regardless of -ar.
+// TestBuildFFmpegArgs_OutputResampling verifies that -ar is always emitted,
+// including when the probed source rate matches the target, so a source that
+// later switches rate is still resampled to the configured rate. -ac must
+// always be present so multi-channel sources still downmix to mono.
 func TestBuildFFmpegArgs_OutputResampling(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name             string
 		sourceSampleRate int
-		wantAr           bool
 	}{
-		{"unknown_source_rate_resamples", 0, true},
-		{"differing_rate_resamples", 44100, true},
-		{"matching_rate_skips_ar", 48000, false},
+		{"unknown_source_rate", 0},
+		{"differing_rate", 44100},
+		{"matching_rate", 48000},
 	}
 
 	for _, tt := range tests {
@@ -487,11 +486,7 @@ func TestBuildFFmpegArgs_OutputResampling(t *testing.T) {
 
 			args := BuildFFmpegArgs(cfg, nil)
 
-			if tt.wantAr {
-				assertFlagValue(t, args, "-ar", "48000")
-			} else {
-				assert.NotContains(t, args, "-ar", "expected no -ar when source rate matches target")
-			}
+			assertFlagValue(t, args, "-ar", "48000")
 			// -ac must always be present so stereo sources downmix to mono.
 			assertFlagValue(t, args, "-ac", "1")
 		})

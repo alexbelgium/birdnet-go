@@ -11,17 +11,22 @@ import (
 
 // TestResolveStreamSampleRates covers the probe-failure fallback logic that
 // keeps a reconnecting RTSP source from silently collapsing to the target rate
-// (#4350). targetRate is the 48 kHz analysis default in every case.
+// (#4350), and the bat output floor that keeps a source which switches rate on
+// the fly (48 kHz by day, 192 kHz at night) analysable by its bat models.
+// targetRate is the 48 kHz analysis default in every case.
 func TestResolveStreamSampleRates(t *testing.T) {
 	t.Parallel()
 
-	const target = 48000
+	const (
+		target = 48000
+		batMin = 192000
+	)
 
 	tests := []struct {
 		name       string
 		probeRate  int
 		fallback   int
-		isBat      bool
+		minRate    int
 		wantSource int
 		wantOutput int
 		wantRetain bool
@@ -30,29 +35,34 @@ func TestResolveStreamSampleRates(t *testing.T) {
 		{
 			name:       "probe ok, non-bat",
 			probeRate:  44100,
-			isBat:      false,
 			wantSource: 44100,
 			wantOutput: target,
 		},
 		{
 			name:       "probe ok, bat above target raises output",
 			probeRate:  250000,
-			isBat:      true,
+			minRate:    batMin,
 			wantSource: 250000,
 			wantOutput: 250000,
 		},
 		{
-			name:       "probe ok, bat at or below target keeps target output",
+			name:       "probe ok, bat below its minimum raises output to the minimum",
 			probeRate:  32000,
-			isBat:      true,
+			minRate:    batMin,
 			wantSource: 32000,
-			wantOutput: target,
+			wantOutput: batMin,
+		},
+		{
+			name:       "probe ok at 48 kHz, bat output stays at the minimum for a later rate switch",
+			probeRate:  target,
+			minRate:    batMin,
+			wantSource: target,
+			wantOutput: batMin,
 		},
 		{
 			name:       "probe failed, fallback known, non-bat retains source rate",
 			probeRate:  0,
 			fallback:   96000,
-			isBat:      false,
 			wantSource: 96000,
 			wantOutput: target,
 			wantRetain: true,
@@ -61,34 +71,33 @@ func TestResolveStreamSampleRates(t *testing.T) {
 			name:       "probe failed, fallback known, bat retains and raises output",
 			probeRate:  0,
 			fallback:   250000,
-			isBat:      true,
+			minRate:    batMin,
 			wantSource: 250000,
 			wantOutput: 250000,
 			wantRetain: true,
 		},
 		{
-			name:       "probe failed, fallback below target, bat retains source but keeps target output",
+			name:       "probe failed, fallback below target, bat retains source and raises output to the minimum",
 			probeRate:  0,
 			fallback:   32000,
-			isBat:      true,
+			minRate:    batMin,
 			wantSource: 32000,
-			wantOutput: target,
+			wantOutput: batMin,
 			wantRetain: true,
 		},
 		{
 			name:       "probe failed, no fallback, bat escalates",
 			probeRate:  0,
 			fallback:   0,
-			isBat:      true,
+			minRate:    batMin,
 			wantSource: 0,
-			wantOutput: target,
+			wantOutput: batMin,
 			wantEscal:  true,
 		},
 		{
 			name:       "probe failed, no fallback, non-bat stays quiet",
 			probeRate:  0,
 			fallback:   0,
-			isBat:      false,
 			wantSource: 0,
 			wantOutput: target,
 		},
@@ -96,7 +105,7 @@ func TestResolveStreamSampleRates(t *testing.T) {
 			name:       "successful probe never retains even with a fallback present",
 			probeRate:  192000,
 			fallback:   250000,
-			isBat:      true,
+			minRate:    batMin,
 			wantSource: 192000,
 			wantOutput: 192000,
 		},
@@ -106,7 +115,7 @@ func TestResolveStreamSampleRates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			gotSource, gotOutput, gotRetain, gotEscal := resolveStreamSampleRates(
-				tc.probeRate, tc.fallback, target, tc.isBat)
+				tc.probeRate, tc.fallback, target, tc.minRate)
 			assert.Equal(t, tc.wantSource, gotSource, "source rate")
 			assert.Equal(t, tc.wantOutput, gotOutput, "output rate")
 			assert.Equal(t, tc.wantRetain, gotRetain, "retained flag")

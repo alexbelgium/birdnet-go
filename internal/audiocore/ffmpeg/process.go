@@ -215,14 +215,17 @@ func effectiveMediaMode(cfg *StreamConfig) string {
 }
 
 // buildOutputArgs appends the post-input FFmpeg flags: the input URL, decode
-// format, channel selection, conditional output resampling, and the stdout pipe.
+// format, channel selection, output sample rate, and the stdout pipe.
 // It is shared by BuildFFmpegArgs and Stream.startProcess so the unit-tested
 // argument construction matches the runtime path exactly.
 //
 // -ac (channel count) is always emitted via appendChannelArgs so multi-channel
-// sources are downmixed to mono. -ar (sample rate) is only emitted when the
-// source rate is unknown or differs from the target, avoiding a needless
-// resample when the source already matches.
+// sources are downmixed to mono. -ar (sample rate) is always emitted: the
+// probed source rate is only a snapshot, and some sources switch rate on the
+// fly (for example an RTSP bat microphone that moves from 48 kHz by day to
+// 192 kHz at night). Without -ar FFmpeg would pass the new rate through while
+// the pipeline still reads the stream at the configured rate. When the rates
+// already match, libswresample passes the audio through unchanged.
 func buildOutputArgs(args []string, cfg *StreamConfig) []string {
 	sampleRate, numChannels, format := GetFFmpegFormat(cfg.SampleRate, cfg.Channels, cfg.BitDepth)
 
@@ -238,10 +241,7 @@ func buildOutputArgs(args []string, cfg *StreamConfig) []string {
 		"-f", format,
 	)
 	args = appendChannelArgs(args, cfg.ChannelMode, cfg.SourceChannels, numChannels)
-	if cfg.needsOutputResampling() {
-		args = append(args, "-ar", sampleRate)
-	}
-	args = append(args, "-hide_banner", "pipe:1")
+	args = append(args, "-ar", sampleRate, "-hide_banner", "pipe:1")
 
 	return args
 }

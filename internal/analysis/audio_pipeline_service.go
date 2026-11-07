@@ -1979,7 +1979,7 @@ func (p *AudioPipelineService) buildSourceConfigs(fallbackSources map[string]str
 		}
 
 		sourceSampleRate, sampleRate, retained, escalate := resolveStreamSampleRates(
-			probe.sampleRate, fb.sampleRate, conf.SampleRate, isBat)
+			probe.sampleRate, fb.sampleRate, conf.SampleRate, minSourceRate)
 
 		sourceChannels, channelsRetained := resolveStreamChannels(probe.channels, fb.channels)
 
@@ -1995,9 +1995,9 @@ func (p *AudioPipelineService) buildSourceConfigs(fallbackSources map[string]str
 			// rate is lost, but a channel count may still have been recovered, and
 			// that recovery must not be silent (the exact class of hidden behavior
 			// this change surfaces).
-			GetLogger().Error("stream probe failed with no previously known sample rate; high sample rate model audio will be resampled to the target rate until the source is re-probed",
+			GetLogger().Error("stream probe failed with no previously known sample rate; the source rate is unknown until it is re-probed, so bat models may receive audio below their minimum rate",
 				logger.String("stream", stream.Name),
-				logger.Int("target_sample_rate", conf.SampleRate),
+				logger.Int("output_sample_rate", sampleRate),
 				logger.Int("channels", sourceChannels),
 				logger.Bool("channels_retained", channelsRetained),
 				logger.String("operation", "probe_stream"))
@@ -2131,22 +2131,28 @@ func minSourceSampleRate(modelIDs []string) int {
 // failed and a positive fallbackRate is known, that rate is reused so the
 // pipeline keeps the correct geometry (retained=true).
 //
-// outputRate is the target rate, raised to the source rate only for bat models,
-// which analyse at the source's native high rate; other models always analyse at
-// targetRate and rely on downstream resampling.
+// outputRate is the target rate for streams without a bat model. A stream with a
+// bat model (minBatRate > 0, the highest Spec.MinRawSampleRate of its models)
+// analyses at its native high rate, so its output is the highest of targetRate,
+// the source rate and minBatRate. The minBatRate floor matters for a source that
+// switches rate on the fly, such as an RTSP microphone at 48 kHz by day and
+// 192 kHz at night: a stream probed by day would otherwise be fixed at 48 kHz
+// output, and FFmpeg would resample the night audio down and remove the
+// ultrasonic band the bat models need.
 //
 // escalate reports a genuine loss: the probe failed, no fallback was available,
-// and the stream uses a high-sample-rate (bat) model, so its audio will be
-// resampled to targetRate until a successful re-probe. Callers should log this.
-func resolveStreamSampleRates(probeRate, fallbackRate, targetRate int, isBatModel bool) (sourceRate, outputRate int, retained, escalate bool) {
+// and the stream uses a bat model, so the true source rate is unknown until a
+// successful re-probe. Callers should log this.
+func resolveStreamSampleRates(probeRate, fallbackRate, targetRate, minBatRate int) (sourceRate, outputRate int, retained, escalate bool) {
 	sourceRate = probeRate
 	if sourceRate == 0 && fallbackRate > 0 {
 		sourceRate = fallbackRate
 		retained = true
 	}
+	isBatModel := minBatRate > 0
 	outputRate = targetRate
-	if isBatModel && sourceRate > targetRate {
-		outputRate = sourceRate
+	if isBatModel {
+		outputRate = max(targetRate, sourceRate, minBatRate)
 	}
 	escalate = probeRate == 0 && !retained && isBatModel
 	return sourceRate, outputRate, retained, escalate

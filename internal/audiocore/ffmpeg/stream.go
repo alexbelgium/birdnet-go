@@ -305,24 +305,6 @@ func (c *StreamConfig) sourceType() audiocore.SourceType {
 	}
 }
 
-// needsOutputResampling reports whether FFmpeg should resample the decoded
-// audio to the configured sample rate via -ar/-ac output flags.
-// When the source rate is known (probed) and matches the target, no
-// resampling is needed. When unknown (probe failed) or different from
-// the target, FFmpeg must resample to ensure the pipeline gets the
-// expected rate.
-func (c *StreamConfig) needsOutputResampling() bool {
-	if c.SourceSampleRate == 0 {
-		return true
-	}
-	// A fallback estimate may no longer match the live source rate, so force
-	// resampling to guarantee the pipeline receives exactly SampleRate (#4350).
-	if c.SourceSampleRateEstimated {
-		return true
-	}
-	return c.SourceSampleRate != c.SampleRate
-}
-
 // healthyThreshold returns the configured healthy data threshold or the default.
 func (c *StreamConfig) healthyThreshold() time.Duration {
 	if c.HealthyDataThreshold > 0 {
@@ -969,7 +951,7 @@ func (s *Stream) startProcess() error {
 		logger.String("media_mode", effectiveMediaMode(&s.config)),
 		logger.Int("target_sample_rate", s.config.SampleRate),
 		logger.Int("source_sample_rate", s.config.SourceSampleRate),
-		logger.Bool("ffmpeg_resampling", s.config.needsOutputResampling()),
+		logger.Bool("source_rate_differs", s.config.SourceSampleRate != s.config.SampleRate),
 		logger.Int64("total_process_count", currentTotal),
 		logger.String("component", "ffmpeg-stream"),
 		logger.String("operation", "start_process"))

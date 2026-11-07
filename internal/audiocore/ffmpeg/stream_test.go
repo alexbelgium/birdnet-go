@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1349,7 +1350,10 @@ func TestStream_SourceTypeDetection(t *testing.T) {
 	}
 }
 
-func TestStreamConfig_NeedsOutputResampling(t *testing.T) {
+// TestBuildOutputArgs_AlwaysSetsOutputRate verifies -ar is emitted at the
+// configured rate for every source rate, including a matching or estimated one,
+// so a source that switches rate on the fly is still delivered at SampleRate.
+func TestBuildOutputArgs_AlwaysSetsOutputRate(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -1357,33 +1361,31 @@ func TestStreamConfig_NeedsOutputResampling(t *testing.T) {
 		sampleRate       int
 		sourceSampleRate int
 		estimated        bool
-		want             bool
 	}{
-		{"unknown_source_resamples", 48000, 0, false, true},
-		{"8kHz_to_48kHz_resamples", 48000, 8000, false, true},
-		{"16kHz_to_48kHz_resamples", 48000, 16000, false, true},
-		{"44100Hz_to_48kHz_resamples", 48000, 44100, false, true},
-		{"48kHz_to_48kHz_passthrough", 48000, 48000, false, false},
-		{"96kHz_source_downsampled_for_bird", 48000, 96000, false, true},
-		{"96kHz_bat_passthrough", 96000, 96000, false, false},
-		{"192kHz_bat_passthrough", 192000, 192000, false, false},
-		{"256kHz_bat_passthrough", 256000, 256000, false, false},
-		{"384kHz_bat_passthrough", 384000, 384000, false, false},
-		// A fallback estimate forces resampling even when source == target, because
-		// the live rate may have drifted from the estimate (#4350).
-		{"estimated_matching_rate_forces_resample", 250000, 250000, true, true},
-		{"estimated_bird_rate_forces_resample", 48000, 48000, true, true},
+		{"unknown_source", 48000, 0, false},
+		{"8kHz_to_48kHz", 48000, 8000, false},
+		{"48kHz_to_48kHz", 48000, 48000, false},
+		{"96kHz_source_for_bird", 48000, 96000, false},
+		{"48kHz_daytime_source_on_bat_stream", 192000, 48000, false},
+		{"192kHz_bat", 192000, 192000, false},
+		{"384kHz_bat", 384000, 384000, false},
+		{"estimated_matching_rate", 250000, 250000, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := StreamConfig{
+				URL:                       "rtsp://camera.example.com/live",
+				Type:                      "rtsp",
 				SampleRate:                tt.sampleRate,
 				SourceSampleRate:          tt.sourceSampleRate,
 				SourceSampleRateEstimated: tt.estimated,
+				BitDepth:                  16,
+				Channels:                  1,
 			}
-			assert.Equal(t, tt.want, cfg.needsOutputResampling())
+			args := buildOutputArgs(nil, &cfg)
+			assertFlagValue(t, args, "-ar", strconv.Itoa(tt.sampleRate))
 		})
 	}
 }
