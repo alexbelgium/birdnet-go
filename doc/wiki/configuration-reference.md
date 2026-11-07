@@ -135,6 +135,7 @@ BSGBatConfig holds configuration for the BSG-BAT bat classifier.
 | `bsgbat.modelpath` | string | path to BSG-BAT ONNX model file |
 | `bsgbat.labelpath` | string | path to BSG-BAT label file |
 | `bsgbat.threshold` | number | confidence threshold for BSG-BAT detections |
+| `bsgbat.stepframes` | integer | StepFrames is the analysis step between successive BSG-BAT windows, in mel frames of 768 samples (2 ms at 384 kHz). Accepted values are 100 to 512; 0 uses the default of 250. The bat false positive filter count follows it as ceil(6 / step seconds * level fraction). A change restarts audio capture. |
 
 ## bsg
 
@@ -211,6 +212,8 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.audio.export.normalization.targetlufs` | number | target integrated loudness in LUFS (default: -23) |
 | `realtime.audio.export.normalization.loudnessrange` | number | Deprecated: no longer applied; retained so existing configs keep loading. |
 | `realtime.audio.export.normalization.truepeak` | number | true peak limit in dBTP (default: -2) |
+| `realtime.audio.export.denoise.enabled` | boolean | true to apply the denoise |
+| `realtime.audio.export.denoise.strength` | string | preset name, see the DenoisePreset constants |
 | `realtime.audio.soundlevel.enabled` | boolean | true to enable sound level monitoring |
 | `realtime.audio.soundlevel.interval` | integer | measurement interval in seconds (default: 10) |
 | `realtime.audio.soundlevel.debug` | boolean | true to enable debug logging for sound level monitoring |
@@ -252,6 +255,8 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.dashboard.layout.elements` | dashboard-element[] |  |
 | `realtime.dashboard.defaultaudiogain` | number | Default playback gain in dB (0-24) |
 | `realtime.dashboard.livespectrogram` | boolean | auto-start live spectrogram on dashboard |
+| `realtime.dashboard.playbackdenoise.enabled` | boolean | true to apply the denoise |
+| `realtime.dashboard.playbackdenoise.strength` | string | preset name, see the DenoisePreset constants |
 | `realtime.dynamicthreshold.enabled` | boolean | true to enable dynamic threshold |
 | `realtime.dynamicthreshold.debug` | boolean | true to enable debug mode |
 | `realtime.dynamicthreshold.trigger` | number | trigger threshold for dynamic threshold |

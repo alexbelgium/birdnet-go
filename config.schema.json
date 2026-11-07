@@ -128,6 +128,10 @@
         "threshold": {
           "type": "number",
           "description": "confidence threshold for BSG-BAT detections"
+        },
+        "stepframes": {
+          "type": "integer",
+          "description": "StepFrames is the analysis step between successive BSG-BAT windows, in mel\nframes of 768 samples (2 ms at 384 kHz). Accepted values are 100 to 512; 0\nuses the default of 250. The bat false positive filter count follows it as\nceil(6 / step seconds * level fraction). A change restarts audio capture."
         }
       },
       "additionalProperties": false,
@@ -711,6 +715,10 @@
         "livespectrogram": {
           "type": "boolean",
           "description": "auto-start live spectrogram on dashboard"
+        },
+        "playbackdenoise": {
+          "$ref": "#/$defs/DenoiseSettings",
+          "description": "denoise clips when they are played or downloaded; stored clips stay unchanged"
         }
       },
       "additionalProperties": false,
@@ -794,6 +802,21 @@
       "additionalProperties": false,
       "type": "object",
       "description": "DaylightFilterSettings contains settings for the daylight species filter."
+    },
+    "DenoiseSettings": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "true to apply the denoise"
+        },
+        "strength": {
+          "type": "string",
+          "description": "preset name, see the DenoisePreset constants"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "DenoiseSettings is a denoise on/off switch with a strength preset."
     },
     "DetectionsGridConfig": {
       "properties": {},
@@ -1011,6 +1034,10 @@
         "normalization": {
           "$ref": "#/$defs/NormalizationSettings",
           "description": "audio normalization settings (EBU R128)"
+        },
+        "denoise": {
+          "$ref": "#/$defs/DenoiseSettings",
+          "description": "denoise the captured audio before it is saved"
         }
       },
       "additionalProperties": false,
