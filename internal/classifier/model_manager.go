@@ -367,7 +367,7 @@ func (mm *ModelManager) ScanInstalled() {
 // auto-enabled every installed gallery model on each scan; models.enabled is now authoritative,
 // so this reproduces that behavior a single time, gated on the AutoEnableMigrated companion
 // marker. It is NOT gated on ConfigVersion: this runs after conf.Load(), where Part A
-// (MigrateModelsEnabledAuthoritative) already stamped ConfigVersion=2, so a ConfigVersion gate
+// (MigrateModelsEnabledAuthoritative) already raised ConfigVersion past 1, so a ConfigVersion gate
 // would be a permanent no-op. After the capture, a downloaded-but-disabled model is no longer
 // auto-loaded (loadInstalledModels honors the enabled set). On a read-only config the marker
 // never persists, so the capture re-runs in memory each start, reproducing the pre-Phase-4
@@ -586,6 +586,12 @@ func familyFields(s *conf.Settings, registryID string) (familyFieldSet, bool) {
 			Labels: &s.BSG.LabelPath,
 			Locale: &s.BSG.Locale,
 		}, true
+	case RegistryIDBSGBat:
+		return familyFieldSet{
+			Model:     &s.BSGBat.ModelPath,
+			Labels:    &s.BSGBat.LabelPath,
+			Threshold: &s.BSGBat.Threshold,
+		}, true
 	case RegistryIDBat:
 		return familyFieldSet{
 			Model:      &s.Bat.ClassifierModel,
@@ -596,8 +602,6 @@ func familyFields(s *conf.Settings, registryID string) (familyFieldSet, bool) {
 		}, true
 	case RegistryIDBatDetect2:
 		return familyFieldSet{Model: &s.ForkModels.BatDetect2.ModelPath, Labels: &s.ForkModels.BatDetect2.LabelPath, Threshold: &s.Bat.Threshold, Locale: &s.Bat.Locale}, true
-	case RegistryIDBSGBat:
-		return familyFieldSet{Model: &s.ForkModels.BSGBat.ModelPath, Labels: &s.ForkModels.BSGBat.LabelPath, Threshold: &s.Bat.Threshold, Locale: &s.Bat.Locale}, true
 	default:
 		return familyFieldSet{}, false
 	}

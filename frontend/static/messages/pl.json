@@ -1545,6 +1545,8 @@
           "creating": "Tworzenie...",
           "createBackup": "Utwórz kopię zapasową",
           "noBackups": "Brak kopii zapasowych",
+          "loadFailed": "Nie udało się wczytać historii kopii zapasowych",
+          "createFailed": "Nie udało się uruchomić kopii zapasowej",
           "download": "Pobierz",
           "failed": "Niepowodzenie",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Rozpoczynanie migracji...",
         "status": {
           "idle": "Gotowy do rozpoczęcia",
+          "checking": "Sprawdzanie wymagań",
+          "notReady": "Niegotowe",
           "initializing": "Inicjalizacja",
           "dual_write": "Podwójny zapis aktywny",
           "migrating": "Migrowanie danych podstawowych",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Rekordy",
           "sizeLabel": "Rozmiar",
           "prerequisitesNotMet": "Wymagania wstępne nie są spełnione - rozwiąż poniższe krytyczne problemy",
+          "prerequisitesUnavailable": "Sprawdzenia przed migracją nie zostały ukończone. Zobacz Sprawdzenia przed migracją poniżej.",
+          "prerequisitesFailedList": "Najpierw rozwiąż te problemy: {checks}",
           "validatingTitle": "Walidacja danych",
           "validatingBody": "Porównywanie {count} starszych rekordów z bazą danych V2...",
           "dirtyRecordsCatchup": "{count} zmienionych rekordów - próba uzgodnienia",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} ostrzeżenie/ostrzeżeń",
           "running": "Wykonywanie wstępnych sprawdzeń...",
           "checkingStep": "Krok {current} z {total}",
+          "currentCheck": "Sprawdzanie: {name} ({seconds} s)",
+          "slowHint": "Duże bazy danych mogą potrzebować kilku minut.",
+          "runFailed": "Kontrole przed migracją nie zakończyły się: {error}",
           "passedCount": "{passed}/{total} zaliczonych",
           "criticalCount": "{count} krytycznych",
           "warningCount": "{count} ostrzeżeń",
@@ -5210,6 +5219,7 @@
         "denoise": "Odszumianie",
         "denoiseOff": "Wyłączony",
         "denoiseLight": "Lekki",
+        "denoiseLightMedium": "Lekki-średni",
         "denoiseMedium": "Średni",
         "denoiseHeavy": "Ciężki",
         "normalize": "Normalizuj audio",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "Migracja nie jest skonfigurowana",
-      "preFlightFailed": "Wstępne sprawdzenie nie powiodło się",
+      "preFlightFailed": "Kontrola przed migracją nie powiodła się: {check}",
+      "prerequisitesNotReady": "Uruchom kontrole przed migracją i poczekaj na ich pomyślne zakończenie, zanim rozpoczniesz migrację.",
       "invalidBody": "Nieprawidłowa treść żądania",
       "recordCountFailed": "Nie udało się określić łącznej liczby rekordów",
       "startFailed": "Nie udało się rozpocząć migracji",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Włącz, aby ustawić próg dla tego modelu. W przeciwnym razie obowiązuje wspólny próg dla nietoperzy."
-      },
-      "bsgBatBackgroundMax": {
-        "helpText": "Odrzuć wszystkie wykrycia w oknie czasowym, gdy jego wynik tła przekracza ten próg. 0 = wyłączone; w przeciwnym razie użyj 0.5–1.0 (wartości poniżej 0.5 wyłączają filtr). Zalecana wartość: 0.99. Przy 0.98 usuwane jest więcej szumu, ale niektóre rzeczywiste głosy mogą zostać utracone.",
-        "label": "BSG-BAT: Próg odrzucania tła"
       }
     },
     "rangeFilter": {

@@ -1545,6 +1545,8 @@
           "creating": "Creating...",
           "createBackup": "Create Backup",
           "noBackups": "No backups yet",
+          "loadFailed": "Backup history could not be loaded",
+          "createFailed": "The backup could not be started",
           "download": "Download",
           "failed": "Failed",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Starting migration...",
         "status": {
           "idle": "Ready to Start",
+          "checking": "Checking prerequisites",
+          "notReady": "Not ready",
           "initializing": "Initializing",
           "dual_write": "Dual-Write Active",
           "migrating": "Migrating Primary",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Records",
           "sizeLabel": "Size",
           "prerequisitesNotMet": "Prerequisites not met - resolve critical issues below",
+          "prerequisitesUnavailable": "The pre-migration checks did not finish. See Pre-Migration Checks below.",
+          "prerequisitesFailedList": "Resolve these checks first: {checks}",
           "validatingTitle": "Validating Data",
           "validatingBody": "Comparing {count} legacy records against V2 database...",
           "dirtyRecordsCatchup": "{count} dirty records - will attempt catch-up reconciliation",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} warning(s)",
           "running": "Running pre-migration checks...",
           "checkingStep": "Step {current} of {total}",
+          "currentCheck": "Checking {name} ({seconds} s)",
+          "slowHint": "Large databases can take several minutes.",
+          "runFailed": "The pre-migration checks did not finish: {error}",
           "passedCount": "{passed}/{total} passed",
           "criticalCount": "{count} critical",
           "warningCount": "{count} warning(s)",
@@ -5210,6 +5219,7 @@
         "denoise": "Denoise",
         "denoiseOff": "Off",
         "denoiseLight": "Light",
+        "denoiseLightMedium": "Light-medium",
         "denoiseMedium": "Medium",
         "denoiseHeavy": "Heavy",
         "normalize": "Normalize audio",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "Migration is not configured",
-      "preFlightFailed": "Pre-flight checks failed",
+      "preFlightFailed": "Pre-migration check failed: {check}",
+      "prerequisitesNotReady": "Run the pre-migration checks and wait for them to pass before starting the migration.",
       "invalidBody": "Invalid request body",
       "recordCountFailed": "Failed to determine total records",
       "startFailed": "Failed to start migration",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Enable to set a threshold for this model. Otherwise, the shared bat threshold applies."
-      },
-      "bsgBatBackgroundMax": {
-        "label": "BSG-BAT: Background rejection limit",
-        "helpText": "Reject all detections in a window when its Background score exceeds this limit. 0 = off; otherwise use 0.5–1.0 (values below 0.5 turn it off). Suggested: 0.99. At 0.98, more noise is removed, but some real calls may be lost."
       }
     },
     "rangeFilter": {

@@ -538,6 +538,25 @@ type DaylightFilterSettings struct {
 	Species []string `yaml:"species" json:"species"` // species, families, orders, or genera to filter during daylight
 }
 
+// ModelConsensusSettings configures the model consensus false positive filter. A
+// detection in scope is discarded unless enough distinct models of its taxon group
+// (bird or bat) detected it within the pending window. Only models that scored the
+// audio of the detection's hits, can classify the species and pass the range filter
+// for it are eligible, and the requirement is capped at the eligible count, so a
+// species that only one model can detect always passes.
+type ModelConsensusSettings struct {
+	AllSpecies    bool     `yaml:"allspecies" json:"allSpecies"`       // true to require consensus for every species; takes precedence over listedspecies
+	ListedSpecies bool     `yaml:"listedspecies" json:"listedSpecies"` // true to require consensus for the species in species
+	Species       []string `yaml:"species" json:"species"`             // species that need consensus when listedspecies is on; scientific names keep working after a locale change
+	MinModels     int      `yaml:"minmodels" json:"minModels"`         // agreeing models required, 2 to 4, capped at the number of eligible models
+	AllEligible   bool     `yaml:"alleligible" json:"allEligible"`     // true to require every eligible model instead of minmodels
+	Debug         bool     `yaml:"debug" json:"debug"`                 // true to log each consensus discard at info level, with the agreeing and eligible models
+}
+
+// Enabled reports whether the filter is switched on, for every species or for the
+// listed ones.
+func (m *ModelConsensusSettings) Enabled() bool { return m.AllSpecies || m.ListedSpecies }
+
 // RTSPHealthSettings contains settings for RTSP stream health monitoring.
 type RTSPHealthSettings struct {
 	HealthyDataThreshold int `yaml:"healthydatathreshold" json:"healthyDataThreshold"` // seconds before stream considered unhealthy (default: 60)
@@ -904,6 +923,7 @@ type RealtimeSettings struct {
 	PrivacyFilter    PrivacyFilterSettings    `yaml:"privacyfilter" json:"privacyFilter"`       // Privacy filter settings
 	DogBarkFilter    DogBarkFilterSettings    `yaml:"dogbarkfilter" json:"dogBarkFilter"`       // Dog bark filter settings
 	DaylightFilter   DaylightFilterSettings   `yaml:"daylightfilter" json:"daylightFilter"`     // Daylight filter settings
+	ModelConsensus   ModelConsensusSettings   `yaml:"modelconsensus" json:"modelConsensus"`     // Model consensus false positive filter settings
 	RTSP             RTSPSettings             `yaml:"rtsp" json:"rtsp"`                         // RTSP settings
 	MQTT             MQTTSettings             `yaml:"mqtt" json:"mqtt"`                         // MQTT settings
 	Telemetry        TelemetrySettings        `yaml:"telemetry" json:"telemetry"`               // Telemetry settings
@@ -1322,6 +1342,14 @@ type BirdNETConfig struct {
 	OpenVINODevice      string              `yaml:"openvinodevice,omitempty" json:"openVinoDevice,omitempty"`           // OpenVINO device preference: "auto" (default), "cpu", or "gpu"
 	HuggingFaceEndpoint string              `yaml:"huggingfaceendpoint,omitempty" json:"huggingFaceEndpoint,omitempty"` // model download host, e.g. "https://hf-mirror.com" where huggingface.co is blocked; empty falls back to $HF_ENDPOINT then https://huggingface.co
 	ModelRegion         string              `yaml:"modelregion,omitempty" json:"modelRegion,omitempty"`                 // regional model preference: "auto" (resolve from coordinates, default), "global" (always global models), or a region slug pin (e.g. "iberia"); empty is treated as "auto"
+
+	// AlternateMinConfidence is the lowest confidence, on the 0 to 1 scale, at which
+	// an alternate prediction of a detection is stored. Alternates below it are
+	// dropped when the detection is saved; the detected species itself is never
+	// affected. 0 stores every alternate. Rows already in the database are not
+	// changed. Not shown in the web UI. Defaults to 0.1. Hot-reloadable through the
+	// settings API; a config file edit applies at the next start.
+	AlternateMinConfidence float64 `yaml:"alternateminconfidence" json:"alternateMinConfidence"`
 }
 
 // Inference backend preferences for BirdNET.Backend.
@@ -1332,8 +1360,10 @@ const (
 )
 
 // OpenVINO device preferences for BirdNET.OpenVINODevice. "auto" picks the GPU
-// (Intel iGPU) when present for eligible models, else the f16 CPU path; "cpu"
-// and "gpu" force a device. An empty string is treated as "auto".
+// (Intel iGPU) when present for eligible models, else the CPU device on an
+// ARMv8.2+ CPU with native f16 (the precision is per model; see
+// classifier.openVINOPrecisionFor); "cpu" and "gpu" force a device. An empty
+// string is treated as "auto".
 const (
 	OVDeviceAuto = "auto"
 	OVDeviceCPU  = "cpu"
@@ -1462,6 +1492,15 @@ func (c UltrasonicFilterConfig) validateSplit() error {
 	return nil
 }
 
+// BSGBatConfig holds configuration for the BSG-BAT bat classifier. The schedule,
+// false positive filter and ultrasonic filter are shared with the bat section
+// (BatConfig); only the model files and the confidence threshold are its own.
+type BSGBatConfig struct {
+	ModelPath string  `yaml:"modelpath,omitempty" json:"modelPath,omitempty"` // path to BSG-BAT ONNX model file
+	LabelPath string  `yaml:"labelpath,omitempty" json:"labelPath,omitempty"` // path to BSG-BAT label file
+	Threshold float64 `yaml:"threshold" json:"threshold"`                     // confidence threshold for BSG-BAT detections
+}
+
 // BSGConfig holds configuration for BSG regional bird models.
 type BSGConfig struct {
 	ModelPath string `yaml:"modelpath,omitempty" json:"modelPath,omitempty"` // path to BSG ONNX model file
@@ -1475,7 +1514,7 @@ type ModelsConfig struct {
 	Directory string   `yaml:"directory,omitempty" json:"directory,omitempty"` // base directory for downloaded model files
 	// AutoEnableMigrated is an internal marker recording that the classifier's one-shot legacy
 	// model auto-enable has run for this config file, so it never re-runs. Do not edit by hand;
-	// a managed read-only config may set it true (with configversion: 2) to keep an explicit
+	// a managed read-only config may set it true (with configversion: 3) to keep an explicit
 	// models.enabled from being re-seeded. Set by the classifier; hidden from the JSON API; the
 	// companion-marker rationale (why not ConfigVersion) lives in internal/conf/migrations.go.
 	AutoEnableMigrated bool `yaml:"autoenablemigrated,omitempty" json:"-"`
@@ -1639,7 +1678,31 @@ type Security struct {
 	// holds clients: a client inside a listed range is trusted as a proxy, so its
 	// own forwarded headers can name any address. Have the proxy append X-Forwarded-For or overwrite
 	// X-Real-IP; the client-IP headers it forwards must all name the same client,
-	// and a Forwarded header is not accepted. Hot-reloadable.
+	// and a Forwarded header is not accepted. The API rate limiters follow the
+	// same rule: listing a proxy by its own address gives each verified client its
+	// own limits, while all requests of a listed proxy whose headers do not verify
+	// share one bucket. On the login and import elevation routes, which also
+	// limit the connection peer as a whole, a proxy listed by its own address (a
+	// bare IP, a /32 or a /128, not inside a wider listed range) is exempt from
+	// that shared peer limit for the clients it verifies, unless a Cloudflare edge
+	// address is in the request's chain; the clients a listed range or a listed
+	// proxy behind a Cloudflare edge verifies, and the visitors an unlisted proxy
+	// names, keep it. A request that arrives directly has no shared peer limit
+	// and keeps its own per-address count. A proxy behind Cloudflare whose
+	// headers name a Cloudflare edge hop verifies only when the "cloudflare"
+	// preset is listed as well. An unlisted proxy on a loopback, link-local or
+	// private address gets per-client limits only while the headers it forwards
+	// agree on one client; a host that can reach that proxy directly can still
+	// name any of its clients, and an unlisted local host can name any client
+	// under its own address. An unlisted proxy on a public or 100.64.0.0/10
+	// (CGNAT, Tailscale IPv4) address is treated as the client and its headers
+	// are ignored, so list it.
+	// The client address that logs and the tunnel label record comes from the same
+	// resolution as the rate limiters. Forwarded headers that disagree, or that a
+	// listed proxy cannot verify, are not recorded: the peer's own address is
+	// logged instead. A client that an unlisted loopback, link-local or private
+	// host names consistently is recorded as named, so such a host can choose the
+	// address that appears in logs. Hot-reloadable.
 	TrustedProxies []string     `yaml:"trustedproxies" json:"trustedProxies"`
 	PublicAccess   PublicAccess `yaml:"publicaccess" json:"publicAccess"` // features accessible without authentication
 
@@ -1964,6 +2027,7 @@ type Settings struct {
 	Perch     PerchConfig     `yaml:"perch" json:"perch"`         // Perch v2 model configuration
 	BirdNETV3 BirdNETV3Config `yaml:"birdnetv3" json:"birdnetv3"` // BirdNET v3.0 acoustic classifier configuration
 	Bat       BatConfig       `yaml:"bat" json:"bat"`             // Bat detection configuration
+	BSGBat    BSGBatConfig    `yaml:"bsgbat" json:"bsgbat"`       // BSG-BAT bat classifier configuration
 	BSG       BSGConfig       `yaml:"bsg" json:"bsg"`             // BSG regional bird model configuration
 	Models    ModelsConfig    `yaml:"models" json:"models"`       // Global model enablement and management
 

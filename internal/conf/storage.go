@@ -101,6 +101,10 @@ func Load() (*Settings, error) {
 		return nil, err
 	}
 
+	if settings.MigrateLegacyForkBSGBat() {
+		persistMigration(settings, "legacy fork BSG-BAT")
+	}
+
 	// Normalize species config keys to lowercase for case-insensitive matching
 	// This ensures that config keys like "American Robin" are converted to "american robin"
 	// to match the lowercase species names used in detection lookup (fixes #1701)
@@ -150,6 +154,14 @@ func Load() (*Settings, error) {
 	// spelling.
 	if settings.MigrateModelsEnabledAuthoritative() {
 		persistMigration(settings, "models enabled authoritative")
+	}
+
+	// Restore the log deduplication defaults over the zero pair (enabled false, interval 0)
+	// that builds without viper defaults for the section persisted, once per file, then stamp
+	// ConfigVersion 3. Runs after the version 1 and 2 steps, which gate on ConfigVersion and
+	// would be skipped by an earlier stamp.
+	if settings.MigrateLogDeduplicationDefaults() {
+		persistMigration(settings, "log deduplication defaults")
 	}
 
 	// Relocate stream URLs misconfigured under realtime.audio.sources (meant

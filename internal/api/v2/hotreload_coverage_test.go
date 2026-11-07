@@ -48,8 +48,10 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"Main": {categories: []hotReloadCategory{hotReloadDisplay}},
 
 	// --- BirdNET ---
-	"BirdNET.Debug":       {categories: []hotReloadCategory{hotReloadFresh}},
-	"BirdNET.Sensitivity": {categories: []hotReloadCategory{hotReloadFresh}},
+	// Read per save from the action's settings snapshot in storedAlternates; no action needed.
+	"BirdNET.AlternateMinConfidence": {categories: []hotReloadCategory{hotReloadFresh}},
+	"BirdNET.Debug":                  {categories: []hotReloadCategory{hotReloadFresh}},
+	"BirdNET.Sensitivity":            {categories: []hotReloadCategory{hotReloadFresh}},
 	// The base threshold is read live per detection; the dynamic threshold applies
 	// it against the shared per-species level at read time, so no recalc action fires.
 	"BirdNET.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
@@ -107,8 +109,13 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"Bat.Threshold":                   {categories: []hotReloadCategory{hotReloadFresh}},
 	"ForkModels":                      {categories: []hotReloadCategory{hotReloadRestart}},
 	"ForkModels.BatDetect2.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
-	"ForkModels.BSGBat.Threshold":     {categories: []hotReloadCategory{hotReloadFresh}},
-	"ForkModels.BSGBat.BackgroundMax": {categories: []hotReloadCategory{hotReloadFresh}},
+
+	// --- BSG-BAT ---
+	// Parent is restart like Perch: model and label path changes reload the model.
+	// The threshold is read live by the processor per detection
+	// (modelGlobalConfidenceThreshold), so it hot-reloads with no action.
+	"BSGBat":           {categories: []hotReloadCategory{hotReloadRestart}},
+	"BSGBat.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// --- BSG ---
 	"BSG": {categories: []hotReloadCategory{hotReloadRestart}},
@@ -201,6 +208,7 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"Realtime.PrivacyFilter":  {categories: []hotReloadCategory{hotReloadFresh}},
 	"Realtime.DogBarkFilter":  {categories: []hotReloadCategory{hotReloadFresh}},
 	"Realtime.DaylightFilter": {categories: []hotReloadCategory{hotReloadFresh}},
+	"Realtime.ModelConsensus": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// -- RTSP --
 	"Realtime.RTSP.Streams.*.Name":        {categories: []hotReloadCategory{hotReloadFresh}, action: "reconfigure_rtsp_sources"},

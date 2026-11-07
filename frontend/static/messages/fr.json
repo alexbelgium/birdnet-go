@@ -1545,6 +1545,8 @@
           "creating": "Création...",
           "createBackup": "Créer une sauvegarde",
           "noBackups": "Aucune sauvegarde",
+          "loadFailed": "Impossible de charger l'historique des sauvegardes",
+          "createFailed": "Impossible de démarrer la sauvegarde",
           "download": "Télécharger",
           "failed": "Échoué",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Démarrage de la migration...",
         "status": {
           "idle": "Prêt à démarrer",
+          "checking": "Vérification des prérequis",
+          "notReady": "Pas prêt",
           "initializing": "Initialisation",
           "dual_write": "Double écriture active",
           "migrating": "Migration des données primaires",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Enregistrements",
           "sizeLabel": "Taille",
           "prerequisitesNotMet": "Prérequis non remplis - résolvez les problèmes critiques ci-dessous",
+          "prerequisitesUnavailable": "Les vérifications pré-migration ne se sont pas terminées. Voir Vérifications pré-migration ci-dessous.",
+          "prerequisitesFailedList": "Résolvez d'abord ces vérifications : {checks}",
           "validatingTitle": "Validation des données",
           "validatingBody": "Comparaison de {count} enregistrements avec la base de données V2...",
           "dirtyRecordsCatchup": "{count} enregistrements modifiés - tentative de réconciliation",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} avertissement(s)",
           "running": "Exécution des vérifications pré-migration...",
           "checkingStep": "Étape {current} sur {total}",
+          "currentCheck": "Vérification de {name} ({seconds} s)",
+          "slowHint": "Les grandes bases de données peuvent prendre plusieurs minutes.",
+          "runFailed": "Les vérifications préalables à la migration ne se sont pas terminées : {error}",
           "passedCount": "{passed}/{total} réussis",
           "criticalCount": "{count} critique(s)",
           "warningCount": "{count} avertissement(s)",
@@ -5210,6 +5219,7 @@
         "denoise": "Réduction du bruit",
         "denoiseOff": "Désactivé",
         "denoiseLight": "Léger",
+        "denoiseLightMedium": "Léger-moyen",
         "denoiseMedium": "Moyen",
         "denoiseHeavy": "Fort",
         "normalize": "Normaliser l'audio",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "La migration n'est pas configurée",
-      "preFlightFailed": "Les vérifications préalables ont échoué",
+      "preFlightFailed": "Échec de la vérification préalable à la migration : {check}",
+      "prerequisitesNotReady": "Lancez les vérifications préalables à la migration et attendez qu'elles réussissent avant de démarrer la migration.",
       "invalidBody": "Corps de requête invalide",
       "recordCountFailed": "Impossible de déterminer le nombre total d'enregistrements",
       "startFailed": "Impossible de démarrer la migration",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Activez cette option pour définir un seuil pour ce modèle. Sinon, le seuil commun aux chauves-souris s’applique."
-      },
-      "bsgBatBackgroundMax": {
-        "helpText": "Rejeter toutes les détections dans une fenêtre lorsque son score de bruit de fond dépasse ce seuil. 0 = désactivé ; sinon, utiliser 0.5–1.0 (les valeurs inférieures à 0.5 désactivent le filtre). Valeur suggérée : 0.99. À 0.98, davantage de bruit est supprimé, mais certains cris réels peuvent être perdus.",
-        "label": "BSG-BAT : Seuil de rejet du bruit de fond"
       }
     },
     "rangeFilter": {

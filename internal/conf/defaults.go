@@ -52,17 +52,16 @@ func setDefaultConfig() {
 	setModuleLogDefaults("ebird", false)       // eBird integration (disabled by default)
 
 	// System and support modules
-	setModuleLogDefaults("backup", true)                          // Backup operations
-	setModuleLogDefaults("config", true)                          // Configuration management
-	setModuleLogDefaults("diskmanager", true)                     // Disk management
-	viper.SetDefault("logging.modules.diskmanager.level", "info") // Override: runs per-clip, debug floods log
-	setModuleLogDefaults("events", true)                          // Event bus
-	setModuleLogDefaults("imageprovider", true)                   // Bird image provider
-	setModuleLogDefaults("monitor", true)                         // System monitoring
-	setModuleLogDefaults("notifications", true)                   // Push notifications
-	setModuleLogDefaults("securefs", true)                        // Secure filesystem operations
-	setModuleLogDefaults("support", true)                         // Support/diagnostics
-	setModuleLogDefaults("telemetry", true)                       // Telemetry/metrics
+	setModuleLogDefaults("backup", true)        // Backup operations
+	setModuleLogDefaults("config", true)        // Configuration management
+	setModuleLogDefaults("diskmanager", true)   // Disk management
+	setModuleLogDefaults("events", true)        // Event bus
+	setModuleLogDefaults("imageprovider", true) // Bird image provider
+	setModuleLogDefaults("monitor", true)       // System monitoring
+	setModuleLogDefaults("notifications", true) // Push notifications
+	setModuleLogDefaults("securefs", true)      // Secure filesystem operations
+	setModuleLogDefaults("support", true)       // Support/diagnostics
+	setModuleLogDefaults("telemetry", true)     // Telemetry/metrics
 
 	// Main configuration
 	viper.SetDefault("main.name", "BirdNET-Go")
@@ -84,6 +83,7 @@ func setDefaultConfig() {
 	viper.SetDefault("birdnet.labelpath", "")
 	viper.SetDefault("birdnet.modelregion", ModelRegionAuto)
 	viper.SetDefault("birdnet.usexnnpack", true)
+	viper.SetDefault("birdnet.alternateminconfidence", DefaultAlternateMinConfidence)
 	viper.SetDefault("taxonomysynonyms", map[string]string{})
 
 	// Range filter configuration
@@ -110,6 +110,10 @@ func setDefaultConfig() {
 	viper.SetDefault("bat.ultrasonicfilter.fftsize", DefaultUltrasonicFFTSize)
 	viper.SetDefault("bat.ultrasonicfilter.hopsize", DefaultUltrasonicHopSize)
 	viper.SetDefault("bat.ultrasonicfilter.frequencysplithz", DefaultUltrasonicSplitHz)
+
+	// BSG-BAT model configuration. Its schedule, false positive filter and
+	// ultrasonic filter come from the bat section above.
+	viper.SetDefault("bsgbat.threshold", 0.5)
 
 	// Global model enablement (BirdNET only by default)
 	viper.SetDefault("models.enabled", []string{"birdnet"})
@@ -212,7 +216,7 @@ func setDefaultConfig() {
 
 	// Log deduplication configuration
 	viper.SetDefault("realtime.logdeduplication.enabled", true)
-	viper.SetDefault("realtime.logdeduplication.healthcheckintervalseconds", 60)
+	viper.SetDefault("realtime.logdeduplication.healthcheckintervalseconds", DefaultLogDeduplicationHealthCheckSeconds)
 
 	// False positive filter configuration
 	// Level 0 = Off (no filtering, backward compatible default)
@@ -314,6 +318,14 @@ func setDefaultConfig() {
 	viper.SetDefault("realtime.dogbarkfilter.remember", 5)
 	viper.SetDefault("realtime.dogbarkfilter.confidence", 0.1)
 	viper.SetDefault("realtime.dogbarkfilter.species", []string{})
+
+	// Model consensus filter configuration
+	viper.SetDefault("realtime.modelconsensus.allspecies", false)
+	viper.SetDefault("realtime.modelconsensus.listedspecies", false)
+	viper.SetDefault("realtime.modelconsensus.species", []string{})
+	viper.SetDefault("realtime.modelconsensus.minmodels", DefaultModelConsensusMinModels)
+	viper.SetDefault("realtime.modelconsensus.alleligible", false)
+	viper.SetDefault("realtime.modelconsensus.debug", false)
 
 	// Telemetry configuration
 	viper.SetDefault("realtime.telemetry.enabled", false)
@@ -479,11 +491,12 @@ func setDefaultConfig() {
 	viper.SetDefault("diagnostics.profiling.mutexfraction", 0)
 }
 
-// setModuleLogDefaults sets default values for a module log configuration
+// setModuleLogDefaults sets default values for a module log configuration. An absent
+// module level defaults to info, matching the embedded config.yaml.
 func setModuleLogDefaults(module string, enabled bool) {
 	prefix := "logging.modules." + module
 	viper.SetDefault(prefix+".enabled", enabled)
 	viper.SetDefault(prefix+".file_path", "logs/"+module+".log")
-	viper.SetDefault(prefix+".level", "debug")
+	viper.SetDefault(prefix+".level", "info")
 	viper.SetDefault(prefix+".console_also", false)
 }

@@ -1545,6 +1545,8 @@
           "creating": "Izveido...",
           "createBackup": "Izveidot dublējumkopiju",
           "noBackups": "Dublējumkopiju vēl nav",
+          "loadFailed": "Neizdevās ielādēt dublējumkopiju vēsturi",
+          "createFailed": "Neizdevās sākt dublējumkopijas izveidi",
           "download": "Lejupielādēt",
           "failed": "Neizdevās",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Sāk migrāciju...",
         "status": {
           "idle": "Gatavs sākšanai",
+          "checking": "Priekšnosacījumu pārbaude",
+          "notReady": "Nav gatavs",
           "initializing": "Inicializē",
           "dual_write": "Dubultrakstīšana aktīva",
           "migrating": "Migrē primāros",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Ieraksti",
           "sizeLabel": "Izmērs",
           "prerequisitesNotMet": "Priekšnosacījumi nav izpildīti - atrisiniet kritiskās problēmas zemāk",
+          "prerequisitesUnavailable": "Pirmmigrācijas pārbaudes netika pabeigtas. Skatiet Pirmmigrācijas pārbaudes zemāk.",
+          "prerequisitesFailedList": "Vispirms novērsiet šīs pārbaudes: {checks}",
           "validatingTitle": "Validē datus",
           "validatingBody": "Salīdzina {count} mantotos ierakstus ar V2 datubāzi...",
           "dirtyRecordsCatchup": "{count} izmainīti ieraksti - tiks mēģināta saskaņošana",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} brīdinājums(-i)",
           "running": "Veic pirmmigrācijas pārbaudes...",
           "checkingStep": "Solis {current} no {total}",
+          "currentCheck": "Pārbauda: {name} ({seconds} s)",
+          "slowHint": "Lielas datubāzes var aizņemt vairākas minūtes.",
+          "runFailed": "Pārbaudes pirms migrācijas netika pabeigtas: {error}",
           "passedCount": "{passed}/{total} izturētas",
           "criticalCount": "{count} kritiskas",
           "warningCount": "{count} brīdinājums(-i)",
@@ -5210,6 +5219,7 @@
         "denoise": "Trokšņu samazināšana",
         "denoiseOff": "Izslēgts",
         "denoiseLight": "Viegls",
+        "denoiseLightMedium": "Viegls-vidējs",
         "denoiseMedium": "Vidējs",
         "denoiseHeavy": "Spēcīgs",
         "normalize": "Normalizēt audio",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "Migrācija nav konfigurēta",
-      "preFlightFailed": "Pirms-lidojuma pārbaudes neizdevās",
+      "preFlightFailed": "Pārbaude pirms migrācijas neizdevās: {check}",
+      "prerequisitesNotReady": "Palaidiet pārbaudes pirms migrācijas un uzgaidiet, līdz tās tiek izturētas, pirms sākat migrāciju.",
       "invalidBody": "Nederīgs pieprasījuma saturs",
       "recordCountFailed": "Neizdevās noteikt kopējo ierakstu skaitu",
       "startFailed": "Neizdevās sākt migrāciju",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Iespējojiet, lai šim modelim iestatītu slieksni. Pretējā gadījumā tiek izmantots kopīgais sikspārņu slieksnis."
-      },
-      "bsgBatBackgroundMax": {
-        "helpText": "Noraidīt visus konstatējumus laika logā, ja tā fona vērtējums pārsniedz šo robežvērtību. 0 = izslēgts; citādi izmantojiet 0.5–1.0 (vērtības zem 0.5 izslēdz filtru). Ieteikums: 0.99. Pie 0.98 tiek noņemts vairāk trokšņa, taču var tikt zaudēti daži īsti saucieni.",
-        "label": "BSG-BAT: Fona noraidīšanas robežvērtība"
       }
     },
     "rangeFilter": {

@@ -1545,6 +1545,8 @@
           "creating": "Luodaan...",
           "createBackup": "Luo varmuuskopio",
           "noBackups": "Ei varmuuskopioita vielä",
+          "loadFailed": "Varmuuskopiohistoriaa ei voitu ladata",
+          "createFailed": "Varmuuskopiointia ei voitu käynnistää",
           "download": "Lataa",
           "failed": "Epäonnistui",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Käynnistetään migraatiota...",
         "status": {
           "idle": "Valmis aloitettavaksi",
+          "checking": "Tarkistetaan edellytyksiä",
+          "notReady": "Ei valmis",
           "initializing": "Alustus",
           "dual_write": "Kaksoiskirjoitus aktiivinen",
           "migrating": "Migroidaan ensisijaiset",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Tietueet",
           "sizeLabel": "Koko",
           "prerequisitesNotMet": "Edellytykset eivät täyty - ratkaise alla olevat kriittiset ongelmat",
+          "prerequisitesUnavailable": "Migraation esitarkistukset eivät valmistuneet. Katso Migraation esitarkistukset alla.",
+          "prerequisitesFailedList": "Ratkaise ensin nämä tarkistukset: {checks}",
           "validatingTitle": "Tietojen tarkistus",
           "validatingBody": "Verrataan {count} vanhaa tietuetta V2-tietokantaan...",
           "dirtyRecordsCatchup": "{count} muuttunutta tietuetta - yritetään täsmäytystä",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} varoitus(ta)",
           "running": "Suoritetaan esitarkistuksia...",
           "checkingStep": "Vaihe {current}/{total}",
+          "currentCheck": "Tarkistetaan: {name} ({seconds} s)",
+          "slowHint": "Suuret tietokannat voivat kestää useita minuutteja.",
+          "runFailed": "Siirtoa edeltävät tarkistukset eivät valmistuneet: {error}",
           "passedCount": "{passed}/{total} hyväksytty",
           "criticalCount": "{count} kriittistä",
           "warningCount": "{count} varoitusta",
@@ -5210,6 +5219,7 @@
         "denoise": "Kohinanpoisto",
         "denoiseOff": "Pois",
         "denoiseLight": "Kevyt",
+        "denoiseLightMedium": "Kevyt-keskitaso",
         "denoiseMedium": "Keskitaso",
         "denoiseHeavy": "Voimakas",
         "normalize": "Normalisoi ääni",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "Siirtoa ei ole määritetty",
-      "preFlightFailed": "Esitarkistukset epäonnistuivat",
+      "preFlightFailed": "Siirtoa edeltävä tarkistus epäonnistui: {check}",
+      "prerequisitesNotReady": "Suorita siirtoa edeltävät tarkistukset ja odota niiden läpäisyä ennen siirron aloittamista.",
       "invalidBody": "Virheellinen pyyntösisältö",
       "recordCountFailed": "Tietueiden kokonaismäärää ei voitu määrittää",
       "startFailed": "Siirron käynnistäminen epäonnistui",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Ota käyttöön asettaaksesi tälle mallille oman rajan. Muuten käytetään lepakoiden yhteistä rajaa."
-      },
-      "bsgBatBackgroundMax": {
-        "helpText": "Hylkää kaikki aikaikkunan havainnot, kun sen taustapistemäärä ylittää tämän rajan. 0 = pois käytöstä; muuten käytä arvoa 0.5–1.0 (alle 0.5 olevat arvot poistavat suodattimen käytöstä). Suositus: 0.99. Arvo 0.98 poistaa enemmän kohinaa, mutta joitakin todellisia ääniä voi jäädä havaitsematta.",
-        "label": "BSG-BAT: Taustan hylkäysraja"
       }
     },
     "rangeFilter": {

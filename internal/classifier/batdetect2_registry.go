@@ -10,7 +10,6 @@ import (
 const RegistryIDBatDetect2 = "BatDetect2"
 
 func init() {
-	batFamilyIDs[RegistryIDBatDetect2] = struct{}{}
 	ModelRegistry[RegistryIDBatDetect2] = ModelInfo{
 		ID: RegistryIDBatDetect2, Name: "BatDetect2 (UK)", Backend: BackendONNX,
 		DetectionName: "BatDetect2", DetectionVersion: "2.0.0b3",

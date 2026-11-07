@@ -10,6 +10,9 @@ const (
 	ModelIDPerchV2   = "perch_v2"
 	ModelIDBat       = "bat"
 	ModelIDBSG       = "bsg"
+	ModelIDBSGBat    = "bsg_bat"
+	// ModelIDBSGBatLegacy is the pre-upstream fork spelling retained for config migration.
+	ModelIDBSGBatLegacy = "bsgbat"
 
 	// Catalog-style model IDs mirror the hyphenated model *catalog* entry IDs
 	// (classifier/model_catalog.go) and are accepted as aliases for the canonical
@@ -21,6 +24,7 @@ const (
 	ModelIDBirdNETV3Catalog = "birdnet-v3.0"
 	ModelIDPerchV2Catalog   = "perch-v2"
 	ModelIDBSGCatalog       = "bsg-finland"
+	ModelIDBSGBatCatalog    = "bsg-bat"
 
 	SampleRate     = 48000 // Sample rate of the audio fed to BirdNET Analyzer
 	BitDepth       = 16    // Bit depth of the audio fed to BirdNET Analyzer
@@ -85,6 +89,10 @@ const (
 	DefaultRetentionMaxUsage            = "80%"
 	DefaultRetryBackoffMultiplier       = 2.0
 
+	// DefaultLogDeduplicationHealthCheckSeconds is the default log deduplication health check
+	// interval in seconds.
+	DefaultLogDeduplicationHealthCheckSeconds = 60
+
 	// The bat ultrasonic filter's STFT defaults. normalizeUltrasonicFilter resets an
 	// invalid or unwritten value to them on load.
 	DefaultUltrasonicFFTSize = 8192
@@ -96,7 +104,53 @@ const (
 	// filter created in the UI and one repaired here get the same value. 0.707 is the
 	// conventional rounding of the Butterworth 1/sqrt(2).
 	DefaultEQQFactor = 0.707
+
+	// DefaultAlternateMinConfidence is the default lowest confidence, on the 0 to 1
+	// scale, at which an alternate prediction of a detection is stored.
+	// normalizeAlternateMinConfidence resets an invalid value to it on load.
+	DefaultAlternateMinConfidence = 0.1
+
+	// DefaultModelConsensusMinModels is the default number of agreeing models the
+	// model consensus filter requires. normalizeModelConsensus resets an invalid
+	// value to it on load.
+	DefaultModelConsensusMinModels = 2
+
+	// MinModelConsensusMinModels is the lowest accepted model consensus minmodels value.
+	MinModelConsensusMinModels = 2
+
+	// MaxModelConsensusMinModels is the highest accepted model consensus minmodels value.
+	MaxModelConsensusMinModels = 4
 )
+
+// Denoise preset names accepted wherever a clip denoise strength is chosen. They
+// map to go-audio-dsp denoiser strengths in internal/audiocore/transcode, which
+// imports this package, so the names live here.
+const (
+	// DenoisePresetLight is the gentlest denoise strength.
+	DenoisePresetLight = "light"
+	// DenoisePresetLightMedium sits between light and medium.
+	DenoisePresetLightMedium = "light-medium"
+	// DenoisePresetMedium is the medium denoise strength.
+	DenoisePresetMedium = "medium"
+	// DenoisePresetHeavy is the strongest denoise strength.
+	DenoisePresetHeavy = "heavy"
+
+	// DefaultDenoisePreset is the preset to fall back to when a setting turns
+	// denoise on without naming a strength. It does not apply to clip and audio
+	// processing requests, where an empty preset means denoise off.
+	DefaultDenoisePreset = DenoisePresetLightMedium
+)
+
+// IsValidDenoisePresetName reports whether name is one of the denoise preset
+// names. The empty string (denoise off) is not a preset name.
+func IsValidDenoisePresetName(name string) bool {
+	switch name {
+	case DenoisePresetLight, DenoisePresetLightMedium, DenoisePresetMedium, DenoisePresetHeavy:
+		return true
+	default:
+		return false
+	}
+}
 
 // DefaultSessionDuration is the default session duration (7 days).
 const DefaultSessionDuration = 168 * time.Hour

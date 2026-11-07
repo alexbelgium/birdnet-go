@@ -156,7 +156,7 @@ func (b *BatDetect2) Predict(ctx context.Context, samples [][]float32) ([]datast
 		return nil, errors.Newf("empty audio sample").Component("classifier").Context("operation", "predict").Context("model", RegistryIDBatDetect2).Category(errors.CategoryValidation).Build()
 	}
 	if len(samples[0]) != batDetect2ExpectedSamples {
-		span.markErrored(errTypeBatInvalidInput)
+		span.markErrored(errTypeInvalidInput)
 		return nil, errors.Newf("BatDetect2 requires %d samples, got %d", batDetect2ExpectedSamples, len(samples[0])).Component("classifier").Context("operation", "predict").Context("model", RegistryIDBatDetect2).Category(errors.CategoryValidation).Build()
 	}
 	b.mu.Lock()
@@ -182,7 +182,7 @@ func (b *BatDetect2) Predict(ctx context.Context, samples [][]float32) ([]datast
 		det, classes, err := b.runTile(b.tile)
 		if err != nil {
 			err = errors.New(err).Component("classifier").Context("operation", "predict").Context("model", RegistryIDBatDetect2).Category(errors.CategoryAudio).Build()
-			recordPredictionFailure(span, RegistryIDBatDetect2, errTypeBatInvokeFailed, startTime, err)
+			recordPredictionFailure(span, RegistryIDBatDetect2, errTypeInvokeFailed, startTime, err)
 			return nil, err
 		}
 		for y := range batDetect2ImageHeight {

@@ -1545,6 +1545,8 @@
           "creating": "Létrehozás...",
           "createBackup": "Mentés létrehozása",
           "noBackups": "Még nincs mentés",
+          "loadFailed": "A mentési előzmények nem tölthetők be",
+          "createFailed": "A mentés nem indítható el",
           "download": "Letöltés",
           "failed": "Sikertelen",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Migráció indítása...",
         "status": {
           "idle": "Indításra kész",
+          "checking": "Előfeltételek ellenőrzése",
+          "notReady": "Nem kész",
           "initializing": "Inicializálás",
           "dual_write": "Dupla-írás aktív",
           "migrating": "Elsődleges migrálása",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Rekordok",
           "sizeLabel": "Méret",
           "prerequisitesNotMet": "Előfeltételek nem teljesültek - hárítsa el az alábbi kritikus problémákat",
+          "prerequisitesUnavailable": "A migráció előtti ellenőrzések nem fejeződtek be. Lásd lent: Migráció előtti ellenőrzések.",
+          "prerequisitesFailedList": "Először oldja meg ezeket az ellenőrzéseket: {checks}",
           "validatingTitle": "Adatok validálása",
           "validatingBody": "{count} régi rekord összehasonlítása a V2 adatbázissal...",
           "dirtyRecordsCatchup": "{count} hibás rekord - egyeztetési kísérlet a validálás során",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} figyelmeztetés",
           "running": "Migráció előtti ellenőrzések futtatása...",
           "checkingStep": "{current}. lépés / {total}",
+          "currentCheck": "Ellenőrzés: {name} ({seconds} mp)",
+          "slowHint": "A nagy adatbázisok ellenőrzése több percig is tarthat.",
+          "runFailed": "A migráció előtti ellenőrzések nem fejeződtek be: {error}",
           "passedCount": "{passed}/{total} sikeres",
           "criticalCount": "{count} kritikus",
           "warningCount": "{count} figyelmeztetés",
@@ -5210,6 +5219,7 @@
         "denoise": "Zajcsökkentés",
         "denoiseOff": "Ki",
         "denoiseLight": "Enyhe",
+        "denoiseLightMedium": "Enyhe-közepes",
         "denoiseMedium": "Közepes",
         "denoiseHeavy": "Erős",
         "normalize": "Hang normalizálása",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "A migráció nincs konfigurálva",
-      "preFlightFailed": "Az előzetes ellenőrzések sikertelenek",
+      "preFlightFailed": "A migráció előtti ellenőrzés sikertelen: {check}",
+      "prerequisitesNotReady": "Futtassa le a migráció előtti ellenőrzéseket, és várja meg, amíg sikeresek, mielőtt elindítja a migrációt.",
       "invalidBody": "Érvénytelen kérés törzs",
       "recordCountFailed": "Az összes rekord meghatározása sikertelen",
       "startFailed": "A migráció indítása sikertelen",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Bekapcsolva külön küszöb állítható be ehhez a modellhez. Egyébként a denevérek közös küszöbe érvényes."
-      },
-      "bsgBatBackgroundMax": {
-        "helpText": "Az időablak összes észlelésének elvetése, ha a háttérpontszám meghaladja ezt a határértéket. 0 = kikapcsolva; egyébként 0.5–1.0 használható (a 0.5 alatti értékek kikapcsolják a szűrőt). Javasolt érték: 0.99. A 0.98 több zajt távolít el, de néhány valódi hang is elveszhet.",
-        "label": "BSG-BAT: Háttérkizárási határérték"
       }
     },
     "rangeFilter": {

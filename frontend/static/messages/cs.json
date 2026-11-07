@@ -1545,6 +1545,8 @@
           "creating": "Vytváření...",
           "createBackup": "Vytvořit zálohu",
           "noBackups": "Zatím žádné zálohy",
+          "loadFailed": "Historii záloh se nepodařilo načíst",
+          "createFailed": "Zálohu se nepodařilo spustit",
           "download": "Stáhnout",
           "failed": "Selhalo",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Zahajuje se migrace...",
         "status": {
           "idle": "Připraveno ke spuštění",
+          "checking": "Kontrola předpokladů",
+          "notReady": "Nepřipraveno",
           "initializing": "Inicializace",
           "dual_write": "Duální zápis aktivní",
           "migrating": "Migrace primární",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Záznamy",
           "sizeLabel": "Velikost",
           "prerequisitesNotMet": "Předpoklady nesplněny - vyřešte kritické problémy níže",
+          "prerequisitesUnavailable": "Kontroly před migrací nebyly dokončeny. Viz Kontroly před migrací níže.",
+          "prerequisitesFailedList": "Nejdříve vyřešte tyto kontroly: {checks}",
           "validatingTitle": "Ověřování dat",
           "validatingBody": "Porovnávání {count} původních záznamů s databází V2...",
           "dirtyRecordsCatchup": "{count} nesynchronizovaných záznamů - proběhne pokus o dodatečné srovnání",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} varování",
           "running": "Probíhají kontroly před migrací...",
           "checkingStep": "Krok {current} z {total}",
+          "currentCheck": "Kontroluje se {name} ({seconds} s)",
+          "slowHint": "Velké databáze mohou trvat několik minut.",
+          "runFailed": "Kontroly před migrací nebyly dokončeny: {error}",
           "passedCount": "{passed}/{total} úspěšných",
           "criticalCount": "{count} kritických",
           "warningCount": "{count} varování",
@@ -5210,6 +5219,7 @@
         "denoise": "Odšumění",
         "denoiseOff": "Vypnuto",
         "denoiseLight": "Slabé",
+        "denoiseLightMedium": "Středně slabé",
         "denoiseMedium": "Střední",
         "denoiseHeavy": "Silné",
         "normalize": "Normalizovat zvuk",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "Migrace není nakonfigurována",
-      "preFlightFailed": "Předběžné kontroly selhaly",
+      "preFlightFailed": "Kontrola před migrací selhala: {check}",
+      "prerequisitesNotReady": "Spusťte kontroly před migrací a počkejte, až projdou, než migraci spustíte.",
       "invalidBody": "Neplatné tělo požadavku",
       "recordCountFailed": "Celkový počet záznamů se nepodařilo určit",
       "startFailed": "Migraci se nepodařilo spustit",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Zapnutím nastavíte práh pro tento model. Jinak se použije společný práh pro netopýry."
-      },
-      "bsgBatBackgroundMax": {
-        "helpText": "Odmítnout všechny detekce v okně, pokud jeho skóre pozadí překročí tuto mez. 0 = vypnuto; jinak použijte 0.5–1.0 (hodnoty pod 0.5 filtr vypnou). Doporučeno: 0.99. Při 0.98 se odstraní více šumu, ale některé skutečné hlasy mohou být ztraceny.",
-        "label": "BSG-BAT: Mez pro odmítnutí pozadí"
       }
     },
     "rangeFilter": {

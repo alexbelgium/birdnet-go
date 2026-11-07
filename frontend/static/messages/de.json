@@ -1545,6 +1545,8 @@
           "creating": "Wird erstellt...",
           "createBackup": "Sicherung erstellen",
           "noBackups": "Noch keine Sicherungen",
+          "loadFailed": "Der Sicherungsverlauf konnte nicht geladen werden",
+          "createFailed": "Die Sicherung konnte nicht gestartet werden",
           "download": "Herunterladen",
           "failed": "Fehlgeschlagen",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Migration wird gestartet...",
         "status": {
           "idle": "Bereit zum Starten",
+          "checking": "Voraussetzungen werden geprüft",
+          "notReady": "Nicht bereit",
           "initializing": "Initialisierung",
           "dual_write": "Dual-Write aktiv",
           "migrating": "Migriere Primärdaten",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Datensätze",
           "sizeLabel": "Größe",
           "prerequisitesNotMet": "Voraussetzungen nicht erfüllt - beheben Sie die kritischen Probleme unten",
+          "prerequisitesUnavailable": "Die Prüfungen vor der Migration wurden nicht abgeschlossen. Siehe Prüfungen vor der Migration unten.",
+          "prerequisitesFailedList": "Beheben Sie zuerst diese Prüfungen: {checks}",
           "validatingTitle": "Daten werden überprüft",
           "validatingBody": "{count} Legacy-Datensätze werden mit der V2-Datenbank verglichen...",
           "dirtyRecordsCatchup": "{count} schmutzige Datensätze - Nachholabgleich wird versucht",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} Warnung(en)",
           "running": "Führe Vorab-Prüfungen durch...",
           "checkingStep": "Schritt {current} von {total}",
+          "currentCheck": "Prüfe {name} ({seconds} s)",
+          "slowHint": "Große Datenbanken können mehrere Minuten brauchen.",
+          "runFailed": "Die Prüfungen vor der Migration wurden nicht abgeschlossen: {error}",
           "passedCount": "{passed}/{total} bestanden",
           "criticalCount": "{count} kritisch",
           "warningCount": "{count} Warnung(en)",
@@ -5210,6 +5219,7 @@
         "denoise": "Entrauschen",
         "denoiseOff": "Aus",
         "denoiseLight": "Leicht",
+        "denoiseLightMedium": "Leicht-mittel",
         "denoiseMedium": "Mittel",
         "denoiseHeavy": "Stark",
         "normalize": "Audio normalisieren",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "Migration ist nicht konfiguriert",
-      "preFlightFailed": "Vorabprüfungen fehlgeschlagen",
+      "preFlightFailed": "Prüfung vor der Migration fehlgeschlagen: {check}",
+      "prerequisitesNotReady": "Führen Sie die Prüfungen vor der Migration aus und warten Sie, bis sie bestanden sind, bevor Sie die Migration starten.",
       "invalidBody": "Ungültiger Anfragekörper",
       "recordCountFailed": "Gesamtanzahl der Datensätze konnte nicht ermittelt werden",
       "startFailed": "Migration konnte nicht gestartet werden",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Aktivieren, um einen Schwellenwert für dieses Modell festzulegen. Andernfalls gilt der gemeinsame Schwellenwert für Fledermäuse."
-      },
-      "bsgBatBackgroundMax": {
-        "helpText": "Alle Erkennungen in einem Zeitfenster verwerfen, wenn dessen Hintergrundwert diesen Grenzwert überschreitet. 0 = aus; ansonsten 0.5–1.0 verwenden (Werte unter 0.5 schalten den Filter aus). Empfehlung: 0.99. Bei 0.98 wird mehr Rauschen entfernt, aber einige echte Rufe können verloren gehen.",
-        "label": "BSG-BAT: Grenzwert für Hintergrundunterdrückung"
       }
     },
     "rangeFilter": {

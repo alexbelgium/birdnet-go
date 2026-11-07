@@ -1545,6 +1545,8 @@
           "creating": "Creazione in corso...",
           "createBackup": "Crea backup",
           "noBackups": "Nessun backup ancora",
+          "loadFailed": "Impossibile caricare la cronologia dei backup",
+          "createFailed": "Impossibile avviare il backup",
           "download": "Scarica",
           "failed": "Fallito",
           "columns": {
@@ -1572,6 +1574,8 @@
         "starting": "Avvio migrazione...",
         "status": {
           "idle": "Pronto per Iniziare",
+          "checking": "Verifica dei prerequisiti",
+          "notReady": "Non pronto",
           "initializing": "Inizializzazione",
           "dual_write": "Scrittura Doppia Attiva",
           "migrating": "Migrazione Primaria",
@@ -1603,6 +1607,8 @@
           "recordsLabel": "Record",
           "sizeLabel": "Dimensione",
           "prerequisitesNotMet": "Prerequisiti non soddisfatti - risolvi i problemi critici qui sotto",
+          "prerequisitesUnavailable": "I controlli pre-migrazione non sono terminati. Vedi Controlli Pre-Migrazione qui sotto.",
+          "prerequisitesFailedList": "Risolvi prima questi controlli: {checks}",
           "validatingTitle": "Validazione dati",
           "validatingBody": "Confronto di {count} record legacy con il database V2...",
           "dirtyRecordsCatchup": "{count} record non sincronizzati - verrà tentata la riconciliazione",
@@ -1704,6 +1710,9 @@
           "warningsCount": "{count} avviso/i",
           "running": "Esecuzione controlli pre-migrazione...",
           "checkingStep": "Passo {current} di {total}",
+          "currentCheck": "Controllo di {name} ({seconds} s)",
+          "slowHint": "I database grandi possono richiedere diversi minuti.",
+          "runFailed": "I controlli prima della migrazione non sono terminati: {error}",
           "passedCount": "{passed}/{total} superati",
           "criticalCount": "{count} critici",
           "warningCount": "{count} avviso/i",
@@ -5210,6 +5219,7 @@
         "denoise": "Riduzione rumore",
         "denoiseOff": "Disattivato",
         "denoiseLight": "Leggero",
+        "denoiseLightMedium": "Leggero-medio",
         "denoiseMedium": "Medio",
         "denoiseHeavy": "Pesante",
         "normalize": "Normalizza audio",
@@ -5334,7 +5344,8 @@
     },
     "migration": {
       "notConfigured": "La migrazione non è configurata",
-      "preFlightFailed": "Controlli preliminari non superati",
+      "preFlightFailed": "Controllo prima della migrazione non riuscito: {check}",
+      "prerequisitesNotReady": "Esegui i controlli prima della migrazione e attendi che siano superati prima di avviare la migrazione.",
       "invalidBody": "Corpo della richiesta non valido",
       "recordCountFailed": "Impossibile determinare il numero totale di record",
       "startFailed": "Impossibile avviare la migrazione",
@@ -5610,10 +5621,6 @@
       },
       "batThresholdOverride": {
         "helpText": "Attiva per impostare una soglia per questo modello. Altrimenti si applica la soglia condivisa per i pipistrelli."
-      },
-      "bsgBatBackgroundMax": {
-        "helpText": "Scarta tutti i rilevamenti in una finestra quando il suo punteggio di rumore di fondo supera questo limite. 0 = disattivato; altrimenti usare 0.5–1.0 (i valori inferiori a 0.5 disattivano il filtro). Valore suggerito: 0.99. Con 0.98 viene eliminato più rumore, ma si possono perdere alcuni richiami reali.",
-        "label": "BSG-BAT: Limite di esclusione del rumore di fondo"
       }
     },
     "rangeFilter": {
