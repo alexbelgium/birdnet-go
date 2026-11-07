@@ -2719,6 +2719,7 @@ export type TranslationKey =
   | 'settings.audio.streams.test.error'
   | 'settings.audio.streams.test.batCompatible'
   | 'settings.audio.streams.test.batIncompatible'
+  | 'settings.audio.streams.test.minRateWarning' // params: rate
   | 'settings.audio.streams.batWarning'
   | 'settings.audio.streams.codecWarning.lossy'
   | 'settings.audio.streams.channelMode.analyzeError'
@@ -4099,6 +4100,14 @@ export type TranslationKey =
   | 'analysis.detection.confidenceThreshold.helpText'
   | 'analysis.detection.batThreshold.label'
   | 'analysis.detection.batThreshold.helpText'
+  | 'analysis.detection.bsgBatThreshold.label'
+  | 'analysis.detection.bsgBatThreshold.helpText'
+  | 'analysis.detection.bsgBatThreshold.sampleRateWarning'
+  | 'analysis.detection.bsgBatStep.label'
+  | 'analysis.detection.bsgBatStep.helpText'
+  | 'analysis.detection.bsgBatStep.readout' // params: seconds
+  | 'analysis.detection.bsgBatStep.readoutWithFilter' // params: seconds, level, count
+  | 'analysis.detection.bsgBatStep.restartNote'
   | 'analysis.detection.batFilter.label'
   | 'analysis.detection.batFilter.helpText'
   | 'analysis.detection.batNighttimeOnly.label'
@@ -4111,6 +4120,7 @@ export type TranslationKey =
   | 'analysis.detection.batFalsePositiveFilter.levels.moderate'
   | 'analysis.detection.batFalsePositiveFilter.levels.strict'
   | 'analysis.detection.batFalsePositiveFilter.detectionCount' // params: count, description
+  | 'analysis.detection.batFalsePositiveFilter.detectionCountByModel' // params: batty, bsgBat, description
   | 'analysis.detection.batFalsePositiveFilter.warningOff'
   | 'analysis.detection.locale.label'
   | 'analysis.detection.locale.helpText'
@@ -4811,6 +4821,7 @@ export type TranslationParams = {
   'settings.audio.streams.summary': { count: string | number };
   'settings.audio.streams.restartCount': { count: string | number };
   'settings.audio.streams.timeline.eventAt': { time: string | number };
+  'settings.audio.streams.test.minRateWarning': { rate: string | number };
   'settings.audio.streams.channelMode.recommended': { channel: string | number };
   'settings.audio.streams.format.multi': { count: string | number };
   'settings.audio.streams.format.withSampleRate': {
@@ -4949,8 +4960,19 @@ export type TranslationParams = {
   'wizard.progress': { current: string | number; total: string | number };
   'wizard.whatsNew.title': { version: string | number };
   'wizard.steps.detection.descriptionStored': { threshold: string | number };
+  'analysis.detection.bsgBatStep.readout': { seconds: string | number };
+  'analysis.detection.bsgBatStep.readoutWithFilter': {
+    seconds: string | number;
+    level: string | number;
+    count: string | number;
+  };
   'analysis.detection.batFalsePositiveFilter.detectionCount': {
     count: string | number;
+    description: string | number;
+  };
+  'analysis.detection.batFalsePositiveFilter.detectionCountByModel': {
+    batty: string | number;
+    bsgBat: string | number;
     description: string | number;
   };
   'analysis.rangeFilter.status.geomodelInfo': {

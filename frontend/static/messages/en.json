@@ -3729,9 +3729,10 @@
           "result": "Test Result",
           "error": "Test failed",
           "batCompatible": "Bat compatible",
-          "batIncompatible": "Not bat compatible"
+          "batIncompatible": "Not bat compatible",
+          "minRateWarning": "The selected models need a capture rate of at least {rate} kHz. This stream is below it."
         },
-        "batWarning": "Bat models require streams with a lossless codec (PCM) and a sample rate of at least 96 kHz. Use the Test Stream button above to verify compatibility.",
+        "batWarning": "Bat models require streams with a lossless codec (PCM) and a sample rate of at least 96 kHz. BSG-BAT needs at least 192 kHz. Use the Test Stream button above to verify compatibility.",
         "codecWarning": {
           "lossy": "Lossy codecs (AAC, Opus, MP3) destroy ultrasonic frequencies above ~20 kHz, making the stream unsuitable for bat detection."
         },
@@ -5591,8 +5592,20 @@
         "helpText": "Minimum confidence score (0.0 - 1.0) required for a detection to be recorded."
       },
       "batThreshold": {
-        "label": "Bat Detection Threshold",
-        "helpText": "Minimum confidence score for bat species detections. Only applies to bat classifier models."
+        "label": "Bat Detection Threshold (BattyBirdNET)",
+        "helpText": "Minimum confidence score for BattyBirdNET bat species detections. BSG-BAT has its own threshold."
+      },
+      "bsgBatThreshold": {
+        "label": "Bat Detection Threshold (BSG-BAT)",
+        "helpText": "Minimum confidence score for BSG-BAT bat species detections.",
+        "sampleRateWarning": "Captures at 192 kHz work, but species that call above 96 kHz cannot be identified and scores are less reliable. A capture rate of 384 kHz is recommended."
+      },
+      "bsgBatStep": {
+        "label": "BSG-BAT Analysis Step (frames)",
+        "helpText": "Frames of 2 ms between BSG-BAT analysis windows, from 100 (0.2 s) to 512 (1.024 s, no overlap). The default of 250 (0.5 s) is the reference step. 375 (0.75 s) finds about 85% of the events at two thirds of the CPU; 512 finds roughly 70 to 75% at about half the CPU, for devices that cannot keep up.",
+        "readout": "Step: {seconds} s between analysis windows.",
+        "readoutWithFilter": "Step: {seconds} s between analysis windows. Bat filter level {level}: {count} confirmations required.",
+        "restartNote": "Saving a new step restarts audio capture."
       },
       "batFilter": {
         "label": "Bat Audio High-Pass Filter",
@@ -5615,6 +5628,7 @@
           "strict": "Maximum filtering for highest accuracy."
         },
         "detectionCount": "{count} confirmations required. {description}",
+        "detectionCountByModel": "{batty} confirmations required for BattyBirdNET, {bsgBat} for BSG-BAT. {description}",
         "warningOff": "Without filtering there is a high probability of false positives. Enabling filtering significantly improves accuracy."
       },
       "locale": {
