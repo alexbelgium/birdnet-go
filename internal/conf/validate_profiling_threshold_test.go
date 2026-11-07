@@ -72,6 +72,7 @@ func TestValidateModelThresholds(t *testing.T) {
 		s.Bat.Threshold = 0.5
 		s.Perch.Threshold = 0.5
 		s.BirdNETV3.Threshold = 0.5
+		s.BSGBat.Threshold = 0.5
 		return s
 	}
 
@@ -106,6 +107,12 @@ func TestValidateModelThresholds(t *testing.T) {
 			mutate:      func(s *Settings) { s.BirdNETV3.Threshold = 1.5 },
 			wantErr:     true,
 			errContains: "birdnetv3.threshold must be between",
+		},
+		{
+			name:        "bsgbat threshold above 1 rejected",
+			mutate:      func(s *Settings) { s.BSGBat.Threshold = 1.5 },
+			wantErr:     true,
+			errContains: "bsgbat.threshold must be between",
 		},
 		{
 			name:        "NaN threshold rejected (comparison would silently pass)",
@@ -221,4 +228,44 @@ func TestNormalizeModelThresholds(t *testing.T) {
 		assert.InEpsilon(t, 1.0, s.BirdNETV3.Threshold, 1e-9)
 		assert.Empty(t, s.ValidationWarnings)
 	})
+}
+
+// TestNormalizeAlternateMinConfidence verifies the load-path repair of the stored
+// alternate cutoff: a negative value becomes 0 (off), NaN, Inf and values above 1
+// revert to the default, each with one warning, and the strict validator passes
+// afterwards. Valid boundaries stay untouched with no warning.
+func TestNormalizeAlternateMinConfidence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		in       float64
+		want     float64
+		wantWarn bool
+	}{
+		{"negative becomes off", -0.5, 0, true},
+		{"NaN becomes the default", math.NaN(), DefaultAlternateMinConfidence, true},
+		{"negative infinity becomes the default, not off", math.Inf(-1), DefaultAlternateMinConfidence, true},
+		{"positive infinity becomes the default", math.Inf(1), DefaultAlternateMinConfidence, true},
+		{"above 1 becomes the default", 1.5, DefaultAlternateMinConfidence, true},
+		{"0 is kept", 0, 0, false},
+		{"1 is kept", 1, 1, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := &Settings{}
+			s.BirdNET.AlternateMinConfidence = tt.in
+
+			s.normalizeAlternateMinConfidence()
+
+			assert.InDelta(t, tt.want, s.BirdNET.AlternateMinConfidence, 1e-9)
+			if tt.wantWarn {
+				assert.Len(t, s.ValidationWarnings, 1)
+			} else {
+				assert.Empty(t, s.ValidationWarnings)
+			}
+			assert.True(t, ValidateBirdNETSettings(&s.BirdNET).Valid)
+		})
+	}
 }
