@@ -57,6 +57,7 @@ type BatDetect2 struct {
 	dsp                              *batDetect2DSP
 	input, detection, classes        *ort.Tensor[float32]
 	tile, fullDetection, fullClasses []float32
+	centrality                       []int
 }
 
 // NewBatDetect2 creates a BatDetect2 instance.
@@ -95,7 +96,7 @@ func NewBatDetect2(cfg *BatDetect2ModelConfig) (*BatDetect2, error) {
 	info := ModelRegistry[RegistryIDBatDetect2]
 	info.NumSpecies = len(labels)
 	base := &batORTBase{labels: labels, info: info, modelPath: cfg.ModelPath}
-	model := &BatDetect2{batORTBase: base, dsp: dsp, tile: make([]float32, batDetect2ImageHeight*batDetect2TileWidth), fullDetection: make([]float32, len(dsp.image)), fullClasses: make([]float32, len(labels)*len(dsp.image))}
+	model := &BatDetect2{batORTBase: base, dsp: dsp, tile: make([]float32, batDetect2ImageHeight*batDetect2TileWidth), fullDetection: make([]float32, len(dsp.image)), fullClasses: make([]float32, len(labels)*len(dsp.image)), centrality: make([]int, len(dsp.x0))}
 	if classifier, device, precision, ok := tryBatDetect2OpenVINO(cfg, len(labels)); ok {
 		base.info.Backend = BackendOpenVINO
 		model.ovClassifier, model.device, model.precision = classifier, device, precision
@@ -166,14 +167,16 @@ func (b *BatDetect2) Predict(ctx context.Context, samples [][]float32) ([]datast
 		return nil, errors.Newf("BatDetect2 classifier is closed").Component("classifier").Context("operation", "predict").Context("model", RegistryIDBatDetect2).Category(errors.CategoryModelInit).Build()
 	}
 	image, width := b.dsp.preprocess(samples[0])
-	covered := 0
+	// Tile the image with half-tile overlap and keep each column from the tile in
+	// which it sits furthest from the tile edges. The network sees zero padding
+	// beyond a tile, and a column at a tile seam was otherwise scored with no
+	// context on one side; on noisy feeds that seam produced false positives.
 	tilePlane := batDetect2ImageHeight * batDetect2TileWidth
 	fullPlane := batDetect2ImageHeight * width
-	for covered < width {
-		start := covered
-		if width >= batDetect2TileWidth {
-			start = min(start, width-batDetect2TileWidth)
-		}
+	for i := range b.centrality[:width] {
+		b.centrality[i] = -1
+	}
+	for _, start := range batDetect2TileStarts(width) {
 		copyWidth := min(batDetect2TileWidth, width-start)
 		clear(b.tile)
 		for y := range batDetect2ImageHeight {
@@ -185,15 +188,23 @@ func (b *BatDetect2) Predict(ctx context.Context, samples [][]float32) ([]datast
 			recordPredictionFailure(span, RegistryIDBatDetect2, errTypeInvokeFailed, startTime, err)
 			return nil, err
 		}
-		for y := range batDetect2ImageHeight {
-			copy(b.fullDetection[y*width+covered:y*width+start+copyWidth], det[y*batDetect2TileWidth+covered-start:y*batDetect2TileWidth+copyWidth])
-			for c := range b.labels {
-				copy(b.fullClasses[c*fullPlane+y*width+covered:c*fullPlane+y*width+start+copyWidth], classes[c*tilePlane+y*batDetect2TileWidth+covered-start:c*tilePlane+y*batDetect2TileWidth+copyWidth])
+		for j := range copyWidth {
+			col := start + j
+			centrality := min(j, batDetect2TileWidth-1-j)
+			if centrality <= b.centrality[col] {
+				continue
+			}
+			b.centrality[col] = centrality
+			for y := range batDetect2ImageHeight {
+				b.fullDetection[y*width+col] = det[y*batDetect2TileWidth+j]
+				for c := range b.labels {
+					b.fullClasses[c*fullPlane+y*width+col] = classes[c*tilePlane+y*batDetect2TileWidth+j]
+				}
 			}
 		}
-		covered = start + copyWidth
 	}
 	peaks := batDetect2NMS(b.fullDetection, batDetect2ImageHeight, width, width)
+	peaks = batDetect2DropEdgePeaks(peaks, width)
 	sort.SliceStable(peaks, func(i, j int) bool { return peaks[i].score > peaks[j].score })
 	limit := width * batDetect2TopKPerSecond / batDetect2OutputFrameRate
 	peaks = peaks[:min(len(peaks), limit)]

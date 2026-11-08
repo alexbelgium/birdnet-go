@@ -22,6 +22,14 @@ const (
 	batDetect2PCENTimeConstant = 0.4
 	batDetect2PCENSmoothingHop = 512
 	batDetect2OutputFrameRate  = 1000
+	// batDetect2TileStride is the advance between model tiles: half a tile, so
+	// every column but the outermost has a tile that gives it context both sides.
+	batDetect2TileStride = batDetect2TileWidth / 2
+	// batDetect2EdgeColumns is how many columns (1 ms each) at each end of the
+	// window are ignored for peaks. The network has no context past the window
+	// edge, and live windows overlap by 50%, so a call there is scored in the
+	// middle of the neighbouring window instead.
+	batDetect2EdgeColumns = 16
 )
 
 type batDetect2DSP struct {
@@ -81,13 +89,7 @@ func (d *batDetect2DSP) preprocess(samples []float32) (image []float32, width in
 	biasPower := math.Pow(batDetect2PCENBias, batDetect2PCENPower)
 	for y := range srcH {
 		row := d.spec[y*frames : (y+1)*frames]
-		// Start the PCEN smoother at the row's first frame (its steady state) rather
-		// than at zero. A zero state makes the first frames of every window a
-		// full-band onset, and live analysis cuts the stream into independent 0.56 s
-		// windows, so on stationary noise the detector fires at x=0 of each window.
-		// The warm start removes that artefact and, on calls mixed into real noise,
-		// raises rather than lowers the scores of calls at the window start.
-		m := row[0] * scale
+		m := 0.0
 		mean := 0.0
 		for x, v := range row {
 			v *= scale
@@ -150,4 +152,34 @@ func batDetect2NMS(detection []float32, height, width, copyWidth int) []batDetec
 		}
 	}
 	return peaks
+}
+
+// batDetect2TileStarts returns the start columns of the model tiles covering an
+// image of the given width: every batDetect2TileStride columns, with a last
+// tile aligned to the right edge.
+func batDetect2TileStarts(width int) []int {
+	if width <= batDetect2TileWidth {
+		return []int{0}
+	}
+	last := width - batDetect2TileWidth
+	starts := make([]int, 0, last/batDetect2TileStride+2)
+	for s := 0; s < last; s += batDetect2TileStride {
+		starts = append(starts, s)
+	}
+	return append(starts, last)
+}
+
+// batDetect2DropEdgePeaks removes peaks within batDetect2EdgeColumns of either
+// end of the window.
+func batDetect2DropEdgePeaks(peaks []batDetect2Peak, width int) []batDetect2Peak {
+	if width <= 2*batDetect2EdgeColumns {
+		return peaks
+	}
+	kept := peaks[:0]
+	for _, p := range peaks {
+		if p.x >= batDetect2EdgeColumns && p.x < width-batDetect2EdgeColumns {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
