@@ -10,6 +10,8 @@ import (
 
 // Detection metadata keys shared by event producers and consumers.
 const (
+	// DetectionMetadataModelName is the display name of the model that produced the detection.
+	DetectionMetadataModelName           = "model_name"
 	DetectionMetadataDaysSinceLastSeen   = "days_since_last_seen"
 	DetectionMetadataNoveltyEpisodeDays  = "novelty_episode_days"
 	DetectionMetadataNoveltyEpisodeStart = "novelty_episode_start"

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/events"
 )
 
 func TestBuildBaseURL(t *testing.T) {
@@ -257,10 +259,18 @@ func TestBuildBaseURL_EdgeCases(t *testing.T) {
 func TestNewTemplateData(t *testing.T) {
 	t.Parallel()
 
-	// This test would require setting up a full detection event with metadata
-	// For now, we'll focus on BuildBaseURL tests which are the main change
-	// The integration test in detection_consumer_test.go covers the full flow
-	t.Skip("Template data construction is covered by integration tests")
+	for _, modelName := range []string{"", "BirdNET 2.4", "Perch V2"} {
+		t.Run(modelName, func(t *testing.T) {
+			t.Parallel()
+			event, err := events.NewDetectionEvent("Robin", "Erithacus rubecula", 0.9, "Garden", false, 0)
+			require.NoError(t, err)
+			if modelName != "" {
+				event.GetMetadata()[events.DetectionMetadataModelName] = modelName
+			}
+			data := NewTemplateData(event, "", true)
+			assert.Equal(t, modelName, data.ModelName)
+		})
+	}
 }
 
 // BenchmarkBuildBaseURL measures the performance of URL construction

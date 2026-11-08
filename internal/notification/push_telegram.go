@@ -201,22 +201,27 @@ func buildTelegramCaption(n *Notification, imageURL string) string {
 		link = "\n<a href=\"" + htmlEscape(detURL) + "\">View detection</a>"
 	}
 
+	var modelLine string
+	if modelName, ok := n.Metadata["bg_model_name"].(string); ok && modelName != "" {
+		modelLine = "\nModel: " + htmlEscape(modelName)
+	}
+
 	msg := strings.TrimSpace(n.Message)
 	if imageURL != "" {
 		msg = strings.TrimSpace(strings.ReplaceAll(msg, imageURL, ""))
 	}
 
 	if msg == "" {
-		return title + link
+		return title + modelLine + link
 	}
 
 	escaped := htmlEscape(msg)
 	// Budget for the message body: total limit minus title, "\n" separator,
-	// link, and the 3-byte "…" ellipsis appended when truncating.
-	budget := telegramCaptionMaxBytes - len(title) - 1 - len(link) - 3
+	// model line, link, and the 3-byte "…" ellipsis appended when truncating.
+	budget := telegramCaptionMaxBytes - len(title) - 1 - len(modelLine) - len(link) - 3
 	if budget <= 0 {
 		// Fixed parts alone fill the limit; omit the body.
-		return title + link
+		return title + modelLine + link
 	}
 	if len([]byte(escaped)) > budget {
 		runes := []rune(escaped)
@@ -225,7 +230,7 @@ func buildTelegramCaption(n *Notification, imageURL string) string {
 		}
 		escaped = string(runes) + "…"
 	}
-	return title + "\n" + escaped + link
+	return title + "\n" + escaped + modelLine + link
 }
 
 // htmlEscape escapes the five HTML special characters required by Telegram HTML parse mode.
