@@ -5617,6 +5617,10 @@
         "readoutWithFilter": "Lépés: {seconds} s az elemzési ablakok között. Denevérszűrő szintje {level}: {count} megerősítés szükséges.",
         "restartNote": "Új lépés mentése újraindítja a hangrögzítést."
       },
+      "bsgBatBackgroundMax": {
+        "label": "BSG-BAT háttérelutasítási határ",
+        "helpText": "Elveti egy ablak összes észlelését, ha a háttérpontszáma meghaladja ezt a határt. 0 = ki. Alapértelmezés 0,9. Az alacsonyabb értékek több zajt szűrnek ki, de elveszhetnek valódi hívások."
+      },
       "batFilter": {
         "label": "Denevér hang felüláteresztő szűrő",
         "helpText": "Kiszűri az emberi fül számára hallható frekvenciákat a denevérelemzés előtt, hogy csökkentse a madárdal és a környezeti zaj okozta téves észleléseket."

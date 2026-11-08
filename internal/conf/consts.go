@@ -104,6 +104,10 @@ const (
 	// DefaultBSGBatStepFrames is the step used when the setting is unset (0). It is
 	// also the static registry step; changing it is this one line.
 	DefaultBSGBatStepFrames = 250
+
+	// DefaultBSGBatBackgroundMax is the default bsgbat.backgroundmax: a window whose
+	// Background score exceeds it yields no detections. 0 would disable the gate.
+	DefaultBSGBatBackgroundMax = 0.9
 	// MinBSGBatStepFrames is the smallest accepted step: 0.2 s, twice the analysis
 	// monitor poll interval, because the monitor reads at most one window per poll.
 	// An analysis test pins it against that interval.

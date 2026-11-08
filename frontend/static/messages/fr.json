@@ -5617,6 +5617,10 @@
         "readoutWithFilter": "Pas : {seconds} s entre les fenêtres d'analyse. Niveau du filtre chauves-souris {level} : {count} confirmations requises.",
         "restartNote": "L'enregistrement d'un nouveau pas redémarre la capture audio."
       },
+      "bsgBatBackgroundMax": {
+        "label": "Limite de rejet du fond BSG-BAT",
+        "helpText": "Rejette toutes les détections d'une fenêtre lorsque son score de fond dépasse cette limite. 0 = désactivé. Par défaut 0,9. Des valeurs plus basses suppriment plus de bruit, mais peuvent perdre certains vrais cris."
+      },
       "batFilter": {
         "label": "Filtre passe-haut pour chauves-souris",
         "helpText": "Filtre les fréquences audibles avant l'analyse des chauves-souris pour réduire les faux positifs dus aux chants d'oiseaux et au bruit ambiant."

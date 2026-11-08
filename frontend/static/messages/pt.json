@@ -5617,6 +5617,10 @@
         "readoutWithFilter": "Passo: {seconds} s entre as janelas de análise. Nível do filtro de morcegos {level}: {count} confirmações necessárias.",
         "restartNote": "Guardar um novo passo reinicia a captura de áudio."
       },
+      "bsgBatBackgroundMax": {
+        "label": "Limite de rejeição de fundo BSG-BAT",
+        "helpText": "Rejeita todas as deteções numa janela quando a sua pontuação de fundo excede este limite. 0 = desativado. Predefinição 0,9. Valores mais baixos removem mais ruído, mas podem perder alguns chamamentos reais."
+      },
       "batFilter": {
         "label": "Filtro passa-altas para morcegos",
         "helpText": "Filtra frequências audíveis antes da análise de morcegos para reduzir falsos positivos causados por cantos de aves e ruído ambiente."

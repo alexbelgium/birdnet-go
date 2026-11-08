@@ -155,6 +155,9 @@
   const BSG_BAT_CATALOG_ID = 'bsg-bat';
   /** Backend default of bsgbat.threshold, used until the section is loaded. */
   const BSG_BAT_DEFAULT_THRESHOLD = 0.5;
+  /** Backend default of bsgbat.backgroundmax (DefaultBSGBatBackgroundMax), used until saved. */
+  const BSG_BAT_DEFAULT_BACKGROUND_MAX = 0.9;
+  const BSG_BAT_BACKGROUND_MAX_STEP = 0.01;
   /** Bounds and step of the bat model threshold fields. */
   const BAT_THRESHOLD_MIN = 0.01;
   const BAT_THRESHOLD_MAX = 0.99;
@@ -1230,6 +1233,10 @@
   // The field clamps to the range; a fractional entry becomes a whole frame. A step equal to the
   // saved effective one restores the saved raw value (0 or none for the default), so the form
   // compares equal to the saved settings again and the save bar does not stay active.
+  function updateBsgBatBackgroundMax(value: number) {
+    settingsActions.updateSection('bsgbat', { backgroundMax: value });
+  }
+
   function updateBsgBatStep(value: number) {
     const frames = Math.round(value);
     const stepFrames =
@@ -2069,6 +2076,16 @@
                 {t('analysis.detection.bsgBatStep.restartNote')}
               </p>
             </div>
+            <NumberField
+              label={t('analysis.detection.bsgBatBackgroundMax.label')}
+              value={bsgBat.backgroundMax ?? BSG_BAT_DEFAULT_BACKGROUND_MAX}
+              onUpdate={updateBsgBatBackgroundMax}
+              min={0}
+              max={1}
+              step={BSG_BAT_BACKGROUND_MAX_STEP}
+              disabled={store.isLoading || store.isSaving}
+              helpText={t('analysis.detection.bsgBatBackgroundMax.helpText')}
+            />
           </div>
         {/if}
 

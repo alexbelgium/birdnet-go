@@ -1519,6 +1519,11 @@ type BSGBatConfig struct {
 	// uses the default of 250. The bat false positive filter count follows it as
 	// ceil(6 / step seconds * level fraction). A change restarts audio capture.
 	StepFrames int `yaml:"stepframes" json:"stepFrames"`
+	// BackgroundMax rejects a window whose Background score (sigmoid of the
+	// Background logit) exceeds it: the window yields no detections. 0 disables
+	// the gate; otherwise 0 to 1. Read per prediction, so changes apply without a
+	// restart.
+	BackgroundMax float64 `yaml:"backgroundmax" json:"backgroundMax"`
 }
 
 // BSGConfig holds configuration for BSG regional bird models.

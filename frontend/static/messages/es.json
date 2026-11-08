@@ -5617,6 +5617,10 @@
         "readoutWithFilter": "Paso: {seconds} s entre ventanas de análisis. Nivel del filtro de murciélagos {level}: se requieren {count} confirmaciones.",
         "restartNote": "Al guardar un nuevo paso se reinicia la captura de audio."
       },
+      "bsgBatBackgroundMax": {
+        "label": "Límite de rechazo de fondo BSG-BAT",
+        "helpText": "Descarta todas las detecciones de una ventana cuando su puntuación de fondo supera este límite. 0 = desactivado. Predeterminado 0,9. Valores más bajos eliminan más ruido, pero pueden perder algunas llamadas reales."
+      },
       "batFilter": {
         "label": "Filtro de paso alto para murciélagos",
         "helpText": "Filtra las frecuencias audibles antes del análisis de murciélagos para reducir falsos positivos por cantos de aves y ruido ambiental."

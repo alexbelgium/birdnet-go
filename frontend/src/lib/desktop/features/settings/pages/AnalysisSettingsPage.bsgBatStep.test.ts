@@ -366,6 +366,29 @@ describe('AnalysisSettingsPage BSG-BAT analysis step', () => {
     });
   });
 
+  describe('background rejection limit', () => {
+    it('shows the default 0.9 when unset and saves an edit to the bsgbat section only', async () => {
+      seedSection('bsgbat', { threshold: 0.5, stepFrames: 250 });
+      await renderWithCatalog(BSG_BAT_CATALOG_ID);
+
+      const input = screen.getByRole('spinbutton', {
+        name: /analysis\.detection\.bsgBatBackgroundMax\.label/,
+      });
+      expect(input).toHaveValue(0.9);
+      expect(input).toHaveAttribute('min', '0');
+      expect(input).toHaveAttribute('max', '1');
+
+      const user = userEvent.setup();
+      await user.clear(input);
+      await user.type(input, '0.95');
+      await user.tab();
+
+      expect(settingsActions.updateSection).toHaveBeenLastCalledWith('bsgbat', {
+        backgroundMax: 0.95,
+      });
+    });
+  });
+
   describe('change tracking', () => {
     /** The global unsaved-changes test: the raw form copy against the raw saved copy. */
     function formDiffersFromSaved(): boolean {

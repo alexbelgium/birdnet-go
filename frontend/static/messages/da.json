@@ -5617,6 +5617,10 @@
         "readoutWithFilter": "Trin: {seconds} s mellem analysevinduerne. Flagermusfilter, niveau {level}: {count} bekræftelser kræves.",
         "restartNote": "Når et nyt trin gemmes, genstartes lydoptagelsen."
       },
+      "bsgBatBackgroundMax": {
+        "label": "BSG-BAT grænse for baggrundsafvisning",
+        "helpText": "Afvis alle registreringer i et vindue, når dets baggrundsscore overstiger denne grænse. 0 = fra. Standard 0,9. Lavere værdier fjerner mere støj, men kan miste nogle ægte kald."
+      },
       "batFilter": {
         "label": "Flagermus-audio-højpasfilter",
         "helpText": "Filtrerer hørbare frekvenser fra før flagermusanalysen for at reducere falske positiver fra fuglesang og omgivende støj."

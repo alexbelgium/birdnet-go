@@ -4118,6 +4118,8 @@ export type TranslationKey =
   | 'analysis.detection.bsgBatStep.readout' // params: seconds
   | 'analysis.detection.bsgBatStep.readoutWithFilter' // params: seconds, level, count
   | 'analysis.detection.bsgBatStep.restartNote'
+  | 'analysis.detection.bsgBatBackgroundMax.label'
+  | 'analysis.detection.bsgBatBackgroundMax.helpText'
   | 'analysis.detection.batFilter.label'
   | 'analysis.detection.batFilter.helpText'
   | 'analysis.detection.batNighttimeOnly.label'

@@ -5617,6 +5617,10 @@
         "readoutWithFilter": "Solis: {seconds} s starp analīzes logiem. Sikspārņu filtra līmenis {level}: nepieciešami {count} apstiprinājumi.",
         "restartNote": "Jauna soļa saglabāšana restartē audio uztveršanu."
       },
+      "bsgBatBackgroundMax": {
+        "label": "BSG-BAT fona noraidīšanas robeža",
+        "helpText": "Noraidīt visas šī loga atklāšanas, ja tā fona rādītājs pārsniedz šo robežu. 0 = izslēgts. Noklusējums 0,9. Zemākas vērtības noņem vairāk trokšņa, bet var zaudēt dažus īstus saucienus."
+      },
       "batFilter": {
         "label": "Sikspārņu audio augstfrekvences filtrs",
         "helpText": "Filtrē cilvēka dzirdei pieejamās frekvences pirms sikspārņu analīzes, lai samazinātu viltus pozitīvos rezultātus no putnu dziesmām un apkārtējā trokšņa."
