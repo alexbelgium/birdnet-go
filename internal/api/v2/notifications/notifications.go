@@ -35,6 +35,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/tphakala/birdnet-go/internal/api/auth"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
+	"github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/httpclient"
 	"github.com/tphakala/birdnet-go/internal/logger"
@@ -1049,6 +1050,7 @@ func (c *Handler) CreateTestNewSpeciesNotification(ctx echo.Context) error {
 
 	// Create test template data with realistic values
 	testTemplateData := &notification.TemplateData{
+		ModelName:          detection.DefaultModelName + " " + detection.DefaultModelVersion,
 		CommonName:         "Test Bird Species",
 		ScientificName:     "Testus birdicus",
 		Confidence:         testNotificationConfidence,

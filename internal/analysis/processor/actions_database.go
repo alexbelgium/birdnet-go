@@ -524,6 +524,7 @@ func (a *DatabaseAction) populateEventMetadata(detectionEvent events.DetectionEv
 		return
 	}
 
+	metadata[events.DetectionMetadataModelName] = strings.TrimSpace(a.Result.Model.Name + " " + a.Result.Model.Version)
 	metadata["note_id"] = a.Result.ID
 	metadata["latitude"] = a.Result.Latitude
 	metadata["longitude"] = a.Result.Longitude

@@ -274,6 +274,7 @@ func EnrichWithTemplateData(notification *Notification, data *TemplateData) *Not
 		WithMetadata("bg_detection_path", data.DetectionPath).
 		WithMetadata("bg_detection_url", data.DetectionURL).
 		WithMetadata("bg_image_url", data.ImageURL).
+		WithMetadata("bg_model_name", data.ModelName).
 		WithMetadata("bg_confidence_percent", data.ConfidencePercent).
 		WithMetadata("bg_detection_time", data.DetectionTime).
 		WithMetadata("bg_detection_date", data.DetectionDate).

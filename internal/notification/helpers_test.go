@@ -221,6 +221,7 @@ func TestEnrichWithTemplateData(t *testing.T) {
 			name:         "nil notification",
 			notification: nil,
 			templateData: &TemplateData{
+				ModelName:         "BirdNET 2.4",
 				DetectionID:       "1",
 				DetectionPath:     "/ui/detections/1",
 				DetectionURL:      "http://localhost/detections/1",
@@ -244,6 +245,7 @@ func TestEnrichWithTemplateData(t *testing.T) {
 			name:         "valid notification and template data",
 			notification: NewNotification(TypeDetection, PriorityHigh, "Test", "Test Message"),
 			templateData: &TemplateData{
+				ModelName:         "BirdNET 2.4",
 				DetectionID:       "1",
 				DetectionPath:     "/ui/detections/1",
 				DetectionURL:      "http://localhost/detections/1",
@@ -278,6 +280,7 @@ func TestEnrichWithTemplateData(t *testing.T) {
 					"bg_detection_path":     tt.templateData.DetectionPath,
 					"bg_detection_url":      tt.templateData.DetectionURL,
 					"bg_image_url":          tt.templateData.ImageURL,
+					"bg_model_name":         tt.templateData.ModelName,
 					"bg_confidence_percent": tt.templateData.ConfidencePercent,
 					"bg_detection_time":     tt.templateData.DetectionTime,
 					"bg_detection_date":     tt.templateData.DetectionDate,

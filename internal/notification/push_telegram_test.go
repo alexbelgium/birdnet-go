@@ -148,6 +148,24 @@ func TestBuildTelegramCaption(t *testing.T) {
 		assert.Contains(t, caption, "http://localhost:8080/ui/detections/42")
 	})
 
+	t.Run("model before link with escaped HTML and byte budget", func(t *testing.T) {
+		t.Parallel()
+		const modelName = "Perch <V2> & custom"
+		const suffix = "\nModel: Perch &lt;V2&gt; &amp; custom\n<a href=\"https://example.com/detection/42\">View detection</a>"
+		for _, message := range []string{"Detected", "", strings.Repeat("鳥", telegramCaptionMaxBytes)} {
+			n := &Notification{
+				Title: "Bird", Message: message,
+				Metadata: map[string]any{"bg_model_name": modelName, "bg_detection_url": "https://example.com/detection/42"},
+			}
+			caption := buildTelegramCaption(n, "")
+			assert.True(t, strings.HasSuffix(caption, suffix), "caption: %s", caption)
+			assert.LessOrEqual(t, len(caption), telegramCaptionMaxBytes)
+			if message == "Detected" {
+				assert.Equal(t, "<b>Bird</b>\nDetected"+suffix, caption)
+			}
+		}
+	})
+
 	t.Run("no detection URL", func(t *testing.T) {
 		t.Parallel()
 		n := &Notification{
@@ -158,6 +176,7 @@ func TestBuildTelegramCaption(t *testing.T) {
 		caption := buildTelegramCaption(n, "")
 		assert.Contains(t, caption, "<b>Test Bird</b>")
 		assert.NotContains(t, caption, "View detection")
+		assert.NotContains(t, caption, "Model:")
 	})
 
 	t.Run("html special chars escaped", func(t *testing.T) {

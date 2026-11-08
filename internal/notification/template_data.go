@@ -12,6 +12,8 @@ import (
 )
 
 type TemplateData struct {
+	// ModelName is the display name of the model that produced the detection.
+	ModelName          string
 	CommonName         string
 	ScientificName     string
 	Confidence         float64
@@ -31,6 +33,7 @@ type TemplateData struct {
 
 func NewTemplateData(event events.DetectionEvent, baseURL string, timeAs24h bool) *TemplateData {
 	metadata := event.GetMetadata()
+	modelName, _ := metadata[events.DetectionMetadataModelName].(string)
 
 	// Get begin_time from metadata
 	var beginTime time.Time
@@ -99,6 +102,7 @@ func NewTemplateData(event events.DetectionEvent, baseURL string, timeAs24h bool
 	}
 
 	return &TemplateData{
+		ModelName:          modelName,
 		CommonName:         event.GetSpeciesName(),
 		ScientificName:     scientificName,
 		Confidence:         confidence,
