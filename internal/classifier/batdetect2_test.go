@@ -2,6 +2,7 @@ package classifier
 
 import (
 	"encoding/binary"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,4 +138,31 @@ func TestBatDetect2NMSAcrossSeam(t *testing.T) {
 	assert.Equal(t, []batDetect2Peak{{.9, 0, 256}}, batDetect2NMS(det, 1, width, width))
 	det[255] = .9
 	assert.Len(t, batDetect2NMS(det, 1, width, width), 2)
+}
+
+// Stationary noise must not light up the first columns of a window: live analysis
+// restarts PCEN on every window, so a zero-state smoother would put a full-band
+// onset at x=0 of every window and the detector fires on it.
+func TestBatDetect2PCENNoWindowStartTransient(t *testing.T) {
+	dsp, err := newBatDetect2DSP(batDetect2ExpectedSamples)
+	require.NoError(t, err)
+	rng := rand.New(rand.NewPCG(3, 4))
+	samples := make([]float32, batDetect2ExpectedSamples)
+	for i := range samples {
+		samples[i] = float32(rng.NormFloat64() * 0.001)
+	}
+	image, width := dsp.preprocess(samples)
+	column := func(x int) float64 {
+		var sum float64
+		for y := range batDetect2ImageHeight {
+			sum += float64(image[y*width+x])
+		}
+		return sum / batDetect2ImageHeight
+	}
+	var total float64
+	for x := range width {
+		total += column(x)
+	}
+	mean := total / float64(width)
+	assert.Less(t, column(0), 3*mean+0.05, "first column %.3f vs window mean %.3f", column(0), mean)
 }

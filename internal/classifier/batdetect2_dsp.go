@@ -81,7 +81,13 @@ func (d *batDetect2DSP) preprocess(samples []float32) (image []float32, width in
 	biasPower := math.Pow(batDetect2PCENBias, batDetect2PCENPower)
 	for y := range srcH {
 		row := d.spec[y*frames : (y+1)*frames]
-		m := 0.0
+		// Start the PCEN smoother at the row's first frame (its steady state) rather
+		// than at zero. A zero state makes the first frames of every window a
+		// full-band onset, and live analysis cuts the stream into independent 0.56 s
+		// windows, so on stationary noise the detector fires at x=0 of each window.
+		// The warm start removes that artefact and, on calls mixed into real noise,
+		// raises rather than lowers the scores of calls at the window start.
+		m := row[0] * scale
 		mean := 0.0
 		for x, v := range row {
 			v *= scale
