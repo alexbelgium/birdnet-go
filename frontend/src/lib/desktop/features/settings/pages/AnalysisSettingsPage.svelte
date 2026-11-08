@@ -451,6 +451,9 @@
         ? (store.originalData.bsgbat?.threshold ?? BSG_BAT_DEFAULT_THRESHOLD)
         : undefined,
       bsgBatStepFrames: hasBsgBatModel ? savedBsgBatStepFrames : undefined,
+      bsgBatBackgroundMax: hasBsgBatModel
+        ? (store.originalData.bsgbat?.backgroundMax ?? BSG_BAT_DEFAULT_BACKGROUND_MAX)
+        : undefined,
     },
     current: {
       batThreshold: bat.threshold,
@@ -459,6 +462,9 @@
       batFPFilter: batFPLevel,
       bsgBatThreshold: hasBsgBatModel ? bsgBat.threshold : undefined,
       bsgBatStepFrames: hasBsgBatModel ? bsgBatStepFrames : undefined,
+      bsgBatBackgroundMax: hasBsgBatModel
+        ? (bsgBat.backgroundMax ?? BSG_BAT_DEFAULT_BACKGROUND_MAX)
+        : undefined,
     },
   });
   const rangeFilterChange: ChangePair = $derived({

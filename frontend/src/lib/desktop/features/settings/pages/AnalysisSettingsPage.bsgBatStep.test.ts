@@ -427,6 +427,20 @@ describe('AnalysisSettingsPage BSG-BAT analysis step', () => {
       expect(descriptionOf(settingsTab())).toBe('');
     });
 
+    it('lights the Settings tab for a Background limit edit and clears it when set back', async () => {
+      seedSection('bsgbat', { threshold: 0.5, stepFrames: 250, backgroundMax: 0.9 });
+      await renderWithCatalog(BSG_BAT_CATALOG_ID);
+      expect(descriptionOf(settingsTab())).toBe('');
+
+      editSection('bsgbat', { backgroundMax: 0.8 });
+      await tick();
+      expect(descriptionOf(settingsTab())).toBe(HAS_CHANGES);
+
+      editSection('bsgbat', { backgroundMax: 0.9 });
+      await tick();
+      expect(descriptionOf(settingsTab())).toBe('');
+    });
+
     it('treats a saved 0 and the default of 250 as the same step', async () => {
       seedSection('bsgbat', { threshold: 0.5, stepFrames: 0 });
       await renderWithCatalog(BSG_BAT_CATALOG_ID);
