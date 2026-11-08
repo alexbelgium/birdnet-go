@@ -2,7 +2,6 @@ package classifier
 
 import (
 	"encoding/binary"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,29 +139,14 @@ func TestBatDetect2NMSAcrossSeam(t *testing.T) {
 	assert.Len(t, batDetect2NMS(det, 1, width, width), 2)
 }
 
-// Stationary noise must not light up the first columns of a window: live analysis
-// restarts PCEN on every window, so a zero-state smoother would put a full-band
-// onset at x=0 of every window and the detector fires on it.
-func TestBatDetect2PCENNoWindowStartTransient(t *testing.T) {
-	dsp, err := newBatDetect2DSP(batDetect2ExpectedSamples)
-	require.NoError(t, err)
-	rng := rand.New(rand.NewPCG(3, 4))
-	samples := make([]float32, batDetect2ExpectedSamples)
-	for i := range samples {
-		samples[i] = float32(rng.NormFloat64() * 0.001)
-	}
-	image, width := dsp.preprocess(samples)
-	column := func(x int) float64 {
-		var sum float64
-		for y := range batDetect2ImageHeight {
-			sum += float64(image[y*width+x])
-		}
-		return sum / batDetect2ImageHeight
-	}
-	var total float64
-	for x := range width {
-		total += column(x)
-	}
-	mean := total / float64(width)
-	assert.Less(t, column(0), 3*mean+0.05, "first column %.3f vs window mean %.3f", column(0), mean)
+func TestBatDetect2TileStarts(t *testing.T) {
+	assert.Equal(t, []int{0}, batDetect2TileStarts(200))
+	assert.Equal(t, []int{0}, batDetect2TileStarts(256))
+	assert.Equal(t, []int{0, 128, 256, 307}, batDetect2TileStarts(563))
+	assert.Equal(t, []int{0, 128, 256}, batDetect2TileStarts(512))
+}
+
+func TestBatDetect2DropEdgePeaks(t *testing.T) {
+	peaks := []batDetect2Peak{{0.9, 5, 0}, {0.8, 5, 15}, {0.7, 5, 16}, {0.6, 5, 546}, {0.5, 5, 547}, {0.4, 5, 562}}
+	assert.Equal(t, []batDetect2Peak{{0.7, 5, 16}, {0.6, 5, 546}}, batDetect2DropEdgePeaks(peaks, 563))
 }
