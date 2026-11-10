@@ -226,6 +226,23 @@ func normalizeName(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// lookupForward tries the caller's exact scientific name first, then its
+// unambiguous OpenFauna canonical alias. The callback controls where names come
+// from (an in-memory map or a streamed Lookup), while this helper keeps alias
+// precedence identical across all forward lookup paths.
+func lookupForward(scientific string, lookup func(string) (string, bool)) (string, bool) {
+	exact := normalizeName(scientific)
+	if name, ok := lookup(exact); ok && name != "" {
+		return name, true
+	}
+	canonical := normalizeName(CanonicalName(scientific))
+	if canonical == exact {
+		return "", false
+	}
+	name, ok := lookup(canonical)
+	return name, ok && name != ""
+}
+
 // BuildIndex streams the embedded dataset once and returns a sparse Index holding
 // only the requested scientific names, with common names for the given locale and
 // metadata for those species. Names not present in the dataset are simply absent.
@@ -233,18 +250,23 @@ func normalizeName(s string) string {
 //
 // Memory: only matching rows are retained; the full dataset is never held at once.
 func BuildIndex(scientificNames []string, locale string) (*Index, error) {
-	want := make(map[string]struct{}, len(scientificNames))
+	want := make(map[string]struct{}, len(scientificNames)*2)
+	requested := make(map[string]struct{}, len(scientificNames))
 	for _, n := range scientificNames {
-		want[normalizeName(n)] = struct{}{}
+		exact := normalizeName(n)
+		requested[exact] = struct{}{}
+		want[exact] = struct{}{}
+		want[normalizeName(CanonicalName(n))] = struct{}{}
 	}
 	ix := &Index{
 		locale: locale,
-		names:  make(map[string]string, len(want)),
-		meta:   make(map[string]Meta, len(want)),
+		names:  make(map[string]string, len(requested)),
+		meta:   make(map[string]Meta, len(requested)),
 	}
-	if len(want) == 0 {
+	if len(requested) == 0 {
 		return ix, nil
 	}
+	translations := make(map[string]string, len(want))
 
 	if err := streamTranslations(func(sci, loc, common string) error {
 		if loc != locale {
@@ -252,7 +274,7 @@ func BuildIndex(scientificNames []string, locale string) (*Index, error) {
 		}
 		key := normalizeName(sci)
 		if _, ok := want[key]; ok {
-			ix.names[key] = common
+			translations[key] = common
 		}
 		return nil
 	}); err != nil {
@@ -263,10 +285,11 @@ func BuildIndex(scientificNames []string, locale string) (*Index, error) {
 		return nil, err
 	}
 
+	metadata := make(map[string]Meta, len(want))
 	if err := streamMetadata(func(sci string, m Meta) error {
 		key := normalizeName(sci)
 		if _, ok := want[key]; ok {
-			ix.meta[key] = m
+			metadata[key] = m
 		}
 		return nil
 	}); err != nil {
@@ -276,11 +299,28 @@ func BuildIndex(scientificNames []string, locale string) (*Index, error) {
 		)
 		return nil, err
 	}
+	for scientific := range requested {
+		if name, ok := lookupForward(scientific, func(key string) (string, bool) {
+			name, found := translations[key]
+			return name, found
+		}); ok {
+			ix.names[scientific] = name
+		}
+		exact := scientific
+		canonical := normalizeName(CanonicalName(scientific))
+		if m, ok := metadata[exact]; ok {
+			ix.meta[scientific] = m
+		} else if canonical != exact {
+			if m, ok := metadata[canonical]; ok {
+				ix.meta[scientific] = m
+			}
+		}
+	}
 
 	GetLogger().Info("built openfauna species index",
 		logger.String("locale", locale),
 		logger.String("data_version", DataVersion()),
-		logger.Int("requested", len(want)),
+		logger.Int("requested", len(requested)),
 		logger.Int("resolved_names", len(ix.names)),
 		logger.Int("with_metadata", len(ix.meta)),
 	)
@@ -512,12 +552,15 @@ func LookupCommonNames(scientificNames []string, bngLocale string) map[string]st
 // shared with (*Resolver).ResolveLocalizedBatch which holds an effective locale.
 func lookupCommonNamesEffective(scientificNames []string, eff string) map[string]string {
 	inputs := make(map[string][]string) // normalized sci -> original inputs
+	want := make(map[string]struct{})
 	for _, in := range scientificNames {
 		norm := normalizeName(in)
 		if norm == "" {
 			continue
 		}
 		inputs[norm] = append(inputs[norm], in)
+		want[norm] = struct{}{}
+		want[normalizeName(CanonicalName(in))] = struct{}{}
 	}
 	if len(inputs) == 0 {
 		return map[string]string{}
@@ -527,7 +570,7 @@ func lookupCommonNamesEffective(scientificNames []string, eff string) map[string
 	inEnglish := make(map[string]string) // normalized sci -> common (English fallback)
 	if err := streamTranslations(func(sci, loc, common string) error {
 		norm := normalizeName(sci)
-		if _, want := inputs[norm]; !want {
+		if _, wanted := want[norm]; !wanted {
 			return nil
 		}
 		if common == "" {
@@ -555,11 +598,17 @@ func lookupCommonNamesEffective(scientificNames []string, eff string) map[string
 
 	out := make(map[string]string, len(inputs))
 	for norm, origins := range inputs {
-		name := inLocale[norm]
-		if name == "" {
-			name = inEnglish[norm]
+		name, ok := lookupForward(norm, func(key string) (string, bool) {
+			value, found := inLocale[key]
+			return value, found
+		})
+		if !ok {
+			name, ok = lookupForward(norm, func(key string) (string, bool) {
+				value, found := inEnglish[key]
+				return value, found
+			})
 		}
-		if name == "" {
+		if !ok {
 			continue
 		}
 		for _, in := range origins {
