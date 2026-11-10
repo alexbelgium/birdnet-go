@@ -286,6 +286,10 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.daylightfilter.enabled` | boolean | true to enable daylight filter |
 | `realtime.daylightfilter.offset` | integer | hours to adjust daylight window; positive = shrink (lenient), negative = expand (strict) |
 | `realtime.daylightfilter.species` | string[] | species, families, orders, or genera to filter during daylight |
+| `realtime.firstdailyconsensus.enabled` | boolean | true to require a second bird model to confirm a species' first detection each day |
+| `realtime.firstdailyconsensus.whitelist` | string[] | bird species exempt from the first-daily consensus rule, by common or scientific name |
+| `realtime.firstdailyconsensus.batenabled` | boolean | true to require a second bat model to confirm a species' first detection each day |
+| `realtime.firstdailyconsensus.batwhitelist` | string[] | bat species exempt from the first-daily consensus rule, by common or scientific name |
 | `realtime.modelconsensus.allspecies` | boolean | true to require consensus for every species; takes precedence over listedspecies |
 | `realtime.modelconsensus.listedspecies` | boolean | true to require consensus for the species in species |
 | `realtime.modelconsensus.species` | string[] | species that need consensus when listedspecies is on; scientific names keep working after a locale change |
