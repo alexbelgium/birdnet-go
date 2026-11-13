@@ -62,6 +62,11 @@ const (
 	minHour = 0
 	// maxHour is the maximum valid hour value (11 PM).
 	maxHour = 23
+	// saveDetectionTimeout bounds a whole Save: the model, label and source
+	// lookups and the transaction. Callers detach the save from their own
+	// cancellation, so without it a database that stops answering would hold the
+	// lookups, and the detection's save slot, until TCP gives up.
+	saveDetectionTimeout = 60 * time.Second
 	// saveTransactionTimeout is the maximum duration for a Save transaction.
 	// This prevents indefinite lock holding during slow I/O operations.
 	saveTransactionTimeout = 30 * time.Second
@@ -865,6 +870,9 @@ func retrySafe(err error) error {
 // COMMIT was sent wraps datastore.ErrDetectionSaveRetrySafe; a failure of COMMIT
 // itself does not, because the server may have applied it.
 func (ds *Datastore) saveDetection(ctx context.Context, w *detectionWrite) (uint, error) {
+	ctx, cancelSave := context.WithTimeout(ctx, saveDetectionTimeout)
+	defer cancelSave()
+
 	// Use the model info from the write if available, otherwise fall back to the default.
 	// This allows multi-model detections to be attributed to the correct model.
 	modelInfo := w.model

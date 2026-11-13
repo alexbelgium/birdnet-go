@@ -1776,9 +1776,14 @@ func (r *detectionRepository) GetNewSpecies(ctx context.Context, start, end int6
 	// Use raw SQL to properly group by scientific_name across all label IDs
 	// This finds species where their lifetime first detection is within the requested range.
 	//
-	// Approach: Use a derived table to compute lifetime first detection per species,
-	// The species_first derived table finds each species' lifetime first detection with one
-	// grouped scan; the outer join then picks the representative detection at that timestamp.
+	// Approach: the species_first derived table computes each species' lifetime first and last
+	// detection; the outer join then picks the representative detection at that first timestamp.
+	// species_first only aggregates candidates: species with a detection inside the window and
+	// none before it (false positives excluded on both sides). That is exactly what its HAVING
+	// keeps, so the result is unchanged, but the grouped scan no longer reads every detection
+	// ever stored: the candidates come from an index range on detected_at, the prior history
+	// check is one (label_id, detected_at) index probe per candidate species, and only the few
+	// species left are aggregated over their full history.
 	// count_in_period is a correlated subquery evaluated once per reported species (a handful per
 	// window, each an index lookup by label and time), joined on scientific_name so it counts the
 	// species across every model's label, not just the label of the first detection.
@@ -1812,6 +1817,26 @@ func (r *detectionRepository) GetNewSpecies(ctx context.Context, start, end int6
 			JOIN %s l2 ON l2.id = d2.label_id
 			LEFT JOIN %s dr2 ON dr2.detection_id = d2.id
 			WHERE (dr2.verified IS NULL OR dr2.verified != ?)
+				AND l2.scientific_name IN (
+					SELECT candidates.scientific_name
+					FROM (
+						SELECT DISTINCT l4.scientific_name
+						FROM %s d4
+						JOIN %s l4 ON l4.id = d4.label_id
+						LEFT JOIN %s dr4 ON dr4.detection_id = d4.id
+						WHERE d4.detected_at >= ? AND d4.detected_at < ?
+							AND (dr4.verified IS NULL OR dr4.verified != ?)
+					) candidates
+					WHERE NOT EXISTS (
+						SELECT 1
+						FROM %s d5
+						JOIN %s l5 ON l5.id = d5.label_id
+						LEFT JOIN %s dr5 ON dr5.detection_id = d5.id
+						WHERE l5.scientific_name = candidates.scientific_name
+							AND d5.detected_at < ?
+							AND (dr5.verified IS NULL OR dr5.verified != ?)
+					)
+				)
 			GROUP BY l2.scientific_name
 			HAVING MIN(d2.detected_at) >= ? AND MIN(d2.detected_at) < ?
 		) species_first
@@ -1822,11 +1847,22 @@ func (r *detectionRepository) GetNewSpecies(ctx context.Context, start, end int6
 		GROUP BY species_first.scientific_name, species_first.lifetime_first, species_first.lifetime_last, species_first.first_begin_time
 		ORDER BY first_detected DESC
 		LIMIT ? OFFSET ?
-	`, r.tableName(), r.labelsTable(), r.reviewsTable(), r.tableName(), r.labelsTable(), r.reviewsTable(), r.labelsTable(), r.tableName(), r.reviewsTable())
+	`, r.tableName(), r.labelsTable(), r.reviewsTable(), // count_in_period
+		r.tableName(), r.labelsTable(), r.reviewsTable(), // species_first
+		r.tableName(), r.labelsTable(), r.reviewsTable(), // candidates
+		r.tableName(), r.labelsTable(), r.reviewsTable(), // prior history
+		r.labelsTable(), r.tableName(), r.reviewsTable()) // representative detection
 
 	// Placeholders in text order: the count_in_period subquery in the SELECT list, then the
-	// species_first derived table, then the outer WHERE, then LIMIT/OFFSET.
-	err := r.db.WithContext(ctx).Raw(rawSQL, start, end, fpFilter, noBeginTimeMillis, fpFilter, start, end, fpFilter, limit, offset).Scan(&results).Error
+	// species_first derived table (its select list, its WHERE, the candidates and prior history
+	// subqueries, its HAVING), then the outer WHERE, then LIMIT/OFFSET.
+	err := r.db.WithContext(ctx).Raw(rawSQL,
+		start, end, fpFilter,
+		noBeginTimeMillis, fpFilter,
+		start, end, fpFilter,
+		start, fpFilter,
+		start, end,
+		fpFilter, limit, offset).Scan(&results).Error
 	return results, err
 }
 
