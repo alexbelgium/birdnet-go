@@ -26,14 +26,14 @@
 
   const logger = loggers.ui;
 
+  // Match the canonical navigation path with a regex, as App.svelte does.
+  // Quoted /ui/... strings can be rewritten by an ingress proxy sub_filter,
+  // while navigation.currentPath always excludes the proxy prefix.
+  const SYSTEM_SUBPAGE_RE = /^\/ui\/system\/(database|terminal|inference|import-export)$/;
+
   // Determine which subpage to show
   let currentSubpage = $derived.by(() => {
-    const path = navigation.currentPath;
-    if (path === '/ui/system/database') return 'database';
-    if (path === '/ui/system/terminal') return 'terminal';
-    if (path === '/ui/system/inference') return 'inference';
-    if (path === '/ui/system/import-export') return 'import-export';
-    return 'overview';
+    return SYSTEM_SUBPAGE_RE.exec(navigation.currentPath)?.[1] ?? 'overview';
   });
 
   // Maximum number of sparkline data points to retain
