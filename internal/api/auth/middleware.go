@@ -267,7 +267,7 @@ func requestBasePath(c echo.Context) string {
 		return bp
 	}
 	// Fallback: check proxy headers directly (for cases where context middleware hasn't run).
-	if p := strings.TrimRight(c.Request().Header.Get("X-Ingress-Path"), "/"); isSafePathPrefix(p) {
+	if p := strings.TrimRight(c.Request().Header.Get(headerIngressPath), "/"); isSafePathPrefix(p) {
 		return p
 	}
 	if p := strings.TrimRight(c.Request().Header.Get("X-Forwarded-Prefix"), "/"); isSafePathPrefix(p) {
