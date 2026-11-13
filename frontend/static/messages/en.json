@@ -5601,6 +5601,10 @@
         "readoutWithFilter": "Step: {seconds} s between analysis windows. Bat filter level {level}: {count} confirmations required.",
         "restartNote": "Saving a new step restarts audio capture."
       },
+      "bsgBatBackgroundMax": {
+        "label": "BSG-BAT Background Rejection Limit",
+        "helpText": "Reject all detections in a window when its Background score exceeds this limit. 0 = off. Default 0.9. Lower values remove more noise but may lose some real calls."
+      },
       "batFilter": {
         "label": "Bat Audio High-Pass Filter",
         "helpText": "Filters out human-audible frequencies before bat analysis to reduce false positives from bird songs and ambient noise."

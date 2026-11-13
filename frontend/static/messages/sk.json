@@ -5601,6 +5601,10 @@
         "readoutWithFilter": "Krok: {seconds} s medzi analyzovanými oknami. Úroveň filtra netopierov {level}: požadované potvrdenia: {count}.",
         "restartNote": "Uloženie nového kroku reštartuje zachytávanie zvuku."
       },
+      "bsgBatBackgroundMax": {
+        "label": "Limit odmietnutia pozadia BSG-BAT",
+        "helpText": "Zahodiť všetky detekcie v okne, keď jeho skóre pozadia prekročí tento limit. 0 = vypnuté. Predvolene 0,9. Nižšie hodnoty odstránia viac šumu, ale môžu stratiť niektoré skutočné zvuky."
+      },
       "batFilter": {
         "label": "Horný priepustný filter pre netopiere",
         "helpText": "Filtruje počuteľné frekvencie pred analýzou netopierov na zníženie falošných detekcií spôsobených spevom vtákov a okolitým hlukom."

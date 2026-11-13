@@ -5601,6 +5601,10 @@
         "readoutWithFilter": "Passo: {seconds} s tra le finestre di analisi. Livello del filtro pipistrelli {level}: {count} conferme richieste.",
         "restartNote": "Il salvataggio di un nuovo passo riavvia l'acquisizione audio."
       },
+      "bsgBatBackgroundMax": {
+        "label": "Limite di rifiuto del fondo BSG-BAT",
+        "helpText": "Scarta tutti i rilevamenti di una finestra quando il suo punteggio di fondo supera questo limite. 0 = disattivato. Predefinito 0,9. Valori più bassi rimuovono più rumore, ma possono perdere alcuni richiami reali."
+      },
       "batFilter": {
         "label": "Filtro passa-alto audio pipistrelli",
         "helpText": "Filtra le frequenze udibili dall'uomo prima dell'analisi dei pipistrelli per ridurre i falsi positivi causati dal canto degli uccelli e dal rumore ambientale."

@@ -5601,6 +5601,10 @@
         "readoutWithFilter": "Schritt: {seconds} s zwischen den Analysefenstern. Fledermausfilter-Stufe {level}: {count} Bestätigungen erforderlich.",
         "restartNote": "Das Speichern eines neuen Schritts startet die Audioaufnahme neu."
       },
+      "bsgBatBackgroundMax": {
+        "label": "BSG-BAT: Grenzwert für Hintergrundunterdrückung",
+        "helpText": "Alle Erkennungen in einem Zeitfenster verwerfen, wenn dessen Hintergrundwert diesen Grenzwert überschreitet. 0 = aus. Standard 0,9. Niedrigere Werte entfernen mehr Rauschen, können aber einige echte Rufe verlieren."
+      },
       "batFilter": {
         "label": "Fledermaus-Audio-Hochpassfilter",
         "helpText": "Filtert hörbare Frequenzen vor der Fledermausanalyse heraus, um Fehlerkennungen durch Vogelgesang und Umgebungsgeräusche zu reduzieren."

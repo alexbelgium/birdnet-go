@@ -162,6 +162,8 @@ export interface BSGBatSettings {
    * are in fpCadence.ts (BSG_BAT_STEP_*), which mirrors the backend constants.
    */
   stepFrames?: number;
+  /** Background rejection limit, 0 to 1; 0 disables it. Backend default 0.9 (DefaultBSGBatBackgroundMax). */
+  backgroundMax?: number;
 }
 
 // Secondary acoustic classifiers (Perch v2, BirdNET v3.0). Their detections

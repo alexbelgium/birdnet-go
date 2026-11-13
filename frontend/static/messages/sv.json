@@ -5601,6 +5601,10 @@
         "readoutWithFilter": "Steg: {seconds} s mellan analysfönstren. Fladdermusfilter, nivå {level}: {count} bekräftelser krävs.",
         "restartNote": "När ett nytt steg sparas startas ljudinspelningen om."
       },
+      "bsgBatBackgroundMax": {
+        "label": "BSG-BAT gräns för bakgrundsavvisning",
+        "helpText": "Avvisa alla detekteringar i ett fönster när dess bakgrundspoäng överstiger denna gräns. 0 = av. Standard 0,9. Lägre värden tar bort mer brus, men kan förlora några riktiga läten."
+      },
       "batFilter": {
         "label": "Högpassfilter för fladdermöss-ljud",
         "helpText": "Filtrerar bort hörbara frekvenser före fladdermöss-analysen för att minska falska positiva resultat från fågelsång och omgivningsljud."

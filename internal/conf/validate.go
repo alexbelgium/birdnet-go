@@ -428,5 +428,16 @@ func validateModelThresholds(settings *Settings) error {
 				Build()
 		}
 	}
+	return validateBSGBatBackgroundMax(settings.BSGBat.BackgroundMax)
+}
+
+// validateBSGBatBackgroundMax checks bsgbat.backgroundmax is 0 (gate off) to 1.
+func validateBSGBatBackgroundMax(v float64) error {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
+		return errors.Newf("bsgbat.backgroundmax must be between 0 and 1, got %v", v).
+			Category(errors.CategoryValidation).
+			Context("validation_type", "bsgbat-background-max").
+			Build()
+	}
 	return nil
 }

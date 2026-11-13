@@ -115,10 +115,11 @@ func TestBSGBat_Predict(t *testing.T) {
 
 	t.Run("drops background, applies sigmoid and no threshold", func(t *testing.T) {
 		t.Parallel()
-		// Background (index 1) has the largest logit and must not surface. The
+		// Background (index 1) has the largest logit (kept under the default background
+		// gate limit) and must not surface. The
 		// second species has a logit far below any threshold and is still returned,
 		// because the processor, not Predict, applies the threshold.
-		inst, model := newFakeBSGBat(t, []float32{1, 9, -6})
+		inst, model := newFakeBSGBat(t, []float32{1, 2, -6})
 		results, err := inst.Predict(t.Context(), [][]float32{window})
 		require.NoError(t, err)
 		require.Len(t, results, 2)

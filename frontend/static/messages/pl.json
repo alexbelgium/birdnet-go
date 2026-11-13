@@ -5601,6 +5601,10 @@
         "readoutWithFilter": "Krok: {seconds} s między oknami analizy. Poziom filtra nietoperzy {level}: wymagane potwierdzenia: {count}.",
         "restartNote": "Zapisanie nowego kroku restartuje przechwytywanie dźwięku."
       },
+      "bsgBatBackgroundMax": {
+        "label": "Limit odrzucania tła BSG-BAT",
+        "helpText": "Odrzuć wszystkie wykrycia w oknie, gdy jego wynik tła przekracza ten limit. 0 = wyłączone. Domyślnie 0,9. Niższe wartości usuwają więcej szumu, ale mogą gubić część prawdziwych odgłosów."
+      },
       "batFilter": {
         "label": "Filtr górnoprzepustowy dla nietoperzy",
         "helpText": "Filtruje słyszalne częstotliwości przed analizą nietoperzy, aby zmniejszyć fałszywe wykrycia spowodowane śpiewem ptaków i hałasem otoczenia."

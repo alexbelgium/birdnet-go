@@ -5601,6 +5601,10 @@
         "readoutWithFilter": "Stap: {seconds} s tussen de analysevensters. Vleermuisfilterniveau {level}: {count} bevestigingen vereist.",
         "restartNote": "Het opslaan van een nieuwe stap start de audio-opname opnieuw."
       },
+      "bsgBatBackgroundMax": {
+        "label": "BSG-BAT limiet voor achtergrondafwijzing",
+        "helpText": "Verwerp alle detecties in een venster wanneer de achtergrondscore deze limiet overschrijdt. 0 = uit. Standaard 0,9. Lagere waarden verwijderen meer ruis, maar kunnen enkele echte roepen kwijtraken."
+      },
       "batFilter": {
         "label": "Vleermuis audio hoogdoorlaatfilter",
         "helpText": "Filtert hoorbare frequenties vóór de vleermuisanalyse om valse detecties door vogelzang en omgevingsgeluid te verminderen."

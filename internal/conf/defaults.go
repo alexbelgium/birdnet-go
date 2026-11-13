@@ -116,6 +116,7 @@ func setDefaultConfig() {
 	// ultrasonic filter come from the bat section above.
 	viper.SetDefault("bsgbat.threshold", 0.5)
 	viper.SetDefault("bsgbat.stepframes", DefaultBSGBatStepFrames)
+	viper.SetDefault("bsgbat.backgroundmax", DefaultBSGBatBackgroundMax)
 
 	// Global model enablement (BirdNET only by default)
 	viper.SetDefault("models.enabled", []string{"birdnet"})
