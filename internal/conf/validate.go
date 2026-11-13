@@ -67,13 +67,14 @@ var (
 // ValidAudioModels contains recognized AI model identifiers.
 // Empty string is also valid (defaults to birdnet).
 var ValidAudioModels = map[string]bool{
-	"":               true, // default (birdnet)
-	ModelIDBirdNET:   true,
-	ModelIDBirdNETV3: true,
-	ModelIDPerchV2:   true,
-	ModelIDBat:       true,
-	ModelIDBSG:       true,
-	ModelIDBSGBat:    true,
+	"":                  true, // default (birdnet)
+	ModelIDBirdNET:      true,
+	ModelIDBirdNETV3:    true,
+	ModelIDPerchV2:      true,
+	ModelIDBat:          true,
+	ModelIDBSG:          true,
+	ModelIDBSGBat:       true,
+	ModelIDBSGBatLegacy: true,
 	// Catalog-style aliases (see consts.go) so a source model set to the
 	// hyphenated catalog ID validates rather than failing startup.
 	ModelIDBirdNETCatalog:   true,
@@ -415,6 +416,7 @@ func validateModelThresholds(settings *Settings) error {
 		value float64
 	}{
 		{"bat.threshold", settings.Bat.Threshold},
+		{"forkmodels.batdetect2.threshold", settings.ForkModels.BatDetect2.Threshold},
 		{"perch.threshold", settings.Perch.Threshold},
 		{"birdnetv3.threshold", settings.BirdNETV3.Threshold},
 		{"bsgbat.threshold", settings.BSGBat.Threshold},

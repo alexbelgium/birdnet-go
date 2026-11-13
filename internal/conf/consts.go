@@ -11,6 +11,8 @@ const (
 	ModelIDBat       = "bat"
 	ModelIDBSG       = "bsg"
 	ModelIDBSGBat    = "bsg_bat"
+	// ModelIDBSGBatLegacy is the pre-upstream fork spelling retained for config migration.
+	ModelIDBSGBatLegacy = "bsgbat"
 
 	// Catalog-style model IDs mirror the hyphenated model *catalog* entry IDs
 	// (classifier/model_catalog.go) and are accepted as aliases for the canonical

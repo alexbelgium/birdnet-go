@@ -77,6 +77,7 @@
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import ModelVariantPicker from '$lib/desktop/features/settings/components/ModelVariantPicker.svelte';
   import ModelRegionSelector from '$lib/desktop/features/settings/components/ModelRegionSelector.svelte';
+  import BatModelThresholds from './BatModelThresholds_fork.svelte';
   import NumberField from '$lib/desktop/components/forms/NumberField.svelte';
   import FalsePositiveFilterControl, {
     type FilterLevel,
@@ -440,6 +441,7 @@
   });
   const batChange: ChangePair = $derived({
     original: {
+      forkModels: store.originalData.forkModels,
       batThreshold: store.originalData.bat?.threshold,
       batNighttimeOnly: store.originalData.bat?.nighttimeOnly,
       batUltrasonicFilter: store.originalData.bat?.ultrasonicFilter?.enabled ?? true,
@@ -451,6 +453,7 @@
       bsgBatStepFrames: hasBsgBatModel ? savedBsgBatStepFrames : undefined,
     },
     current: {
+      forkModels: store.formData.forkModels,
       batThreshold: bat.threshold,
       batNighttimeOnly: bat.nighttimeOnly,
       batUltrasonicFilter: bat.ultrasonicFilter?.enabled ?? true,
@@ -2040,6 +2043,10 @@
               describedByExtra={BSG_BAT_WARNING_ID}
             />
           {/if}
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+          <BatModelThresholds />
         </div>
 
         {#if hasBsgBatModel}

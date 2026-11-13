@@ -600,6 +600,8 @@ func familyFields(s *conf.Settings, registryID string) (familyFieldSet, bool) {
 			Threshold:  &s.Bat.Threshold,
 			Locale:     &s.Bat.Locale,
 		}, true
+	case RegistryIDBatDetect2:
+		return familyFieldSet{Model: &s.ForkModels.BatDetect2.ModelPath, Labels: &s.ForkModels.BatDetect2.LabelPath, Threshold: &s.Bat.Threshold, Locale: &s.Bat.Locale}, true
 	default:
 		return familyFieldSet{}, false
 	}

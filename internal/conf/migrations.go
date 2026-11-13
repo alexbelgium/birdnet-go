@@ -27,6 +27,30 @@ func persistMigration(settings *Settings, label string) {
 	}
 }
 
+// MigrateLegacyForkBSGBat moves the fork's pre-upstream BSG-BAT settings into
+// the native upstream section. Explicit native values win when both forms are
+// present. The old backgroundmax field has no upstream equivalent and is left
+// behind when the migrated settings are persisted.
+func (s *Settings) MigrateLegacyForkBSGBat() bool {
+	migrated := false
+	if !viper.IsSet("bsgbat.modelpath") && viper.IsSet("forkmodels.bsgbat.modelpath") {
+		s.BSGBat.ModelPath = viper.GetString("forkmodels.bsgbat.modelpath")
+		migrated = true
+	}
+	if !viper.IsSet("bsgbat.labelpath") && viper.IsSet("forkmodels.bsgbat.labelpath") {
+		s.BSGBat.LabelPath = viper.GetString("forkmodels.bsgbat.labelpath")
+		migrated = true
+	}
+	if !viper.IsSet("bsgbat.threshold") && viper.IsSet("forkmodels.bsgbat.threshold") {
+		s.BSGBat.Threshold = viper.GetFloat64("forkmodels.bsgbat.threshold")
+		if s.BSGBat.Threshold == 0 {
+			s.BSGBat.Threshold = s.Bat.Threshold
+		}
+		migrated = true
+	}
+	return migrated
+}
+
 // migrateEmptyLossyExportBitrate fills the documented default into a lossy export
 // whose bitrate was left blank on disk (an explicit `bitrate: ""` from a save made
 // while export was disabled, or a hand-edit), returning whether it changed anything.
@@ -542,6 +566,7 @@ var catalogModelIDAliases = map[string]string{
 	ModelIDPerchV2Catalog:   ModelIDPerchV2,
 	ModelIDBSGCatalog:       ModelIDBSG,
 	ModelIDBSGBatCatalog:    ModelIDBSGBat,
+	ModelIDBSGBatLegacy:     ModelIDBSGBat,
 }
 
 // canonicalizeModelID returns the canonical config ID for a catalog-style

@@ -302,7 +302,7 @@ var ModelRegistry = map[string]ModelInfo{
 		},
 		// The catalog form mirrors the catalog entry ID; the underscore primary
 		// stays canonical for write-back.
-		ConfigAliases: []string{conf.ModelIDBSGBat, conf.ModelIDBSGBatCatalog},
+		ConfigAliases: []string{conf.ModelIDBSGBat, conf.ModelIDBSGBatCatalog, conf.ModelIDBSGBatLegacy},
 		NumSpecies:    bsgBatNumSpecies,
 		// BSG-BAT classifies its own label space; no range-filter auto-selection.
 		rangeFilterCompat: rangeFilterCompatNone,
