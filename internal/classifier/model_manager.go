@@ -367,7 +367,7 @@ func (mm *ModelManager) ScanInstalled() {
 // auto-enabled every installed gallery model on each scan; models.enabled is now authoritative,
 // so this reproduces that behavior a single time, gated on the AutoEnableMigrated companion
 // marker. It is NOT gated on ConfigVersion: this runs after conf.Load(), where Part A
-// (MigrateModelsEnabledAuthoritative) already stamped ConfigVersion=2, so a ConfigVersion gate
+// (MigrateModelsEnabledAuthoritative) already raised ConfigVersion past 1, so a ConfigVersion gate
 // would be a permanent no-op. After the capture, a downloaded-but-disabled model is no longer
 // auto-loaded (loadInstalledModels honors the enabled set). On a read-only config the marker
 // never persists, so the capture re-runs in memory each start, reproducing the pre-Phase-4
@@ -545,6 +545,8 @@ type familyFieldSet struct {
 // into s so callers can read or write a family's fields without naming the conf
 // struct; a nil pointer means the family has no such field and it must NOT be
 // written. ok is false for a nil settings pointer or an unknown registry ID.
+// The BirdNET v3.0 preview and BirdNET+ V3.0 map to separate settings sections, so
+// one family never rewrites the other's paths or threshold.
 //
 // The primary's Labels pointer is &s.BirdNET.LabelPath like every other family:
 // the "a variant swap must not disturb a user-configured label path" rule lives in
@@ -580,11 +582,25 @@ func familyFields(s *conf.Settings, registryID string) (familyFieldSet, bool) {
 			OverrideThreshold: &s.BirdNETV3.OverrideThreshold,
 			Locale:            &s.BirdNETV3.Locale,
 		}, true
+	case RegistryIDBirdNETPlusV3:
+		return familyFieldSet{
+			Model:             &s.BirdNETPlus.ModelPath,
+			Labels:            &s.BirdNETPlus.LabelPath,
+			Threshold:         &s.BirdNETPlus.Threshold,
+			OverrideThreshold: &s.BirdNETPlus.OverrideThreshold,
+			Locale:            &s.BirdNETPlus.Locale,
+		}, true
 	case RegistryIDBSG:
 		return familyFieldSet{
 			Model:  &s.BSG.ModelPath,
 			Labels: &s.BSG.LabelPath,
 			Locale: &s.BSG.Locale,
+		}, true
+	case RegistryIDBSGBat:
+		return familyFieldSet{
+			Model:     &s.BSGBat.ModelPath,
+			Labels:    &s.BSGBat.LabelPath,
+			Threshold: &s.BSGBat.Threshold,
 		}, true
 	case RegistryIDBat:
 		return familyFieldSet{
@@ -1558,7 +1574,7 @@ func (mm *ModelManager) replaceVariant(ctx context.Context, entry *CatalogEntry,
 		if reloadErr := mm.orchestrator.ReloadForVariantSwap(entry.RegistryID); reloadErr != nil {
 			return mm.rollbackVariant(log, entry, old, newVariantID, reloadErr, false, progress)
 		}
-		// A target that brings a geomodel (inline for Perch and BirdNET v3.0, or through a
+		// A target that brings a geomodel (inline for Perch, BirdNET v3.0 and BirdNET+ V3.0, or through a
 		// dependency) had its gallery-managed range filter re-pointed in step 3 (a custom one
 		// is kept); reload it, exactly as hotLoadAfterInstall does after an install. The v2.4
 		// anchor reloads its own range filter inside reloadEntry; that is separate from the

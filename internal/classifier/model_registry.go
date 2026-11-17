@@ -11,6 +11,7 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/inference/bsgbat"
 )
 
 // modelIDCustom is the sentinel ID used for user-supplied model files that
@@ -21,7 +22,9 @@ const modelIDCustom = "Custom"
 const (
 	ModelNameBirdNETv24 = "BirdNET v2.4"
 	ModelNameBirdNETv30 = "BirdNET v3.0"
-	ModelNamePerchV2    = "Google Perch v2"
+	// ModelNameBirdNETPlusV30 is the display name of the BirdNET+ V3.0 family.
+	ModelNameBirdNETPlusV30 = "BirdNET+ V3.0"
+	ModelNamePerchV2        = "Google Perch v2"
 )
 
 // Inference backend identifiers.
@@ -57,9 +60,30 @@ const (
 // Registry ID constants for model identification across packages.
 const (
 	RegistryIDBirdNETV3 = "BirdNET_V3.0"
-	RegistryIDBSG       = "BSG"
-	RegistryIDBat       = "Bat"
-	RegistryIDPerchV2   = "Perch_V2"
+	// RegistryIDBirdNETPlusV3 identifies BirdNET+ V3.0, a family separate from the
+	// BirdNET v3.0 preview: own settings section, own detection model row.
+	RegistryIDBirdNETPlusV3 = "BirdNET_Plus_V3.0"
+	RegistryIDBSG           = "BSG"
+	RegistryIDBat           = "Bat"
+	RegistryIDPerchV2       = "Perch_V2"
+	RegistryIDBSGBat        = "BSG_BAT"
+)
+
+// BSG-BAT registry parameters. The window geometry is fixed by the model's
+// front end (internal/inference/bsgbat).
+const (
+	// DetectionVersionBSGBat is the BSG-BAT model version stored with detections.
+	DetectionVersionBSGBat = "0.21"
+	// bsgBatNumSpecies is the number of species the model classifies, without its
+	// Background class.
+	bsgBatNumSpecies = 21
+	// bsgBatMinRawSampleRate is the lowest source capture rate in Hz BSG-BAT
+	// accepts. A source below the model's 384 kHz is upsampled, so its mel bands
+	// above the source Nyquist are empty; the model reads 9 to 150 kHz, so a 192 kHz
+	// capture leaves the bands above 96 kHz empty.
+	bsgBatMinRawSampleRate = 192000
+	// bsgBatClipLength is the duration of the BSG-BAT window at its sample rate.
+	bsgBatClipLength = time.Duration(bsgbat.ClipSamples) * time.Second / bsgbat.SampleRate
 )
 
 // defaultBirdNETClassifierARM64Arch is the GOARCH for which container images
@@ -108,7 +132,7 @@ const DetectionNamePerch = "Perch"
 type rangeFilterCompat uint8
 
 const (
-	rangeFilterCompatNone     rangeFilterCompat = iota // Bat, BSG, Custom, unknown
+	rangeFilterCompatNone     rangeFilterCompat = iota // Bat, BSG-BAT, BSG, Custom, unknown
 	rangeFilterCompatMDataV24                          // v2.4 MData filter (TFLite or strict ONNX) over the v2.4 label set
 	rangeFilterCompatGeomodel                          // mapped geomodel v3 remaps onto the classifier's labels
 )
@@ -160,7 +184,7 @@ type ModelInfo struct {
 	// The zero value means it participates in no range-filter auto-selection.
 	rangeFilterCompat rangeFilterCompat
 	// scheduleGated marks a model that runs only inside a schedule (today the bat
-	// model's nighttime scheduler). Such a model is never a default analysis target
+	// models' nighttime scheduler). Such a model is never a default analysis target
 	// (DefaultTargets) and is inactive outside its schedule (IsModelActive,
 	// ModelScheduleStatus), all read through isScheduleGated. Zero value: not gated.
 	scheduleGated bool
@@ -225,6 +249,24 @@ var ModelRegistry = map[string]ModelInfo{
 		rangeFilterCompat: rangeFilterCompatGeomodel,
 		taxonGroup:        TaxonGroupBird,
 	},
+	RegistryIDBirdNETPlusV3: {
+		ID:               RegistryIDBirdNETPlusV3,
+		Name:             ModelNameBirdNETPlusV30,
+		Backend:          BackendONNX,
+		DetectionName:    detection.ModelNameBirdNETPlus,
+		DetectionVersion: "3.0",
+		Description:      "BirdNET+ V3.0 model (32kHz, 5s clips, embeddings)", // NumSpecies omitted: determined at runtime from label file
+		Spec:             ModelSpec{SampleRate: 32000, ClipLength: 5 * time.Second},
+		// Catalog form mirrors the catalog entry ID; the underscore primary stays
+		// canonical for write-back. See BirdNET v2.4 entry above.
+		ConfigAliases: []string{conf.ModelIDBirdNETPlusV3, conf.ModelIDBirdNETPlusV3Catalog},
+		SupportedLocales: []string{"af", "ar", "bg", "ca", "cs", "da", "de", "el", "en-uk", "en-us", "es",
+			"et", "fi", "fr", "he", "hr", "hu", "id", "is", "it", "ja", "ko", "lt", "lv", "ml", "nl",
+			"no", "pl", "pt", "pt-br", "pt-pt", "ro", "ru", "sk", "sl", "sr", "sv", "th", "tr", "uk", "zh"},
+		DefaultLocale:     "en-uk",
+		rangeFilterCompat: rangeFilterCompatGeomodel,
+		taxonGroup:        TaxonGroupBird,
+	},
 	RegistryIDPerchV2: {
 		ID:               RegistryIDPerchV2,
 		Name:             ModelNamePerchV2,
@@ -258,6 +300,36 @@ var ModelRegistry = map[string]ModelInfo{
 		// Bat runs only inside the nighttime scheduler, so it is never a default
 		// analysis target and is paused outside its schedule. Read by isScheduleGated
 		// (IsModelActive, ModelScheduleStatus, DefaultTargets).
+		scheduleGated: true,
+		taxonGroup:    TaxonGroupBat,
+	},
+	RegistryIDBSGBat: {
+		ID:               RegistryIDBSGBat,
+		Name:             "BSG-BAT",
+		Backend:          BackendONNX,
+		DetectionName:    detection.ModelNameBSGBat,
+		DetectionVersion: DetectionVersionBSGBat,
+		Description:      "European bat species classifier for 384 kHz ultrasonic audio (21 species)",
+		// The window is not a whole number of seconds, so it is expressed in samples
+		// at the effective rate, with a fixed step (the default here; ConfiguredSpec
+		// applies the bsgbat.stepframes setting) and no zero-headed windows.
+		Spec: ModelSpec{
+			SampleRate:              bsgbat.SampleRate,
+			RawSampleRate:           bsgbat.SampleRate,
+			ClipSamples:             bsgbat.ClipSamples,
+			StepSamples:             conf.DefaultBSGBatStepFrames * bsgbat.HopSize,
+			ClipLength:              bsgBatClipLength,
+			MinRawSampleRate:        bsgBatMinRawSampleRate,
+			RecommendedSampleRate:   bsgbat.SampleRate,
+			RequireContiguousWindow: true,
+		},
+		// The catalog form mirrors the catalog entry ID; the underscore primary
+		// stays canonical for write-back.
+		ConfigAliases: []string{conf.ModelIDBSGBat, conf.ModelIDBSGBatCatalog},
+		NumSpecies:    bsgBatNumSpecies,
+		// BSG-BAT classifies its own label space; no range-filter auto-selection.
+		rangeFilterCompat: rangeFilterCompatNone,
+		// Like Bat, it runs only inside the nighttime scheduler.
 		scheduleGated: true,
 		taxonGroup:    TaxonGroupBat,
 	},
@@ -438,7 +510,9 @@ func ConfigAliasForRegistry(registryID string) string {
 	return info.ConfigAliases[0]
 }
 
-// GetModelSpec returns the ModelSpec for a registry ID.
+// GetModelSpec returns the ModelSpec for a registry ID. StepSamples there is the
+// registry default; a reader of the analysis step uses RegistrySpec, which
+// applies the settings.
 func GetModelSpec(registryID string) (ModelSpec, bool) {
 	info, ok := ModelRegistry[registryID]
 	if !ok {
@@ -473,10 +547,14 @@ var filenamePatterns = map[string]string{
 	"birdnet-v30":            RegistryIDBirdNETV3,
 	"birdnet_v3.0":           RegistryIDBirdNETV3,
 	"birdnet-v3.0":           RegistryIDBirdNETV3,
+	"birdnet_plus_v3.0":      RegistryIDBirdNETPlusV3,
+	"birdnet-plus-v3.0":      RegistryIDBirdNETPlusV3,
 	"perch_v2":               RegistryIDPerchV2,
 	"perch-v2":               RegistryIDPerchV2,
 	"bsg_finland":            RegistryIDBSG,
 	"bsg-finland":            RegistryIDBSG,
+	"bsgbat":                 RegistryIDBSGBat,
+	"bsg-bat":                RegistryIDBSGBat,
 }
 
 // DetermineModelInfo identifies the model type from a file path or model identifier.
@@ -596,8 +674,8 @@ func DetectionModelInfoForID(modelID string) detection.ModelInfo {
 // ParticipatesInRangeFilter reports whether detections from the model with the
 // given registry ID should be gated by the geographic range filter. Registry
 // models participate when their label space is range-filter compatible
-// (rangeFilterCompat != rangeFilterCompatNone): BirdNET v2.4 (MData), BirdNET v3.0
-// and Perch (mapped geomodel). Bat and BSG classify their own label spaces and do
+// (rangeFilterCompat != rangeFilterCompatNone): BirdNET v2.4 (MData), BirdNET v3.0,
+// BirdNET+ V3.0 and Perch (mapped geomodel). Bat, BSG-BAT and BSG classify their own label spaces and do
 // not participate.
 //
 // An ID absent from the registry (a custom or otherwise unknown classifier) does
