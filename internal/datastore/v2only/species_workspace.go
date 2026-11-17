@@ -12,6 +12,7 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
+	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	"github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"gorm.io/gorm"
@@ -32,12 +33,12 @@ func wsError(err error, action string) error {
 
 // speciesLabelIDs returns every label ID of a species: exact name, or a legacy
 // concatenated label whose scientific part equals the name (see
-// scientificNameLikeEscaper for why '!' is the escape character).
+// repository.LabelMatchForScientificName).
 func (ds *Datastore) speciesLabelIDs(db *gorm.DB, scientificName string) ([]uint, error) {
 	var ids []uint
+	match, args := repository.LabelMatchForScientificName(scientificName)
 	err := db.Table(ds.manager.TablePrefix()+"labels").
-		Where("scientific_name = ? OR scientific_name LIKE ? ESCAPE '!'",
-			scientificName, scientificNameLikeEscaper.Replace(scientificName)+`!_%`).
+		Where(match, args...).
 		Pluck("id", &ids).Error
 	return ids, err
 }
