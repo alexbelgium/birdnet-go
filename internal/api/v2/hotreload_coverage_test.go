@@ -98,15 +98,29 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"Perch.OverrideThreshold": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// --- BirdNET v3.0 ---
-	"BirdNETV3":                   {categories: []hotReloadCategory{hotReloadRestart}},
-	"BirdNETV3.Threshold":         {categories: []hotReloadCategory{hotReloadFresh}},
-	"BirdNETV3.OverrideThreshold": {categories: []hotReloadCategory{hotReloadFresh}},
+	"BirdNETV3":                     {categories: []hotReloadCategory{hotReloadRestart}},
+	"BirdNETV3.Threshold":           {categories: []hotReloadCategory{hotReloadFresh}},
+	"BirdNETV3.OverrideThreshold":   {categories: []hotReloadCategory{hotReloadFresh}},
+	"BirdNETPlus":                   {categories: []hotReloadCategory{hotReloadRestart}},
+	"BirdNETPlus.Threshold":         {categories: []hotReloadCategory{hotReloadFresh}},
+	"BirdNETPlus.OverrideThreshold": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// --- Bat ---
 	"Bat": {categories: []hotReloadCategory{hotReloadFresh}},
 	// The bat base threshold is read live per detection like the other model bases,
 	// so a change takes effect at the next detection with no recalc action.
 	"Bat.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
+
+	// --- BSG-BAT ---
+	// Parent is restart like Perch: model and label path changes reload the model.
+	// The threshold is read live by the processor per detection
+	// (modelGlobalConfidenceThreshold), so it hot-reloads with no action.
+	"BSGBat":           {categories: []hotReloadCategory{hotReloadRestart}},
+	"BSGBat.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
+	// The analysis step sizes every BSG-BAT analysis buffer, so a change reallocates
+	// them via a full audio-capture restart (restart_audio_capture; bsgBatStepChanged
+	// in the detector table). It never reloads the model.
+	"BSGBat.StepFrames": {categories: []hotReloadCategory{hotReloadFresh}, action: "restart_audio_capture"},
 
 	// --- BSG ---
 	"BSG": {categories: []hotReloadCategory{hotReloadRestart}},
@@ -276,6 +290,8 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	"WebServer.EnableTerminal": {categories: []hotReloadCategory{hotReloadNotify}},
 
 	// --- Security ---
+	// OAuth provider registration is applied directly by handleSettingsChanges
+	// (security.ReloadOAuthProviders), not through a control channel action.
 	"Security": {categories: []hotReloadCategory{hotReloadFresh}},
 
 	// --- Sentry ---

@@ -4,6 +4,7 @@
 package processor
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -419,12 +420,15 @@ func (a *DatabaseAction) recordSaveSuccess(ctx context.Context, attempt int) {
 	// Share the database ID with downstream actions (MQTT, SSE) immediately.
 	if a.DetectionCtx != nil {
 		a.DetectionCtx.NoteID.Store(uint64(a.Result.ID))
+		// The clip can be encoded before this row exists; when it was, the marker
+		// is still unwritten and this is the call that writes it.
+		a.DetectionCtx.recordClipDenoise(ctx, a.clipMarks, a.Result.ClipName)
 	}
 
-	// Add an explanatory comment when the ultrasonic validation filter tagged this detection as unlikely.
+	// Add an explanatory comment when a validator tagged this detection as unlikely.
 	if a.Result.Unlikely && a.Result.ID != 0 && a.Repo != nil {
 		locale := a.Settings.Realtime.Dashboard.Locale
-		comment := formatUnlikelyComment(locale, a.Result.UltrasonicCV, a.Result.UltrasonicCVThreshold)
+		comment := formatUnlikelyComment(locale, &a.Result)
 		noteID := strconv.FormatUint(uint64(a.Result.ID), 10)
 		if err := a.Repo.AddComment(ctx, noteID, comment); err != nil {
 			GetLogger().Warn("failed to add unlikely comment to detection",
@@ -807,12 +811,17 @@ func (a *SaveAudioAction) Execute(ctx context.Context, _ any) error {
 
 	exportRate, exportFormat, outputPath := a.resolveExportParams(outputPath)
 
+	// Denoise the captured PCM, after the container and rate are settled and
+	// before any encoder sees it. The clip file is written once, from this PCM.
+	a.applyExportDenoise(ctx, exportRate)
+
 	enc, err := a.encodeClip(ctx, exportRate, exportFormat, outputPath)
 	if err != nil {
 		a.logExportFailure(&enc, exportFormat, exportRate, outputPath, err)
 		return err
 	}
 	a.correctClipSampleRate(ctx, exportRate)
+	a.recordClipDenoised(ctx)
 
 	// Get file size for logging
 	fileInfo, err := os.Stat(outputPath)
@@ -843,9 +852,9 @@ func (a *SaveAudioAction) Execute(ctx context.Context, _ any) error {
 	// back off this line (the audio_export_success case in
 	// internal/api/v2/system/events_aggregation.go). It consumes only this line, so
 	// dropping the field empties every ClipPaths the endpoint returns.
-	// 15 = the 13 unconditional fields below, plus bitrate_kbps on the lossy
+	// 16 = the 14 unconditional fields below, plus bitrate_kbps on the lossy
 	// formats, plus operation.
-	fields := make([]logger.Field, 0, 15)
+	fields := make([]logger.Field, 0, 16)
 	fields = append(fields,
 		logger.String("component", "analysis.processor.actions"),
 		logger.String("detection_id", a.CorrelationID),
@@ -860,6 +869,7 @@ func (a *SaveAudioAction) Execute(ctx context.Context, _ any) error {
 		logger.Int64("duration_ms", clipDurationMs(len(a.pcmData), exportRate)),
 		logger.Int64("measure_ms", enc.MeasureMs),
 		logger.Int64("encode_ms", enc.EncodeMs),
+		logger.String("denoise", cmp.Or(a.denoisePreset, exportDenoiseOff)),
 	)
 	if enc.BitrateKbps > 0 {
 		fields = append(fields, logger.Int("bitrate_kbps", enc.BitrateKbps))
@@ -1133,7 +1143,11 @@ func (a *SaveAudioAction) encodeClip(ctx context.Context, exportRate int, export
 	enc.Normalized = normalized
 
 	encodeStart := time.Now()
-	err = a.runEncoder(ctx, enc.Encoder, exportRate, enc.BitrateKbps, exportFormat, outputPath, gainDB)
+	encode := a.encode
+	if encode == nil {
+		encode = a.runEncoder
+	}
+	err = encode(ctx, enc.Encoder, exportRate, enc.BitrateKbps, exportFormat, outputPath, gainDB)
 	enc.EncodeMs = time.Since(encodeStart).Milliseconds()
 	return enc, err
 }
@@ -1637,6 +1651,23 @@ func (a *SaveAudioAction) correctClipSampleRate(ctx context.Context, exportRate 
 			logger.Error(err),
 			logger.String("operation", "clip_sample_rate_correct"))
 	}
+}
+
+// recordClipDenoised stores on the shared detection context whether the clip just
+// written was denoised, then writes the marker if the detection's row is already
+// saved; otherwise DatabaseAction writes it once the save lands. denoisePreset is
+// set only by a successful denoise, so a skipped, failed or timed-out denoise
+// reads as written as captured. Without a shared context there is no row to mark.
+func (a *SaveAudioAction) recordClipDenoised(ctx context.Context) {
+	if a.DetectionCtx == nil {
+		return
+	}
+	state := clipDenoiseRaw
+	if a.denoisePreset != "" {
+		state = clipDenoiseDenoised
+	}
+	a.DetectionCtx.clipDenoise.Store(state)
+	a.DetectionCtx.recordClipDenoise(ctx, a.clipMarks, a.ClipName)
 }
 
 // resampleExportTo converts the captured PCM from srcRate to dstRate for export,

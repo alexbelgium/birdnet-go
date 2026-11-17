@@ -11,7 +11,8 @@
     dynamic threshold, and advanced options
   - Models tab: Model gallery with Installed and Available tabs
   - Confidence threshold slider for bird detection
-  - Bat detection threshold slider (visible when a bat model is installed)
+  - Bat detection threshold slider (visible when a BattyBirdNET model is installed)
+  - BSG-BAT detection threshold slider (visible when the BSG-BAT model is installed)
   - Locale selector with flag icons for species labels
   - False positive filter with colored level badge
   - Range filter with species count, view/download functionality
@@ -26,11 +27,11 @@
   @component
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { downloadBlob } from '$lib/utils/fileHelpers';
+  import { canReturnFocus, pickOpener } from '$lib/utils/pressedElement';
   import type {
     CatalogEntry,
-    CatalogVariant,
     DownloadProgress,
     InstalledModel,
     ModelRegionsResponse,
@@ -53,17 +54,27 @@
     watchAcousticModels,
   } from '$lib/stores/acousticModels.svelte';
   import {
-    BAT_MODEL_ID,
+    BATTYBIRDNET_STEP_SECONDS,
+    BSG_BAT_STEP_MAX_FRAMES,
+    BSG_BAT_STEP_MIN_FRAMES,
     FILTER_ACTIVE_MIN_LEVEL,
     REFERENCE_WINDOW_SECONDS,
     baseClipMinDetections,
+    bsgBatStepSeconds,
+    hasBirdCadenceModels,
     minDetectionsForStep,
     planLagsSettings,
     previewReadout,
+    resolveBsgBatStepFrames,
     sameOverlap,
     savedReadout,
     type CadenceReadoutRow,
   } from '$lib/desktop/features/settings/utils/fpCadence';
+  import ModelCardGrid from '$lib/desktop/features/settings/components/ModelCardGrid.svelte';
+  import type {
+    ModelCardAction,
+    ModelCardMode,
+  } from '$lib/desktop/features/settings/components/ModelCard.svelte';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
@@ -89,8 +100,11 @@
     dynamicThresholdSettings,
     realtimeSettings,
     batSettings,
+    bsgBatSettings,
     perchSettings,
     birdNetV3Settings,
+    birdNetPlusSettings,
+    type BSGBatSettings,
   } from '$lib/stores/settings';
   import { cn } from '$lib/utils/cn.js';
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
@@ -100,12 +114,11 @@
   import { formatBytes, formatNumber } from '$lib/utils/formatters';
   import {
     pickPreselectedVariant,
-    translateReason,
     normalizeRegionMode,
     DEFAULT_REGION_MODE,
     GLOBAL_REGION_MODE,
     optimizeOffers,
-    variantHardwareLabel,
+    CHANNEL_EXPERIMENTAL,
     CHANNEL_PREVIEW,
     type OptimizeOffer,
   } from '$lib/utils/variantSelection';
@@ -123,23 +136,15 @@
     Shield,
     ShieldAlert,
     Package,
-    BrainCircuit,
     AlertTriangle,
     TriangleAlert,
     Loader2,
     RefreshCw,
-    Radar,
-    Globe,
     XCircle,
     X,
-    Check,
     Sparkles,
     Settings as SettingsIcon,
   } from '@lucide/svelte';
-
-  import logoBirdnet from '$lib/assets/logos/logo-birdnet.png';
-  import logoGoogle from '$lib/assets/logos/logo-google.png';
-  import logoJyu from '$lib/assets/logos/logo-jyu.jpeg';
 
   const logger = loggers.settings;
 
@@ -147,33 +152,32 @@
   // by hand; nothing enforces it, but it is only placeholder text, so drift
   // would be cosmetic.
   const DEFAULT_HUGGINGFACE_ENDPOINT = 'https://huggingface.co';
-
-  const MODEL_LOGOS: Record<string, string> = {
-    birdnet: logoBirdnet,
-    perch: logoGoogle,
-    bsg: logoJyu,
-  };
-
-  function getModelLogo(id: string): string | null {
-    for (const [prefix, logo] of Object.entries(MODEL_LOGOS)) {
-      if (id.startsWith(prefix)) return logo;
-    }
-    return null;
-  }
-
-  // Render an entry-level incompatibility code (e.g. "backend.onnx_unavailable")
-  // through the same i18n reason path the variant picker uses, falling back to a
-  // generic localized line when the code is absent or has no translation, so a
-  // structured code never surfaces to the user as a raw dotted string. The
-  // fallback is cause-neutral on purpose: it is only reached when the code is
-  // missing or unmapped, which is exactly when the specific cause is not known.
-  // Entry-level codes carry no interpolation args (unlike variant reasons), so
-  // undefined args are passed; a future parameterized entry-level code would need
-  // an args field on CatalogEntryResponse.IncompatibleReason and a change here.
-  function entryIncompatibleText(code: string | undefined): string {
-    const fallback = t('analysis.gallery.entryIncompatible');
-    return code ? translateReason(code, undefined, fallback) : fallback;
-  }
+  /** Catalog ID of the BSG-BAT model (the other bat catalog entries are BattyBirdNET models). */
+  const BSG_BAT_CATALOG_ID = 'bsg-bat';
+  /** Catalog ID of the BirdNET+ V3.0 model; the threshold card shows only while it is installed. */
+  const BIRDNET_PLUS_CATALOG_ID = 'birdnet-plus-v3.0';
+  /** Backend default of birdnetplus.threshold, used until the section is loaded. */
+  const BIRDNET_PLUS_DEFAULT_THRESHOLD = 0.5;
+  /** Backend default of bsgbat.threshold, used until the section is loaded. */
+  const BSG_BAT_DEFAULT_THRESHOLD = 0.5;
+  /** Bounds and step of the bat model threshold fields. */
+  const BAT_THRESHOLD_MIN = 0.01;
+  const BAT_THRESHOLD_MAX = 0.99;
+  const BAT_THRESHOLD_STEP = 0.01;
+  /** Frames are whole numbers. */
+  const BSG_BAT_STEP_INCREMENT = 1;
+  /** Decimals of the step shown in seconds (one frame is 2 ms, so 0.01 s is five frames). */
+  const BSG_BAT_STEP_SECONDS_DECIMALS = 2;
+  /**
+   * Subgrid rows for two threshold fields side by side: each field spans four rows (the three
+   * of its form control plus the message row below it) and its form control spans the first
+   * three, so labels, inputs and help texts line up across the fields at their natural heights.
+   */
+  const BAT_THRESHOLD_SHARED_ROWS = [
+    'md:gap-y-1',
+    'md:[&>*]:row-span-4 md:[&>*]:grid md:[&>*]:grid-rows-subgrid',
+    'md:[&>*>.form-control]:row-span-3 md:[&>*>.form-control]:grid md:[&>*>.form-control]:grid-rows-subgrid',
+  ].join(' ');
 
   // ── Page-level tab state ──────────────────────────────────────────────
   type PageTab = 'settings' | 'models';
@@ -214,12 +218,31 @@
   let downloadProgress = $state<DownloadProgress | null>(null);
   let completionTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // The one gallery action running, with the card it runs on. The three ids are never
+  // set together: every assignment sits behind a galleryActionInFlight guard.
+  const activeGalleryAction = $derived.by(
+    (): { entryId: string; action: ModelCardAction } | null => {
+      if (deletingId !== null) return { entryId: deletingId, action: 'remove' };
+      if (reinstallingId !== null) return { entryId: reinstallingId, action: 'reinstall' };
+      if (installingId !== null) return { entryId: installingId, action: 'install' };
+      return null;
+    }
+  );
+
   // One shared "any gallery action in flight" predicate. Install and reinstall
   // share the single downloadProgress state and progressCleanup subscription, so
   // starting a second action while one runs can strand the first's UI state; every
   // action gate uses this rather than an ad-hoc subset of the three ids.
-  const galleryActionInFlight = $derived(
-    installingId !== null || reinstallingId !== null || deletingId !== null
+  const galleryActionInFlight = $derived(activeGalleryAction !== null);
+  // The completion line of a finished install, reinstall or swap, announced by the live region
+  // in the Models tab. That region lives on the page, not on a card, so it still reaches a
+  // screen reader when the user switches gallery tabs and the running card is unmounted.
+  const galleryCompleteText = $derived(
+    downloadProgress?.status === 'complete'
+      ? reinstallingId !== null
+        ? t('analysis.gallery.reinstallComplete')
+        : t('analysis.gallery.progress.complete')
+      : ''
   );
 
   // Shared DOM id for the "actions paused" status line rendered while any gallery
@@ -246,9 +269,18 @@
   const HUGGINGFACE_ENDPOINT_ID = 'huggingface-endpoint';
 
   let licenseModel = $state<CatalogEntry | null>(null);
-  // The variant preselected in the license/install dialog: the server-recommended
-  // one by default, overridable by the user. Empty for flat (variant-less) entries.
-  let selectedVariantId = $state('');
+  // The variant the user picked in the license/install dialog, null until they pick
+  // one. Reset each time the dialog opens.
+  let chosenVariantId = $state<string | null>(null);
+  // The variant the dialog installs: the user's pick, else the smart default (the
+  // server-recommended one, falling back sensibly and skipping other regions'
+  // slices). The default follows activeRegionSlug, so it is recomputed when the
+  // regions load after the dialog opened. Empty for flat (variant-less) entries.
+  const selectedVariantId = $derived.by(
+    () =>
+      chosenVariantId ??
+      (licenseModel ? pickPreselectedVariant(licenseModel, activeRegionSlug) : '')
+  );
   // The download-size row and the install target follow the selected variant when
   // the entry has variants; otherwise they fall back to the whole-entry size.
   const licenseSelectedVariant = $derived(
@@ -257,15 +289,37 @@
   const licenseDownloadSize = $derived(
     licenseSelectedVariant?.sizeBytes ?? licenseModel?.totalSizeBytes ?? 0
   );
-  // Block install when the selected variant cannot run on this host (e.g. every
-  // variant is incompatible, so the preselected one is blocked). The default
-  // path preselects a compatible variant, so this only fires in the all-blocked case.
+  // The notice the license dialog shows for a non-stable release channel
+  const licenseChannelNotice = $derived.by(() => {
+    switch (licenseModel?.channel) {
+      case CHANNEL_PREVIEW:
+        return t('analysis.gallery.preview.dialogNotice', {
+          build: licenseModel.buildLabel ?? licenseModel.version,
+        });
+      case CHANNEL_EXPERIMENTAL:
+        return t('analysis.gallery.experimental.dialogNotice');
+      default:
+        return null;
+    }
+  });
+  // The notice the license dialog shows for a model that a newer catalog entry replaces
+  const licenseSupersededNotice = $derived(
+    licenseModel?.supersededBy
+      ? t('analysis.gallery.superseded.dialogNotice', { name: licenseModel.supersededBy.name })
+      : null
+  );
+  // Block install when the selected variant cannot run on this host. The
+  // preselection can be blocked while another variant would run, for example when
+  // the global build and the host's own slice do not fit but another region's
+  // slice does (pickPreselectedVariant skips other regions' slices).
   const installBlocked = $derived(
     licenseSelectedVariant != null && !licenseSelectedVariant.compatible
   );
   // Links the blocked (aria-disabled) Install button to the visible reason.
   const INSTALL_BLOCKED_HELP_ID = generateId('install-blocked-help');
   const RANGE_DIALOG_TITLE_ID = generateId('range-filter-dialog-title');
+  const BSG_BAT_WARNING_ID = generateId('bsg-bat-warning');
+  const BSG_BAT_STEP_READOUT_ID = generateId('bsg-bat-step-readout');
   let removeConfirmModel = $state<CatalogEntry | null>(null);
 
   // Element bindings should NOT use $state - causes showModal() to fail
@@ -349,12 +403,27 @@
       filterEnabled: false,
       nighttimeOnly: true,
       falsePositiveFilter: { level: 0 },
-      ultrasonicFilter: { enabled: true },
+      ultrasonicFilter: { enabled: true, discardUnlikely: false },
     }
   );
 
-  // Check if a bat model is installed
+  let bsgBat: BSGBatSettings = $derived(
+    $bsgBatSettings ?? { threshold: BSG_BAT_DEFAULT_THRESHOLD }
+  );
+  // The step the form shows: the saved value, or the default for 0 or no value (the API can store
+  // a raw 0, which the backend resolves to the default).
+  const bsgBatStepFrames = $derived(resolveBsgBatStepFrames(bsgBat.stepFrames));
+  const savedBsgBatStepFrames = $derived(
+    resolveBsgBatStepFrames(store.originalData.bsgbat?.stepFrames)
+  );
+
+  // The bat card (schedule, ultrasonic and false positive filters) is shared by every bat model.
+  // Each bat model has its own threshold, shown only while that model is installed.
   const hasBatModel = $derived(catalog.some(e => e.installed && e.category === 'bat'));
+  const hasBsgBatModel = $derived(catalog.some(e => e.installed && e.id === BSG_BAT_CATALOG_ID));
+  const hasBattyBirdNetModel = $derived(
+    catalog.some(e => e.installed && e.category === 'bat' && e.id !== BSG_BAT_CATALOG_ID)
+  );
   const batFPLevel = $derived(bat.falsePositiveFilter?.level ?? 0);
 
   // Secondary acoustic classifiers with a per-model threshold override. These are
@@ -366,6 +435,12 @@
   let birdnetV3 = $derived($birdNetV3Settings ?? { overrideThreshold: false, threshold: 0.5 });
   const hasPerchModel = $derived(installedModels.some(m => m.catalogId.startsWith('perch')));
   const hasBirdNetV3Model = $derived(installedModels.some(m => m.catalogId === 'birdnet-v3.0'));
+  let birdnetPlus = $derived(
+    $birdNetPlusSettings ?? { overrideThreshold: false, threshold: BIRDNET_PLUS_DEFAULT_THRESHOLD }
+  );
+  const hasBirdNetPlusModel = $derived(
+    installedModels.some(m => m.catalogId === BIRDNET_PLUS_CATALOG_ID)
+  );
 
   // ── Change detection ──────────────────────────────────────────────────
   // The saved and the current value of each card, used by the card's unsaved-changes badge
@@ -410,18 +485,33 @@
     },
     current: { override: birdnetV3.overrideThreshold, threshold: birdnetV3.threshold },
   });
+  const birdnetPlusChange: ChangePair = $derived({
+    original: {
+      override: store.originalData.birdnetplus?.overrideThreshold ?? false,
+      threshold: store.originalData.birdnetplus?.threshold ?? BIRDNET_PLUS_DEFAULT_THRESHOLD,
+    },
+    current: { override: birdnetPlus.overrideThreshold, threshold: birdnetPlus.threshold },
+  });
   const batChange: ChangePair = $derived({
     original: {
       batThreshold: store.originalData.bat?.threshold,
       batNighttimeOnly: store.originalData.bat?.nighttimeOnly,
       batUltrasonicFilter: store.originalData.bat?.ultrasonicFilter?.enabled ?? true,
+      batDiscardUnlikely: store.originalData.bat?.ultrasonicFilter?.discardUnlikely ?? false,
       batFPFilter: store.originalData.bat?.falsePositiveFilter?.level ?? 0,
+      bsgBatThreshold: hasBsgBatModel
+        ? (store.originalData.bsgbat?.threshold ?? BSG_BAT_DEFAULT_THRESHOLD)
+        : undefined,
+      bsgBatStepFrames: hasBsgBatModel ? savedBsgBatStepFrames : undefined,
     },
     current: {
       batThreshold: bat.threshold,
       batNighttimeOnly: bat.nighttimeOnly,
       batUltrasonicFilter: bat.ultrasonicFilter?.enabled ?? true,
+      batDiscardUnlikely: bat.ultrasonicFilter?.discardUnlikely ?? false,
       batFPFilter: batFPLevel,
+      bsgBatThreshold: hasBsgBatModel ? bsgBat.threshold : undefined,
+      bsgBatStepFrames: hasBsgBatModel ? bsgBatStepFrames : undefined,
     },
   });
   const rangeFilterChange: ChangePair = $derived({
@@ -453,10 +543,10 @@
     current: { huggingFaceEndpoint: birdnet?.huggingFaceEndpoint ?? '' },
   });
 
-  // A tab shows the change dot when any card badge on it would. The Perch, BirdNET v3.0 and bat
-  // cards count only while they are shown, so the dot and the badges stay in step. For Perch and
-  // BirdNET v3.0 the gate changes nothing today, since the defaults equal the saved-side
-  // fallbacks. For bat it is load-bearing: with no bat section saved, the page's defaults differ
+  // A tab shows the change dot when any card badge on it would. The Perch, BirdNET v3.0, BirdNET+
+  // V3.0 and bat cards count only while they are shown, so the dot and the badges stay in step.
+  // For Perch, BirdNET v3.0 and BirdNET+ V3.0 the gate changes nothing today, since the
+  // defaults equal the saved-side fallbacks. For bat it is load-bearing: with no bat section saved, the page's defaults differ
   // from the saved values and would light the dot for good.
   const settingsTabHasChanges = $derived(
     [
@@ -466,6 +556,7 @@
       advancedChange,
       ...(hasPerchModel ? [perchChange] : []),
       ...(hasBirdNetV3Model ? [birdnetV3Change] : []),
+      ...(hasBirdNetPlusModel ? [birdnetPlusChange] : []),
       ...(hasBatModel ? [batChange] : []),
     ].some(c => hasSettingsChanged(c.original, c.current))
   );
@@ -486,6 +577,7 @@
   // host-recommended variant differs from the installed one and is compatible.
   const offers = $derived(optimizeOffers(catalog));
   const offerByEntry = $derived(new Map(offers.map(o => [o.entry.id, o])));
+  const optimizeEntryIds = $derived(new Set(offers.map(o => o.entry.id)));
 
   // Session-scoped banner dismissal, guarded so a private-window/blocked
   // sessionStorage never throws (see frontend/AGENTS.md).
@@ -583,31 +675,6 @@
     lastInstallingId = current;
   });
 
-  // Choose which variant a card should describe: the installed variant on the
-  // Installed tab, the host-recommended (else default) variant on the Available tab.
-  // Returns null for a flat (variant-less) entry.
-  function displayVariantFor(
-    entry: CatalogEntry,
-    mode: 'available' | 'installed'
-  ): CatalogVariant | null {
-    const variants = entry.variants ?? [];
-    if (variants.length === 0) return null;
-    if (mode === 'installed') {
-      return variants.find(v => v.id === entry.installedVariantId) ?? null;
-    }
-    return (
-      variants.find(v => v.id === entry.recommendedVariantId) ??
-      variants.find(v => v.default) ??
-      null
-    );
-  }
-
-  // The region display for a variant-bearing entry's card: the variant's region
-  // name (localized), or the "Global" label when the variant is global.
-  function displayRegionName(variant: CatalogVariant | null): string {
-    if (!variant?.region) return t('analysis.gallery.regionGlobal');
-    return regionNameMap.get(variant.region) ?? variant.region;
-  }
   const availableWildlife = $derived(
     catalog.filter(e => !e.installed && e.category === 'wildlife')
   );
@@ -832,7 +899,7 @@
   // server or before the audio pipeline has published a plan; the control's
   // description then falls back to the count from the configured overlap.
   const cadence = $derived(analysisCadence());
-  const cadenceHasBirdModels = $derived(cadence?.models.some(m => m.id !== BAT_MODEL_ID) ?? false);
+  const cadenceHasBirdModels = $derived(cadence ? hasBirdCadenceModels(cadence) : false);
   const savedFpLevel = $derived(store.originalData.realtime?.falsePositiveFilter?.level ?? 0);
   const savedOverlap = $derived(store.originalData.birdnet?.overlap ?? 0);
   const formOverlap = $derived(birdnet?.overlap ?? 0);
@@ -916,12 +983,13 @@
 
   // A saved level change that stays on one side of the filter on/off line does
   // not re-plan, so no topology event follows; the per-model counts the server
-  // reports still change. Refetch when the saved level or overlap changes. The
-  // first observation after settings load is skipped (the watch already fetched).
+  // reports still change, as do the BSG-BAT step and its counts, for which the plan broadcast does
+  // not fire either. Refetch when the saved level, overlap or BSG-BAT step changes. The first
+  // observation after settings load is skipped (the watch already fetched).
   let fpSavedKey: string | null = null;
   $effect(() => {
     if (!store.originalData.realtime) return; // settings not loaded yet
-    const key = `${savedFpLevel}:${savedOverlap}`;
+    const key = `${savedFpLevel}:${savedOverlap}:${savedBsgBatStepFrames}`;
     if (fpSavedKey === null) {
       fpSavedKey = key;
       return;
@@ -974,6 +1042,8 @@
 
   let rangeFilterState = $state<{
     speciesCount: number | null;
+    // True once a count request has finished, so a missing count then means it failed
+    countSettled: boolean;
     loading: boolean;
     testing: boolean;
     downloading: boolean;
@@ -982,6 +1052,7 @@
     species: RangeFilterSpecies[];
   }>({
     speciesCount: null,
+    countSettled: false,
     loading: false,
     testing: false,
     downloading: false,
@@ -991,7 +1062,7 @@
   });
 
   // Focus management for modal accessibility
-  let previouslyFocusedElement: HTMLElement | null = null;
+  let previouslyFocusedElement: HTMLElement | SVGElement | null = null;
 
   function getFocusableElements(container: HTMLElement): HTMLElement[] {
     const focusableSelectors = [
@@ -1041,7 +1112,9 @@
     let focusTimer: ReturnType<typeof setTimeout> | undefined;
 
     if (rangeFilterState.showModal) {
-      previouslyFocusedElement = document.activeElement as HTMLElement;
+      // untrack: the dialog element binds after this runs and must not re-run the effect and its cleanup
+      const opener = pickOpener(untrack(() => rangeDialogElement));
+      if (opener !== undefined) previouslyFocusedElement = opener;
 
       focusTimer = setTimeout(() => {
         const modal = rangeDialogElement;
@@ -1059,8 +1132,11 @@
         }
       }, 0);
     } else if (previouslyFocusedElement) {
-      // The button may have been removed while the dialog was open
-      if (previouslyFocusedElement.isConnected) previouslyFocusedElement.focus();
+      // The button may have been removed while the dialog was open, and focus the user moved to
+      // another control stays there; the dialog is already gone from the page here
+      if (previouslyFocusedElement.isConnected && canReturnFocus(undefined)) {
+        previouslyFocusedElement.focus();
+      }
       previouslyFocusedElement = null;
     }
 
@@ -1079,6 +1155,8 @@
   let rangeFilterAbortController: AbortController | null = null;
 
   function debouncedTestRangeFilter() {
+    // A new count is on its way: until it settles, a missing count reads as loading, not failed
+    rangeFilterState.countSettled = false;
     rangeFilterAbortController?.abort();
     rangeFilterAbortController = null;
     clearTimeout(debounceTimer);
@@ -1088,6 +1166,7 @@
   }
 
   async function loadRangeFilterCount() {
+    rangeFilterState.countSettled = false;
     try {
       interface CountResponse {
         count: number;
@@ -1098,6 +1177,7 @@
       logger.error('Failed to load range filter count:', err);
       rangeFilterState.error = t('settings.main.errors.rangeFilterCountFailed');
     }
+    rangeFilterState.countSettled = true;
   }
 
   async function testCurrentRangeFilter() {
@@ -1124,6 +1204,7 @@
       );
 
       rangeFilterState.speciesCount = data.count;
+      rangeFilterState.countSettled = true;
 
       if (rangeFilterState.showModal) {
         rangeFilterState.species = data.species || [];
@@ -1133,12 +1214,38 @@
       logger.error('Failed to test range filter:', err);
       rangeFilterState.error = t('settings.main.errors.rangeFilterTestFailed');
       rangeFilterState.speciesCount = null;
+      rangeFilterState.countSettled = true;
     } finally {
       clearTimeout(loadingDelayTimer);
       rangeFilterState.testing = false;
       rangeFilterAbortController = null;
     }
   }
+
+  // Why the View Species button is blocked, or undefined when it works. The reason is shown next
+  // to the button and the button points at it.
+  let viewSpeciesBlockedReason = $derived.by(() => {
+    // The location reads as unset until the settings arrive
+    if (store.isLoading) return t('settings.loading');
+    if (!birdnet?.locationConfigured) {
+      return t('settings.species.activeSpecies.locationNotConfigured.title');
+    }
+    if (rangeFilterState.loading)
+      return t('settings.main.sections.rangeFilter.modal.loadingSpecies');
+    if (rangeFilterState.testing)
+      return t('settings.main.sections.rangeFilter.speciesCount.loading');
+    if (rangeFilterState.speciesCount === null) {
+      // Loading only while the first count is pending; after that a missing count is a failure
+      return rangeFilterState.countSettled
+        ? t('settings.main.errors.rangeFilterCountFailed')
+        : t('settings.main.sections.rangeFilter.speciesCount.loading');
+    }
+    if (rangeFilterState.speciesCount === 0) {
+      return t('settings.main.sections.rangeFilter.modal.noSpeciesFound');
+    }
+    return undefined;
+  });
+  let viewSpeciesBlocked = $derived(viewSpeciesBlockedReason !== undefined);
 
   async function loadRangeFilterSpecies() {
     if (rangeFilterState.loading || !birdnet?.locationConfigured) return;
@@ -1264,6 +1371,20 @@
     settingsActions.updateSection('bat', { threshold: value });
   }
 
+  function updateBsgBatThreshold(value: number) {
+    settingsActions.updateSection('bsgbat', { threshold: value });
+  }
+
+  // The field clamps to the range; a fractional entry becomes a whole frame. A step equal to the
+  // saved effective one restores the saved raw value (0 or none for the default), so the form
+  // compares equal to the saved settings again and the save bar does not stay active.
+  function updateBsgBatStep(value: number) {
+    const frames = Math.round(value);
+    const stepFrames =
+      frames === savedBsgBatStepFrames ? store.originalData.bsgbat?.stepFrames : frames;
+    settingsActions.updateSection('bsgbat', { stepFrames });
+  }
+
   function updateBatNighttimeOnly(value: boolean) {
     settingsActions.updateSection('bat', { nighttimeOnly: value });
   }
@@ -1271,6 +1392,16 @@
   function updateBatUltrasonicFilter(value: boolean) {
     settingsActions.updateSection('bat', {
       ultrasonicFilter: { ...bat.ultrasonicFilter, enabled: value },
+    });
+  }
+
+  function updateBatDiscardUnlikely(value: boolean) {
+    settingsActions.updateSection('bat', {
+      ultrasonicFilter: {
+        ...bat.ultrasonicFilter,
+        enabled: bat.ultrasonicFilter?.enabled ?? true,
+        discardUnlikely: value,
+      },
     });
   }
 
@@ -1320,9 +1451,9 @@
     },
   ];
 
-  // Bat has only 3 meaningful levels (fixed 50% overlap, 4 detections in window):
-  // Off=bypass (1 det), Moderate=2 det, Strict=3 det.
-  // Lenient(1 det) is functionally identical to Off, so it's excluded.
+  // Bat has only 3 meaningful levels: Off=bypass (1 det), Moderate and Strict. How many
+  // confirmations they need depends on the model's step (BattyBirdNET 1.5 s, BSG-BAT its
+  // configured step). Lenient is functionally identical to Off for BattyBirdNET, so it's excluded.
   const BAT_FP_LEVELS: FilterLevel[] = [
     {
       value: 0,
@@ -1341,14 +1472,25 @@
     },
   ];
 
-  // Bat FP filter calculation helpers.
-  // The bat model uses a fixed 50% overlap (1.5s step for 3s clip),
-  // yielding 4 possible detections in a 6-second reference window.
-  const BAT_MAX_DETECTIONS_IN_WINDOW = 4;
-
-  function calculateBatMinDetections(level: number): number {
-    return minDetectionsForStep(REFERENCE_WINDOW_SECONDS / BAT_MAX_DETECTIONS_IN_WINDOW, level);
+  // Bat FP filter calculation helpers: the same confirmation formula as the backend, applied to
+  // the step each bat model runs at. BattyBirdNET has a fixed 1.5 s step; BSG-BAT uses the step in
+  // the form, so an unsaved step shows its count before saving.
+  function battyBirdNetMinDetections(level: number): number {
+    return minDetectionsForStep(BATTYBIRDNET_STEP_SECONDS, level);
   }
+
+  function bsgBatMinDetections(level: number): number {
+    return minDetectionsForStep(bsgBatStepSeconds(bsgBatStepFrames), level);
+  }
+
+  /** Translation key of a filter level's name (the bird level list holds every level). */
+  function fpLevelNameKey(level: number): string {
+    return BIRD_FP_LEVELS.find(l => l.value === level)?.nameKey ?? '';
+  }
+
+  const bsgBatStepSecondsText = $derived(
+    formatNumber(bsgBatStepSeconds(bsgBatStepFrames), BSG_BAT_STEP_SECONDS_DECIMALS)
+  );
 
   const BAT_FP_DESCRIPTION_KEYS: Record<number, string> = {
     0: 'analysis.detection.batFalsePositiveFilter.levels.off',
@@ -1364,7 +1506,14 @@
     const baseDescription = t(descKey);
     if (level === 0) return baseDescription;
 
-    const minDet = calculateBatMinDetections(level);
+    if (hasBattyBirdNetModel && hasBsgBatModel) {
+      return t('analysis.detection.batFalsePositiveFilter.detectionCountByModel', {
+        batty: battyBirdNetMinDetections(level).toString(),
+        bsgBat: bsgBatMinDetections(level).toString(),
+        description: baseDescription,
+      });
+    }
+    const minDet = hasBsgBatModel ? bsgBatMinDetections(level) : battyBirdNetMinDetections(level);
     return t('analysis.detection.batFalsePositiveFilter.detectionCount', {
       count: minDet.toString(),
       description: baseDescription,
@@ -1407,6 +1556,14 @@
 
   function updateBirdNetV3Threshold(value: number) {
     settingsActions.updateSection('birdnetv3', { threshold: value });
+  }
+
+  function updateBirdNetPlusOverride(value: boolean) {
+    settingsActions.updateSection('birdnetplus', { overrideThreshold: value });
+  }
+
+  function updateBirdNetPlusThreshold(value: number) {
+    settingsActions.updateSection('birdnetplus', { threshold: value });
   }
 
   // ── Gallery tab definitions ───────────────────────────────────────────
@@ -1508,9 +1665,7 @@
 
   function openLicenseDialog(entry: CatalogEntry) {
     licenseModel = entry;
-    // Smart default: preselect the recommended variant (falls back sensibly when
-    // there is no recommendation). Empty string for flat entries.
-    selectedVariantId = pickPreselectedVariant(entry);
+    chosenVariantId = null;
     licenseDialogRef?.showModal();
   }
 
@@ -1681,6 +1836,22 @@
     startReinstall(entry.id, entry.name);
   }
 
+  // A card's action button was used. Install and the Optimize swap both go through the
+  // license dialog, which picks the variant.
+  function handleCardAction(action: ModelCardAction, entry: CatalogEntry) {
+    switch (action) {
+      case 'install':
+        openLicenseDialog(entry);
+        break;
+      case 'reinstall':
+        handleReinstall(entry);
+        break;
+      case 'remove':
+        openRemoveDialog(entry);
+        break;
+    }
+  }
+
   // The reinstall body, extracted so a failed reinstall's Retry can re-run it.
   async function startReinstall(modelId: string, modelName: string) {
     // Defensive boundary: callers already gate on galleryActionInFlight.
@@ -1766,33 +1937,9 @@
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el?.focus();
   }
-
-  /** Compute download percentage for progress bar */
-  function progressPercent(p: DownloadProgress): number {
-    if (p.totalBytes <= 0) return 0;
-    return Math.min(100, Math.round((p.downloadedBytes / p.totalBytes) * 100));
-  }
-
-  /** Human-readable status label */
-  function statusLabel(status: DownloadProgress['status']): string {
-    switch (status) {
-      case 'downloading':
-        return t('analysis.gallery.progress.downloading');
-      case 'verifying':
-        return t('analysis.gallery.progress.verifying');
-      case 'loading':
-        return t('analysis.gallery.progress.loading');
-      case 'complete':
-        return t('analysis.gallery.progress.complete');
-      case 'failed':
-        return t('analysis.gallery.progress.failed');
-      default:
-        return '';
-    }
-  }
 </script>
 
-<!-- ── Secondary-model threshold override section (Perch v2, BirdNET v3.0) ── -->
+<!-- ── Secondary-model threshold override section (Perch v2, BirdNET v3.0, BirdNET+ V3.0) ── -->
 {#snippet secondaryModelThreshold(cfg: SecondaryModelThresholdConfig)}
   <SettingsSection
     title={t(cfg.titleKey)}
@@ -1894,7 +2041,7 @@
 
       {#if falsePositiveFilter.level === 0}
         <SettingsNote>
-          {#snippet icon()}<AlertTriangle class="size-4 text-[var(--color-warning)]" />{/snippet}
+          {#snippet icon()}<AlertTriangle class="size-4 text-[var(--text-warning)]" />{/snippet}
           <span>{t('settings.main.sections.falsePositiveFilter.warningOff')}</span>
         </SettingsNote>
       {:else}
@@ -2088,6 +2235,20 @@
       })}
     {/if}
 
+    <!-- 3b. BirdNET+ V3.0 threshold override (only when the BirdNET+ model is installed) -->
+    {#if hasBirdNetPlusModel}
+      {@render secondaryModelThreshold({
+        titleKey: 'analysis.birdnetplus.title',
+        descKey: 'analysis.birdnetplus.description',
+        thresholdLabelKey: 'analysis.detection.birdnetplusThreshold.label',
+        effectiveThreshold: birdnet?.threshold ?? 0.3,
+        current: birdnetPlus,
+        change: birdnetPlusChange,
+        onOverride: updateBirdNetPlusOverride,
+        onThreshold: updateBirdNetPlusThreshold,
+      })}
+    {/if}
+
     <!-- 4. Bat Detection (only when a bat model is installed) -->
     {#if hasBatModel}
       <SettingsSection
@@ -2097,19 +2258,81 @@
         originalData={batChange.original}
         currentData={batChange.current}
       >
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <NumberField
-            label={t('analysis.detection.batThreshold.label')}
-            value={bat.threshold}
-            onUpdate={updateBatThreshold}
-            min={0.01}
-            max={0.99}
-            step={0.01}
-            disabled={store.isLoading || store.isSaving}
-            helpText={t('analysis.detection.batThreshold.helpText')}
-          />
-          <div></div>
+        <!-- Side by side at md and up, the two fields share the rows of one grid (label, input, help text, message) through subgrid, so a label that wraps in a longer translation keeps both inputs level without reserving height for labels that do not wrap. -->
+        <div
+          class={cn(
+            'grid grid-cols-1 md:grid-cols-2 gap-6',
+            hasBattyBirdNetModel && hasBsgBatModel && BAT_THRESHOLD_SHARED_ROWS
+          )}
+        >
+          {#if hasBattyBirdNetModel}
+            <NumberField
+              label={t('analysis.detection.batThreshold.label')}
+              value={bat.threshold}
+              onUpdate={updateBatThreshold}
+              min={BAT_THRESHOLD_MIN}
+              max={BAT_THRESHOLD_MAX}
+              step={BAT_THRESHOLD_STEP}
+              disabled={store.isLoading || store.isSaving}
+              helpText={t('analysis.detection.batThreshold.helpText')}
+            />
+          {/if}
+          {#if hasBsgBatModel}
+            <NumberField
+              label={t('analysis.detection.bsgBatThreshold.label')}
+              value={bsgBat.threshold}
+              onUpdate={updateBsgBatThreshold}
+              min={BAT_THRESHOLD_MIN}
+              max={BAT_THRESHOLD_MAX}
+              step={BAT_THRESHOLD_STEP}
+              disabled={store.isLoading || store.isSaving}
+              helpText={t('analysis.detection.bsgBatThreshold.helpText')}
+              describedByExtra={BSG_BAT_WARNING_ID}
+            />
+          {/if}
+        </div>
 
+        {#if hasBsgBatModel}
+          <div class="mt-4">
+            <SettingsNote id={BSG_BAT_WARNING_ID}>
+              {#snippet icon()}<AlertTriangle class="size-4 text-[var(--text-warning)]" />{/snippet}
+              <span>{t('analysis.detection.bsgBatThreshold.sampleRateWarning')}</span>
+            </SettingsNote>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+            <div>
+              <NumberField
+                label={t('analysis.detection.bsgBatStep.label')}
+                value={bsgBatStepFrames}
+                onUpdate={updateBsgBatStep}
+                min={BSG_BAT_STEP_MIN_FRAMES}
+                max={BSG_BAT_STEP_MAX_FRAMES}
+                step={BSG_BAT_STEP_INCREMENT}
+                disabled={store.isLoading || store.isSaving}
+                helpText={t('analysis.detection.bsgBatStep.helpText')}
+                describedByExtra={BSG_BAT_STEP_READOUT_ID}
+              />
+              <p
+                id={BSG_BAT_STEP_READOUT_ID}
+                class="mt-1 text-xs text-[var(--color-base-content)]/70"
+              >
+                {#if batFPLevel === 0}
+                  {t('analysis.detection.bsgBatStep.readout', { seconds: bsgBatStepSecondsText })}
+                {:else}
+                  {t('analysis.detection.bsgBatStep.readoutWithFilter', {
+                    seconds: bsgBatStepSecondsText,
+                    level: t(fpLevelNameKey(batFPLevel)),
+                    count: bsgBatMinDetections(batFPLevel).toString(),
+                  })}
+                {/if}
+                {t('analysis.detection.bsgBatStep.restartNote')}
+              </p>
+            </div>
+          </div>
+        {/if}
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
           <Checkbox
             checked={bat.nighttimeOnly ?? true}
             label={t('analysis.detection.batNighttimeOnly.label')}
@@ -2117,13 +2340,25 @@
             disabled={store.isLoading || store.isSaving}
             onchange={updateBatNighttimeOnly}
           />
-          <Checkbox
-            checked={bat.ultrasonicFilter?.enabled ?? true}
-            label={t('analysis.detection.batUltrasonicFilter.label')}
-            helpText={t('analysis.detection.batUltrasonicFilter.helpText')}
-            disabled={store.isLoading || store.isSaving}
-            onchange={updateBatUltrasonicFilter}
-          />
+          <!-- One grid cell, so the dependent checkbox sits under the filter it belongs to -->
+          <div class="flex flex-col gap-6">
+            <Checkbox
+              checked={bat.ultrasonicFilter?.enabled ?? true}
+              label={t('analysis.detection.batUltrasonicFilter.label')}
+              helpText={t('analysis.detection.batUltrasonicFilter.helpText')}
+              disabled={store.isLoading || store.isSaving}
+              onchange={updateBatUltrasonicFilter}
+            />
+            {#if bat.ultrasonicFilter?.enabled ?? true}
+              <Checkbox
+                checked={bat.ultrasonicFilter?.discardUnlikely ?? false}
+                label={t('analysis.detection.batDiscardUnlikely.label')}
+                helpText={t('analysis.detection.batDiscardUnlikely.helpText')}
+                disabled={store.isLoading || store.isSaving}
+                onchange={updateBatDiscardUnlikely}
+              />
+            {/if}
+          </div>
         </div>
 
         <!-- Bat False Positive Filter -->
@@ -2140,7 +2375,7 @@
 
         {#if batFPLevel === 0}
           <SettingsNote>
-            {#snippet icon()}<AlertTriangle class="size-4 text-[var(--color-warning)]" />{/snippet}
+            {#snippet icon()}<AlertTriangle class="size-4 text-[var(--text-warning)]" />{/snippet}
             <span>{t('analysis.detection.batFalsePositiveFilter.warningOff')}</span>
           </SettingsNote>
         {/if}
@@ -2179,7 +2414,7 @@
           </div>
           <div class="flex items-center gap-3">
             <div
-              class="text-2xl font-bold text-[var(--color-primary)] tabular-nums"
+              class="text-2xl font-bold text-[var(--text-primary)] tabular-nums"
               class:opacity-60={rangeFilterState.testing}
             >
               {rangeFilterState.speciesCount !== null
@@ -2199,14 +2434,16 @@
                   : ''}
             </span>
           </div>
-          <div class="flex gap-2 mt-2">
+          <div class="flex flex-wrap items-center gap-2 mt-2">
+            <!-- aria-disabled, not disabled: the click that opens the dialog starts the load, and a
+                 natively disabled button would drop focus before the dialog could return it here -->
             <button
               type="button"
-              class="inline-flex items-center justify-center h-8 px-3 text-sm font-medium rounded-lg border border-[var(--color-base-content)]/30 bg-transparent hover:bg-black/5 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!rangeFilterState.speciesCount ||
-                rangeFilterState.loading ||
-                !birdnet?.locationConfigured}
+              class="inline-flex items-center justify-center h-8 px-3 text-sm font-medium rounded-lg border border-[var(--color-base-content)]/30 bg-transparent hover:not-aria-disabled:bg-black/5 dark:hover:not-aria-disabled:bg-white/10 focus-ring transition-colors aria-disabled:text-[var(--color-base-content)]/50 aria-disabled:border-[var(--color-base-content)]/15 aria-disabled:cursor-not-allowed"
+              aria-disabled={viewSpeciesBlocked ? 'true' : undefined}
+              aria-describedby={viewSpeciesBlocked ? 'range-species-blocked-reason' : undefined}
               onclick={() => {
+                if (viewSpeciesBlocked) return;
                 rangeFilterState.showModal = true;
                 loadRangeFilterSpecies();
               }}
@@ -2224,6 +2461,15 @@
               <Download class="size-4" />
               {t('analytics.filters.exportCsv')}
             </button>
+            <!-- After both buttons, so a long reason wraps below them instead of splitting them -->
+            {#if viewSpeciesBlockedReason}
+              <span
+                id="range-species-blocked-reason"
+                class="text-xs text-[var(--color-base-content)]/70"
+              >
+                {viewSpeciesBlockedReason}
+              </span>
+            {/if}
           </div>
           <span class="help-text mt-1">
             {t('settings.main.sections.rangeFilter.speciesCount.helpText')}
@@ -2253,7 +2499,7 @@
                 class={cn(
                   'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
                   rangeFilterStatus.geomodel.autoSelected
-                    ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
+                    ? 'bg-[var(--color-success)]/15 text-[var(--text-success)]'
                     : 'bg-[var(--color-base-300)] text-[var(--color-base-content)]/80'
                 )}
               >
@@ -2270,19 +2516,23 @@
                   <thead>
                     <tr class="border-b border-[var(--color-base-300)]">
                       <th
+                        scope="col"
                         class="text-left py-2 pr-4 font-medium text-[var(--color-base-content)]/60"
                         >{t('analysis.rangeFilter.status.classifier')}</th
                       >
                       <th
+                        scope="col"
                         class="text-right py-2 px-4 font-medium text-[var(--color-base-content)]/60"
                         >{t('analysis.rangeFilter.status.totalSpecies')}</th
                       >
                       <th
+                        scope="col"
                         class="text-right py-2 px-4 font-medium text-[var(--color-base-content)]/60"
                         title={t('analysis.rangeFilter.status.withRangeDataTooltip')}
                         >{t('analysis.rangeFilter.status.withRangeData')}</th
                       >
                       <th
+                        scope="col"
                         class="text-right py-2 pl-4 font-medium text-[var(--color-base-content)]/60"
                         title={t('analysis.rangeFilter.status.withoutRangeDataTooltip')}
                         >{t('analysis.rangeFilter.status.withoutRangeData')}</th
@@ -2328,7 +2578,7 @@
 
       {#if rangeFilterState.error}
         <div
-          class="flex items-start gap-3 p-4 rounded-lg mt-4 bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--color-error)]"
+          class="flex items-start gap-3 p-4 rounded-lg mt-4 bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--text-error)]"
           role="alert"
         >
           <XCircle class="size-5 shrink-0" aria-hidden="true" />
@@ -2468,7 +2718,7 @@
           role="alert"
         >
           <div class="flex items-start gap-3">
-            <AlertTriangle class="size-5 shrink-0 text-[var(--color-error)]" aria-hidden="true" />
+            <AlertTriangle class="size-5 shrink-0 text-[var(--text-error)]" aria-hidden="true" />
             <div class="min-w-0 flex-1">
               <p class="font-medium text-[var(--color-base-content)]">
                 {t('analysis.gallery.errors.actionFailed', { name: installError.modelName })}
@@ -2545,6 +2795,11 @@
         </div>
       {/if}
 
+      <!-- Always rendered, so a screen reader hears its text change when an install completes;
+           a line mounted together with its text is often not announced (see frontend/AGENTS.md,
+           Accessibility). -->
+      <span class="sr-only" role="status">{galleryCompleteText}</span>
+
       {#if galleryActionInFlight}
         <!-- One shared, live status line naming why the other cards' actions are
              blocked. Touch users get no tooltip and aria-disabled buttons carry no
@@ -2567,7 +2822,7 @@
           class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-4 py-3 text-sm"
           role="status"
         >
-          <Sparkles class="size-5 shrink-0 text-[var(--color-primary)]" aria-hidden="true" />
+          <Sparkles class="size-5 shrink-0 text-[var(--text-primary)]" aria-hidden="true" />
           <p class="min-w-0 flex-1 font-medium text-[var(--color-base-content)]">
             {t('analysis.gallery.optimize.bannerTitle', { count: offers.length })}
           </p>
@@ -2594,6 +2849,7 @@
         queryParam="modelTab"
         defaultTab="installed"
         showActions={false}
+        ariaLabel={t('analysis.gallery.tabs.navigationAria')}
       />
     </SettingsSection>
 
@@ -2655,7 +2911,7 @@
     class="flex items-center gap-3 rounded-lg border border-[var(--color-error)]/30 bg-[var(--color-error)]/10 px-4 py-3 text-sm"
     role="alert"
   >
-    <AlertTriangle class="size-5 shrink-0 text-[var(--color-error)]" aria-hidden="true" />
+    <AlertTriangle class="size-5 shrink-0 text-[var(--text-error)]" aria-hidden="true" />
     <span class="text-[var(--color-base-content)]">{catalogError}</span>
     <button
       type="button"
@@ -2668,48 +2924,28 @@
   </div>
 {/snippet}
 
-<!-- Variant-aware metadata rows for a gallery card: region, species count, and a
-     friendly hardware chip, all describing the RELEVANT variant (the installed one
-     on the Installed tab, the recommended one on the Available tab) rather than the
-     entry-level globals. Flat (variant-less) entries keep the entry region/species. -->
-{#snippet cardMetaRows(entry: CatalogEntry, mode: 'available' | 'installed')}
-  {@const dv = displayVariantFor(entry, mode)}
-  {#if entry.variants && entry.variants.length > 0}
-    <div class="text-[var(--color-base-content)]/80">{t('analysis.gallery.regionLabel')}</div>
-    <div class="text-[var(--color-base-content)]/80">{displayRegionName(dv)}</div>
-    <div class="text-[var(--color-base-content)]/80">{t('analysis.gallery.speciesLabel')}</div>
-    <div class="text-[var(--color-base-content)]/80">
-      {t('analysis.gallery.species', { count: dv?.speciesCount ?? entry.speciesCount })}
-    </div>
-    <div class="text-[var(--color-base-content)]/80">{t('analysis.gallery.hardwareLabel')}</div>
-    <div>
-      {#if dv}
-        <span
-          class="inline-flex items-center gap-1 rounded-full bg-[var(--color-base-300)] px-2 py-0.5 text-xs text-[var(--color-base-content)]"
-        >
-          {variantHardwareLabel(dv)}
-        </span>
-      {:else}
-        <span class="text-[var(--color-base-content)]/80">-</span>
-      {/if}
-    </div>
-  {:else}
-    {#if entry.region}
-      <div class="text-[var(--color-base-content)]/80">{t('analysis.gallery.regionLabel')}</div>
-      <div class="text-[var(--color-base-content)]/80">{entry.region}</div>
-    {/if}
-    <div class="text-[var(--color-base-content)]/80">{t('analysis.gallery.speciesLabel')}</div>
-    <div class="text-[var(--color-base-content)]/80">
-      {t('analysis.gallery.species', { count: entry.speciesCount })}
-    </div>
-  {/if}
+{#snippet galleryGrid(
+  entries: CatalogEntry[],
+  mode: ModelCardMode,
+  optimizeIds?: ReadonlySet<string>
+)}
+  <ModelCardGrid
+    {mode}
+    {entries}
+    regionNames={regionNameMap}
+    activeAction={activeGalleryAction}
+    progress={downloadProgress}
+    pausedReasonId={GALLERY_ACTION_STATUS_ID}
+    optimizeEntryIds={optimizeIds}
+    onAction={handleCardAction}
+  />
 {/snippet}
 
 {#snippet installedTabContent()}
   <div class="space-y-4">
     {#if loading}
       <div class="flex items-center justify-center py-12">
-        <Loader2 class="size-6 animate-spin text-[var(--color-primary)]" />
+        <Loader2 class="size-6 animate-spin text-[var(--text-primary)]" />
         <span class="ml-3 text-sm text-[var(--color-base-content)]/80"
           >{t('analysis.gallery.loading')}</span
         >
@@ -2717,288 +2953,11 @@
     {:else if catalogError}
       {@render catalogErrorBanner()}
     {:else}
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <!-- Installed models. The permanent built-in classifier (BirdNET v2.4) sorts
-             first and renders a built-in badge instead of Remove/Reinstall; every
-             installed model with a better host-recommended variant shows an Optimize
-             action. -->
-        {#each installedEntries as entry (entry.id)}
-          {@const isDeleting = deletingId === entry.id}
-          {@const isReinstalling = reinstallingId === entry.id}
-          {@const reinstallProgress = isReinstalling ? downloadProgress : null}
-          <!-- "Paused" = another gallery action is running, so THIS button is
-               cross-disabled (vs its own in-progress spinner). aria-disabled keeps
-               it tab-focusable to read the reason; native disabled stays for the
-               button's own running state. -->
-          {@const reinstallPaused = galleryActionInFlight && !isReinstalling}
-          {@const removePaused = galleryActionInFlight && !isDeleting}
-          {@const offer = offerByEntry.get(entry.id)}
-          {@const isSwapping = installingId === entry.id}
-          {@const optimizePaused = galleryActionInFlight && !isSwapping}
-          {@const cardProgress = reinstallProgress ?? (isSwapping ? downloadProgress : null)}
-          {@const logo = getModelLogo(entry.id)}
-          <div
-            class="rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-200)] p-4"
-          >
-            <div class="flex items-start gap-3">
-              {#if logo}
-                <img src={logo} alt="" class="size-10 shrink-0 rounded-lg" />
-              {:else}
-                <div class="shrink-0 rounded-lg bg-[var(--color-primary)]/10 p-2.5">
-                  {#if entry.category === 'geomodel'}
-                    <Globe size={24} class="text-[var(--color-primary)]" />
-                  {:else if entry.category === 'bat'}
-                    <Radar size={24} class="text-[var(--color-primary)]" />
-                  {:else}
-                    <BrainCircuit size={24} class="text-[var(--color-primary)]" />
-                  {/if}
-                </div>
-              {/if}
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <h4 class="text-sm font-semibold text-[var(--color-base-content)]">
-                    {entry.name}
-                  </h4>
-                  {#if entry.channel === CHANNEL_PREVIEW}
-                    <span
-                      class="inline-flex items-center rounded-full bg-[var(--color-warning)]/15 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-[var(--color-warning)]"
-                    >
-                      {t('analysis.gallery.preview.badge')}
-                    </span>
-                  {/if}
-                  {#if entry.buildLabel}
-                    <span class="font-mono text-xs text-[var(--color-base-content)]/70">
-                      {t('analysis.gallery.preview.buildLabel', {
-                        version: entry.version,
-                        build: entry.buildLabel,
-                      })}
-                    </span>
-                  {/if}
-                </div>
-                <p class="mt-0.5 line-clamp-2 text-xs text-[var(--color-base-content)]/80">
-                  {entry.description}
-                </p>
-                {#if entry.upstreamUrl}
-                  <a
-                    href={entry.upstreamUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="mt-1 inline-block text-xs text-[var(--color-primary)]/80 hover:text-[var(--color-primary)] transition-colors"
-                  >
-                    {entry.author}
-                  </a>
-                {:else}
-                  <p class="mt-1 text-xs text-[var(--color-base-content)]/80">{entry.author}</p>
-                {/if}
-              </div>
-            </div>
-            <!-- Progress bar (shown during reinstall, not for companion entries) -->
-            {#if cardProgress}
-              <div class="mt-3 space-y-1.5">
-                {#if cardProgress.status === 'complete'}
-                  <div
-                    class="flex items-center gap-2 text-sm font-medium text-[var(--color-success)]"
-                  >
-                    <Check class="h-4 w-4" />
-                    <span
-                      >{isSwapping
-                        ? t('analysis.gallery.progress.complete')
-                        : t('analysis.gallery.reinstallComplete')}</span
-                    >
-                  </div>
-                {:else}
-                  <div class="h-2 w-full overflow-hidden rounded-full bg-[var(--color-base-300)]">
-                    <div
-                      class="h-full rounded-full bg-[var(--color-primary)] transition-all duration-300"
-                      style:width="{progressPercent(cardProgress)}%"
-                    ></div>
-                  </div>
-                  <div
-                    class="flex items-center justify-between text-xs text-[var(--color-base-content)]/80"
-                  >
-                    <span>
-                      {statusLabel(
-                        cardProgress.status
-                      )}{#if cardProgress.status === 'downloading' && cardProgress.totalFiles > 1}
-                        ({cardProgress.currentFile}/{cardProgress.totalFiles})
-                      {/if}
-                    </span>
-                    {#if cardProgress.status === 'downloading' && cardProgress.totalBytes > 0}
-                      <span>
-                        {formatBytes(cardProgress.downloadedBytes)} / {formatBytes(
-                          cardProgress.totalBytes
-                        )}
-                      </span>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            {/if}
-            <!-- Incompatible warning for installed models -->
-            {#if !entry.compatible}
-              <div
-                class="mt-3 flex items-start gap-2 rounded-lg bg-[var(--color-error)]/10 p-3 text-sm"
-                role="status"
-              >
-                <XCircle
-                  class="h-4 w-4 shrink-0 mt-0.5 text-[var(--color-error)]"
-                  aria-hidden="true"
-                />
-                <span class="text-[var(--color-base-content)]"
-                  >{entryIncompatibleText(entry.incompatibleReason)}</span
-                >
-              </div>
-            {/if}
-            <!-- Metadata grid -->
-            <div
-              class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-[var(--color-base-300)] pt-3 text-xs"
-            >
-              {@render cardMetaRows(entry, 'installed')}
-              <div class="text-[var(--color-base-content)]/80">
-                {t('analysis.gallery.license.license')}
-              </div>
-              <div>
-                {#if entry.commercialUse}
-                  <span
-                    class="inline-flex items-center gap-1 rounded-full bg-[var(--color-success)]/15 px-2 py-0.5 text-xs text-[var(--color-success)]"
-                    title={t('analysis.gallery.license.commercialUseAllowed')}
-                  >
-                    <Shield class="size-3" />
-                    {entry.license}
-                  </span>
-                {:else}
-                  <span
-                    class="inline-flex items-center gap-1 rounded-full bg-[var(--color-warning)]/15 px-2 py-0.5 text-xs text-[var(--color-warning)]"
-                    title={t('analysis.gallery.license.nonCommercialOnly')}
-                  >
-                    <ShieldAlert class="size-3" />
-                    {entry.license}
-                  </span>
-                {/if}
-              </div>
-            </div>
-            <!-- Geomodel badge (for acoustic classifiers that bundle a geomodel) -->
-            {#if entry.hasGeomodel && entry.category !== 'geomodel'}
-              <div class="mt-2">
-                <span
-                  class="inline-flex items-center gap-1 rounded-full bg-[var(--color-info)]/15 px-2.5 py-0.5 text-xs font-medium text-[var(--color-info)]"
-                >
-                  {t('analysis.gallery.geomodelBadge')}
-                </span>
-              </div>
-            {/if}
-            <!-- Optimize badge: a faster/better-matched build is available here. -->
-            {#if offer}
-              <div class="mt-2">
-                <span
-                  class="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary)]/15 px-2.5 py-0.5 text-xs font-medium text-[var(--color-primary)]"
-                  title={t('analysis.gallery.optimize.badgeTitle')}
-                >
-                  <Sparkles class="size-3" aria-hidden="true" />
-                  {t('analysis.gallery.optimize.badgeTitle')}
-                </span>
-              </div>
-            {/if}
-            <!-- Action footer. The permanent built-in classifier shows a built-in
-                 badge instead of Remove and hides Reinstall; only its variant can be
-                 swapped (the Optimize action). -->
-            <div class="mt-3 flex items-center justify-end gap-2">
-              {#if offer}
-                <button
-                  type="button"
-                  onclick={e => {
-                    if (optimizePaused) {
-                      e.preventDefault();
-                      return;
-                    }
-                    openLicenseDialog(entry);
-                  }}
-                  disabled={isSwapping}
-                  aria-disabled={optimizePaused ? 'true' : undefined}
-                  aria-describedby={optimizePaused ? GALLERY_ACTION_STATUS_ID : undefined}
-                  title={optimizePaused ? t('analysis.gallery.actionInProgress') : undefined}
-                  class={cn(
-                    'inline-flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-primary-content)] transition-colors',
-                    optimizePaused
-                      ? 'cursor-not-allowed opacity-50'
-                      : 'hover:not-disabled:bg-[var(--color-primary-hover)]'
-                  )}
-                  aria-label="{t('analysis.gallery.optimize.swap')} {entry.name}"
-                >
-                  <Sparkles class="size-3.5" aria-hidden="true" />
-                  {t('analysis.gallery.optimize.swap')}
-                </button>
-              {/if}
-              {#if entry.permanent}
-                <span
-                  class="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary)]/15 px-2.5 py-0.5 text-xs font-medium text-[var(--color-primary)]"
-                >
-                  {t('analysis.gallery.builtIn')}
-                </span>
-              {:else}
-                <button
-                  type="button"
-                  onclick={e => {
-                    if (reinstallPaused) {
-                      e.preventDefault();
-                      return;
-                    }
-                    handleReinstall(entry);
-                  }}
-                  disabled={isReinstalling}
-                  aria-disabled={reinstallPaused ? 'true' : undefined}
-                  aria-describedby={reinstallPaused ? GALLERY_ACTION_STATUS_ID : undefined}
-                  title={reinstallPaused ? t('analysis.gallery.actionInProgress') : undefined}
-                  class={cn(
-                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--color-base-content)]/80 transition-colors',
-                    isReinstalling || reinstallPaused
-                      ? 'opacity-50'
-                      : 'hover:bg-[var(--color-base-300)]',
-                    reinstallPaused && 'cursor-not-allowed'
-                  )}
-                  aria-label="{t('analysis.gallery.reinstall')} {entry.name}"
-                >
-                  {#if isReinstalling}
-                    <Loader2 class="size-3.5 animate-spin motion-reduce:animate-none" />
-                    {t('analysis.gallery.reinstalling')}
-                  {:else}
-                    <RefreshCw class="size-3.5" />
-                    {t('analysis.gallery.reinstall')}
-                  {/if}
-                </button>
-                <button
-                  type="button"
-                  onclick={e => {
-                    if (removePaused) {
-                      e.preventDefault();
-                      return;
-                    }
-                    openRemoveDialog(entry);
-                  }}
-                  disabled={isDeleting}
-                  aria-disabled={removePaused ? 'true' : undefined}
-                  aria-describedby={removePaused ? GALLERY_ACTION_STATUS_ID : undefined}
-                  title={removePaused ? t('analysis.gallery.actionInProgress') : undefined}
-                  class={cn(
-                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--color-error)] transition-colors',
-                    isDeleting || removePaused ? 'opacity-50' : 'hover:bg-[var(--color-error)]/10',
-                    removePaused && 'cursor-not-allowed'
-                  )}
-                  aria-label="{t('analysis.gallery.remove')} {entry.name}"
-                >
-                  {#if isDeleting}
-                    <Loader2 class="size-3.5 animate-spin motion-reduce:animate-none" />
-                    {t('analysis.gallery.removing')}
-                  {:else}
-                    <Trash2 class="size-3.5" />
-                    {t('analysis.gallery.remove')}
-                  {/if}
-                </button>
-              {/if}
-            </div>
-          </div>
-        {/each}
-      </div>
+      <!-- Installed models. The permanent built-in classifier (BirdNET v2.4) sorts
+           first and renders a built-in badge instead of Remove/Reinstall; every
+           installed model with a better host-recommended variant shows an Optimize
+           action. -->
+      {@render galleryGrid(installedEntries, 'installed', optimizeEntryIds)}
 
       {#if installedEntries.length === 0}
         <p class="py-4 text-center text-sm text-[var(--color-base-content)]/80">
@@ -3009,222 +2968,11 @@
   </div>
 {/snippet}
 
-{#snippet modelCard(entry: CatalogEntry)}
-  {@const isInstalling = installingId === entry.id}
-  {@const progress = isInstalling ? downloadProgress : null}
-  <!-- Paused only when this Install would otherwise be available: another action
-       is running, this one is not, and the entry is compatible. Incompatible
-       entries keep their permanent native-disabled state (explained by the banner
-       above), never a transient "action in progress" reason. -->
-  {@const installPaused = galleryActionInFlight && !isInstalling && entry.compatible}
-  {@const logo = getModelLogo(entry.id)}
-  <div
-    class={cn(
-      'flex h-full flex-col rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-200)] p-4',
-      !entry.compatible && 'opacity-60'
-    )}
-  >
-    <!-- Header: logo + name/description/author -->
-    <div class="flex items-start gap-3">
-      {#if logo}
-        <img src={logo} alt="" class="size-10 shrink-0 rounded-lg" />
-      {:else}
-        <div class="shrink-0 rounded-lg bg-[var(--color-primary)]/10 p-2.5">
-          {#if entry.category === 'geomodel'}
-            <Globe size={24} class="text-[var(--color-primary)]" />
-          {:else if entry.category === 'bat'}
-            <Radar size={24} class="text-[var(--color-primary)]" />
-          {:else}
-            <BrainCircuit size={24} class="text-[var(--color-primary)]" />
-          {/if}
-        </div>
-      {/if}
-      <div class="min-w-0 flex-1">
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h4 class="text-sm font-semibold text-[var(--color-base-content)]">
-            {entry.name}
-          </h4>
-          {#if entry.channel === CHANNEL_PREVIEW}
-            <span
-              class="inline-flex items-center rounded-full bg-[var(--color-warning)]/15 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-[var(--color-warning)]"
-            >
-              {t('analysis.gallery.preview.badge')}
-            </span>
-          {/if}
-          {#if entry.buildLabel}
-            <span class="font-mono text-xs text-[var(--color-base-content)]/70">
-              {t('analysis.gallery.preview.buildLabel', {
-                version: entry.version,
-                build: entry.buildLabel,
-              })}
-            </span>
-          {/if}
-        </div>
-        <p class="mt-0.5 line-clamp-2 text-xs text-[var(--color-base-content)]/80">
-          {entry.description}
-        </p>
-        {#if entry.upstreamUrl}
-          <a
-            href={entry.upstreamUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="mt-1 inline-block text-xs text-[var(--color-primary)]/80 hover:text-[var(--color-primary)] transition-colors"
-          >
-            {entry.author}
-          </a>
-        {:else}
-          <p class="mt-1 text-xs text-[var(--color-base-content)]/80">{entry.author}</p>
-        {/if}
-      </div>
-    </div>
-
-    <!-- Developer-preview notice: v3.0 and any future preview build are flagged as
-         not the final GA release so users know what they are installing. -->
-    {#if entry.channel === CHANNEL_PREVIEW}
-      <div
-        class="mt-3 flex items-start gap-2 rounded-lg bg-[var(--color-warning)]/10 p-3 text-xs"
-        role="note"
-      >
-        <TriangleAlert
-          class="h-4 w-4 shrink-0 mt-0.5 text-[var(--color-warning)]"
-          aria-hidden="true"
-        />
-        <span class="text-[var(--color-base-content)]"
-          >{t('analysis.gallery.preview.cardNotice')}</span
-        >
-      </div>
-    {/if}
-
-    <!-- Progress bar (shown during install, not for companion entries) -->
-    {#if progress}
-      <div class="mt-3 space-y-1.5">
-        {#if progress.status === 'complete'}
-          <div class="flex items-center gap-2 text-sm font-medium text-[var(--color-success)]">
-            <Check class="h-4 w-4" />
-            <span>{t('analysis.gallery.progress.complete')}</span>
-          </div>
-        {:else}
-          <div class="h-2 w-full overflow-hidden rounded-full bg-[var(--color-base-300)]">
-            <div
-              class="h-full rounded-full bg-[var(--color-primary)] transition-all duration-300"
-              style:width="{progressPercent(progress)}%"
-            ></div>
-          </div>
-          <div
-            class="flex items-center justify-between text-xs text-[var(--color-base-content)]/80"
-          >
-            <span>
-              {statusLabel(
-                progress.status
-              )}{#if progress.status === 'downloading' && progress.totalFiles > 1}
-                ({progress.currentFile}/{progress.totalFiles})
-              {/if}
-            </span>
-            {#if progress.status === 'downloading' && progress.totalBytes > 0}
-              <span>
-                {formatBytes(progress.downloadedBytes)} / {formatBytes(progress.totalBytes)}
-              </span>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Incompatible warning banner -->
-    {#if !entry.compatible}
-      <div
-        class="mt-3 flex items-start gap-2 rounded-lg bg-[var(--color-warning)]/10 p-3 text-sm"
-        role="status"
-      >
-        <TriangleAlert
-          class="h-4 w-4 shrink-0 mt-0.5 text-[var(--color-warning)]"
-          aria-hidden="true"
-        />
-        <span class="text-[var(--color-base-content)]"
-          >{entryIncompatibleText(entry.incompatibleReason)}</span
-        >
-      </div>
-    {/if}
-
-    <!-- Metadata grid -->
-    <div
-      class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-[var(--color-base-300)] pt-3 text-xs"
-    >
-      {@render cardMetaRows(entry, 'available')}
-      <div class="text-[var(--color-base-content)]/80">{t('analysis.gallery.license.license')}</div>
-      <div>
-        {#if entry.commercialUse}
-          <span
-            class="inline-flex items-center gap-1 rounded-full bg-[var(--color-success)]/15 px-2 py-0.5 text-xs text-[var(--color-success)]"
-            title={t('analysis.gallery.license.commercialUseAllowed')}
-          >
-            <Shield class="size-3" />
-            {entry.license}
-          </span>
-        {:else}
-          <span
-            class="inline-flex items-center gap-1 rounded-full bg-[var(--color-warning)]/15 px-2 py-0.5 text-xs text-[var(--color-warning)]"
-            title={t('analysis.gallery.license.nonCommercialOnly')}
-          >
-            <ShieldAlert class="size-3" />
-            {entry.license}
-          </span>
-        {/if}
-      </div>
-    </div>
-
-    <!-- Geomodel badge (for acoustic classifiers that bundle a geomodel) -->
-    {#if entry.hasGeomodel && entry.category !== 'geomodel'}
-      <div class="mt-2">
-        <span
-          class="inline-flex items-center gap-1 rounded-full bg-[var(--color-info)]/15 px-2.5 py-0.5 text-xs font-medium text-[var(--color-info)]"
-        >
-          {t('analysis.gallery.geomodelBadge')}
-        </span>
-      </div>
-    {/if}
-
-    <!-- Action footer (pushed to bottom via mt-auto) -->
-    <div class="mt-auto flex items-center justify-end pt-3">
-      <button
-        type="button"
-        onclick={e => {
-          if (installPaused) {
-            e.preventDefault();
-            return;
-          }
-          openLicenseDialog(entry);
-        }}
-        disabled={!entry.compatible || isInstalling}
-        aria-disabled={installPaused ? 'true' : undefined}
-        aria-describedby={installPaused ? GALLERY_ACTION_STATUS_ID : undefined}
-        title={installPaused ? t('analysis.gallery.actionInProgress') : undefined}
-        class={cn(
-          'inline-flex items-center gap-1.5 rounded-md bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary-content)] transition-colors',
-          !entry.compatible || isInstalling || installPaused
-            ? 'opacity-50'
-            : 'hover:bg-[var(--color-primary-hover)]',
-          installPaused && 'cursor-not-allowed'
-        )}
-        aria-label="{t('analysis.gallery.install')} {entry.name}"
-      >
-        {#if isInstalling}
-          <Loader2 class="size-3.5 animate-spin motion-reduce:animate-none" />
-          {t('analysis.gallery.installing')}
-        {:else}
-          <Download class="size-3.5" />
-          {t('analysis.gallery.install')}
-        {/if}
-      </button>
-    </div>
-  </div>
-{/snippet}
-
 {#snippet availableTabContent()}
   <div class="space-y-6">
     {#if loading}
       <div class="flex items-center justify-center py-12">
-        <Loader2 class="size-6 animate-spin text-[var(--color-primary)]" />
+        <Loader2 class="size-6 animate-spin text-[var(--text-primary)]" />
         <span class="ml-3 text-sm text-[var(--color-base-content)]/80"
           >{t('analysis.gallery.loading')}</span
         >
@@ -3246,11 +2994,7 @@
               >
                 {t('analysis.gallery.categories.wildlife')}
               </h3>
-              <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {#each availableWildlife as entry (entry.id)}
-                  {@render modelCard(entry)}
-                {/each}
-              </div>
+              {@render galleryGrid(availableWildlife, 'available')}
             </div>
           {/if}
 
@@ -3261,11 +3005,7 @@
               >
                 {t('analysis.gallery.categories.bird')}
               </h3>
-              <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {#each availableBirds as entry (entry.id)}
-                  {@render modelCard(entry)}
-                {/each}
-              </div>
+              {@render galleryGrid(availableBirds, 'available')}
             </div>
           {/if}
 
@@ -3276,11 +3016,7 @@
               >
                 {t('analysis.gallery.categories.bat')}
               </h3>
-              <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {#each availableBats as entry (entry.id)}
-                  {@render modelCard(entry)}
-                {/each}
-              </div>
+              {@render galleryGrid(availableBats, 'available')}
             </div>
           {/if}
         </div>
@@ -3292,11 +3028,7 @@
           <h2 class="text-sm font-bold uppercase tracking-wider text-[var(--color-base-content)]">
             {t('analysis.gallery.sections.geomodel')}
           </h2>
-          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {#each availableGeomodels as entry (entry.id)}
-              {@render modelCard(entry)}
-            {/each}
-          </div>
+          {@render galleryGrid(availableGeomodels, 'available')}
         </div>
       {/if}
 
@@ -3314,6 +3046,16 @@
   <SettingsTabs tabs={pageTabs} bind:activeTab={pageTab} />
 </main>
 
+{#snippet licenseNote(text: string)}
+  <div
+    class="mt-4 flex items-start gap-2 rounded-lg bg-[var(--color-warning)]/10 p-3 text-sm"
+    role="note"
+  >
+    <TriangleAlert class="h-4 w-4 shrink-0 mt-0.5 text-[var(--text-warning)]" aria-hidden="true" />
+    <span class="text-[var(--color-base-content)]">{text}</span>
+  </div>
+{/snippet}
+
 <!-- License Acceptance Dialog -->
 <dialog
   bind:this={licenseDialogRef}
@@ -3325,21 +3067,11 @@
       <h3 id="license-dialog-title" class="text-lg font-semibold text-[var(--color-base-content)]">
         {t('analysis.gallery.license.title')}
       </h3>
-      {#if licenseModel.channel === CHANNEL_PREVIEW}
-        <div
-          class="mt-4 flex items-start gap-2 rounded-lg bg-[var(--color-warning)]/10 p-3 text-sm"
-          role="note"
-        >
-          <TriangleAlert
-            class="h-4 w-4 shrink-0 mt-0.5 text-[var(--color-warning)]"
-            aria-hidden="true"
-          />
-          <span class="text-[var(--color-base-content)]">
-            {t('analysis.gallery.preview.dialogNotice', {
-              build: licenseModel.buildLabel ?? licenseModel.version,
-            })}
-          </span>
-        </div>
+      {#if licenseChannelNotice}
+        {@render licenseNote(licenseChannelNotice)}
+      {/if}
+      {#if licenseSupersededNotice}
+        {@render licenseNote(licenseSupersededNotice)}
       {/if}
       <div class="mt-4 space-y-3">
         <table
@@ -3385,12 +3117,12 @@
               >
               <td class="px-4 py-1 text-right align-top">
                 {#if licenseModel.commercialUse}
-                  <span class="inline-flex items-center gap-1 text-[var(--color-success)]">
+                  <span class="inline-flex items-center gap-1 text-[var(--text-success)]">
                     <Shield class="size-3.5" />
                     {t('analysis.gallery.license.allowed')}
                   </span>
                 {:else}
-                  <span class="inline-flex items-center gap-1 text-[var(--color-warning)]">
+                  <span class="inline-flex items-center gap-1 text-[var(--text-warning)]">
                     <ShieldAlert class="size-3.5" />
                     {t('analysis.gallery.license.notAllowed')}
                   </span>
@@ -3417,7 +3149,7 @@
             {selectedVariantId}
             {activeRegionSlug}
             regionNames={regionNameMap}
-            onSelect={id => (selectedVariantId = id)}
+            onSelect={id => (chosenVariantId = id)}
             idPrefix="license-variant"
           />
           <!-- Plain-language help for the precision jargon (FP32/FP16/INT8) and the
@@ -3437,7 +3169,7 @@
             class="flex items-start gap-2 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2.5 text-sm"
           >
             <ShieldAlert
-              class="mt-0.5 size-4 shrink-0 text-[var(--color-warning)]"
+              class="mt-0.5 size-4 shrink-0 text-[var(--text-warning)]"
               aria-hidden="true"
             />
             <p class="text-[var(--color-base-content)]">
@@ -3448,7 +3180,7 @@
       </div>
 
       {#if installBlocked}
-        <p id={INSTALL_BLOCKED_HELP_ID} class="mt-4 text-sm text-[var(--color-error)]" role="alert">
+        <p id={INSTALL_BLOCKED_HELP_ID} class="mt-4 text-sm text-[var(--text-error)]" role="alert">
           {t('analysis.gallery.variants.incompatible')}
         </p>
       {/if}
@@ -3486,7 +3218,7 @@
     <div class="w-full max-w-md p-6">
       <div class="flex items-start gap-3">
         <div class="shrink-0 rounded-full bg-[var(--color-error)]/10 p-2">
-          <AlertTriangle class="size-5 text-[var(--color-error)]" aria-hidden="true" />
+          <AlertTriangle class="size-5 text-[var(--text-error)]" aria-hidden="true" />
         </div>
         <div>
           <h3
@@ -3598,7 +3330,7 @@
 
       {#if rangeFilterState.error}
         <div
-          class="flex items-start gap-3 p-4 rounded-lg mb-4 bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--color-error)]"
+          class="flex items-start gap-3 p-4 rounded-lg mb-4 bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--text-error)]"
           role="alert"
         >
           <XCircle class="size-5 shrink-0" aria-hidden="true" />
