@@ -2578,12 +2578,12 @@
           "title": "Seuil dynamique",
           "description": "Ajuster automatiquement la sensibilité de détection en fonction des observations précédentes",
           "enable": {
-            "label": "Activer le seuil dynamique (fonctionnalité spécifique à BirdNET-Go)",
-            "helpText": "Active la fonctionnalité de seuil de confiance dynamique pour une détection des chants d'oiseaux plus adaptative."
+            "label": "Activer le seuil dynamique",
+            "helpText": "Abaisse le seuil de confiance pour une espèce après qu'elle a été détectée avec une confiance élevée."
           },
           "trigger": {
             "label": "Seuil de déclenchement",
-            "helpText": "Le niveau de confiance auquel le seuil dynamique est activé. Si un chant d'oiseau est détecté avec une confiance supérieure à cette valeur, le seuil pour les correspondances positives de cette espèce sera abaissé pour les chants suivants."
+            "helpText": "Le niveau de confiance auquel le seuil dynamique est activé. Si une espèce est détectée avec une confiance supérieure à cette valeur, le seuil pour les correspondances positives de cette espèce sera abaissé pour les détections suivantes."
           },
           "minimum": {
             "label": "Seuil dynamique minimum",
@@ -2632,7 +2632,7 @@
           "overloadedNoticeTitle": "Cet appareil ne peut pas suivre l'analyse",
           "overloadedNotice": "L'exécution de {models, plural, one {# modèle} other {# modèles}} sur {sources, plural, one {# source audio} other {# sources audio}} dépasse la capacité mesurée de cet appareil même sans chevauchement. L'analyse peut prendre du retard et des détections peuvent être manquées. Activez moins de modèles ou de sources audio, ou choisissez une variante de modèle plus rapide.",
           "unknownLatency": "Le temps de traitement n'a pas pu être mesuré pour {models}, il n'est donc pas pris en compte lors de la limitation du chevauchement. L'analyse peut tout de même prendre du retard.",
-          "cpuNote": "Une intensité plus élevée analyse plus souvent l'audio qui se chevauche, ce qui coûte du temps CPU pour chaque modèle et chaque source audio activés. BirdNET-Go limite automatiquement le chevauchement à ce que cet appareil peut traiter."
+          "cpuNote": "Une intensité plus élevée analyse plus souvent l'audio qui se chevauche, ce qui coûte du temps CPU pour chaque classificateur activé auquel ce filtre s'applique et chaque source audio. BirdNET-Go limite automatiquement le chevauchement à ce que cet appareil peut traiter."
         },
         "rangeFilter": {
           "title": "Filtre de portée",
@@ -5694,6 +5694,7 @@
       "reloadPage": "Recharger la page"
     },
     "skip": "Passer",
+    "notNow": "Pas maintenant",
     "back": "Retour",
     "next": "Suivant",
     "done": "Terminé",
@@ -5812,29 +5813,53 @@
         "citizenPoint3": "Utilisez les détections IA comme point de départ pour vos propres observations",
         "outro": "Cette approche garantit la qualité des données pour la recherche scientifique tout en maximisant votre apprentissage et votre plaisir de l'observation des oiseaux.",
         "acknowledge": "Je comprends"
+      },
+      "enableOnSources": {
+        "title": "Activer sur les sources audio",
+        "intro": "{name} est installé. Choisissez les sources audio à analyser avec ce modèle.",
+        "saveHint": "Votre choix est enregistré lorsque vous sélectionnez Terminé. Pas maintenant ferme cette fenêtre sans enregistrer.",
+        "allSources": "Toutes les sources audio",
+        "soundCardsHeading": "Cartes son",
+        "streamsHeading": "Flux",
+        "alreadyOn": "Analyse déjà avec {name}.",
+        "followsDefaultsRuns": "Utilise les modèles par défaut, qui incluent {name}.",
+        "followsDefaultsAdd": "Utilise les modèles par défaut. L’activer les conserve et ajoute {name}.",
+        "followsDefaultsUnknown": "Suit les modèles par défaut, qui n'ont pas pu être lus. Activez {name} pour cette source dans les paramètres audio.",
+        "batStreamWarning": "Les modèles de chauves-souris nécessitent un flux avec un codec sans perte (PCM) et une fréquence d’échantillonnage d’au moins 96 kHz ; BSG-BAT nécessite au moins 192 kHz. Un flux de caméra classique n’est pas ultrasonore : testez le flux dans les paramètres audio avant de vous y fier.",
+        "allRunning": "Toutes les sources audio analysent déjà avec {name}. Il n’y a rien à modifier.",
+        "notListed": "{name} ne figure pas dans la liste des modèles activés et ne peut donc pas être activé ici pour une source audio.",
+        "notLoadedPending": "{name} est encore en cours de chargement et ne peut donc pas encore être activé pour une source audio. Une fois chargé, activez-le dans les paramètres des sources audio.",
+        "notLoadedFailed": "{name} n’a pas pu être chargé et ne peut donc pas être activé pour une source audio.",
+        "noSources": "Aucune source audio n’est encore configurée. Ajoutez une carte son ou un flux dans les paramètres audio, puis activez {name} à cet endroit.",
+        "openAudioSettings": "Ouvrir les paramètres audio",
+        "enabledToast": "{name} activé sur {count, plural, one {# source audio} other {# sources audio}}"
+      }
+    },
+    "modelNextSteps": {
+      "title": "Étapes suivantes pour {name}",
+      "errors": {
+        "saveFailed": "Échec de l’enregistrement. Vérifiez la connexion et réessayez, ou choisissez Pas maintenant et activez le modèle pour vos sources plus tard dans Paramètres > Audio.",
+        "saveRejected": "La modification n’a pas été acceptée. Réessayez, ou choisissez Pas maintenant et activez le modèle pour vos sources plus tard dans Paramètres > Audio."
       }
     }
   },
   "analysis": {
     "title": "Analyse",
     "tabs": {
-      "settings": "Paramètres",
-      "models": "Modèles"
+      "models": "Modèles",
+      "detection": "Détection",
+      "bats": "Chauves-souris",
+      "inference": "Inférence",
+      "filters": "Filtres"
     },
     "detection": {
       "title": "Paramètres de détection",
       "description": "Configurer les seuils de confiance pour la classification des espèces.",
-      "confidenceThreshold": {
-        "label": "Seuil de confiance",
-        "helpText": "Score de confiance minimum (0.0 - 1.0) requis pour qu'une détection soit enregistrée."
-      },
       "batThreshold": {
-        "label": "Seuil de détection des chauves-souris (BattyBirdNET)",
-        "helpText": "Score de confiance minimum pour les détections d'espèces de chauves-souris de BattyBirdNET. BSG-BAT a son propre seuil."
+        "label": "Seuil de détection des chauves-souris (BattyBirdNET)"
       },
       "bsgBatThreshold": {
         "label": "Seuil de détection des chauves-souris (BSG-BAT)",
-        "helpText": "Score de confiance minimum pour les détections d'espèces de chauves-souris de BSG-BAT.",
         "sampleRateWarning": "Les captures à 192 kHz fonctionnent, mais les espèces qui émettent au-dessus de 96 kHz ne peuvent pas être identifiées et les scores sont moins fiables. Une fréquence de capture de 384 kHz est recommandée."
       },
       "bsgBatStep": {
@@ -5875,27 +5900,9 @@
       "locale": {
         "label": "Langue des espèces",
         "helpText": "Langue utilisée pour les noms communs des espèces dans l'interface."
-      },
-      "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
-        "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
-      },
-      "secondaryThreshold": {
-        "helpText": "Minimum confidence score (0.01 - 0.99) required for a detection from this model to be recorded.",
-        "followsBirdnet": "Enable the override above to set a custom value. This model currently follows the main BirdNET confidence threshold."
-      },
-      "perchThreshold": {
-        "label": "Perch v2 Confidence Threshold"
-      },
-      "birdnetv3Threshold": {
-        "label": "BirdNET v3.0 Confidence Threshold"
-      },
-      "birdnetplusThreshold": {
-        "label": "Seuil de confiance BirdNET+ V3.0"
       }
     },
     "rangeFilter": {
-      "birdOnlyNote": "Le filtre de zone s'applique uniquement aux classificateurs d'oiseaux. Les modèles de chauves-souris utilisent leurs propres listes d'espèces.",
       "status": {
         "title": "Aperçu du filtre de zone",
         "geomodelInfo": "BirdNET Géomodèle {version} - {species} espèces connues",
@@ -5910,13 +5917,13 @@
         "noFilter": "Aucun filtre de zone actif",
         "passUnmapped": {
           "label": "Autoriser les espèces sans données de zone",
-          "helpText": "Autoriser les détections d'espèces pour lesquelles le géomodèle n'a pas de données géographiques. Lorsque désactivé, ces espèces sont toujours filtrées."
+          "helpText": "Autoriser les détections d'espèces pour lesquelles le géomodèle n'a pas de données géographiques. Lorsque désactivé, ces espèces sont toujours filtrées. Cela n'affecte que les classificateurs auxquels le filtre de zone s'applique."
         }
       }
     },
     "advanced": {
       "title": "Avancé",
-      "description": "Configuration du traitement et des modèles personnalisés."
+      "description": "Fichiers de modèle et d'étiquettes personnalisés."
     },
     "downloadSource": {
       "title": "Source de téléchargement",
@@ -5930,7 +5937,7 @@
     },
     "gallery": {
       "title": "Galerie de modèles",
-      "description": "Gérer les modèles classificateurs pour la détection des oiseaux et des chauves-souris.",
+      "description": "Gérer les modèles classificateurs.",
       "region": {
         "title": "Région du modèle",
         "modeAuto": "Automatique",
@@ -5986,6 +5993,8 @@
         "precisionHelp": "Precision (FP32, FP16, INT8) trades accuracy for size and speed: FP32 is most accurate, INT8 is smallest and fastest. Recommended is the best match for your detected hardware; Default is the model's standard build."
       },
       "actionInProgress": "Attendez la fin de l'installation, de la réinstallation ou de la suppression du modèle en cours",
+      "installSuccess": "{name} installé",
+      "installedEnableOnSources": "{name} est installé. Pour l’utiliser, activez-le pour vos sources dans Paramètres > Audio.",
       "removeSuccess": "Removed {name}",
       "reasons": {
         "backendRecommended": "S'exécute sur {backend}, le backend recommandé pour votre matériel",
@@ -6046,7 +6055,9 @@
         "commercialUseAllowed": "Utilisation commerciale autorisée",
         "nonCommercialOnly": "Usage non commercial uniquement",
         "nonCommercialWarning": "Ce modèle est licencié pour un usage non commercial uniquement. En l'installant, vous acceptez de respecter les termes de la licence.",
-        "acceptAndInstall": "Accepter et installer"
+        "acceptAndInstall": "Accepter et installer",
+        "continue": "Continuer",
+        "agreementNext": "Ce modèle est soumis à des conditions que vous devez accepter. Elles s'affichent à l'étape suivante."
       },
       "removeDialog": {
         "title": "Supprimer {name} ?",
@@ -6063,7 +6074,9 @@
         "goToDownloadSource": "Aller à la source de téléchargement",
         "dismiss": "Ignorer",
         "details": "Details",
-        "removeRetryHint": "To try again, use the Remove button on the model's card."
+        "removeRetryHint": "To try again, use the Remove button on the model's card.",
+        "agreementRequired": "{name} nécessite votre accord sur ses conditions avant de pouvoir être installé.",
+        "documentUnavailable": "Le texte du document n'a pas pu être chargé et vérifié. Vérifiez que BirdNET-Go peut joindre la source de téléchargement des modèles, puis réessayez."
       },
       "regionLabel": "Région",
       "speciesLabel": "Espèces",
@@ -6071,10 +6084,10 @@
       "reinstalling": "Réinstallation...",
       "reinstallComplete": "Fichiers vérifiés avec succès",
       "geomodelBadge": "Inclut le BirdNET v3.0 geomodel",
+      "newBadge": "Nouveau",
       "preview": {
         "badge": "Aperçu",
         "buildLabel": "{version} · {build}",
-        "cardNotice": "Aperçu développeur, pas la version finale. Il s'agit d'une version préliminaire pour les tests; les résultats peuvent changer avant la version stable.",
         "dialogNotice": "Vous installez un aperçu développeur ({build}). Idéal pour tester, mais pas encore recommandé comme classificateur unique."
       },
       "experimental": {
@@ -6113,30 +6126,113 @@
         "applyFailed": "Échec de l'application",
         "upToDate": "Tous vos modèles sont déjà optimisés pour ce matériel.",
         "licenseNote": "Le changement reste au sein du même modèle, sa licence ne change donc pas."
+      },
+      "documents": {
+        "heading": "Documents du modèle",
+        "kinds": {
+          "license": "Licence",
+          "acceptable_use": "Politique d'utilisation acceptable"
+        },
+        "genericKind": "Conditions du modèle",
+        "source": "Depuis {repo}",
+        "textRegion": "Texte : {document}",
+        "loading": "Chargement du texte du document",
+        "view": "Afficher : {document}",
+        "hide": "Masquer : {document}"
+      },
+      "agreement": {
+        "title": "Lire et accepter",
+        "intro": "Avant d'installer {name}, lisez et acceptez les conditions ci-dessous.",
+        "agree": "J'ai lu et j'accepte : {document}",
+        "agreeAndContinue": "Accepter et continuer",
+        "tickEach": "Cochez la case sous chaque document pour continuer.",
+        "waitForText": "Vous pourrez accepter une fois tous les documents chargés.",
+        "unavailableBlocked": "Un document n'a pas pu être chargé, vous ne pouvez donc pas encore l'accepter. Utilisez Réessayer pour le recharger."
       }
-    },
-    "bird": {
-      "title": "Détection des oiseaux",
-      "description": "Configurez le seuil de confiance, la langue des espèces et le filtrage des faux positifs pour les classificateurs d'oiseaux."
     },
     "bat": {
       "title": "Détection des chauves-souris",
-      "description": "Configurez le seuil, la planification et le filtrage des faux positifs pour les classificateurs de chauves-souris."
-    },
-    "dynamicThreshold": {
-      "birdOnlyNote": "Le seuil dynamique s'applique uniquement aux classificateurs d'oiseaux."
+      "description": "Planification, validation et filtrage des faux positifs pour les classificateurs de chauves-souris."
     },
     "perch": {
-      "title": "Perch v2 Detection",
-      "description": "Set a dedicated confidence threshold for Google Perch v2 detections, independent of the BirdNET threshold."
+      "title": "Perch v2 Detection"
     },
     "birdnetv3": {
-      "title": "BirdNET v3.0 Detection",
-      "description": "Set a dedicated confidence threshold for BirdNET v3.0 detections, independent of the main BirdNET threshold."
+      "title": "BirdNET v3.0 Detection"
     },
     "birdnetplus": {
-      "title": "Détection BirdNET+ V3.0",
-      "description": "Définissez un seuil de confiance dédié aux détections BirdNET+ V3.0, indépendant du seuil BirdNET principal."
+      "title": "Détection BirdNET+ v3.0"
+    },
+    "thresholds": {
+      "title": "Seuils de détection",
+      "description": "Confiance minimale requise pour enregistrer une détection, pour chaque classificateur activé.",
+      "category": {
+        "bat": "Chauves-souris"
+      },
+      "state": {
+        "pending": "Chargement",
+        "failed": "Échec du chargement"
+      },
+      "empty": "Aucun classificateur n'est activé.",
+      "shared": {
+        "label": "Seuil partagé",
+        "usedBy": "Utilisé par chaque classificateur sans seuil personnalisé : {models}.",
+        "unused": "Utilisé par chaque classificateur sans seuil personnalisé. Aucun classificateur activé ne l'utilise actuellement."
+      },
+      "customSwitch": "Seuil personnalisé",
+      "usesShared": "Utilise le seuil partagé"
+    },
+    "speciesNames": {
+      "title": "Noms des espèces",
+      "description": "Comment les espèces détectées sont nommées dans l'interface."
+    },
+    "inference": {
+      "runtime": {
+        "title": "Moteur d'exécution d'inférence",
+        "description": "Quel moteur d'exécution et quel appareil exécutent les classificateurs, et combien de threads CPU ils utilisent."
+      },
+      "backend": {
+        "label": "Backend",
+        "helpText": "Automatique choisit le moteur d'exécution le plus rapide pris en charge par cet appareil pour chaque modèle.",
+        "options": {
+          "auto": "Automatique (recommandé)",
+          "onnx": "ONNX Runtime",
+          "openvino": "OpenVINO"
+        }
+      },
+      "device": {
+        "label": "Appareil OpenVINO",
+        "helpText": "Utilisé pour les modèles exécutés sur OpenVINO.",
+        "options": {
+          "auto": "Automatique",
+          "cpu": "CPU",
+          "gpu": "GPU"
+        }
+      },
+      "reloadNote": "Changer le backend ou l'appareil recharge les modèles, ce qui met la détection en pause pendant quelques secondes.",
+      "backendsLoading": "Vérification des moteurs d'exécution pris en charge par cet appareil.",
+      "backendsUnavailable": "Impossible de lire les moteurs d'exécution pris en charge par cet appareil. Le backend et l'appareil peuvent être modifiés après le chargement.",
+      "running": {
+        "title": "En cours d'exécution",
+        "description": "Le moteur d'exécution et la précision utilisés par chaque classificateur activé.",
+        "unknown": "Non signalé"
+      }
+    },
+    "scope": {
+      "dynamicThreshold": "S'applique à tous les classificateurs, y compris ceux de chauves-souris. Une espèce ayant son propre seuil personnalisé n'est pas ajustée.",
+      "speciesNames": "S'applique à tous les classificateurs. Une espèce sans nom dans la langue choisie conserve le nom de son classificateur.",
+      "falsePositiveFilter": "S'applique à tous les classificateurs sauf ceux de chauves-souris, qui ont leur propre filtre de faux positifs.",
+      "falsePositiveFilterBatTab": "S'applique à tous les classificateurs sauf ceux de chauves-souris, qui ont leur propre filtre de faux positifs dans l'onglet Chauves-souris.",
+      "rangeFilter": {
+        "appliesTo": "S'applique à : {models}.",
+        "notApplied": "Non filtré par zone : {models}.",
+        "generic": "S'applique aux classificateurs pris en charge par le modèle de zone. Les classificateurs de chauves-souris ne sont jamais filtrés par zone.",
+        "needsLocation": "Fonctionne uniquement lorsque l'emplacement de la station est défini."
+      },
+      "bat": "S'applique uniquement aux classificateurs de chauves-souris."
+    },
+    "dynamicThreshold": {
+      "minAboveTrigger": "Le minimum ne doit pas dépasser le seuil de déclenchement."
     }
   },
   "restart": {
