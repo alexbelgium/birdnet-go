@@ -34,7 +34,6 @@
     "internalServerError": "Iekšējā servera kļūda",
     "actions": {
       "download": "Lejupielādēt",
-      "review": "Pārskatīt",
       "play": "Atskaņot",
       "view": "Skatīt"
     },
@@ -141,14 +140,14 @@
       "visitEbirdLink": "Atvērt eBird.org jaunā cilnē",
       "learnEbirdTaxonomyLink": "Atvērt eBird taksonomiju jaunā cilnē",
       "resizeHandle": "Velciet, lai mainītu izmēru",
-      "imageCredit": "Attēla autors: {name}"
+      "imageCredit": "Attēla autors: {name}",
+      "opensInNewTab": "atveras jaunā cilnē"
     },
     "labels": {
       "confidence": "Ticamība",
       "github": "GitHub"
     },
     "values": {
-      "yes": "Jā",
       "no": "Nē",
       "unknown": "Nezināms"
     },
@@ -181,12 +180,6 @@
         "hideComment": "Slēpt komentāru",
         "commentPlaceholder": "Pievienojiet komentāru par šo noteikšanu...",
         "commentCount": "({chars} rakstzīmes)",
-        "chars": "rakstzīmes",
-        "commentsLabel": "Komentāri",
-        "currentStatusTitle": "Pašreizējais statuss",
-        "detectionStatusTitle": "Noteikšanas statuss",
-        "lockLabel": "Bloķēšanas statuss",
-        "reviewLabel": "Pārskatīšanas statuss",
         "saveReview": "Saglabāt pārskatīšanu"
       },
       "errors": {
@@ -207,7 +200,6 @@
     "hoursShort": "st"
   },
   "pageTitle": {
-    "settings": "Iestatījumi - BirdNET-Go",
     "pageNotFound": "404 - Lapa nav atrasta",
     "serverError": "500 - Iekšējā servera kļūda",
     "componentError": "Komponentes ielādes kļūda",
@@ -227,7 +219,8 @@
     "dashboard": "Informācijas panelis",
     "liveAudio": "Tiešraides audio",
     "settingsMenu": "Iestatījumu izvēlne",
-    "theme": "Tēma",
+    "switchToDarkTheme": "Pārslēgt uz tumšo tēmu",
+    "switchToLightTheme": "Pārslēgt uz gaišo tēmu",
     "github": "GitHub",
     "detections": "Noteikšanas",
     "search": "Meklēšana",
@@ -427,7 +420,7 @@
         "recalculatingThresholds": "Pārrēķina dinamiskos sliekšņus jaunai bāzes vērtībai",
         "reconfiguringDynamicThresholds": "Pārkonfigurē dinamiskos sliekšņus...",
         "webserverRestartRequired": "Tīmekļa servera iestatījumi mainīti. Nepieciešama restartēšana.",
-        "oauthRestartRequired": "Autentifikācijas nodrošinātāja iestatījumi mainīti. Nepieciešama restartēšana.",
+        "reconfiguringOauthProviders": "Tiek atjaunināti autentifikācijas pakalpojumu sniedzēji...",
         "databaseRestartRequired": "Datu bāzes iestatījumi mainīti. Nepieciešams restarts.",
         "loggingRestartRequired": "Žurnalēšanas iestatījumi mainīti. Nepieciešams restarts.",
         "reconfiguringSoundLevel": "Atjaunina skaņas līmeņa uzraudzību...",
@@ -503,6 +496,10 @@
       "modelOptimize": {
         "title": "{count, plural, zero {# modeļiem ir labākas versijas šai sistēmai} one {# modelim ir labāka versija šai sistēmai} other {# modeļiem ir labākas versijas šai sistēmai}}",
         "message": "Šīs sistēmas aparatūrai vai atrašanās vietai labāk piemērota versija ir pieejama šādiem modeļiem: {models}. Atveriet Iestatījumi > Analīze > Modeļi un izvēlieties Optimizēt, lai pārslēgtos."
+      },
+      "modelSuperseded": {
+        "title": "{count, plural, zero {# instalētajiem modeļiem ir jaunākas versijas} one {Instalētajam modelim ir jaunāka versija} other {# instalētajiem modeļiem ir jaunākas versijas}}",
+        "message": "Instalētais modelis ir priekšskatījuma versija, un tā galīgā versija tagad ir pieejama: {models}. Atveriet Iestatījumi > Analīze > Modeļi, instalējiet galīgo versiju un noņemiet priekšskatījuma versiju."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -890,23 +887,190 @@
       "allDetections": "Visas atklāšanas datumā {date}"
     },
     "detail": {
-      "species": "Suga",
-      "observation": "Novērojums",
+      "species": {
+        "dialogTitle": "Mainīt sugu",
+        "current": "Pašlaik identificēta kā",
+        "fromPredictions": "Citas modeļa prognozes",
+        "search": "Meklēt sugas",
+        "loadingList": "Ielādē sugu sarakstu...",
+        "listFailed": "Neizdevās ielādēt sugu sarakstu. Aizveriet šo logu un mēģiniet vēlreiz.",
+        "noMatches": "Nav atbilstošu sugu.",
+        "effect": "Noteikšana tiek atzīmēta kā pareiza, un modeļa sākotnējā izvēle saglabājas ierakstā.",
+        "pickFirst": "Vispirms izvēlieties sugu.",
+        "confirm": "Mainīt uz {species}",
+        "confirmEmpty": "Mainīt sugu",
+        "changed": "Suga nomainīta uz {species}",
+        "changeFailed": "Neizdevās nomainīt sugu. Lūdzu, mēģiniet vēlreiz.",
+        "conflict": "Sugu pašlaik nevar mainīt: noteikšana ir paturēta (bloķēta), vai arī tiek izmantots mantotais datubāzes formāts.",
+        "notKnownHere": "Suga {species} šajā stacijā vēl nekad nav tikusi noteikta vai prognozēta, tāpēc to vēl nevar izvēlēties.",
+        "predictionsTitle": "Citas prognozes",
+        "noPredictions": "Modelis šim ierakstam nav saglabājis citas prognozes.",
+        "allSpecies": "Visas sugas",
+        "searchRangePlaceholder": "Šajā vietā sagaidāmā suga",
+        "searchAllPlaceholder": "Jebkura modeļiem zināmā suga",
+        "searchHintRange": "Meklē starp {count} sugām, ko areāla filtrs šeit sagaida. Ieslēdziet Visas sugas, lai meklētu visur.",
+        "searchHintAll": "Meklē starp visām {count} modeļiem zināmajām sugām.",
+        "noMatchesInRange": "Nav sakritību starp šeit sagaidāmajām sugām. Ieslēdziet Visas sugas, lai meklētu visur.",
+        "modelPick": "modeļa izvēle"
+      },
       "aria": {
-        "downloadAudioClip": "Lejupielādēt audio fragmentu {name} noteikšanai",
-        "audioRecordingFor": "Audio ieraksts un spektrogramma {name}",
         "scientificName": "Zinātniskais nosaukums",
         "classificationBadges": "Sugas klasifikācijas nozīmītes",
         "confidence": "Atklāšanas ticamība {confidence}%",
-        "metadata": "Atklāšanas metadati",
-        "weatherConditions": "Laikapstākļi atklāšanas brīdī",
-        "comments": "Atklāšanas komentāri",
-        "commentText": "Komentāra teksts",
-        "commentTimestamp": "Komentāra laika zīmogs",
-        "mainRegion": "Atklāšanas informācija",
-        "tabsHeading": "Atklāšanas informācijas cilnes",
-        "tabList": "Atklāšanas detaļu cilnes",
         "speciesHeadingSuffix": "atklāšanas informācija"
+      },
+      "nav": {
+        "label": "Noteikšanu navigācija",
+        "back": "Noteikšanas",
+        "allGroup": "Visas noteikšanas",
+        "older": "Vecāka noteikšana",
+        "noOlder": "Šī ir vecākā noteikšana",
+        "newer": "Jaunāka noteikšana",
+        "noNewer": "Šī ir jaunākā noteikšana",
+        "speciesGroup": "Sugas {species} noteikšanas",
+        "olderSpecies": "Vecāka sugas {species} noteikšana",
+        "noOlderSpecies": "Nav vecākas sugas {species} noteikšanas",
+        "newerSpecies": "Jaunāka sugas {species} noteikšana",
+        "noNewerSpecies": "Nav jaunākas sugas {species} noteikšanas",
+        "stepLoading": "{label}: pārbauda blakus esošās noteikšanas",
+        "stepFailed": "{label}: neizdevās pārbaudīt blakus esošās noteikšanas"
+      },
+      "identity": {
+        "date": "Datums",
+        "time": "Laiks",
+        "beforeSunrise": "{hours} st {minutes} min pirms saullēkta",
+        "afterSunrise": "{hours} st {minutes} min pēc saullēkta",
+        "beforeSunset": "{hours} st {minutes} min pirms saulrieta",
+        "afterSunset": "{hours} st {minutes} min pēc saulrieta",
+        "setByReviewer": "Sugu norādījis pārskatītājs",
+        "timeOfDay": "Diennakts laiks",
+        "minutesBeforeSunrise": "{minutes} min pirms saullēkta",
+        "minutesAfterSunrise": "{minutes} min pēc saullēkta",
+        "minutesBeforeSunset": "{minutes} min pirms saulrieta",
+        "minutesAfterSunset": "{minutes} min pēc saulrieta",
+        "predictionsUnknown": "Citas prognozes",
+        "predictionsNone": "Nav citu prognožu",
+        "predictionsCount": "{count, plural, zero {# citu prognožu} one {# cita prognoze} other {# citas prognozes}}"
+      },
+      "conditions": {
+        "title": "Laiks un apstākļi",
+        "skyLabel": "Dienas laika skala: noteikts plkst. {time}, saullēkts {sunrise}, saulriets {sunset}",
+        "activityLabel": "Sugas {species} noteikšanas pa diennakts stundām",
+        "sunrise": "Saullēkts",
+        "sunset": "Saulriets",
+        "activityLegend": "{species} aktivitāte pa stundām, viss laiks",
+        "feelsLike": "Jūtas kā",
+        "moonLit": "{percent}% apgaismots",
+        "windFrom": "Vējš no {direction}",
+        "cloudCover": "Mākoņainība",
+        "precipitation": "Nokrišņi",
+        "precipitationTypes": {
+          "rain": "lietus",
+          "snow": "sniegs",
+          "sleet": "slapjš sniegs"
+        },
+        "observedAt": "Laikapstākļu novērojums no {time}",
+        "notObserved": "Šim laikam nav laikapstākļu novērojuma"
+      },
+      "compass": {
+        "n": "Z",
+        "nne": "ZZA",
+        "ne": "ZA",
+        "ene": "AZA",
+        "e": "A",
+        "ese": "ADA",
+        "se": "DA",
+        "sse": "DDA",
+        "s": "D",
+        "ssw": "DDR",
+        "sw": "DR",
+        "wsw": "RDR",
+        "w": "R",
+        "wnw": "RZR",
+        "nw": "ZR",
+        "nnw": "ZZR"
+      },
+      "review": {
+        "title": "Pārskatīšana",
+        "autosave": "Saglabājas uzreiz pēc izvēles",
+        "question": "Vai tā ir {species}?",
+        "correct": "Pareizi",
+        "falsePositive": "Kļūdaini pozitīvs",
+        "saving": "Saglabā...",
+        "savedCorrect": "Atzīmēts kā pareizs",
+        "savedFalsePositive": "Atzīmēts kā kļūdaini pozitīvs",
+        "loginRequired": "Piesakieties, lai pārskatītu šo noteikšanu.",
+        "lockedHelp": "Paturētās noteikšanas nevar mainīt. Vispirms izslēdziet Paturēt šo ierakstu.",
+        "keep": "Paturēt šo ierakstu",
+        "keepHelp": "Paturētās noteikšanas nekad netiek dzēstas tīrīšanas laikā.",
+        "reloadFailed": "Saglabāts, bet noteikšanu neizdevās ielādēt vēlreiz. Atjauniniet lapu, lai redzētu izmaiņas.",
+        "ignoredSpecies": "Suga {species} tagad tiek ignorēta",
+        "wrongSpecies": "Nepareiza suga...",
+        "legacyHelp": "Sugas maiņai nepieciešams pašreizējais datubāzes formāts.",
+        "databaseChecking": "Pārbauda, vai sugu var mainīt.",
+        "databaseUnknown": "Sugu nevar mainīt, kamēr nav zināms datubāzes formāts.",
+        "ignoreShort": "Ignorēt sugu",
+        "ignoredShort": "Suga ignorēta"
+      },
+      "models": {
+        "title": "Modeļi",
+        "summary": "Noteica {hit} no {total}",
+        "empty": "Šai noteikšanai nav ieraksta pa modeļiem. Modeļu dalība tiek saglabāta tikai jaunākām noteikšanām.",
+        "hits": "{count, plural, zero {# trāpījumu} one {# trāpījums} other {# trāpījumi}}",
+        "mean": "vidēji {value}",
+        "noHit": "Darbināts šim audio, bez rezultāta"
+      },
+      "stats": {
+        "title": "Suga šajā stacijā",
+        "rangeScore": "Areāla filtra vērtējums",
+        "rangeScoreNote": "Varbūtība šajā vietā datumā {date}",
+        "rangeScoreNoteToday": "Varbūtība šajā vietā šodien",
+        "total": "Noteikšanas, viss laiks",
+        "windowTotal": "Noteikšanas, pēdējās {days} dienas",
+        "firstHeard": "Pirmo reizi dzirdēta",
+        "lastHeard": "Pēdējo reizi dzirdēta",
+        "avgConfidence": "Vidējā ticamība",
+        "maxConfidence": "Augstākā ticamība",
+        "dailyTitle": "Noteikšanas dienā, {days} dienas līdz šai noteikšanai",
+        "dailyLabel": "{count} noteikšanas {days} dienās līdz šai noteikšanai",
+        "allThisDay": "Visas {species} noteikšanas šajā dienā",
+        "reviewsTitle": "Cilvēku pārskatītie",
+        "reviewsCount": "{count, plural, zero {# pārskatījumu} one {# pārskatījums} other {# pārskatījumi}}",
+        "reviewsCorrect": "{count} pareizi",
+        "reviewsFalse": "{count, plural, zero {# kļūdaini pozitīvu} one {# kļūdaini pozitīvs} other {# kļūdaini pozitīvi}}",
+        "oftenRejected": "Šeit bieži noraidīta: {percent}% pārskatījumu bija kļūdaini pozitīvi",
+        "reviewsNone": "Neviena šīs sugas noteikšana vēl nav pārskatīta."
+      },
+      "clip": {
+        "window": "Tveršanas logs",
+        "length": "Garums",
+        "seconds": "{count} s",
+        "format": "Formāts",
+        "denoised": "Samazināts troksnis saglabājot",
+        "denoisedYes": "Jā",
+        "denoisedNo": "Nē",
+        "file": "Fails",
+        "audioRemoved": "Audio tika dzēsts saskaņā ar saglabāšanas politiku; spektrogrammas attēls tika paturēts.",
+        "noClip": "Šai noteikšanai ieraksts netika saglabāts."
+      },
+      "log": {
+        "title": "Darbību žurnāls",
+        "subtitle": "Kas noticis ar šo noteikšanu",
+        "detected": "Noteikta suga {species} ar {confidence}% ticamību",
+        "captureWindow": "Tveršanas logs {begin}-{end}",
+        "clipSaved": "Ieraksts saglabāts",
+        "clipSavedDenoised": "Ieraksts saglabāts, troksnis samazināts",
+        "firstReviewed": "Pirmoreiz pārskatīts",
+        "reviewed": "Atzīmēts kā {status}",
+        "locked": "Paturēts (bloķēts)",
+        "noteAdded": "Piezīme pievienota",
+        "noteEdited": "Rediģēta {time}",
+        "timeUnknown": "Laiks nav reģistrēts",
+        "addNote": "Pievienot piezīmi",
+        "saveNote": "Pievienot piezīmi",
+        "lockedHelp": "Kamēr noteikšana ir paturēta (bloķēta), piezīmes pievienot nevar.",
+        "noteEmpty": "Pirms pievienošanas uzrakstiet piezīmi.",
+        "speciesChanged": "Suga nomainīta no {from} uz {to}"
       }
     },
     "headers": {
@@ -1042,12 +1206,6 @@
       "title": "Ieraksts un spektrogramma",
       "clipHint": "Noklikšķiniet un velciet uz spektrogrammas, lai atlasītu diapazonu klipu eksportam"
     },
-    "tabs": {
-      "overview": "Pārskats",
-      "taxonomy": "Taksonomija",
-      "history": "Vēsture",
-      "notes": "Piezīmes"
-    },
     "environmental": {
       "title": "Vides apstākļi"
     },
@@ -1058,18 +1216,9 @@
       "status": "Statuss",
       "locked": "Bloķēts"
     },
-    "history": {
-      "title": "Atklāšanu vēsture",
-      "comingSoon": "Vēstures izsekošana drīzumā..."
-    },
-    "notes": {
-      "title": "Piezīmes un komentāri",
-      "noComments": "Šai atklāšanai nav komentāru vai piezīmju."
-    },
     "aria": {
       "loading": "Ielādē atklāšanas informāciju...",
       "loaded": "Atklāšanas informācija ielādēta sugai {species}",
-      "error": "Kļūda, ielādējot atklāšanu: {error}",
       "loadingResults": "Ielādē {count} rezultātus...",
       "thumbnailLoading": "Ielādē {species} sīktēlu...",
       "thumbnailLoaded": "Sīktēls {species} ielādēts",
@@ -1087,9 +1236,7 @@
   },
   "species": {
     "rarity": {
-      "title": "Sugas retums",
       "score": "Vērtējums",
-      "basedOnLocation": "Pamatojoties uz atrašanās vietu: {latitude}, {longitude}",
       "statuses": {
         "very_common": "Ļoti izplatīta",
         "common": "Izplatīta",
@@ -1101,7 +1248,6 @@
     },
     "taxonomy": {
       "hierarchy": "Taksonomiskā klasifikācija",
-      "subspecies": "Pasugas",
       "noData": "Taksonomijas dati nav pieejami.",
       "labels": {
         "kingdom": "Valsts",
@@ -1127,11 +1273,9 @@
       }
     },
     "tracking": {
-      "title": "Sugu izsekošana",
       "newSpecies": "Jauna suga",
       "newThisYear": "Pirmā šogad",
-      "newThisSeason": "Pirmā šosezon",
-      "daysSinceFirst": "Dienas kopš pirmās novērošanas"
+      "newThisSeason": "Pirmā šosezon"
     }
   },
   "spectrogram": {
@@ -1184,13 +1328,6 @@
     },
     "systemInfo": {
       "title": "Sistēmas informācija",
-      "os": "Operētājsistēma",
-      "hostname": "Resursdatora nosaukums",
-      "uptime": "Darbības laiks",
-      "cpus": "Procesori",
-      "model": "Sistēmas modelis",
-      "timezone": "Laika zona",
-      "temperature": "Procesora temperatūra",
       "temperatureValue": "{temp}°C",
       "temperatureUnavailable": "Temperatūras dati nav pieejami",
       "cpuCores": "Procesora kodoli",
@@ -1229,16 +1366,7 @@
         "uptime": "Darbības laiks",
         "process": "Process"
       },
-      "showAll": "Rādīt visus procesus",
-      "showBirdnetOnly": "Rādīt tikai BirdNET",
-      "table": {
-        "process": "Process",
-        "status": "Statuss",
-        "cpu": "Procesors",
-        "memory": "Atmiņa",
-        "uptime": "Darbības laiks",
-        "showAllProcesses": "Rādīt visus procesus"
-      }
+      "showAll": "Rādīt visus procesus"
     },
     "errors": {
       "systemInfo": "Neizdevās ielādēt sistēmas informāciju: {error}",
@@ -1962,7 +2090,8 @@
     "detach": "Atvērt jaunā logā",
     "detached": "Terminālis ir atdalīts",
     "detachedDescription": "Terminālis darbojas atsevišķā logā. Aizveriet to logu, lai atgrieztu termināli šeit.",
-    "reattach": "Pievienot atpakaļ"
+    "reattach": "Pievienot atpakaļ",
+    "keyboardExitHint": "Lai atstātu termināli, nospiediet Esc un pēc tam Tab"
   },
   "analytics": {
     "hub": {
@@ -2351,6 +2480,15 @@
       "toolbar": "Iestatījumu darbības",
       "validationBlocked": "Dažiem laukiem nepieciešama uzmanība, pirms varat saglabāt.",
       "noChangesToSave": "Nav izmaiņu, ko saglabāt."
+    },
+    "autoSave": {
+      "saved": "Saglabāts",
+      "failed": "Nav saglabāts. Atjaunota iepriekšējā vērtība.",
+      "changedElsewhere": "Šis iestatījums tika mainīts citur. Tiek rādīta pašreizējā vērtība; veiciet izmaiņu vēlreiz.",
+      "tabNote": "Izmaiņas šajā cilnē tiek saglabātas, kamēr tās veicat.",
+      "failuresSummary": "{count, plural, zero {# izmaiņas nav saglabātas} one {# izmaiņa nav saglabāta} other {# izmaiņas nav saglabātas}}",
+      "dismiss": "Aizvērt",
+      "otherTabsUnsaved": "Citās cilnēs ir nesaglabātas izmaiņas. Atveriet vienu, lai tās saglabātu vai atiestatītu:"
     },
     "errors": {
       "loadFailed": "Neizdevās ielādēt iestatījumus",
@@ -3572,7 +3710,7 @@
         "sampleRateExclusive": "Frekvences virs 48 kHz izmanto ekskluzīvu ierīces piekļuvi Linux sistēmā, neļaujot citām lietojumprogrammām koplietot skaņas karti",
         "modelLabel": "Noteikšanas modeļi",
         "modelHelp": "Izvēlieties, kurus AI modeļus palaist šajā audio avotā",
-        "deleteConfirm": "Noņemt šo skaņas kartes avotu?",
+        "deleteConfirm": "Noņemt skaņas kartes avotu \"{name}\"?",
         "emptyState": {
           "title": "Nav konfigurētu skaņas kartes avotu",
           "description": "Pievienojiet skaņas kartes avotu, lai sāktu audio ierakstīšanu putnu noteikšanai.",
@@ -3599,11 +3737,17 @@
           "minSampleRate": "Nepieciešama vismaz {rate}kHz ierakstīšanas frekvence",
           "recommendedSampleRate": "{rate}kHz ieteicams labākajiem rezultātiem",
           "atLeastOneModel": "Jāizvēlas vismaz viens modelis"
-        }
+        },
+        "captureTitle": "Ierakstīšana",
+        "levelTitle": "Ieejas līmenis",
+        "captureApplyHint": "Ierakstīšana tiks restartēta, kad lietosiet izmaiņas.",
+        "applyCapture": "Lietot un restartēt ierakstīšanu",
+        "applying": "Lieto...",
+        "adding": "Pievieno...",
+        "captureApplyFailed": "Ierakstīšana netika mainīta. Lietojiet vēlreiz vai atceliet."
       },
       "audioCapture": {
         "title": "Skaņas kartes konfigurācija",
-        "description": "Izvēlieties audio ievades ierīci putnu skaņu noteikšanai. Izmaiņām nepieciešama lietojumprogrammas pārstartēšana.",
         "soundCardSource": "Skaņas kartes avots",
         "audioSourceLabel": "Audio avots (nepieciešama lietojumprogrammas pārstartēšana, lai izmaiņas stātos spēkā)",
         "audioSourceHelp": "Izvēlieties audio ievades ierīci putnu skaņu noteikšanai. Izmaiņām nepieciešama lietojumprogrammas pārstartēšana.",
@@ -3637,11 +3781,11 @@
         "fixedHint": "Uztveršana tiek apturēta starp sākuma un beigu laikiem katru dienu. Nakts logi (piem., 22:00 līdz 06:00) tiek atbalstīti.",
         "solarHint": "Laiki tiek aprēķināti no saullēkta/saulrieta jūsu konfigurētajā atrašanās vietā. Izmantojiet negatīvas nobīdes pirms notikuma, pozitīvas - pēc.",
         "badge": "Kluss",
-        "enabledBadge": "Klusās stundas iespējotas šai straumei"
+        "enabledBadge": "Klusās stundas iespējotas šai straumei",
+        "enableLabel": "Apturēt ierakstīšanu klusuma stundās"
       },
       "rtspStreams": {
         "title": "Audio straumju konfigurācija",
-        "description": "Konfigurēt tīkla audio straumes attālinātai audio uztveršanai. Atbalsta RTSP, HTTP, HLS, RTMP un UDP protokolus.",
         "noStreamsConfigured": "Nav konfigurētu straumju"
       },
       "streams": {
@@ -3670,7 +3814,7 @@
         "refresh": "Atsvaidzināt",
         "addStream": "Pievienot straumi",
         "testRequired": "Pirms saglabāšanas veiciet veiksmīgu straumes testu",
-        "deleteConfirm": "Noņemt šo straumi?",
+        "deleteConfirm": "Noņemt straumi \"{name}\"?",
         "restartCount": "Pārstartēta {count} reizi(-es)",
         "healthLoadError": "Neizdevās ielādēt straumes veselības statusu",
         "status": {
@@ -3694,6 +3838,7 @@
         "errors": {
           "nameRequired": "Straumes nosaukums ir obligāts",
           "duplicateName": "Straume ar šādu nosaukumu jau pastāv",
+          "nameTooLong": "Straumes nosaukums ir pārāk garš (ne vairāk kā {max} baiti)",
           "urlRequired": "Straumes URL ir obligāts",
           "invalidUrl": "Nederīgs straumes URL formāts",
           "duplicate": "Šāds straumes URL jau pastāv"
@@ -3710,12 +3855,12 @@
           "eventAt": "Notikums {time}"
         },
         "diagnostics": {
-          "toggleDiagnostics": "Pārslēgt diagnostiku",
           "processState": "Procesa stāvoklis",
           "lastData": "Pēdējie dati",
           "restartCount": "Pārstartēšanas skaits",
           "connection": "Savienojums",
-          "stateErrorHistory": "Stāvokļu un kļūdu vēsture"
+          "stateErrorHistory": "Stāvokļu un kļūdu vēsture",
+          "title": "Diagnostika"
         },
         "connectionStatus": {
           "stable": "Stabils",
@@ -3762,8 +3907,19 @@
         },
         "stereoWarning": {
           "message": "Konstatēta stereo straume. Vairāku kanālu samazināšana var pazemināt noteikšanas precizitāti fāzu atšķirību dēļ starp kanāliem. Izvēlieties konkrētu kanālu (kreiso/labo) vai izmantojiet kanālu detektoru labākajiem rezultātiem.",
-          "short": "Stereo downmix aktīvs. Noteikšanas precizitāte var būt samazināta. Rediģējiet, lai izvēlētos konkrētu kanālu.",
-          "tooltip": "Stereo downmix aktīvs. Noteikšanas precizitāte var būt samazināta. Rediģējiet, lai izvēlētos konkrētu kanālu."
+          "short": "Stereo downmix aktīvs. Noteikšanas precizitāte var būt samazināta. Izvēlieties konkrētu kanālu sadaļā Savienojums."
+        },
+        "autoSaveHelp": "Izmaiņas tiek saglabātas uzreiz. Savienojuma izmaiņas atkārtoti savieno straumi, tāpēc tās gaida, līdz noklikšķināt uz Lietot.",
+        "connectionTitle": "Savienojums",
+        "connectionApplyHint": "Straume tiks atkārtoti savienota, kad lietosiet izmaiņas.",
+        "connectionApplyFailed": "Savienojums netika mainīts. Lietojiet vēlreiz vai atceliet.",
+        "applyConnection": "Lietot un savienot atkārtoti",
+        "testBeforeApply": "Pirms lietošanas pārbaudiet jauno URL.",
+        "statsLine": "Kopā: {total} · Ātrums: {rate} · Pēdējie: {last}",
+        "ago": {
+          "seconds": "pirms {count} s",
+          "minutes": "pirms {count} min",
+          "hours": "pirms {count} h"
         }
       },
       "audioFilters": {
@@ -3922,7 +4078,8 @@
         "warningPermanent": "Oriģinālais audio netiek saglabāts. Klipi tiek pastāvīgi attīrīti no trokšņa saglabājot, tostarp sikspārņu ieraksti.",
         "warningBats": "Trokšņu samazināšana var padarīt klusākus vājos sikspārņu saucienus; stiprie saucieni netiek ietekmēti.",
         "warningImported": "Importētie ieraksti netiek ietekmēti.",
-        "lossyNote": "Trokšņu samazināšana vislabāk darbojas ar FLAC vai WAV klipiem. Zem {minBitrate} kbps kodeka artefakti ierobežo rezultāta tīrību."
+        "lossyNote": "Trokšņu samazināšana vislabāk darbojas ar FLAC vai WAV klipiem. Zem {minBitrate} kbps kodeka artefakti ierobežo rezultāta tīrību.",
+        "warningPlayback": "Noklusējuma trokšņu samazināšana atskaņošanas laikā netiek lietota, kamēr tas ir ieslēgts. Ja vēlāk to izslēgsiet un ieslēgsiet atskaņošanas noklusējumu, šie klipi atskaņošanas laikā tiks attīrīti no trokšņa otrreiz."
       },
       "audioClipRetention": {
         "title": "Audio klipu saglabāšana",
@@ -3981,9 +4138,25 @@
         "noneAvailable": "Šajā serverī nav iespējoti noteikšanas modeļi.",
         "loadFailedWarning": "Neizdevās ielādēt noteikšanas modeli, tāpēc šis avots netiks analizēts, kamēr tas neatkopsies.",
         "loadFailedLink": "Skatīt MI Modeļi statusu",
+        "state": {
+          "pending": "Ielādē",
+          "failed": "Neizdevās ielādēt",
+          "missing": "Nav instalēts"
+        },
+        "notLoadedHelp": "Šis modelis nav ielādēts, tāpēc to nevar izvēlēties.",
         "defaultBadge": "{models} (noklusējums)",
         "defaultPendingBadge": "Noklusējuma modeļi",
-        "noneBadge": "Nav ielādēts modelis"
+        "noneBadge": "Nav ielādēts modelis",
+        "missingHelp": "Šis modelis vairs nav instalēts. Šis avots to ignorē.",
+        "removeMissing": "Noņemt",
+        "removeMissingAria": "Noņemt {model} no {source}",
+        "lastSelectedHelp": "Vismaz viens klasifikators paliek atlasīts.",
+        "followsDefaults": "Šis avots izmanto noklusējuma modeļus.",
+        "listFailed": "Modeļu sarakstu neizdevās ielādēt.",
+        "warningBadge": "Pārbaudiet klasifikatorus"
+      },
+      "sources": {
+        "autoSaveHelp": "Izmaiņas tiek saglabātas uzreiz. Ierīces un iztveršanas frekvences izmaiņas restartē ierakstīšanu, tāpēc tās gaida, līdz noklikšķināt uz Lietot."
       }
     },
     "security": {
@@ -4054,7 +4227,7 @@
         "clientSecretLabel": "Klienta noslēpums",
         "clientSecretHelpText": "OAuth 2.0 klienta noslēpums no jūsu nodrošinātāja izstrādātāju konsoles",
         "userIdLabel": "Atļautie lietotāji",
-        "userIdHelpText": "Ar komatu atdalīti e-pasti vai lietotāju ID, kuriem atļauts pieteikties ar šo pakalpojumu sniedzēju. Ja atstāts tukšs, neviens nevarēs pieteikties.",
+        "userIdHelpText": "Ar komatu atdalīti e-pasti vai lietotāju ID, kuriem atļauts pieteikties ar šo pakalpojumu sniedzēju. Ieteicams lietotāja ID, jo e-pasta adrese var mainīties. Ja atstāts tukšs, neviens nevarēs pieteikties.",
         "allowedUsersEmptyWarning": "Šim pakalpojumu sniedzējam nav atļauto lietotāju, tāpēc katrs pieteikšanās mēģinājums tiks noraidīts. Pievienojiet vismaz vienu e-pastu vai lietotāja ID, lai atļautu piekļuvi.",
         "allowedUsersMissingBadge": "Nav iestatīts neviens atļautais lietotājs - pieteikšanās neizdosies",
         "google": {
@@ -4123,13 +4296,16 @@
           "clientSecretHelpText": "Klienta noslēpums no jūsu OIDC identitātes nodrošinātāja",
           "userIdLabel": "Atļautais lietotājs (e-pasts vai sub apgalvojums)",
           "issuerUrlLabel": "Izdevēja URL",
-          "issuerUrlHelpText": "Jūsu OpenID Connect identitātes nodrošinātāja izdevēja URL (piem., https://auth.example.com)",
+          "issuerUrlHelpText": "Jūsu OpenID Connect nodrošinātāja bāzes URL. BirdNET-Go pats pievieno /.well-known/openid-configuration, tāpēc šo daļu izlaidiet. Piemēri: https://auth.example.com/application/o/birdnet-go/ (Authentik), https://auth.example.com/realms/myrealm (Keycloak).",
           "issuerUrlPlaceholder": "https://auth.example.com",
           "issuerUrlRequired": "OIDC nodrošinātājiem nepieciešams izdevēja URL",
           "issuerUrlInvalid": "Izdevēja URL jābūt derīgam HTTP vai HTTPS URL",
           "scopesLabel": "Tvērumi",
           "scopesHelpText": "Ar komatiem atdalīts OIDC tvērumu saraksts (noklusējums: openid, profile, email)",
-          "scopesPlaceholder": "openid, profile, email"
+          "scopesPlaceholder": "openid, profile, email",
+          "postLogoutRedirectLabel": "Pēc izrakstīšanās pie identitātes nodrošinātāja atgriezties BirdNET-Go",
+          "postLogoutRedirectHelpText": "Pēc izrakstīšanās pārlūkprogramma tiek novirzīta uz {url}. Vispirms reģistrējiet šo URL pie sava identitātes nodrošinātāja kā post-logout redirect URI, citādi nodrošinātājs var parādīt kļūdu.",
+          "postLogoutRedirectNoBaseUrl": "Vispirms iestatiet bāzes URL vai resursdatoru. Atgriešanās URL tiek veidots no tiem."
         }
       },
       "bypassAuthentication": {
@@ -4352,7 +4528,24 @@
           "mappedZero": {
             "title": "Areāla filtrs neatbilda nevienai sugai",
             "description": "Ģeomodeļa areāla filtrs neatbilda nevienai aktīvā modeļa sugai, tāpēc tiktu izfiltrētas visas noteikšanas. Pārbaudiet, vai areāla filtra etiķešu fails atbilst aktīvajam modelim."
-          }
+          },
+          "geomodelNotInstalled": {
+            "title": "BirdNET Geomodel nav instalēts",
+            "description": "Šiem modeļiem ir vajadzīgs BirdNET Geomodel, lai filtrētu atpazīšanas rezultātus pēc atrašanās vietas: {models}. Instalējiet BirdNET Geomodel v3.0 Analīzes iestatījumu cilnē Modeļi."
+          },
+          "geomodelNotSelected": {
+            "title": "BirdNET Geomodel netiek izmantots",
+            "description": "BirdNET Geomodel ir instalēts, taču areāla filtrs ir iestatīts izmantot citu modeli, tāpēc šie modeļi netiek filtrēti pēc atrašanās vietas: {models}. Lai to izmantotu, noņemiet birdnet.rangefilter.model un birdnet.rangefilter.modelpath no konfigurācijas faila vai vides."
+          },
+          "geomodelLoadFailed": {
+            "title": "BirdNET Geomodel neizdevās ielādēt",
+            "description": "BirdNET Geomodel neizdevās ielādēt, tāpēc šie modeļi netiek filtrēti pēc atrašanās vietas: {models}. Pārbaudiet lietotnes žurnālu un instalējiet vai pārinstalējiet BirdNET Geomodel v3.0 Analīzes iestatījumu cilnē Modeļi."
+          },
+          "reloadFailed": {
+            "title": "Areāla filtra pārlāde neizdevās",
+            "description": "Pēdējā areāla filtra pārlāde neizdevās, tāpēc joprojām tiek izmantots iepriekš ielādētais areāla filtrs. Pārbaudiet lietotnes žurnālu un restartējiet BirdNET-Go, lai mēģinātu vēlreiz."
+          },
+          "openModels": "Atvērt Modeļi"
         },
         "columns": {
           "commonName": "Parastais nosaukums",
@@ -4904,7 +5097,15 @@
         "description": "Noklusējuma iestatījumi putnu ierakstu atskaņošanai.",
         "defaultGain": "Noklusējuma skaļuma pastiprināšana",
         "defaultGainHelpText": "Sākotnējā pastiprināšana, kas tiek piemērota, atskaņojot ierakstus. Putnu skaņas bieži ir klusas, tāpēc ieteicama 6-12 dB pastiprināšana.",
-        "defaultGainUnit": "dB"
+        "defaultGainUnit": "dB",
+        "denoiseLabel": "Samazināt klipu troksni atskaņošanas laikā",
+        "denoiseHelpText": "Atskaņo un lejupielādē katra klipa kopiju bez trokšņa. Saglabātie klipi paliek nemainīti. Lejupielādes kļūst par WAV failiem un ir lielākas. Klipa audio iestatījumos var izvēlēties citu stiprumu vai izslēgt trokšņu samazināšanu.",
+        "denoiseStrengthLabel": "Trokšņu samazināšanas stiprums",
+        "denoiseStrengthHelpText": "Viegls saglabā visvairāk oriģinālās skaņas, bet spēcīgs noņem visvairāk trokšņa. Viegls-vidējs der lielākajai daļai ierakstu.",
+        "denoiseStrengthDisabledHelp": "Lai izvēlētos stiprumu, augstāk ieslēdziet trokšņu samazināšanu atskaņošanas laikā.",
+        "denoiseExportPrecedence": "Netiek lietots, kamēr ir ieslēgta „Saglabāto klipu trokšņu samazināšana“ (Audio iestatījumi, cilne Apstrāde). Šie klipi jau ir attīrīti no trokšņa.",
+        "denoiseRedenoiseNote": "Klipi, kas saglabāti, kamēr bija ieslēgta „Saglabāto klipu trokšņu samazināšana“, atskaņošanas laikā tiek attīrīti no trokšņa vēlreiz. Klipa audio iestatījumos izvēlieties Izslēgts, lai to dzirdētu tādu, kāds tas saglabāts.",
+        "denoiseLossyNote": "Trokšņu samazināšana vislabāk darbojas ar FLAC vai WAV klipiem. Zem {minBitrate} kbps kodeka artefakti ierobežo rezultāta tīrību."
       }
     },
     "restartRequired": "Dažām izmaiņām nepieciešama servera pārstartēšana, lai tās stātos spēkā. Lūdzu, pārstartējiet BirdNET-Go."
@@ -4947,7 +5148,8 @@
       "noData": "Nav pieejamu datu",
       "loading": "Ielādē datus...",
       "error": "Neizdevās ielādēt datus",
-      "sortBy": "Kārtot pēc {column}",
+      "sortedAscending": "Kārtots pēc {column}, augošā secībā",
+      "sortedDescending": "Kārtots pēc {column}, dilstošā secībā",
       "rowsPerPage": "Rindas lapā",
       "pageInfo": "Rāda {from} līdz {to} no {total} rezultātiem"
     },
@@ -5096,9 +5298,11 @@
       "filterControl": "Filtra vadība",
       "highPassFilter": "Augstfrekvences filtra vadība: {freq} Hz",
       "seekProgress": "Audio pārtīšanas progress: {current} / {total} sekundes",
+      "seek": "Atskaņošanas pozīcija",
+      "seekValueText": "{current} no {total}",
       "playbackSpeed": "Atskaņošanas ātrums",
       "speed": "Ātrums",
-      "loop": "Pārslēgt cilpu",
+      "loop": "Cilpa",
       "player": "Audio atskaņotājs",
       "autoplayBlocked": "Noklikšķiniet, lai atskaņotu (automātiskā atskaņošana bloķēta)",
       "hlsLoadFailed": "Neizdevās ielādēt audio atskaņotāju, lūdzu, pārlādējiet lapu un mēģiniet vēlreiz",
@@ -5619,6 +5823,10 @@
         "label": "Pēcnoteikšanas validācija",
         "helpText": "Kad iespējots, sikspārņu noteikšana tiek pārbaudīta, analizējot ultraskaņas enerģijas modeļus avota ierakstā. Noteikšanas bez eholokācijas pazīmēm tiek atzīmētas kā maz ticamas."
       },
+      "batDiscardUnlikely": {
+        "label": "Atmest maz ticamas noteikšanas",
+        "helpText": "Kad iespējots, sikspārņu noteikšanas, ko pēcnoteikšanas validācija atzīmē kā maz ticamas, tiek atmestas: tās netiek saglabātas, tām netiek izveidots audio klips vai paziņojums, un tās nevar atjaunot. Kad atspējots (noklusējums), tās tiek saglabātas un atzīmētas kā maz ticamas. Jau saglabātās noteikšanas netiek mainītas."
+      },
       "batFalsePositiveFilter": {
         "label": "Sikspārņu viltus pozitīvo filtrs",
         "helpText": "Pieprasa vairākus apstiprinājumus sikspārņu noteikšanai slīdošajā logā pirms tā pieņemšanas. Augstāki līmeņi pieprasa vairāk apstiprinājumu, samazinot viltus pozitīvos. Sikspārņu modelis izmanto fiksētu 50% pārklāšanos, tāpēc pārklāšanās pielāgošana nav nepieciešama.",
@@ -5648,6 +5856,9 @@
       },
       "birdnetv3Threshold": {
         "label": "BirdNET v3.0 Confidence Threshold"
+      },
+      "birdnetplusThreshold": {
+        "label": "BirdNET+ V3.0 ticamības slieksnis"
       }
     },
     "rangeFilter": {
@@ -5738,7 +5949,6 @@
         "filterPlaceholder": "Filtrēt reģionus",
         "filterAria": "Filtrēt reģioniem pielāgotās versijas",
         "filterNoMatch": "Neviens reģions neatbilst \"{query}\"",
-        "latency": "~{ms} ms",
         "precisionInfo": "About precision and variants",
         "precisionHelp": "Precision (FP32, FP16, INT8) trades accuracy for size and speed: FP32 is most accurate, INT8 is smallest and fastest. Recommended is the best match for your detected hardware; Default is the model's standard build."
       },
@@ -5762,7 +5972,8 @@
       },
       "tabs": {
         "installed": "Instalētie",
-        "available": "Pieejamie"
+        "available": "Pieejamie",
+        "navigationAria": "Modeļu galerijas cilnes"
       },
       "loading": "Ielādē modeļus...",
       "retry": "Mēģināt vēlreiz",
@@ -5833,6 +6044,15 @@
         "cardNotice": "Izstrādātāja priekšskatījums, nav galīgais laidiens. Šī ir agrīna versija testēšanai; rezultāti var mainīties pirms stabilās versijas.",
         "dialogNotice": "Jūs instalējat izstrādātāja priekšskatījumu ({build}). Piemērots izmēģināšanai, taču vēl nav ieteicams kā jūsu vienīgais klasifikators."
       },
+      "experimental": {
+        "badge": "Eksperimentāls",
+        "cardNotice": "Eksperimentāls programmā BirdNET-Go. Modelis ir publicēts, taču tā veiktspēja BirdNET-Go vēl nav pierādīta, tāpēc rezultāti var būt mazāk uzticami.",
+        "dialogNotice": "Jūs instalējat modeli, kas BirdNET-Go ir eksperimentāls. Tā veiktspēja vēl nav pierādīta, tāpēc pārbaudiet tā atpazīšanas rezultātus, pirms uz tiem paļaujaties."
+      },
+      "superseded": {
+        "cardNotice": "Aizstāts ar {name}. Izmantojiet tā vietā jaunāko modeli.",
+        "dialogNotice": "Šo modeli ir aizstājis {name}. Apsveriet {name} instalēšanu tā vietā."
+      },
       "entryIncompatible": "Šis modelis nav pieejams šajā sistēmā.",
       "regionGlobal": "Globāls",
       "hardwareLabel": "Aparatūra",
@@ -5880,6 +6100,10 @@
     "birdnetv3": {
       "title": "BirdNET v3.0 Detection",
       "description": "Set a dedicated confidence threshold for BirdNET v3.0 detections, independent of the main BirdNET threshold."
+    },
+    "birdnetplus": {
+      "title": "BirdNET+ V3.0 noteikšana",
+      "description": "Iestatiet atsevišķu ticamības slieksni BirdNET+ V3.0 noteikšanai, neatkarīgi no galvenā BirdNET sliekšņa."
     }
   },
   "restart": {
@@ -5895,7 +6119,6 @@
     "restartFailed": "Neizdevās sākt restartēšanu",
     "reasons": {
       "webserver": "Tīmekļa servera / tīkla iestatījumi",
-      "oauth": "Autentifikācijas pakalpojumu sniedzēja iestatījumi",
       "database": "Datu bāzes iestatījumi",
       "logging": "Žurnalēšanas iestatījumi",
       "tlsCertificate": "TLS sertifikāts"
@@ -5981,6 +6204,7 @@
     },
     "metricFooter": {
       "allPassing": "Viss kārtībā",
+      "healthyOfTotal": "{healthy} no {total}",
       "needsAttention": "Nepieciešama uzmanība",
       "failing": "Neizdodas",
       "allClear": "Bez problēmām",

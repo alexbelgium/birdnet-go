@@ -297,7 +297,7 @@
         disabled={isVerdictPending}
         aria-pressed={detection?.verified === 'correct'}
       >
-        <CircleCheck class="size-4 text-[var(--color-success)]" />
+        <CircleCheck class="size-4 text-[var(--text-success)]" />
         <span>{t('dashboard.recentDetections.actions.markCorrect')}</span>
       </button>
       <button
@@ -307,13 +307,13 @@
         disabled={isVerdictPending}
         aria-pressed={detection?.verified === 'false_positive'}
       >
-        <CircleX class="size-4 text-[var(--color-error)]" />
+        <CircleX class="size-4 text-[var(--text-error)]" />
         <span>{t('dashboard.recentDetections.actions.markFalsePositive')}</span>
       </button>
       {#if onDeleted}
         <button
           type="button"
-          class="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-[var(--color-error)] transition-colors hover:bg-[var(--color-error)]/10 disabled:opacity-50"
+          class="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-[var(--text-error)] transition-colors hover:bg-[var(--color-error)]/10 disabled:opacity-50"
           onclick={startDeleteConfirmation}
           disabled={isVerdictPending}
           aria-label="Delete this detection"

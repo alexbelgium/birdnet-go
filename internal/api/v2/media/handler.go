@@ -57,13 +57,18 @@ type Handler struct {
 
 	// isClientAuthenticated reports whether the request comes from a signed-in
 	// client (true as well when authentication is not required). Nil means every
-	// client is unauthenticated. Guests never trigger a denoise job.
+	// client is unauthenticated. Guests start a denoise only for the playback default.
 	isClientAuthenticated func(echo.Context) bool
 
 	// processingStartedHook, when set, runs inside a processing job after it holds
 	// a semaphore slot and before the transcode starts. Tests use it to hold a job
 	// in flight. Production leaves it nil.
 	processingStartedHook func()
+
+	// spectrogramRenderHook, when set, runs just before a processed spectrogram is
+	// rendered, outside any processing slot. Tests use it to hold a render in
+	// flight. Production leaves it nil.
+	spectrogramRenderHook func()
 
 	// spectrogramGenerator renders spectrogram images from audio clips via the
 	// media SecureFS sandbox. Built in New from the shared SecureFS.

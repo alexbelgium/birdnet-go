@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -188,6 +189,7 @@ type Dashboard struct {
 	Layout           DashboardLayout      `yaml:"layout" json:"layout"`                                 // configurable dashboard element layout
 	DefaultAudioGain float64              `yaml:"defaultaudiogain" json:"defaultAudioGain"`             // Default playback gain in dB (0-24)
 	LiveSpectrogram  bool                 `yaml:"livespectrogram" json:"liveSpectrogram"`               // auto-start live spectrogram on dashboard
+	PlaybackDenoise  DenoiseSettings      `yaml:"playbackdenoise" json:"playbackDenoise"`               // denoise clips when they are played or downloaded; stored clips stay unchanged
 }
 
 // DashboardLayout defines the ordered list of elements displayed on the dashboard.
@@ -1433,6 +1435,15 @@ type BirdNETV3Config struct {
 	Locale            string  `yaml:"locale,omitempty" json:"locale,omitempty"`       // locale for species label translation
 }
 
+// BirdNETPlusConfig holds configuration for the BirdNET+ V3.0 acoustic classifier.
+type BirdNETPlusConfig struct {
+	ModelPath         string  `yaml:"modelpath,omitempty" json:"modelPath,omitempty"` // path to BirdNET+ V3.0 ONNX model file
+	LabelPath         string  `yaml:"labelpath,omitempty" json:"labelPath,omitempty"` // path to BirdNET+ V3.0 label file
+	OverrideThreshold bool    `yaml:"overridethreshold" json:"overrideThreshold"`     // when true, gate BirdNET+ V3.0 detections on Threshold instead of following BirdNET.Threshold
+	Threshold         float64 `yaml:"threshold" json:"threshold"`                     // confidence threshold for detections (applied only when OverrideThreshold is true)
+	Locale            string  `yaml:"locale,omitempty" json:"locale,omitempty"`       // locale for species label translation
+}
+
 // BatConfig holds configuration for bat detection using BirdNET v2.4 embeddings.
 type BatConfig struct {
 	EmbeddingModel      string                      `yaml:"embeddingmodel,omitempty" json:"embeddingModel,omitempty"`   // path to BirdNET v2.4 embeddings ONNX model
@@ -1449,8 +1460,14 @@ type BatConfig struct {
 // The filter measures temporal variability of ultrasonic energy (US frame CV) in the audio window it is given, at the model's analysis rate.
 // Real bat echolocation produces bursts of ultrasonic energy (high CV), while false positives
 // from audible-range sounds show flat ultrasonic energy at the noise floor (low CV).
+// A window that passes the CV check is then examined in shorter sub-frames. Sub-frames where the band
+// from 0.6 to 0.8 of FrequencySplitHz jumps together with the ultrasonic band (clicks, rustling) do not count toward the CV,
+// and neither do sub-frames where every band of a twentieth of FrequencySplitHz, from 0.7 to 1.2 of it, is raised together
+// with the ultrasonic band (rain). The second check is skipped when FFTSize is so small that such a band is narrower than
+// one sub-frame bin.
 type UltrasonicFilterConfig struct {
 	Enabled          bool    `yaml:"enabled" json:"enabled"`                   // enable ultrasonic validation filter
+	DiscardUnlikely  bool    `yaml:"discardunlikely" json:"discardUnlikely"`   // discard detections tagged unlikely instead of saving them; applies only while enabled
 	CVThreshold      float64 `yaml:"cvthreshold" json:"cvThreshold"`           // detections with US frame CV below this are tagged unlikely
 	FFTSize          int     `yaml:"fftsize" json:"fftSize"`                   // FFT window size in samples (a power of 2, at least 2)
 	HopSize          int     `yaml:"hopsize" json:"hopSize"`                   // STFT hop size in samples, 1 to fftsize
@@ -1620,6 +1637,10 @@ type OAuthProviderConfig struct {
 	UserID       string   `yaml:"userId,omitempty" json:"userId"`           // Allowed user ID/email for this provider
 	IssuerURL    string   `yaml:"issuerUrl,omitempty" json:"issuerUrl"`     // OIDC issuer/discovery URL (required when provider is "oidc")
 	Scopes       []string `yaml:"scopes,omitempty" json:"scopes,omitempty"` // Custom OAuth scopes (OIDC default: openid, profile, email)
+
+	// PostLogoutRedirect sends the browser back to the instance after sign-out at
+	// the identity provider. OIDC only. The return URL must be registered there.
+	PostLogoutRedirect bool `yaml:"postLogoutRedirect,omitempty" json:"postLogoutRedirect,omitempty"`
 }
 
 // TLSMode represents the TLS certificate management mode.
@@ -2042,13 +2063,14 @@ type Settings struct {
 		TimeAs24h bool   `yaml:"timeas24h" json:"timeAs24h"` // true 24-hour time format, false 12-hour time format
 	} `yaml:"main" json:"main"`
 
-	BirdNET   BirdNETConfig   `yaml:"birdnet" json:"birdnet"`     // BirdNET configuration
-	Perch     PerchConfig     `yaml:"perch" json:"perch"`         // Perch v2 model configuration
-	BirdNETV3 BirdNETV3Config `yaml:"birdnetv3" json:"birdnetv3"` // BirdNET v3.0 acoustic classifier configuration
-	Bat       BatConfig       `yaml:"bat" json:"bat"`             // Bat detection configuration
-	BSGBat    BSGBatConfig    `yaml:"bsgbat" json:"bsgbat"`       // BSG-BAT bat classifier configuration
-	BSG       BSGConfig       `yaml:"bsg" json:"bsg"`             // BSG regional bird model configuration
-	Models    ModelsConfig    `yaml:"models" json:"models"`       // Global model enablement and management
+	BirdNET     BirdNETConfig     `yaml:"birdnet" json:"birdnet"`         // BirdNET configuration
+	Perch       PerchConfig       `yaml:"perch" json:"perch"`             // Perch v2 model configuration
+	BirdNETV3   BirdNETV3Config   `yaml:"birdnetv3" json:"birdnetv3"`     // BirdNET v3.0 acoustic classifier configuration
+	BirdNETPlus BirdNETPlusConfig `yaml:"birdnetplus" json:"birdnetplus"` // BirdNET+ V3.0 acoustic classifier configuration
+	Bat         BatConfig         `yaml:"bat" json:"bat"`                 // Bat detection configuration
+	BSGBat      BSGBatConfig      `yaml:"bsgbat" json:"bsgbat"`           // BSG-BAT bat classifier configuration
+	BSG         BSGConfig         `yaml:"bsg" json:"bsg"`                 // BSG regional bird model configuration
+	Models      ModelsConfig      `yaml:"models" json:"models"`           // Global model enablement and management
 
 	LowMemory LowMemoryConfig `yaml:"lowmemory" json:"lowMemory" mapstructure:"lowmemory"` // Low-memory mode override (auto/on/off) for constrained systems
 
@@ -2099,6 +2121,21 @@ type Settings struct {
 	// stamped by UpdateSettings and CompareAndStoreSettings and is zero for a
 	// snapshot published by Load or StoreSettings. Read it through Revision.
 	revision uint64
+}
+
+// EffectivePlaybackDenoise returns the denoise preset the UI applies to clip
+// playback and downloads by default, or "" when none applies. The playback
+// default is off while export-stage denoise is on: the saved clips are already
+// denoised, and denoising them again when played would do it twice.
+func (s *Settings) EffectivePlaybackDenoise() string {
+	if s.Realtime.Audio.Export.Denoise.Enabled {
+		return ""
+	}
+	playback := s.Realtime.Dashboard.PlaybackDenoise
+	if !playback.Enabled || !IsValidDenoisePresetName(playback.Strength) {
+		return ""
+	}
+	return playback.Strength
 }
 
 // Revision identifies the client-writable state of this snapshot within one
@@ -2172,8 +2209,112 @@ type AlertSettings struct {
 	HistoryRetentionDays int `json:"historyRetentionDays" yaml:"history_retention_days" mapstructure:"history_retention_days"` // Days to retain alert history (0 = unlimited)
 }
 
-// GetOAuthProvider returns the OAuth provider configuration for the given provider ID.
-// Returns nil if the provider is not configured.
+// Canonical OAuth provider IDs, as stored in security.oauthProviders[].provider
+// and sent by the settings UI. internal/security dispatches on the same values
+// (its Config* constants derive from these), and it imports conf, so the list
+// lives here.
+const (
+	OAuthProviderGoogle    = "google"
+	OAuthProviderGitHub    = "github"
+	OAuthProviderMicrosoft = "microsoft"
+	OAuthProviderLine      = "line"
+	OAuthProviderKakao     = "kakao"
+	OAuthProviderOIDC      = "oidc"
+)
+
+// knownOAuthProviderIDs is the sorted list of every canonical provider ID.
+var knownOAuthProviderIDs = []string{
+	OAuthProviderGitHub,
+	OAuthProviderGoogle,
+	OAuthProviderKakao,
+	OAuthProviderLine,
+	OAuthProviderMicrosoft,
+	OAuthProviderOIDC,
+}
+
+// IsKnownOAuthProviderID reports whether id is a supported provider ID. It
+// expects the canonical form; run NormalizeOAuthProviderID first.
+func IsKnownOAuthProviderID(id string) bool {
+	return slices.Contains(knownOAuthProviderIDs, id)
+}
+
+// KnownOAuthProviderIDs returns a sorted copy of the supported provider IDs.
+func KnownOAuthProviderIDs() []string {
+	return slices.Clone(knownOAuthProviderIDs)
+}
+
+// NormalizeOAuthProviderID returns the canonical form of an OAuth provider ID:
+// trimmed and lower case. Provider IDs are compared exactly throughout the
+// settings code, so every ingestion point stores them in this form.
+func NormalizeOAuthProviderID(id string) string {
+	return strings.ToLower(strings.TrimSpace(id))
+}
+
+// NormalizeOAuthProviderIDs rewrites every Security.OAuthProviders[i].Provider
+// to its canonical form. It is idempotent and never drops or disables an entry.
+func (s *Settings) NormalizeOAuthProviderIDs() {
+	for i := range s.Security.OAuthProviders {
+		s.Security.OAuthProviders[i].Provider = NormalizeOAuthProviderID(s.Security.OAuthProviders[i].Provider)
+	}
+}
+
+// ReconcileOAuthProviderDuplicates collapses entries that share a canonical
+// provider ID into one: the first enabled entry that has credentials, else the
+// first entry that has credentials, else the first enabled entry, else the first
+// entry. Preferring credentials keeps a working or disabled-but-complete entry from
+// losing to an unfinished one that incomplete-feature normalisation would disable
+// afterwards. The others are dropped and one warning per dropped
+// entry names its index, provider ID and enabled state (never a secret). It
+// expects IDs already canonical (see NormalizeOAuthProviderIDs), and runs on
+// config load so that a hand-edited file with duplicates still starts. The settings
+// API rejects such duplicates instead (see validateOAuthProviderDuplicates).
+func (s *Settings) ReconcileOAuthProviderDuplicates() {
+	providers := s.Security.OAuthProviders
+	// Preference of an entry when several share a provider ID, highest first.
+	const (
+		rankOther = iota
+		rankEnabled
+		rankComplete
+		rankEnabledComplete
+	)
+	rank := func(p *OAuthProviderConfig) int {
+		complete := p.ClientID != "" && p.ClientSecret != ""
+		switch {
+		case p.Enabled && complete:
+			return rankEnabledComplete
+		case complete:
+			return rankComplete
+		case p.Enabled:
+			return rankEnabled
+		default:
+			return rankOther
+		}
+	}
+	keep := make(map[string]int, len(providers))
+	for i := range providers {
+		kept, seen := keep[providers[i].Provider]
+		if !seen || rank(&providers[i]) > rank(&providers[kept]) {
+			keep[providers[i].Provider] = i
+		}
+	}
+
+	reconciled := make([]OAuthProviderConfig, 0, len(keep))
+	for i := range providers {
+		if keep[providers[i].Provider] == i {
+			reconciled = append(reconciled, providers[i])
+			continue
+		}
+		GetLogger().Warn("Dropped duplicate OAuth provider entry; keeping the best entry for this provider ID",
+			logger.Int("index", i),
+			logger.String("provider", providers[i].Provider),
+			logger.Bool("enabled", providers[i].Enabled))
+	}
+	s.Security.OAuthProviders = reconciled
+}
+
+// GetOAuthProvider returns the OAuth provider configuration for the given provider
+// ID, or nil if the provider is not configured. Provider IDs are unique after load
+// and save.
 func (s *Settings) GetOAuthProvider(providerID string) *OAuthProviderConfig {
 	for i := range s.Security.OAuthProviders {
 		if s.Security.OAuthProviders[i].Provider == providerID {
