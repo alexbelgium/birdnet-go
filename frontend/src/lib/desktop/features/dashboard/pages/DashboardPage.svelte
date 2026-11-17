@@ -78,6 +78,8 @@ Performance Optimizations:
   import type { Dashboard, DashboardElement, DashboardLayout } from '$lib/stores/settings';
   import { dashboardEditMode } from '$lib/stores/dashboardEditMode';
   import BannerCard from '$lib/desktop/features/dashboard/components/BannerCard.svelte';
+  import AcousticModelBanner from '$lib/desktop/features/dashboard/components/AcousticModelBanner.svelte';
+  import LegacyDatabaseBanner from '$lib/desktop/features/dashboard/components/LegacyDatabaseBanner.svelte';
   import VideoEmbedCard from '$lib/desktop/features/dashboard/components/VideoEmbedCard.svelte';
   import LazyMiniSpectrogram from '$lib/desktop/features/dashboard/components/LazyMiniSpectrogram.svelte';
   import DashboardEditMode from '$lib/desktop/features/dashboard/components/DashboardEditMode.svelte';
@@ -1048,7 +1050,7 @@ Performance Optimizations:
       hour = 0;
     }
 
-    // Match by scientific_name — it's the unique key used by both the backend
+    // Match by scientific_name: it's the unique key used by both the backend
     // aggregation (analytics.go) and the Svelte {#each} loop in DailySummaryCard.
     // species_code is unreliable: v2 schema stores it as "" (omitted via omitempty),
     // so it's undefined in the frontend for all API-sourced entries.
@@ -1091,7 +1093,7 @@ Performance Optimizations:
       updateDailySummaryCacheEntry(selectedDate, dailySummary);
 
       // Clear animation flags after animation completes.
-      // Use scientificName for lookup — species_code may be undefined (v2 schema).
+      // Use scientificName for lookup; species_code may be undefined (v2 schema).
       scheduleAnimationCleanup(
         () => {
           const currentIndex = dailySummary.findIndex(
@@ -1155,7 +1157,7 @@ Performance Optimizations:
       updateDailySummaryCacheEntry(selectedDate, dailySummary);
 
       // Clear animation flag after animation completes.
-      // Use scientificName for lookup — species_code may be undefined (v2 schema).
+      // Use scientificName for lookup; species_code may be undefined (v2 schema).
       scheduleAnimationCleanup(
         () => {
           const currentIndex = dailySummary.findIndex(
@@ -1373,6 +1375,8 @@ Performance Optimizations:
 </script>
 
 <div class="col-span-12">
+  <AcousticModelBanner class="mb-6" />
+  <LegacyDatabaseBanner class="mb-6" />
   <DashboardEditMode
     layout={currentLayout}
     editMode={isEditing}
@@ -1400,7 +1404,7 @@ Performance Optimizations:
             class={cn(
               'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
               bannerConfig.showImage
-                ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                 : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
             )}
             aria-pressed={bannerConfig.showImage}
@@ -1415,7 +1419,7 @@ Performance Optimizations:
               value={bannerConfig.imagePath}
               placeholder={t('dashboard.banner.imageUrlPlaceholder')}
               aria-label={t('dashboard.banner.imageUrlPlaceholder')}
-              class="w-full rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-100)] px-2 py-1 text-xs text-[var(--color-base-content)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
+              class="w-full rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-100)] px-2 py-1 text-xs text-[var(--color-base-content)] focus-ring"
               oninput={e =>
                 onUpdate({
                   ...element,
@@ -1435,7 +1439,7 @@ Performance Optimizations:
               class={cn(
                 'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
                 bannerConfig.showLocationMap
-                  ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                  ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                   : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
               )}
               aria-pressed={bannerConfig.showLocationMap}
@@ -1466,7 +1470,7 @@ Performance Optimizations:
                       });
                     }
                   }}
-                  class="ml-auto w-16 rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-100)] px-2 py-1 text-xs text-[var(--color-base-content)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
+                  class="ml-auto w-16 rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-100)] px-2 py-1 text-xs text-[var(--color-base-content)] focus-ring"
                 />
               </div>
 
@@ -1480,7 +1484,7 @@ Performance Optimizations:
                 class={cn(
                   'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
                   (bannerConfig.showPin ?? false)
-                    ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                    ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                     : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
                 )}
                 aria-pressed={bannerConfig.showPin ?? false}
@@ -1502,7 +1506,7 @@ Performance Optimizations:
                 class={cn(
                   'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
                   (bannerConfig.mapExpandable ?? true)
-                    ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                    ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                     : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
                 )}
                 aria-pressed={bannerConfig.mapExpandable ?? true}
@@ -1523,7 +1527,7 @@ Performance Optimizations:
             class={cn(
               'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
               bannerConfig.showWeather
-                ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                 : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
             )}
             aria-pressed={bannerConfig.showWeather}

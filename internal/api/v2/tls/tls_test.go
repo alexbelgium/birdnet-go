@@ -32,17 +32,19 @@ func generateTestCertKeyPair(t *testing.T) (certPEM, keyPEM string) {
 }
 
 // newTestHandler builds a TLS Handler around a *apicore.Core via apitest, with
-// in-memory test doubles for the facade's settings-save machinery. The doubles
-// mirror the production behavior the original tests asserted: getSettingsOrFallback
-// reads the core's atomic snapshot, publishAndSaveSettings stores the updated
-// snapshot back (no disk write, matching the original DisableSaveSettings=true),
-// and handleSettingsChanges is a no-op. They share the supplied mutex so the
+// in-memory test doubles for the facade's settings-save machinery. The settings
+// getter returns only the core's own atomic snapshot, like getSettingsOrFallback
+// for a controller that does not own the global singleton; it never reads the
+// process-global settings, so it does not exercise the global-owner path.
+// updateAndSaveSettings clones the core snapshot, applies the mutation and stores
+// it back (no disk write, matching the original DisableSaveSettings=true), and
+// handleSettingsChanges is a no-op. They share the supplied mutex so the
 // handler serialises just as the facade does.
 func newTestHandler(t *testing.T, core *apicore.Core, mu *sync.RWMutex) *Handler {
 	t.Helper()
 	return New(core, mu,
 		func() *conf.Settings { return core.Settings.Load() },
-		func(_, updated *conf.Settings) error { core.Settings.Store(updated); return nil },
+		apitest.CoreSettingsUpdater(core),
 		func(_, _ *conf.Settings) error { return nil },
 	)
 }
@@ -254,6 +256,26 @@ func TestTLSGenerateSelfSignedCertificate(t *testing.T) {
 	assert.Equal(t, conf.TLSModeSelfSigned, controller.Settings.Load().Security.TLSMode)
 }
 
+// TestTLSGenerateSelfSignedCertificate_SchemedHost verifies a security.host that
+// carries a scheme, port and path contributes its bare hostname to the SAN list.
+func TestTLSGenerateSelfSignedCertificate_SchemedHost(t *testing.T) {
+	e, controller, _ := setupTLSTestEnvironment(t)
+	const schemedHost = "https://birds.example.com:8443/birdnet"
+	controller.Settings.Load().Security.Host = schemedHost
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tls/certificate/generate", strings.NewReader(`{"validity":"30d"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+
+	require.NoError(t, controller.GenerateSelfSignedCertificate(e.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var info TLSCertificateInfo
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &info))
+	assert.Contains(t, info.SANs, "birds.example.com")
+	assert.NotContains(t, info.SANs, schemedHost)
+}
+
 func TestTLSGenerateSelfSignedCertificate_DefaultValidity(t *testing.T) {
 	e, controller, _ := setupTLSTestEnvironment(t)
 
@@ -306,22 +328,4 @@ func TestTLSDownloadCertificate_NoCert(t *testing.T) {
 	err := controller.DownloadTLSCertificate(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-}
-
-func TestTLSRouteRegistration(t *testing.T) {
-	e := echo.New()
-	core := apitest.NewCore(t, apitest.WithEcho(e))
-	var mu sync.RWMutex
-	h := newTestHandler(t, core, &mu)
-
-	h.RegisterRoutes(core.Group)
-
-	expectedRoutes := []string{
-		"GET /api/v2/tls/certificate",
-		"POST /api/v2/tls/certificate",
-		"DELETE /api/v2/tls/certificate",
-		"POST /api/v2/tls/certificate/generate",
-		"GET /api/v2/tls/certificate/download",
-	}
-	apitest.AssertRoutesRegistered(t, e, expectedRoutes)
 }

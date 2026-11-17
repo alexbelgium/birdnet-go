@@ -3,6 +3,7 @@ package classifier
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tphakala/birdnet-go/internal/conf"
@@ -10,6 +11,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Serve the OpenVINO probe child before anything else when this test binary
+	// is re-executed as one, then end any other process the probe hook test
+	// started (openvino builds only; see openvino_probe_child_test.go).
+	serveOVProbeChildIfRequested()
+	exitIfOVProbeHookTestChild()
+
 	// Isolate the process-global config path for the whole classifier test
 	// package so settings-mutating tests never overwrite the developer's real
 	// ~/.config/birdnet-go/config.yaml. Tests call conf.SaveSettings() (via
@@ -83,11 +90,11 @@ func TestGetSpeciesOccurrence(t *testing.T) {
 				},
 			}
 
-			bn := &BirdNET{
-				Settings: settings,
-			}
-
-			occurrence := bn.GetSpeciesOccurrence(tt.species)
+			// The range filter is owned by the orchestrator's service since Phase 2b.
+			// With no backend loaded, occurrenceAtTime short-circuits to 0, matching the
+			// former bn.GetSpeciesOccurrence nil-range-filter fast path these cases hit.
+			rfs := newTestRangeFilterService(nil)
+			occurrence := rfs.occurrenceAtTime(tt.species, time.Now(), settings)
 			assert.InDelta(t, tt.expected, occurrence, 0.001, tt.description)
 		})
 	}

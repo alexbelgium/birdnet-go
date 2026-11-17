@@ -67,7 +67,7 @@
         class="w-36 h-36 rounded-full bg-gradient-to-b from-[var(--surface-200)] to-[var(--color-base-100)] flex items-center justify-center p-1 border border-[var(--border-100)]"
       >
         <img
-          src="/ui/assets/BirdNET-Go-logo.webp"
+          src={buildAppUrl('/ui/assets/BirdNET-Go-logo.webp')}
           alt={t('about.logoAlt')}
           class="w-full h-full object-contain rounded-full"
         />
@@ -230,25 +230,25 @@
       </p>
       <ul class="mt-2 list-none pl-0 space-y-1">
         <li class="flex items-center gap-2">
-          <div class="w-5 h-5 text-[var(--color-success)]">
+          <div class="w-5 h-5 text-[var(--text-success)]">
             <CircleCheck class="size-5" />
           </div>
           {t('about.bugReports')}
         </li>
         <li class="flex items-center gap-2">
-          <div class="w-5 h-5 text-[var(--color-success)]">
+          <div class="w-5 h-5 text-[var(--text-success)]">
             <CircleCheck class="size-5" />
           </div>
           {t('about.featureSuggestions')}
         </li>
         <li class="flex items-center gap-2">
-          <div class="w-5 h-5 text-[var(--color-success)]">
+          <div class="w-5 h-5 text-[var(--text-success)]">
             <CircleCheck class="size-5" />
           </div>
           {t('about.testing')}
         </li>
         <li class="flex items-center gap-2">
-          <div class="w-5 h-5 text-[var(--color-success)]">
+          <div class="w-5 h-5 text-[var(--text-success)]">
             <CircleCheck class="size-5" />
           </div>
           {t('about.documentation')}
@@ -403,7 +403,7 @@
         <div class="flex items-center gap-2">
           <FileText class="size-5" />
           <a
-            href="/ui/assets/LICENSES.md"
+            href={buildAppUrl('/ui/assets/LICENSES.md')}
             class="link link-primary"
             target="_blank"
             rel="noopener noreferrer">{t('about.dependencyLicenses')}</a

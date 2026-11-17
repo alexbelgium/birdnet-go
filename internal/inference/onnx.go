@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	ort "github.com/tphakala/birdnet-go/internal/inference/onnx"
+	"github.com/tphakala/birdnet-go/internal/logger"
 	ortlib "github.com/yalue/onnxruntime_go"
 )
 
@@ -227,6 +229,65 @@ func (c *onnxCustomClassifier) Close() {
 	}
 }
 
+// ONNXTensorModelOptions configures the ONNX tensor model.
+type ONNXTensorModelOptions struct {
+	// Threads sets the intra and inter-op thread counts; zero or less uses
+	// runtime.NumCPU().
+	Threads int
+}
+
+type onnxTensorModel struct {
+	model *ort.TensorModel
+}
+
+// NewONNXTensorModel creates a TensorModel backed by an ONNX Runtime model
+// with a single N-D float input. The ONNX Runtime must be initialized first.
+func NewONNXTensorModel(modelPath string, opts ONNXTensorModelOptions) (TensorModel, error) {
+	threads := opts.Threads
+	if threads <= 0 {
+		threads = runtime.NumCPU()
+	}
+	var configErr error
+	model, err := ort.NewTensorModel(modelPath, ort.TensorModelOptions{
+		SessionOptions: func(so *ortlib.SessionOptions) {
+			if err := so.SetIntraOpNumThreads(threads); err != nil && configErr == nil {
+				configErr = fmt.Errorf("failed to set IntraOpNumThreads to %d: %w", threads, err)
+			}
+			if err := so.SetInterOpNumThreads(threads); err != nil && configErr == nil {
+				configErr = fmt.Errorf("failed to set InterOpNumThreads to %d: %w", threads, err)
+			}
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ONNX tensor model: %w", err)
+	}
+	if configErr != nil {
+		_ = model.Close()
+		return nil, fmt.Errorf("failed to configure ONNX tensor model session: %w", configErr)
+	}
+	return &onnxTensorModel{model: model}, nil
+}
+
+// Run feeds input to the model and returns the raw outputs.
+func (m *onnxTensorModel) Run(input []float32) ([][]float32, error) {
+	return m.model.Run(input)
+}
+
+// InputShape returns the resolved input tensor shape.
+func (m *onnxTensorModel) InputShape() []int64 {
+	return m.model.InputShape()
+}
+
+// OutputSizes returns the element count of each output.
+func (m *onnxTensorModel) OutputSizes() []int {
+	return m.model.OutputSizes()
+}
+
+// Close releases the ONNX session. It is safe to call more than once.
+func (m *onnxTensorModel) Close() {
+	_ = m.model.Close()
+}
+
 // ONNXRangeFilterOptions configures the ONNX range filter.
 type ONNXRangeFilterOptions struct {
 	// Labels is the species label list. Required.
@@ -302,6 +363,7 @@ func InitONNXRuntime(libraryPath string) (err error) {
 		return nil
 	}
 
+	configured := libraryPath != ""
 	if libraryPath == "" {
 		libraryPath = findONNXRuntimeLibrary()
 	}
@@ -312,9 +374,47 @@ func InitONNXRuntime(libraryPath string) (err error) {
 		}
 	}()
 
-	ort.MustInitORT(libraryPath)
+	optOut, initErr := ort.InitORT(libraryPath)
+	if initErr != nil {
+		return describeORTInitError(libraryPath, initErr)
+	}
 	ortInitialized = true
+	publishORTRuntime(libraryPath, configured)
+	logORTInitialized(ortlib.GetVersion(), libraryPath, optOut)
 	return nil
+}
+
+// ortAPIBaseTooOldMarker is the text yalue/onnxruntime_go v1.38.0 returns when
+// the loaded library cannot serve the C API level it requests: code 2 means
+// GetApi(31) returned NULL (setup_env.go:87, setup_env_windows.go:56).
+const ortAPIBaseTooOldMarker = "Error setting ORT API base: 2"
+
+// describeORTInitError turns an InitORT failure into a user-facing error. The
+// cryptic "too old" failure gets a readable message; any other failure keeps
+// the generic wording. It must not call ortlib.GetVersion: after a failed init
+// that points into an unloaded library.
+func describeORTInitError(path string, err error) error {
+	if !strings.Contains(err.Error(), ortAPIBaseTooOldMarker) {
+		return fmt.Errorf("failed to initialize ONNX Runtime: %w; install guide: %s", err, ORTInstallGuideURL)
+	}
+	hint := ""
+	if v := inferVersionFromPath(path); v != "" {
+		if _, known := ortVersionMeetsMinimum(v); known {
+			hint = "; its file name suggests version " + v
+		}
+	}
+	return fmt.Errorf("ONNX Runtime library %q is older than the supported minimum (%s required)%s: %w; install guide: %s",
+		path, ORTRequiredVersion(), hint, err, ORTInstallGuideURL)
+}
+
+// logORTInitialized logs the loaded library and the telemetry opt-out state.
+func logORTInitialized(version, libraryPath string, optOut ort.TelemetryOptOut) {
+	logger.Global().Module("inference").Info("ONNX Runtime initialized",
+		logger.String("version", version),
+		logger.String("library_path", libraryPath),
+		logger.String("ort_disable_telemetry", optOut.Value),
+		logger.Bool("telemetry_disabled", optOut.Disabled),
+		logger.Bool("telemetry_api_disabled", optOut.APIDisabled))
 }
 
 // findONNXRuntimeLibrary searches standard system paths for the ONNX Runtime
@@ -374,5 +474,6 @@ func DestroyONNXRuntime() error {
 		return err
 	}
 	ortInitialized = false
+	clearORTRuntime()
 	return nil
 }

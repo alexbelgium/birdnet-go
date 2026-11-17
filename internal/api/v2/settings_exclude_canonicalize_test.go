@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/speciesindex"
 )
 
 // clearExcludedSpeciesList resets the species exclude list for a clean test start.
@@ -32,10 +33,9 @@ const (
 // name, mirroring the detection-side localized-name tests.
 func installExcludeTestResolver(t *testing.T, c *Controller) {
 	t.Helper()
-	c.SetNameResolver(&analyticsBatchFakeResolver{batch: map[string]string{
+	seedNames(t, c, &analyticsBatchFakeResolver{batch: map[string]string{
 		testExcludeScientificName: testExcludeLocalizedName,
-	}})
-	c.UpdateCommonNameMap([]string{testExcludeScientificName})
+	}}, []string{testExcludeScientificName})
 }
 
 // patchSection drives UpdateSectionSettings for an arbitrary section. It asserts
@@ -43,6 +43,16 @@ func installExcludeTestResolver(t *testing.T, c *Controller) {
 // rejected save would otherwise pass require.NoError and surface only as a
 // confusing downstream mismatch.
 func patchSection(t *testing.T, e *echo.Echo, c *Controller, section string, payload any) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := sendSectionPatch(t, e, c, section, payload)
+	require.Equal(t, http.StatusOK, rec.Code, "section save must succeed; body: %s", rec.Body.String())
+	return rec
+}
+
+// sendSectionPatch drives UpdateSectionSettings for an arbitrary section and
+// returns the response without asserting its status, for tests that expect a
+// rejection.
+func sendSectionPatch(t *testing.T, e *echo.Echo, c *Controller, section string, payload any) *httptest.ResponseRecorder {
 	t.Helper()
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
@@ -53,7 +63,6 @@ func patchSection(t *testing.T, e *echo.Echo, c *Controller, section string, pay
 	ctx.SetParamNames("section")
 	ctx.SetParamValues(section)
 	require.NoError(t, c.UpdateSectionSettings(ctx))
-	require.Equal(t, http.StatusOK, rec.Code, "section save must succeed; body: %s", rec.Body.String())
 	return rec
 }
 
@@ -78,6 +87,7 @@ func TestCanonicalizeExcludeList(t *testing.T) {
 	t.Parallel()
 
 	c := &Controller{Core: &apicore.Core{}}
+	c.names = speciesindex.New(nil)
 	installExcludeTestResolver(t, c)
 
 	tests := []struct {
@@ -222,4 +232,102 @@ func TestUpdateSectionSettingsSkipsExcludeForUnrelatedSection(t *testing.T) {
 	got := controller.Settings.Load().Realtime.Species.Exclude
 	assert.Equal(t, []string{testExcludeLocalizedName}, got,
 		"unrelated section save must leave the legacy exclude entry untouched")
+}
+
+// TestUpdateSectionSettingsSkipsModelConsensusForUnrelatedSection verifies that
+// saving a section other than realtime leaves a legacy (non-canonical) model
+// consensus list entry untouched.
+func TestUpdateSectionSettingsSkipsModelConsensusForUnrelatedSection(t *testing.T) {
+	e, _, controller := setupTestEnvironment(t)
+	installExcludeTestResolver(t, controller)
+
+	controller.Settings.Load().Realtime.ModelConsensus.Species = []string{testExcludeLocalizedName}
+
+	patchSection(t, e, controller, SettingsSectionAudio, map[string]any{})
+
+	got := controller.Settings.Load().Realtime.ModelConsensus.Species
+	assert.Equal(t, []string{testExcludeLocalizedName}, got,
+		"unrelated section save must leave the legacy model consensus entry untouched")
+}
+
+// TestUpdateSectionSettingsCanonicalizesModelConsensusList verifies the PATCH
+// /api/v2/settings/realtime path stores the model consensus species list as
+// scientific names, de-duplicated and trimmed. The filter stays off so validation
+// does not involve the model count.
+func TestUpdateSectionSettingsCanonicalizesModelConsensusList(t *testing.T) {
+	e, _, controller := setupTestEnvironment(t)
+	installExcludeTestResolver(t, controller)
+
+	patchSection(t, e, controller, SettingsSectionRealtime, map[string]any{
+		"modelConsensus": map[string]any{
+			"species": []string{testExcludeLocalizedName, testExcludeScientificName, "  American Crow  ", "  "},
+		},
+	})
+
+	got := controller.Settings.Load().Realtime.ModelConsensus.Species
+	assert.Equal(t, []string{testExcludeScientificName, "American Crow"}, got)
+}
+
+// TestUpdateSettingsCanonicalizesModelConsensusList verifies the full-settings PUT
+// path canonicalizes the model consensus species list.
+func TestUpdateSettingsCanonicalizesModelConsensusList(t *testing.T) {
+	e, _, controller := setupTestEnvironment(t)
+	installExcludeTestResolver(t, controller)
+
+	s := conf.CloneSettings(controller.Settings.Load())
+	s.Realtime.ModelConsensus.Species = []string{testExcludeLocalizedName, "American Crow"}
+	putFullSettings(t, e, controller, s)
+
+	got := controller.Settings.Load().Realtime.ModelConsensus.Species
+	assert.Equal(t, []string{testExcludeScientificName, "American Crow"}, got)
+}
+
+// TestUpdateSectionSettingsEnablingConsensusNeedsAUsableMinimum verifies that a
+// realtime PATCH which only switches the model consensus filter on is refused with a
+// 400 while the stored minimum is unset, that the refused save leaves the stored
+// settings untouched, that a PATCH which does not enable the filter is accepted
+// against the same stored value, and that the same enabling request succeeds once it
+// carries a usable minimum.
+func TestUpdateSectionSettingsEnablingConsensusNeedsAUsableMinimum(t *testing.T) {
+	e, _, controller := setupTestEnvironment(t)
+	controller.Settings.Load().Realtime.ModelConsensus = conf.ModelConsensusSettings{}
+
+	// Control: not enabling the filter is accepted against the unset minimum.
+	patchSection(t, e, controller, SettingsSectionRealtime, map[string]any{
+		"modelConsensus": map[string]any{"debug": true},
+	})
+	require.True(t, controller.Settings.Load().Realtime.ModelConsensus.Debug)
+
+	before := controller.Settings.Load().Realtime.ModelConsensus
+	rec := sendSectionPatch(t, e, controller, SettingsSectionRealtime, map[string]any{
+		"modelConsensus": map[string]any{"allSpecies": true},
+	})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, before, controller.Settings.Load().Realtime.ModelConsensus,
+		"a refused save must leave the stored consensus settings unchanged")
+
+	// Sending a usable minimum with the enabling request is accepted.
+	patchSection(t, e, controller, SettingsSectionRealtime, map[string]any{
+		"modelConsensus": map[string]any{"allSpecies": true, "minModels": 3},
+	})
+	got := controller.Settings.Load().Realtime.ModelConsensus
+	assert.True(t, got.AllSpecies)
+	assert.Equal(t, 3, got.MinModels)
+}
+
+// TestUpdateSectionSettingsKeepsModelConsensusWhenKeyOmitted verifies that a realtime
+// PATCH from a client that does not know the model consensus key leaves the stored
+// settings alone.
+func TestUpdateSectionSettingsKeepsModelConsensusWhenKeyOmitted(t *testing.T) {
+	e, _, controller := setupTestEnvironment(t)
+	stored := conf.ModelConsensusSettings{
+		ListedSpecies: true, Species: []string{testExcludeScientificName}, MinModels: 3, AllEligible: true,
+	}
+	controller.Settings.Load().Realtime.ModelConsensus = stored
+
+	patchSection(t, e, controller, SettingsSectionRealtime, map[string]any{
+		"dogBarkFilter": map[string]any{"debug": true},
+	})
+
+	assert.Equal(t, stored, controller.Settings.Load().Realtime.ModelConsensus)
 }

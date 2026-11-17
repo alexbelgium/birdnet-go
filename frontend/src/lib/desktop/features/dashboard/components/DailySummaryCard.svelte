@@ -38,9 +38,9 @@ Performance Optimizations:
 - Efficient data sorting and max count calculations
 
 Responsive Breakpoints:
-- Wide (≥1600px): All hourly columns, taller heatmap cells
-- Desktop (1024-1599px): All hourly columns visible
-- Tablet (768-1023px): Bi-hourly columns only
+- Wide card (≥1400px): All hourly columns, taller heatmap cells
+- Card (≥900px): All hourly columns visible
+- Narrow card (<900px): Bi-hourly columns only
 - Mobile (<768px): compact MobileSummaryTable replaces the heatmap grid
 -->
 
@@ -48,7 +48,6 @@ Responsive Breakpoints:
   import DatePicker from '$lib/desktop/components/ui/DatePicker.svelte';
   import SkeletonDailySummary from '$lib/desktop/components/ui/SkeletonDailySummary.svelte';
   import { t } from '$lib/i18n';
-  import type { Component } from 'svelte';
   import type { DailySpeciesSummary, LatestWeatherResponse } from '$lib/types/detection.types';
   import { getLocalDateString, getDateInTimezone } from '$lib/utils/date';
   import {
@@ -67,8 +66,8 @@ Responsive Breakpoints:
     WEATHER_ICON_MAP,
     UNKNOWN_WEATHER_INFO,
     getEffectiveWeatherCode,
+    getBasmiliusIconName,
     translateWeatherCondition,
-    isNightTime,
   } from '$lib/utils/weather';
   import {
     convertTemperature,
@@ -78,26 +77,9 @@ Responsive Breakpoints:
   import { dashboardSettings, speciesTrackingSettings } from '$lib/stores/settings';
   import {
     resolveNoveltyCategory,
-    noveltyCategoryColorVar,
+    noveltyCategoryTextColor,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
-  import {
-    ChevronDown,
-    ChevronLeft,
-    ChevronRight,
-    History,
-    Star,
-    XCircle,
-    Sun,
-    Moon,
-    CloudSun,
-    Cloud,
-    CloudDrizzle,
-    CloudRain,
-    CloudLightning,
-    CloudSnow,
-    Snowflake,
-    CloudFog,
-  } from '@lucide/svelte';
+  import { ChevronDown, ChevronLeft, ChevronRight, History, Star, XCircle } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import AnimatedCounter from './AnimatedCounter.svelte';
   import BirdThumbnailPopup from './BirdThumbnailPopup.svelte';
@@ -108,6 +90,7 @@ Responsive Breakpoints:
   import SpeciesDetailCard from './daily-summary/SpeciesDetailCard.svelte';
   import SpeciesEbirdLink from './daily-summary/SpeciesEbirdLink.svelte';
   import TaxonFilterDropdown from './daily-summary/TaxonFilterDropdown.svelte';
+  import WeatherSvgIcon from '$lib/desktop/components/ui/WeatherSvgIcon.svelte';
   import {
     getSpeciesBadgeColor,
     getSpeciesInitials,
@@ -641,6 +624,16 @@ Responsive Breakpoints:
     hourly: () => '#',
   });
 
+  // Returns the cached URL for a key, building and storing it on first use
+  function cachedUrl(cacheKey: string, build: () => string): string {
+    let url = urlCache.get(cacheKey);
+    if (url === undefined) {
+      url = build();
+      urlCache.set(cacheKey, url);
+    }
+    return url;
+  }
+
   // Reactive URL builder factory - clears cache when selectedDate changes
   $effect(() => {
     // Clear cache when selectedDate changes to prevent stale URLs
@@ -649,18 +642,14 @@ Responsive Breakpoints:
     // Create optimized, memoized URL builders
     urlBuilders.species = (species: DailySpeciesSummary) => {
       const cacheKey = `species:${species.scientific_name}:${selectedDate}`;
-      if (!urlCache.has(cacheKey)) {
-        urlCache.set(
-          cacheKey,
-          buildSpeciesDetectionUrl(
-            species.scientific_name,
-            selectedDate,
-            CONFIG.QUERY.DEFAULT_NUM_RESULTS,
-            0
-          )
-        );
-      }
-      return urlCache.get(cacheKey)!;
+      return cachedUrl(cacheKey, () =>
+        buildSpeciesDetectionUrl(
+          species.scientific_name,
+          selectedDate,
+          CONFIG.QUERY.DEFAULT_NUM_RESULTS,
+          0
+        )
+      );
     };
 
     urlBuilders.speciesHour = (
@@ -669,31 +658,23 @@ Responsive Breakpoints:
       duration: number = 1
     ) => {
       const cacheKey = `species-hour:${species.scientific_name}:${selectedDate}:${hour}:${duration}`;
-      if (!urlCache.has(cacheKey)) {
-        urlCache.set(
-          cacheKey,
-          buildSpeciesHourUrl(
-            species.scientific_name,
-            selectedDate,
-            hour,
-            duration,
-            CONFIG.QUERY.DEFAULT_NUM_RESULTS,
-            0
-          )
-        );
-      }
-      return urlCache.get(cacheKey)!;
+      return cachedUrl(cacheKey, () =>
+        buildSpeciesHourUrl(
+          species.scientific_name,
+          selectedDate,
+          hour,
+          duration,
+          CONFIG.QUERY.DEFAULT_NUM_RESULTS,
+          0
+        )
+      );
     };
 
     urlBuilders.hourly = (hour: number, duration: number = 1) => {
       const cacheKey = `hourly:${selectedDate}:${hour}:${duration}`;
-      if (!urlCache.has(cacheKey)) {
-        urlCache.set(
-          cacheKey,
-          buildHourlyDetectionUrl(selectedDate, hour, duration, CONFIG.QUERY.DEFAULT_NUM_RESULTS, 0)
-        );
-      }
-      return urlCache.get(cacheKey)!;
+      return cachedUrl(cacheKey, () =>
+        buildHourlyDetectionUrl(selectedDate, hour, duration, CONFIG.QUERY.DEFAULT_NUM_RESULTS, 0)
+      );
     };
   });
 
@@ -764,11 +745,17 @@ Responsive Breakpoints:
       : false
   );
 
-  // Viewport-aware rendering. On mobile (<768px) only the compact
-  // MobileSummaryTable is rendered; the desktop heatmap DOM is skipped
-  // entirely rather than hidden with CSS. Initialized synchronously so the
-  // very first render is already correct (no flash of desktop DOM on phones).
-  const MOBILE_VIEWPORT_QUERY = '(max-width: 767px)';
+  // Viewport-aware rendering: where this matches, only the compact
+  // MobileSummaryTable is rendered and the desktop heatmap DOM is skipped
+  // entirely rather than hidden with CSS. Initialized synchronously so the very
+  // first render is already correct (no flash of desktop DOM).
+  //
+  // Phones at any orientation, plus tablets held in portrait use the compact
+  // table to avoid constructing the much larger heatmap DOM. On wider
+  // viewports, the heatmap chooses hourly or bi-hourly columns from its own
+  // container width, independently of the navigation sidebar.
+  const MOBILE_VIEWPORT_QUERY =
+    '(max-width: 767px), (max-width: 1024px) and (orientation: portrait)';
   let isMobileViewport = $state(
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia(MOBILE_VIEWPORT_QUERY).matches
@@ -787,18 +774,16 @@ Responsive Breakpoints:
     return () => mq.removeEventListener('change', handleChange);
   });
 
-  // ── Mobile weather stat ─────────────────────────────────────────────────────
-  // Desktop/tablet get weather inside the heatmap's hourly row; the mobile table
-  // has none. Surface current conditions as one extra stat in the overview bar,
-  // but only for "today" on a phone (past dates have no "current" weather, and
-  // the desktop already shows it). Silently absent when the weather provider is
-  // off — never an error state. Mirrors BannerCard's fetch/refresh/error handling.
-  let mobileWeather = $state<LatestWeatherResponse | null>(null);
+  // ── Current weather header decoration ───────────────────────────────────
+  // Current conditions decorate the card header for today on every viewport.
+  // Silently absent when the provider is off. Mirrors BannerCard's fetch and
+  // refresh handling.
+  let currentWeather = $state<LatestWeatherResponse | null>(null);
   const WEATHER_REFRESH_MS = 10 * 60_000;
 
   $effect(() => {
-    if (!isMobileViewport || !isToday) {
-      mobileWeather = null;
+    if (!isToday) {
+      currentWeather = null;
       return;
     }
     const controller = new AbortController();
@@ -808,10 +793,10 @@ Responsive Breakpoints:
           signal: controller.signal,
         });
         if (!resp.ok) throw new Error('weather unavailable');
-        mobileWeather = await resp.json();
+        currentWeather = await resp.json();
       } catch (e: unknown) {
         if (e instanceof Error && e.name === 'AbortError') return;
-        mobileWeather = null; // degrade quietly: no stat rather than an error
+        currentWeather = null; // degrade quietly: no decoration rather than an error
       }
     };
     load();
@@ -822,47 +807,22 @@ Responsive Breakpoints:
     };
   });
 
-  // Lucide icon standing in for a base weather code (day/night aware for clear sky).
-  function weatherIconFor(code: string, night: boolean): Component {
-    switch (code) {
-      case '01':
-        return night ? Moon : Sun;
-      case '02':
-      case '03':
-      case '04':
-        return night ? Cloud : CloudSun;
-      case '09':
-        return CloudDrizzle;
-      case '10':
-        return CloudRain;
-      case '11':
-        return CloudLightning;
-      case '12':
-        return CloudSnow;
-      case '13':
-        return Snowflake;
-      case '50':
-        return CloudFog;
-      default:
-        return Cloud;
-    }
-  }
-
-  // Overview weather stat (icon + rounded temperature + condition label), or
-  // undefined when there is nothing to show. Passed only to the mobile overview.
-  const mobileWeatherStat = $derived.by(() => {
-    const hourly = mobileWeather?.hourly;
+  // Header weather (Basmilius icon + rounded temperature + translated condition),
+  // or undefined when the provider has no usable current-condition icon.
+  const headerWeather = $derived.by(() => {
+    const hourly = currentWeather?.hourly;
     if (!hourly || typeof hourly.temperature !== 'number') return undefined;
-    const code = getEffectiveWeatherCode(hourly.weather_icon, hourly.weather_desc);
-    const night = isNightTime(hourly.weather_icon);
-    const info = code
-      ? safeGet(WEATHER_ICON_MAP, code, UNKNOWN_WEATHER_INFO)
-      : UNKNOWN_WEATHER_INFO;
+    const icon = getBasmiliusIconName(hourly.weather_icon ?? '', hourly.weather_desc);
+    if (icon === 'not-available') return undefined;
     const temp = Math.round(convertTemperature(hourly.temperature, temperatureUnit));
+    const description = translateWeatherCondition(
+      hourly.weather_desc ?? hourly.weather_main ?? ''
+    ).toLowerCase();
     return {
-      icon: weatherIconFor(code, night),
-      count: `${temp}${getTemperatureSymbol(temperatureUnit)}`,
-      label: (hourly.weather_desc ?? info.description).toLowerCase(),
+      icon,
+      label: [`${temp}${getTemperatureSymbol(temperatureUnit)}`, description]
+        .filter(Boolean)
+        .join(' · '),
     };
   });
 
@@ -919,13 +879,6 @@ Responsive Breakpoints:
     }
     return sortedUnlimited;
   });
-
-  // Initial row cap for the compact mobile table. The daily-summary API is
-  // already fetched with &limit=summaryLimit (default 30), so `data` is capped
-  // server-side; this smaller cap keeps the *initial* mobile render short (each
-  // row draws an SVG) and gives a real "Show all" affordance to reach the rest
-  // without a long scroll past every species to the content below.
-  const MOBILE_INITIAL_ROW_CAP = 20;
 
   // ── Mobile sort ───────────────────────────────────────────────────────────
   // The compact table lets the user re-sort via its column headers. Persisted so
@@ -1115,9 +1068,27 @@ Responsive Breakpoints:
     class="daily-summary-card card col-span-12 bg-[var(--color-base-100)] shadow-sm rounded-2xl border border-border-100 overflow-visible"
   >
     <!-- Card Header with Date Navigation -->
-    <div class="px-6 py-4 border-b border-[var(--color-base-200)] overflow-visible">
+    <div
+      class="relative px-3 py-4 md:px-6 border-b border-[var(--color-base-200)] overflow-visible"
+    >
+      {#if headerWeather}
+        <!-- Decorative background: clipped to the header (the header itself stays
+             overflow-visible for the taxon dropdown) and centred in the gap
+             between the title and the date controls. The content below is
+             positioned without a z-index: a z-index there would trap the taxon
+             dropdown menu under the mobile table's column header (z-index 50). -->
+        <div
+          class="pointer-events-none absolute inset-0 overflow-hidden rounded-t-2xl"
+          aria-hidden="true"
+        >
+          <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-35">
+            <WeatherSvgIcon icon={headerWeather.icon} size={128} title={headerWeather.label} />
+          </div>
+        </div>
+        <span class="sr-only">{headerWeather.label}</span>
+      {/if}
       <div
-        class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between overflow-visible"
+        class="relative flex flex-col gap-2 md:flex-row md:items-center md:justify-between overflow-visible"
       >
         <div class="flex flex-col">
           <h3 class="font-semibold">{t('dashboard.dailySummary.title')}</h3>
@@ -1136,9 +1107,12 @@ Responsive Breakpoints:
       </div>
     </div>
 
-    <!-- Grid Content -->
-    <div class="p-6 pt-8">
-      <DailySummaryOverview data={visibleData} {selectedDate} weatherStat={mobileWeatherStat} />
+    <!-- Grid Content. Tighter side padding below the 768px mobile breakpoint: the
+         compact table has ~200px of flexible width to split between the species
+         name and its hourly chart, and 24px gutters were spending a tenth of the
+         viewport on whitespace. Desktop keeps p-6. -->
+    <div class="p-3 pt-5 md:p-6 md:pt-8">
+      <DailySummaryOverview data={visibleData} {selectedDate} />
 
       {#if isMobileViewport}
         <!-- Mobile compact table (<768px): render ONLY this so phones never
@@ -1157,7 +1131,6 @@ Responsive Breakpoints:
             {showThumbnails}
             {selectedDate}
             maxHour={chartMaxHour}
-            limit={MOBILE_INITIAL_ROW_CAP}
             sortKey={mobileSort.key}
             sortDir={mobileSort.dir}
             onSortChange={handleMobileSortChange}
@@ -1166,10 +1139,10 @@ Responsive Breakpoints:
         </div>
       {:else}
         <!-- Desktop/tablet heatmap (≥768px) -->
-        <div class="overflow-x-auto overflow-y-visible">
+        <div class="daily-summary-container overflow-x-auto overflow-y-visible">
           <div
             bind:this={gridEl}
-            class="daily-summary-grid min-w-[900px]"
+            class="daily-summary-grid"
             style:--species-col-width={speciesColumnWidth}
           >
             <!-- Hourly weather visualization row (only shown if weather data exists) -->
@@ -1260,8 +1233,7 @@ Responsive Breakpoints:
                 {#each Array(24) as _, hour (hour)}
                   <a
                     href={urlBuilders.hourly(hour, 1)}
-                    class="text-center hover:text-[var(--color-primary)] cursor-pointer"
-                    style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
+                    class="text-center text-[var(--color-base-content)]/50 hover:text-[var(--text-primary)] cursor-pointer"
                     title={t('dashboard.dailySummary.tooltips.viewHourly', {
                       hour: hour.toString().padStart(2, '0'),
                     })}
@@ -1276,8 +1248,7 @@ Responsive Breakpoints:
                   {@const hour = i * 2}
                   <a
                     href={urlBuilders.hourly(hour, 2)}
-                    class="text-center hover:text-[var(--color-primary)] cursor-pointer"
-                    style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
+                    class="text-center text-[var(--color-base-content)]/50 hover:text-[var(--text-primary)] cursor-pointer"
                     title={t('dashboard.dailySummary.tooltips.viewBiHourly', {
                       startHour: hour.toString().padStart(2, '0'),
                       endHour: (hour + 2).toString().padStart(2, '0'),
@@ -1337,14 +1308,14 @@ Responsive Breakpoints:
                     <div class="flex flex-col min-w-0 flex-1">
                       <a
                         href={urlBuilders.species(item)}
-                        class="text-sm hover:text-[var(--color-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
+                        class="text-sm hover:text-[var(--text-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
                         title={displayName}
                       >
                         <span class="truncate flex-1">{displayName}</span>
                         {#if noveltyCat === 'lifetime'}
                           <span
                             class="inline-block shrink-0"
-                            style:color={noveltyCategoryColorVar('lifetime')}
+                            style:color={noveltyCategoryTextColor('lifetime')}
                             title={`New species (first seen ${item.days_since_first_seen ?? 0} day${(item.days_since_first_seen ?? 0) === 1 ? '' : 's'} ago)`}
                           >
                             <Star class="size-3 fill-current" />
@@ -1352,7 +1323,7 @@ Responsive Breakpoints:
                         {:else if noveltyCat === 'year'}
                           <span
                             class="shrink-0"
-                            style:color={noveltyCategoryColorVar('year')}
+                            style:color={noveltyCategoryTextColor('year')}
                             title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
                           >
                             📅
@@ -1360,7 +1331,7 @@ Responsive Breakpoints:
                         {:else if noveltyCat === 'season'}
                           <span
                             class="shrink-0"
-                            style:color={noveltyCategoryColorVar('season')}
+                            style:color={noveltyCategoryTextColor('season')}
                             title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
                           >
                             🌿
@@ -1368,7 +1339,7 @@ Responsive Breakpoints:
                         {:else if noveltyCat === 'infrequent'}
                           <span
                             class="inline-block shrink-0"
-                            style:color={noveltyCategoryColorVar('infrequent')}
+                            style:color={noveltyCategoryTextColor('infrequent')}
                             title={t('dashboard.dailySummary.tooltips.infrequent', {
                               days: item.days_since_last_seen ?? 0,
                             })}
@@ -1651,9 +1622,14 @@ Responsive Breakpoints:
      Responsive Grid Display
      ======================================================================== */
 
-  /* Tablet (768-1023px): show bi-hourly. Below 768px the desktop grid is not
-     rendered at all — MobileSummaryTable takes over. */
-  @media (min-width: 768px) and (max-width: 1023px) {
+  /* Size the desktop grid from the card's available inline width, so opening the
+     navigation sidebar switches to bi-hourly columns instead of forcing scroll. */
+  .daily-summary-container {
+    container-type: inline-size;
+    container-name: daily-summary;
+  }
+
+  @container daily-summary (max-width: 899px) {
     .hourly-grid {
       display: none;
     }
@@ -1663,8 +1639,9 @@ Responsive Breakpoints:
     }
   }
 
-  /* Wide desktop (≥1600px): taller heatmap cells use the extra room */
-  @media (min-width: 1600px) {
+  /* A card this wide has roughly the same usable space as the former ≥1600px
+     viewport rule, while remaining correct for layouts with a sidebar. */
+  @container daily-summary (min-width: 1400px) {
     .daily-summary-card .heatmap-cell {
       height: 2.25rem;
     }

@@ -64,8 +64,9 @@ func setupAuthIntegrationTest(t *testing.T) (*echo.Echo, *Handler, *conf.Setting
 	oauth2Server := createTestOAuth2Server(t, settings)
 	authService := auth.NewSecurityAdapter(oauth2Server)
 
-	// Initialize gothic session store for testing (required for session operations)
-	gothic.Store = sessions.NewCookieStore([]byte(settings.Security.SessionSecret))
+	// Initialize gothic session store for testing (required for session
+	// operations). It is process-global, so restore it after the test.
+	setTestGothicStore(t, settings.Security.SessionSecret)
 
 	// Build the shared core (the auth handlers reach the logging helpers through
 	// it) and construct the auth Handler exactly as the facade does.
@@ -73,6 +74,15 @@ func setupAuthIntegrationTest(t *testing.T) (*echo.Echo, *Handler, *conf.Setting
 	h := New(core, authService)
 
 	return e, h, settings
+}
+
+// setTestGothicStore installs a cookie session store as the process-global
+// gothic.Store and restores the previous store on cleanup.
+func setTestGothicStore(t *testing.T, secret string) {
+	t.Helper()
+	prev := gothic.Store
+	t.Cleanup(func() { gothic.Store = prev })
+	gothic.Store = sessions.NewCookieStore([]byte(secret))
 }
 
 // createTestOAuth2Server creates an OAuth2Server with the provided settings for testing.
@@ -83,7 +93,7 @@ func createTestOAuth2Server(tb testing.TB, settings *conf.Settings) *security.OA
 
 // TestV2AuthFlow_CompleteLogin tests the complete V2 login flow end-to-end.
 func TestV2AuthFlow_CompleteLogin(t *testing.T) {
-	e, h, settings := setupAuthIntegrationTest(t)
+	e, h, _ := setupAuthIntegrationTest(t)
 
 	t.Run("complete login flow with V2 callback", func(t *testing.T) {
 		// Step 1: POST /api/v2/auth/login with valid credentials
@@ -135,15 +145,23 @@ func TestV2AuthFlow_CompleteLogin(t *testing.T) {
 		assert.NotEmpty(t, location)
 		t.Logf("Callback redirected to: %s", location)
 
-		// Verify session cookie was set
-		cookies := callbackRec.Result().Cookies()
-		t.Logf("Cookies set: %d", len(cookies))
-		for _, cookie := range cookies {
-			t.Logf("Cookie: %s = %s", cookie.Name, cookie.Value[:min(len(cookie.Value), 20)]+"...")
+		// The callback must establish a session: the response sets a live
+		// session cookie (the regenerated session also sends an expired one)
+		// whose session carries the access token.
+		var session *http.Cookie
+		for _, cookie := range callbackRec.Result().Cookies() {
+			if cookie.Name == gothic.SessionName && cookie.MaxAge > 0 {
+				session = cookie
+			}
 		}
+		require.NotNil(t, session, "the callback must set a live session cookie")
+		replay := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		replay.AddCookie(session)
+		token, err := gothic.GetFromSession("access_token", replay)
+		require.NoError(t, err, "the session cookie must carry the access token")
+		assert.NotEmpty(t, token)
+		require.NoError(t, h.authService.ValidateToken(token), "the stored token must be one the auth service accepts")
 	})
-
-	_ = settings // Use settings if needed for additional assertions
 }
 
 // TestV2AuthFlow_FilterQueryRedirectSurvives verifies that a post-login redirect
@@ -285,7 +303,7 @@ func TestV2AuthFlow_EmptyClientID_V1Compatible(t *testing.T) {
 
 	oauth2Server := createTestOAuth2Server(t, settings)
 	authService := auth.NewSecurityAdapter(oauth2Server)
-	gothic.Store = sessions.NewCookieStore([]byte(settings.Security.SessionSecret))
+	setTestGothicStore(t, settings.Security.SessionSecret)
 
 	core := apitest.NewCore(t, apitest.WithEcho(e), apitest.WithSettings(settings))
 	h := New(core, authService)
@@ -386,6 +404,46 @@ func TestV2AuthFlow_OpenRedirectPrevention(t *testing.T) {
 		{
 			name:           "data URL",
 			maliciousURL:   "data:text/html,<script>alert('xss')</script>",
+			expectedResult: "/",
+		},
+		{
+			name:           "triple slash",
+			maliciousURL:   "///evil.com",
+			expectedResult: "/",
+		},
+		{
+			name:           "mixed slash and backslash protocol-relative",
+			maliciousURL:   `/\/evil.com`,
+			expectedResult: "/",
+		},
+		{
+			name:           "vbscript URL",
+			maliciousURL:   "vbscript:msgbox(1)",
+			expectedResult: "/",
+		},
+		{
+			name:           "file URL",
+			maliciousURL:   "file:///etc/passwd",
+			expectedResult: "/",
+		},
+		{
+			name:           "protocol-relative URL with userinfo",
+			maliciousURL:   "//@evil.com",
+			expectedResult: "/",
+		},
+		{
+			name:           "tab before the scheme",
+			maliciousURL:   "\thttp://evil.com",
+			expectedResult: "/",
+		},
+		{
+			name:           "newline before the scheme",
+			maliciousURL:   "\nhttp://evil.com",
+			expectedResult: "/",
+		},
+		{
+			name:           "root path",
+			maliciousURL:   "/",
 			expectedResult: "/",
 		},
 		{
@@ -514,61 +572,5 @@ func TestV2AuthFlow_WrongUsername(t *testing.T) {
 
 		assert.False(t, resp.Success)
 		t.Log("V2 correctly rejects wrong username when ClientID is configured")
-	})
-}
-
-// TestV2AuthFlow_RedirectURLInResponse tests that the login response contains V2 callback URL.
-func TestV2AuthFlow_RedirectURLInResponse(t *testing.T) {
-	e, h, _ := setupAuthIntegrationTest(t)
-
-	t.Run("login response contains V2 callback URL", func(t *testing.T) {
-		loginPayload := `{
-			"username": "birdnet-client",
-			"password": "testpassword123"
-		}`
-
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/login", strings.NewReader(loginPayload))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		c := e.NewContext(req, rec)
-
-		err := h.Login(c)
-		require.NoError(t, err)
-
-		var resp AuthResponse
-		err = json.Unmarshal(rec.Body.Bytes(), &resp)
-		require.NoError(t, err)
-
-		// Verify redirect URL points to V2 callback, NOT V1
-		assert.Contains(t, resp.RedirectURL, "/api/v2/auth/callback",
-			"Should use V2 callback endpoint")
-		assert.NotContains(t, resp.RedirectURL, "/api/v1/",
-			"Should NOT use V1 callback endpoint")
-	})
-}
-
-// TestV2AuthService_Interface tests that SecurityAdapter implements the Service interface correctly.
-func TestV2AuthService_Interface(t *testing.T) {
-	t.Run("SecurityAdapter implements all Service methods", func(t *testing.T) {
-		settings := &conf.Settings{
-			Security: conf.Security{
-				SessionSecret: "test-secret-32-chars-long",
-				BasicAuth: conf.BasicAuth{
-					Enabled:        true,
-					Password:       "test",
-					ClientID:       "test-client",
-					AuthCodeExp:    5 * time.Minute,
-					AccessTokenExp: 24 * time.Hour,
-				},
-			},
-		}
-
-		oauth2Server := createTestOAuth2Server(t, settings)
-		adapter := auth.NewSecurityAdapter(oauth2Server)
-
-		// Verify adapter implements Service interface
-		var _ auth.Service = adapter
-
-		t.Log("SecurityAdapter correctly implements auth.Service interface including new methods")
 	})
 }

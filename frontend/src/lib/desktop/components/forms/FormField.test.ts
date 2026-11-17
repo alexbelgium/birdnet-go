@@ -83,6 +83,60 @@ describe('FormField', () => {
     });
   });
 
+  describe('aria-describedby', () => {
+    const base = { type: 'text', name: 'rate', label: 'Rate', id: 'rate-field' } as const;
+    const describedBy = () => screen.getByLabelText('Rate').getAttribute('aria-describedby');
+
+    it('has no attribute without help text, error or extra ids', () => {
+      formFieldTest.render({ ...base });
+      expect(describedBy()).toBeNull();
+    });
+
+    it('points at the help text alone as before', () => {
+      formFieldTest.render({ ...base, helpText: 'Help' });
+      expect(describedBy()).toBe('rate-field-help');
+    });
+
+    it('uses the extra ids alone when there is no help text or error', () => {
+      formFieldTest.render({ ...base, describedByExtra: 'note-a note-b' });
+      expect(describedBy()).toBe('note-a note-b');
+    });
+
+    it('lists the help text before the extra ids', () => {
+      formFieldTest.render({ ...base, helpText: 'Help', describedByExtra: 'note-a' });
+      expect(describedBy()).toBe('rate-field-help note-a');
+    });
+
+    it('lists the error instead of the help text, before the extra ids', () => {
+      formFieldTest.render({
+        ...base,
+        helpText: 'Help',
+        error: 'Too low',
+        describedByExtra: 'note-a',
+      });
+      expect(describedBy()).toBe('rate-field-error note-a');
+    });
+
+    it('treats an empty extra string as no extra id', () => {
+      formFieldTest.render({ ...base, describedByExtra: '' });
+      expect(describedBy()).toBeNull();
+    });
+  });
+
+  describe('Generated ids', () => {
+    it('gives fields with the same name distinct ids and labels', () => {
+      formFieldTest.render({ type: 'number', name: 'threshold', label: 'First', helpText: 'A' });
+      formFieldTest.render({ type: 'number', name: 'threshold', label: 'Second', helpText: 'B' });
+
+      const first = screen.getByLabelText('First');
+      const second = screen.getByLabelText('Second');
+      expect(first.id).not.toBe(second.id);
+      expect(first.getAttribute('aria-describedby')).not.toBe(
+        second.getAttribute('aria-describedby')
+      );
+    });
+  });
+
   describe('Email Input', () => {
     it('validates email format', async () => {
       const user = userEvent.setup();
@@ -114,7 +168,7 @@ describe('FormField', () => {
         max: 120,
       });
 
-      const input = screen.getByLabelText('Age') as HTMLInputElement;
+      const input = screen.getByLabelText<HTMLInputElement>('Age');
       expect(input.type).toBe('number');
       expect(input.min).toBe('0');
       expect(input.max).toBe('120');
@@ -170,7 +224,7 @@ describe('FormField', () => {
         rows: 5,
       });
 
-      const textarea = screen.getByLabelText('Description') as HTMLTextAreaElement;
+      const textarea = screen.getByLabelText<HTMLTextAreaElement>('Description');
       expect(textarea.rows).toBe(5);
     });
   });

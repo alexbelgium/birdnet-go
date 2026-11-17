@@ -82,6 +82,37 @@ func validateRealtimeSettings(settings *RealtimeSettings) error {
 		return err
 	}
 
+	// Validate model consensus settings
+	if err := validateModelConsensusSettings(&settings.ModelConsensus); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validModelConsensusMinModels reports whether n is an accepted minmodels value.
+func validModelConsensusMinModels(n int) bool {
+	return n >= MinModelConsensusMinModels && n <= MaxModelConsensusMinModels
+}
+
+// validateModelConsensusSettings rejects a minmodels value outside the accepted
+// range when the filter is enabled, and also when a non-zero value is saved while
+// it is off, so an unusable value is refused when it is sent and not only when a
+// later request switches the filter on. Zero means unset: it is accepted while the
+// filter is off and rejected once it is on. Load normalizes the value first, so
+// this only fires for settings saved through the API.
+func validateModelConsensusSettings(settings *ModelConsensusSettings) error {
+	if !settings.Enabled() && settings.MinModels == 0 {
+		return nil
+	}
+	if !validModelConsensusMinModels(settings.MinModels) {
+		return errors.Newf("model consensus minModels must be between %d and %d, got %d",
+			MinModelConsensusMinModels, MaxModelConsensusMinModels, settings.MinModels).
+			Category(errors.CategoryValidation).
+			Context("validation_type", "model-consensus-min-models").
+			Context("min_models", settings.MinModels).
+			Build()
+	}
 	return nil
 }
 
@@ -231,6 +262,11 @@ func validateDashboardSettings(settings *Dashboard) error {
 		}
 	}
 
+	// Playback denoise strength: heal an empty value, reject an unknown one.
+	if err := normalizeAndValidateDenoiseStrength(&settings.PlaybackDenoise, "realtime.dashboard.playbackdenoise.strength"); err != nil {
+		return err
+	}
+
 	// Validate spectrogram settings
 	if settings.Spectrogram.Mode != "" {
 		validModes := []string{"auto", "prerender", "user-requested"}
@@ -286,7 +322,7 @@ func validateDashboardSettings(settings *Dashboard) error {
 }
 
 // validWeatherProviders contains all recognized weather provider values.
-var validWeatherProviders = []string{"none", "yrno", "openweather", "wunderground"} //nolint:goconst // weather-provider value, not the RetentionPolicyNone constant
+var validWeatherProviders = []string{"none", "yrno", "openweather", "wunderground", "pirateweather"} //nolint:goconst // weather-provider value, not the RetentionPolicyNone constant
 
 // validateWeatherSettings validates weather-specific settings
 func validateWeatherSettings(settings *WeatherSettings) error {
@@ -322,6 +358,16 @@ func validateWeatherSettings(settings *WeatherSettings) error {
 			return errors.New(err).
 				Category(errors.CategoryValidation).
 				Context("validation_type", "wunderground-settings").
+				Build()
+		}
+	}
+
+	// Validate Pirate Weather settings if it's the selected provider
+	if settings.Provider == "pirateweather" {
+		if err := settings.PirateWeather.ValidatePirateWeather(); err != nil {
+			return errors.New(err).
+				Category(errors.CategoryValidation).
+				Context("validation_type", "pirateweather-settings").
 				Build()
 		}
 	}

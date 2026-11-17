@@ -6,6 +6,9 @@
   import { t } from '$lib/i18n';
   import { loggers } from '$lib/utils/logger';
   import { safeGet } from '$lib/utils/security';
+  import { createFocusReturn, type FocusFallback } from '$lib/utils/focusReturn';
+  import { useRetryAction } from '$lib/utils/useRetryAction.svelte';
+  import Button from './Button.svelte';
 
   type AlertIconType = 'error' | 'warning' | 'info' | 'success' | 'check';
 
@@ -13,26 +16,59 @@
 
   type AlertType = AlertIconType;
 
-  interface Props extends HTMLAttributes<HTMLDivElement> {
+  interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
+    /** Bold line above the message or children, naming what failed. */
+    title?: string;
     message?: string;
     type?: AlertType;
     dismissible?: boolean;
     onDismiss?: () => void;
+    /**
+     * Shows a Retry button that calls this. Clicks are ignored while it runs (the button
+     * stays focusable with aria-disabled and reads "Retrying"); a rejection is logged.
+     */
+    onRetry?: () => Promise<unknown> | unknown;
+    /** Overrides the Retry busy state when the caller tracks the request itself. */
+    retryBusy?: boolean;
+    /** Bindable Retry button element, for callers that manage focus after a retry. */
+    retryButton?: HTMLButtonElement;
+    /**
+     * Where focus goes when the alert is removed while it holds focus (after a Retry, a
+     * dismiss or a refresh that cleared it): the first element that can take it.
+     */
+    focusFallback?: FocusFallback;
     className?: string;
     children?: Snippet;
   }
 
   let {
+    title,
     message = '',
     type = 'error',
     dismissible = false,
     onDismiss = () => {},
+    onRetry,
+    retryBusy,
+    retryButton = $bindable(),
+    focusFallback,
     className = '',
     children,
     ...rest
   }: Props = $props();
 
   let isVisible = $state(true);
+  const { track: trackFocus, restore: restoreFocus } = createFocusReturn(
+    () => focusFallback?.() ?? []
+  );
+  const retry = useRetryAction(async () => {
+    await onRetry?.();
+  });
+  let retrying = $derived(retryBusy ?? retry.busy);
+
+  function handleRetry() {
+    if (retrying) return;
+    void retry.run();
+  }
 
   // Base alert classes using native Tailwind
   const baseClasses =
@@ -53,14 +89,15 @@
 
   // Icon color classes per type
   const iconColorClasses: Record<AlertType, string> = {
-    error: 'text-[var(--color-error)]',
-    warning: 'text-[var(--color-warning)]',
-    info: 'text-[var(--color-info)]',
-    success: 'text-[var(--color-success)]',
-    check: 'text-[var(--color-success)]',
+    error: 'text-[var(--text-error)]',
+    warning: 'text-[var(--text-warning)]',
+    info: 'text-[var(--text-info)]',
+    success: 'text-[var(--text-success)]',
+    check: 'text-[var(--text-success)]',
   };
 
-  function handleDismiss() {
+  function handleDismiss(event: MouseEvent) {
+    restoreFocus(event);
     isVisible = false;
     try {
       onDismiss();
@@ -74,6 +111,7 @@
   <div
     class={cn(baseClasses, safeGet(typeClasses, type, typeClasses.error), className)}
     role="alert"
+    use:trackFocus
     {...rest}
   >
     {#if type === 'error'}
@@ -94,18 +132,37 @@
       />
     {/if}
 
-    <span class="min-w-0">
+    <!-- A div, not a span, so children may hold block content (lists, buttons
+         on their own line). As a flex item it lays out the same either way. -->
+    <div class="min-w-0">
+      {#if title}
+        <span class="block font-medium">{title}</span>
+      {/if}
       {#if children}
         {@render children()}
+      {:else if title || onRetry}
+        {#if message}
+          <span class="block">{message}</span>
+        {/if}
       {:else}
         {message}
       {/if}
-    </span>
+      {#if onRetry}
+        <Button
+          bind:ref={retryButton}
+          className="mt-2"
+          onclick={handleRetry}
+          aria-disabled={retrying ? 'true' : undefined}
+        >
+          {retrying ? t('common.retrying') : t('common.retry')}
+        </Button>
+      {/if}
+    </div>
 
     {#if dismissible}
       <button
         type="button"
-        class="ml-auto inline-flex items-center justify-center p-1.5 rounded-md bg-transparent hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+        class="ml-auto inline-flex items-center justify-center p-1.5 rounded-md bg-transparent hover:bg-[color-mix(in_srgb,var(--color-base-content)_10%,transparent)] transition-colors"
         onclick={handleDismiss}
         aria-label={t('common.aria.dismissAlert')}
       >

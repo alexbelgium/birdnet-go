@@ -87,9 +87,10 @@ func TestBuildRangeFilter_BareLocalizedCommonNameOverride_DoesNotPolluteNameReso
 	capture := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	cl, err := logger.NewCentralLogger(
 		&logger.LoggingConfig{
-			Console:      &logger.ConsoleOutput{Enabled: false},
-			FileOutput:   &logger.FileOutput{Enabled: false},
-			DefaultLevel: "debug",
+			Console:       &logger.ConsoleOutput{Enabled: false},
+			FileOutput:    &logger.FileOutput{Enabled: false},
+			ModuleOutputs: logger.DisabledModuleOutputs(),
+			DefaultLevel:  "debug",
 		},
 		capture,
 	)
@@ -115,18 +116,20 @@ func TestBuildRangeFilter_BareLocalizedCommonNameOverride_DoesNotPolluteNameReso
 func TestGetProbableSpecies_BareLocalizedCommonNameOverride_CanonicalizesLabel(t *testing.T) {
 	settings, rf := overrideTestSettings(t, "fi")
 
-	bn := &BirdNET{
-		Settings:     settings,
-		rangeFilter:  rf,
-		speciesCache: make(map[string]*speciesCacheEntry),
-	}
+	rfs := newTestRangeFilterService(rf)
 
-	scores, _, err := bn.getProbableSpecies(time.Now(), 0, settings)
+	scores, _, _, _, err := rfs.probableSpecies(time.Now(), 0, settings)
 	require.NoError(t, err)
 
 	labels := make([]string, 0, len(scores))
 	for _, ss := range scores {
 		labels = append(labels, ss.Label)
+		if ss.Label == "Parus major_Talitiainen" {
+			assert.True(t, ss.IsManuallyIncluded,
+				"canonicalized override score must retain its user-override provenance")
+			assert.True(t, ss.IsSyntheticOverride,
+				"out-of-range override must remain identifiable as a synthetic score")
+		}
 	}
 	assert.Contains(t, labels, "Parus major_Talitiainen",
 		"override must be canonicalized to the classifier's Scientific_Common label")
@@ -167,13 +170,9 @@ func TestGetProbableSpecies_NonPrimaryLocalizedCommonOverride_ReverseResolvesToS
 	settings, rf := overrideTestSettings(t, "fi")
 	settings.Realtime.Species.Include = []string{"Kettu"}
 
-	bn := &BirdNET{
-		Settings:     settings,
-		rangeFilter:  rf,
-		speciesCache: make(map[string]*speciesCacheEntry),
-	}
+	rfs := newTestRangeFilterService(rf)
 
-	scores, _, err := bn.getProbableSpecies(time.Now(), 0, settings)
+	scores, _, _, _, err := rfs.probableSpecies(time.Now(), 0, settings)
 	require.NoError(t, err)
 
 	labels := make([]string, 0, len(scores))
@@ -200,9 +199,10 @@ func TestBuildRangeFilter_NonPrimaryLocalizedCommonOverride_DoesNotPolluteNameRe
 	capture := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	cl, err := logger.NewCentralLogger(
 		&logger.LoggingConfig{
-			Console:      &logger.ConsoleOutput{Enabled: false},
-			FileOutput:   &logger.FileOutput{Enabled: false},
-			DefaultLevel: "debug",
+			Console:       &logger.ConsoleOutput{Enabled: false},
+			FileOutput:    &logger.FileOutput{Enabled: false},
+			ModuleOutputs: logger.DisabledModuleOutputs(),
+			DefaultLevel:  "debug",
 		},
 		capture,
 	)
@@ -248,16 +248,12 @@ func TestGetProbableSpecies_LegacyPath_NonPrimaryLocalizedCommonOverride_Reverse
 	settings, _ := overrideTestSettings(t, "fi")
 	settings.Realtime.Species.Include = []string{"Kettu"}
 
-	bn := &BirdNET{
-		Settings: settings,
-		// Non-universal range filter: forces the legacy getProbableSpecies branch.
-		// Two scores aligned with the two classifier labels; only the first clears
-		// the threshold, so the legacy filter contributes Turdus merula.
-		rangeFilter:  &fakeRangeFilter{scores: []float32{0.9, 0.0}},
-		speciesCache: make(map[string]*speciesCacheEntry),
-	}
+	// Non-universal range filter: forces the legacy probableSpecies branch.
+	// Two scores aligned with the two classifier labels; only the first clears
+	// the threshold, so the legacy filter contributes Turdus merula.
+	rfs := newTestRangeFilterService(&fakeRangeFilter{scores: []float32{0.9, 0.0}})
 
-	scores, _, err := bn.getProbableSpecies(time.Now(), 0, settings)
+	scores, _, _, _, err := rfs.probableSpecies(time.Now(), 0, settings)
 	require.NoError(t, err)
 
 	labels := make([]string, 0, len(scores))
@@ -318,12 +314,8 @@ func requireScoreForLabel(t *testing.T, scores []SpeciesScore, label string) Spe
 // probableSpeciesFor runs the override-appending path over the given settings.
 func probableSpeciesFor(t *testing.T, settings *conf.Settings, rf *fakeUniversalRangeFilter) []SpeciesScore {
 	t.Helper()
-	bn := &BirdNET{
-		Settings:     settings,
-		rangeFilter:  rf,
-		speciesCache: make(map[string]*speciesCacheEntry),
-	}
-	scores, _, err := bn.getProbableSpecies(time.Now(), 0, settings)
+	rfs := newTestRangeFilterService(rf)
+	scores, _, _, _, err := rfs.probableSpecies(time.Now(), 0, settings)
 	require.NoError(t, err)
 	return scores
 }
@@ -341,6 +333,7 @@ func TestAddUserOverrideSpeciesScores_Provenance(t *testing.T) {
 		label             string
 		wantCustomConfig  bool
 		wantManualInclude bool
+		wantSynthetic     bool
 		wantScore         float64
 	}{
 		{
@@ -353,6 +346,7 @@ func TestAddUserOverrideSpeciesScores_Provenance(t *testing.T) {
 			config:           map[string]conf.SpeciesConfig{"Great Tit": {Threshold: 0.5}},
 			label:            "Parus major_Great Tit",
 			wantCustomConfig: true,
+			wantSynthetic:    true,
 			wantScore:        1.0,
 		},
 		{
@@ -371,7 +365,18 @@ func TestAddUserOverrideSpeciesScores_Provenance(t *testing.T) {
 			include:           []string{"Great Tit"},
 			label:             "Parus major_Great Tit",
 			wantManualInclude: true,
+			wantSynthetic:     true,
 			wantScore:         1.0,
+		},
+		{
+			// An include matching an existing geomodel row must add provenance
+			// without replacing the native probability with the 1.0 sentinel.
+			name:              "include on an already-scored species flags in place",
+			include:           []string{"Common Blackbird"},
+			label:             "Turdus merula_Common Blackbird",
+			wantManualInclude: true,
+			wantSynthetic:     false,
+			wantScore:         0.9,
 		},
 		{
 			name:              "include and config union onto one entry",
@@ -380,6 +385,7 @@ func TestAddUserOverrideSpeciesScores_Provenance(t *testing.T) {
 			label:             "Parus major_Great Tit",
 			wantCustomConfig:  true,
 			wantManualInclude: true,
+			wantSynthetic:     true,
 			wantScore:         1.0,
 		},
 		{
@@ -412,6 +418,7 @@ func TestAddUserOverrideSpeciesScores_Provenance(t *testing.T) {
 			got := requireScoreForLabel(t, scores, tt.label)
 			assert.Equal(t, tt.wantCustomConfig, got.HasCustomConfig, "HasCustomConfig")
 			assert.Equal(t, tt.wantManualInclude, got.IsManuallyIncluded, "IsManuallyIncluded")
+			assert.Equal(t, tt.wantSynthetic, got.IsSyntheticOverride, "IsSyntheticOverride")
 			assert.InDelta(t, tt.wantScore, got.Score, 1e-9, "score")
 		})
 	}

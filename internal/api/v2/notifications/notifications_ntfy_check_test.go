@@ -2,10 +2,13 @@
 package notifications
 
 import (
+	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -13,6 +16,19 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
 )
+
+// newNtfyCheckRequest builds a request for the check-ntfy-server endpoint with
+// the given host in the JSON body. The endpoint is POST (not GET) so Echo's CSRF
+// middleware protects the side-effecting probe; the handler reads the host via
+// ctx.Bind, which requires the application/json content type.
+func newNtfyCheckRequest(t *testing.T, host string) *http.Request {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"host": host})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/notifications/check-ntfy-server", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	return req
+}
 
 func TestCheckNtfyServer_HTTPSuccess(t *testing.T) {
 	// Spin up a fake HTTP server that mimics the ntfy /v1/health response
@@ -26,8 +42,9 @@ func TestCheckNtfyServer_HTTPSuccess(t *testing.T) {
 	e := echo.New()
 	ctrl := New(&apicore.Core{}, nil, nil)
 	ctrl.Settings.Store(apitest.NewValidTestSettings())
-	// ts.Listener.Addr().String() returns "127.0.0.1:PORT"
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/notifications/check-ntfy-server?host="+ts.Listener.Addr().String(), http.NoBody)
+	// ts.Listener.Addr().String() returns "127.0.0.1:PORT"; the SSRF guard allows
+	// loopback, so the guarded probe still reaches the test server.
+	req := newNtfyCheckRequest(t, ts.Listener.Addr().String())
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
@@ -46,7 +63,7 @@ func TestCheckNtfyServer_MissingHost(t *testing.T) {
 	e := echo.New()
 	ctrl := New(&apicore.Core{}, nil, nil)
 	ctrl.Settings.Store(apitest.NewValidTestSettings())
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/notifications/check-ntfy-server", http.NoBody)
+	req := newNtfyCheckRequest(t, "")
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
@@ -55,27 +72,33 @@ func TestCheckNtfyServer_MissingHost(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestCheckNtfyServer_InvalidHost_Unreachable(t *testing.T) {
+// TestCheckNtfyServer_ClosedPortUnreachable pins the dial-failure path: a host
+// that refuses the connection is answered with 200 and "unreachable", not an
+// error status. The port belongs to a listener that was just closed, so nothing
+// leaves the machine.
+func TestCheckNtfyServer_ClosedPortUnreachable(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	closedAddr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+
 	e := echo.New()
 	ctrl := New(&apicore.Core{}, nil, nil)
 	ctrl.Settings.Store(apitest.NewValidTestSettings())
-	// Inject a short per-scheme probe timeout so the unreachable-host path returns
-	// quickly. 192.0.2.1 never responds, so the result is deterministically
-	// "unreachable" regardless of the timeout; the override only bounds the wait
-	// (default would be ntfyServerCheckTimeout for HTTPS plus HTTP).
 	ctrl.ntfyCheckTimeoutOverride = testFailFastTimeout
-	// Use a reserved/invalid IP that will not respond (TEST-NET-1, RFC 5737)
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/notifications/check-ntfy-server?host=192.0.2.1", http.NoBody)
+	req := newNtfyCheckRequest(t, closedAddr)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
-	err := ctrl.CheckNtfyServer(ctx)
+	err = ctrl.CheckNtfyServer(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var resp map[string]any
+	var resp NtfyServerCheckResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, "unreachable", resp["recommended"])
+	assert.Equal(t, "unreachable", resp.Recommended)
+	assert.False(t, resp.HTTP)
+	assert.False(t, resp.HTTPS)
 }
 
 func TestCheckNtfyServer_NonNtfyServerNotFalsePositive(t *testing.T) {
@@ -91,7 +114,7 @@ func TestCheckNtfyServer_NonNtfyServerNotFalsePositive(t *testing.T) {
 	e := echo.New()
 	ctrl := New(&apicore.Core{}, nil, nil)
 	ctrl.Settings.Store(apitest.NewValidTestSettings())
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/notifications/check-ntfy-server?host="+ts.Listener.Addr().String(), http.NoBody)
+	req := newNtfyCheckRequest(t, ts.Listener.Addr().String())
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
@@ -108,8 +131,8 @@ func TestCheckNtfyServer_InjectionRejected(t *testing.T) {
 	e := echo.New()
 	ctrl := New(&apicore.Core{}, nil, nil)
 	ctrl.Settings.Store(apitest.NewValidTestSettings())
-	// Slash injection attempt
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/notifications/check-ntfy-server?host=evil.com%2F%40good.com", http.NoBody)
+	// Slash/@ injection attempt: rejected by isValidNtfyHost as a malformed host.
+	req := newNtfyCheckRequest(t, "evil.com/@good.com")
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
@@ -118,17 +141,64 @@ func TestCheckNtfyServer_InjectionRejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestCheckNtfyServer_CloudMetadataBlocked(t *testing.T) {
+// TestCheckNtfyServer_ProbesThroughGuardedClient checks that the ntfy
+// connectivity check uses the guarded outbound client. The server listens on
+// loopback, and the probe addresses it as 0.0.0.0:<port>. A plain HTTP client
+// reaches the server through that address (the precondition below), while the
+// guarded client refuses it at dial time, so the answer is "unreachable". If
+// probeNtfyServer switched to a plain or default client the server would be
+// found and this test would fail. Nothing outside the machine is contacted
+// either way.
+func TestCheckNtfyServer_ProbesThroughGuardedClient(t *testing.T) {
+	// ntfyGuardPreconditionTimeout bounds the plain-client precondition probe and
+	// the handler's own probe. Both are wide so a loaded host cannot turn a plain
+	// client that is slow to answer into "unreachable".
+	const ntfyGuardPreconditionTimeout = 10 * time.Second
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"healthy":true}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	_, port, err := net.SplitHostPort(ts.Listener.Addr().String())
+	require.NoError(t, err)
+	unspecifiedHost := net.JoinHostPort("0.0.0.0", port)
+
+	// Precondition: a proxy-less plain client must reach the server through the
+	// unspecified address, otherwise the assertion below proves nothing. A
+	// transport without a proxy keeps an HTTP_PROXY environment from hijacking it.
+	plain := &http.Client{
+		Transport: &http.Transport{Proxy: nil},
+		Timeout:   ntfyGuardPreconditionTimeout,
+	}
+	t.Cleanup(plain.CloseIdleConnections)
+	preReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+unspecifiedHost+"/v1/health", http.NoBody)
+	require.NoError(t, err)
+	pre, err := plain.Do(preReq)
+	if err != nil {
+		t.Skipf("plain dial of %s failed, so the guarded-client check cannot be made: %v", unspecifiedHost, err)
+	}
+	require.NoError(t, pre.Body.Close())
+
 	e := echo.New()
 	ctrl := New(&apicore.Core{}, nil, nil)
 	ctrl.Settings.Store(apitest.NewValidTestSettings())
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/notifications/check-ntfy-server?host=169.254.169.254", http.NoBody)
+	ctrl.ntfyCheckTimeoutOverride = ntfyGuardPreconditionTimeout
+	req := newNtfyCheckRequest(t, unspecifiedHost)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 
-	err := ctrl.CheckNtfyServer(ctx)
+	err = ctrl.CheckNtfyServer(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp NtfyServerCheckResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "unreachable", resp.Recommended)
+	assert.False(t, resp.HTTP)
+	assert.False(t, resp.HTTPS)
 }
 
 func TestIsValidNtfyHost(t *testing.T) {
@@ -147,10 +217,12 @@ func TestIsValidNtfyHost(t *testing.T) {
 		{"", false},
 		{"evil.com/path", false},
 		{"evil.com@other.com", false},
-		{"169.254.169.254", false},            // cloud metadata
-		{"[169.254.169.254]", false},          // cloud metadata bracketed
-		{"fd00:ec2::254", false},              // cloud metadata IPv6
-		{"[fd00:ec2::254]", false},            // cloud metadata IPv6 bracketed
+		// Metadata IPs are syntactically valid hosts; they are refused at dial time
+		// by the SSRF-guarded client, not by this syntactic validator.
+		{"169.254.169.254", true},
+		{"[169.254.169.254]", true},
+		{"fd00:ec2::254", true},
+		{"[fd00:ec2::254]", true},
 		{"192.168.1.100:0", false},            // port 0 out of range
 		{"192.168.1.100:99999", false},        // port > 65535
 		{"192.168.1.100:-1", false},           // negative port

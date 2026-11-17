@@ -54,7 +54,7 @@
     onPredictionSelect,
   }: Props = $props();
 
-  // Form state initialized from props — parent uses {#key} to reset on species change
+  // Form state initialized from props: parent uses {#key} to reset on species change
   // svelte-ignore state_referenced_locally
   const existingAction = config?.actions?.[0];
   // The field DISPLAYS the localized label, while canonicalSpecies holds the value
@@ -227,7 +227,7 @@
   <div class="border-t border-[var(--color-base-300)] pt-3">
     <button
       type="button"
-      class="flex items-center gap-2 text-xs font-medium text-[var(--color-base-content)]/60 hover:text-[var(--color-primary)] transition-colors cursor-pointer"
+      class="flex items-center gap-2 text-xs font-medium text-[var(--color-base-content)]/60 hover:text-[var(--text-primary)] transition-colors cursor-pointer"
       onclick={() => (showActions = !showActions)}
       aria-expanded={showActions}
     >
@@ -286,7 +286,7 @@
           {/each}
           <button
             type="button"
-            class="inline-flex items-center justify-center h-6 px-2 text-xs font-medium rounded-md bg-[var(--color-warning)] text-[var(--color-warning-content)] hover:opacity-90 transition-colors cursor-pointer"
+            class="inline-flex items-center justify-center h-6 px-2 text-xs font-medium rounded-md bg-[var(--color-warning)] text-[var(--color-warning-content)] hover:bg-[var(--color-warning-hover)] transition-colors cursor-pointer"
             onclick={clearParameters}
           >
             {t('settings.species.actionsModal.parameters.buttons.clearParameters')}

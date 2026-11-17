@@ -6,13 +6,15 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/errors"
-	"golang.org/x/text/unicode/norm"
+	"github.com/tphakala/birdnet-go/internal/speciesindex"
+	"github.com/tphakala/birdnet-go/internal/wallclock"
 )
 
 // =============================================================================
@@ -48,7 +50,9 @@ const (
 // =============================================================================
 
 // DateRangeToUnix converts a DateRange to Unix timestamps.
-// Returns start of first day (00:00:00) and end of last day (23:59:59).
+// Returns the start of the first day and the exclusive end of the last day (the start of the
+// day after it), so a detection at 23:59:59 on the last day is inside the range. A day starts at
+// 00:00:00, or at the transition instant when DST skips that midnight.
 // Returns nil, nil if dr is nil.
 func DateRangeToUnix(dr *datastore.DateRange, tz *time.Location) (start, end *int64) {
 	if dr == nil {
@@ -58,19 +62,9 @@ func DateRangeToUnix(dr *datastore.DateRange, tz *time.Location) (start, end *in
 		tz = time.Local
 	}
 
-	// Start of first day (00:00:00)
-	startTime := time.Date(
-		dr.Start.Year(), dr.Start.Month(), dr.Start.Day(),
-		0, 0, 0, 0, tz,
-	)
-	s := startTime.Unix()
-
-	// End of last day (23:59:59)
-	endTime := time.Date(
-		dr.End.Year(), dr.End.Month(), dr.End.Day(),
-		23, 59, 59, 0, tz,
-	)
-	e := endTime.Unix()
+	startTime, _ := wallclock.DayBounds(wallclock.DateOf(dr.Start), tz)
+	_, endTime := wallclock.DayBounds(wallclock.DateOf(dr.End), tz)
+	s, e := startTime.Unix(), endTime.Unix()
 
 	return &s, &e
 }
@@ -126,6 +120,7 @@ func TimeOfDayToHours(periods []string) []int {
 
 // HourFilterToHours converts an HourFilter to a list of hours.
 // Handles wrap-around (e.g., Start=22, End=2 → [22, 23, 0, 1, 2]).
+// Any integer is accepted and taken modulo 24 with a non-negative result (-2 is 22).
 // Returns nil if hf is nil.
 func HourFilterToHours(hf *datastore.HourFilter) []int {
 	if hf == nil {
@@ -133,8 +128,8 @@ func HourFilterToHours(hf *datastore.HourFilter) []int {
 	}
 
 	// Normalize to valid hour range
-	start := hf.Start % 24
-	end := hf.End % 24
+	start := floorModHours(hf.Start)
+	end := floorModHours(hf.End)
 
 	hours := make([]int, 0)
 
@@ -145,7 +140,7 @@ func HourFilterToHours(hf *datastore.HourFilter) []int {
 		}
 	} else {
 		// Wraps around midnight (e.g., 22-2)
-		for h := start; h <= 23; h++ {
+		for h := start; h < wallClockHoursPerDay; h++ {
 			hours = append(hours, h)
 		}
 		for h := 0; h <= end; h++ {
@@ -154,6 +149,11 @@ func HourFilterToHours(hf *datastore.HourFilter) []int {
 	}
 
 	return hours
+}
+
+// floorModHours reduces h to 0..23, mapping negative values to the hour of the previous day.
+func floorModHours(h int) int {
+	return ((h % wallClockHoursPerDay) + wallClockHoursPerDay) % wallClockHoursPerDay
 }
 
 // MergeHourFilters combines TimeOfDay and Hour filters.
@@ -194,30 +194,6 @@ func MergeHourFilters(timeOfDay []string, hour *datastore.HourFilter) []int {
 	}
 
 	return intersection
-}
-
-// GetTimezoneOffset returns the timezone offset in seconds for the given location at the
-// current time (handles DST for "now"). See GetTimezoneOffsetAt for the DST limitation.
-func GetTimezoneOffset(tz *time.Location) int {
-	return GetTimezoneOffsetAt(tz, time.Now())
-}
-
-// GetTimezoneOffsetAt returns the timezone offset in seconds for the given location at the
-// instant t (handles DST for that instant). Prefer this over GetTimezoneOffset when the
-// query has a known reference time (e.g. the start of the queried day), so the offset
-// reflects the data's DST state rather than the current one.
-//
-// LIMITATION: a single offset is applied to a whole query. When bucketing or filtering data
-// that spans a DST transition, hours may be off by up to 1 hour for rows recorded in a
-// different DST state than t. For most use cases (recent data, single-day windows, non-DST
-// timezones) this is acceptable; for precise historical conversion across DST boundaries,
-// use database-native timezone conversion functions.
-func GetTimezoneOffsetAt(tz *time.Location, t time.Time) int {
-	if tz == nil {
-		tz = time.Local
-	}
-	_, offset := t.In(tz).Zone()
-	return offset
 }
 
 // =============================================================================
@@ -344,6 +320,83 @@ func ResolveSpeciesToLabelIDs(ctx context.Context, deps *FilterLookupDeps, speci
 	return labelIDs, nil
 }
 
+// ResolveSourcesToSourceIDs maps the public source filter values to audio source IDs. Each value
+// is the source's numeric ID (as /analytics/sources lists it) or a name, which goes through the
+// same matching as the search endpoint's device filter (ResolveDeviceToSourceIDs: node name,
+// display name or source URI, case-insensitively, exact before substring). Returns nil for an
+// empty filter and sentinelNoMatchIDs when nothing matches, so an unknown source yields no rows
+// rather than every row. Without a source repository only numeric IDs can match.
+func ResolveSourcesToSourceIDs(ctx context.Context, deps *FilterLookupDeps, sources []string) ([]uint, error) {
+	if len(sources) == 0 {
+		return nil, nil
+	}
+	// Numeric IDs need no lookup, so a filter is still applied when no source repository is
+	// wired; names then match nothing rather than being dropped, so the response is never
+	// silently unfiltered.
+	haveRepo := deps != nil && deps.SourceRepo != nil
+	var groups [][]uint
+	for _, want := range sources {
+		want = strings.TrimSpace(want)
+		if want == "" {
+			continue
+		}
+		if id, ok := parseSourceID(want); ok {
+			groups = append(groups, []uint{id})
+			continue
+		}
+		if !haveRepo {
+			continue
+		}
+		ids, err := ResolveDeviceToSourceIDs(ctx, deps, want)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) > 0 && ids[0] != sentinelNoMatchIDs[0] {
+			groups = append(groups, ids)
+		}
+	}
+	merged := mergeUniqueIDs(groups...)
+	if len(merged) == 0 {
+		return sentinelNoMatchIDs, nil
+	}
+	return merged, nil
+}
+
+// parseSourceID reports whether s is a positive decimal integer and returns it.
+func parseSourceID(s string) (id uint, ok bool) {
+	n, err := strconv.ParseUint(s, 10, 32)
+	if err != nil || n == 0 {
+		return 0, false
+	}
+	return uint(n), true
+}
+
+// intersectSourceIDs combines the location and source filters: nil means "no filter" on either
+// side, so the other side wins; when both are set only sources in both survive, and an empty
+// intersection becomes the no-match sentinel.
+func intersectSourceIDs(a, b []uint) []uint {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	inB := make(map[uint]struct{}, len(b))
+	for _, id := range b {
+		inB[id] = struct{}{}
+	}
+	out := make([]uint, 0, len(a))
+	for _, id := range a {
+		if _, ok := inB[id]; ok {
+			out = append(out, id)
+		}
+	}
+	if len(out) == 0 {
+		return sentinelNoMatchIDs
+	}
+	return out
+}
+
 // ResolveLocationsToSourceIDs converts location/node names to audio source IDs.
 // If locations is non-empty but no sources are found, returns sentinel []uint{0}
 // to ensure the query returns zero results.
@@ -380,7 +433,9 @@ func ResolveLocationsToSourceIDs(ctx context.Context, deps *FilterLookupDeps, lo
 // =============================================================================
 
 // parseDateString parses a date string in YYYY-MM-DD format to Unix timestamp.
-// Returns the start of day (00:00:00) or end of day (23:59:59) in the given timezone.
+// Returns the start of day or the exclusive end of day (the start of the next day, so 23:59:59
+// is inside the day) in the given timezone. A day starts at 00:00:00, or at the transition
+// instant when DST skips that midnight.
 // Returns (nil, nil) if dateStr is empty (no filter, not an error).
 // Returns error if dateStr is non-empty but invalid format.
 func parseDateString(dateStr string, tz *time.Location, endOfDay bool) (*int64, error) {
@@ -391,16 +446,18 @@ func parseDateString(dateStr string, tz *time.Location, endOfDay bool) (*int64, 
 		tz = time.Local
 	}
 
-	t, err := time.ParseInLocation("2006-01-02", dateStr, tz)
+	date, err := wallclock.ParseDate(dateStr)
 	if err != nil {
 		return nil, errors.NewStd("invalid date format: expected YYYY-MM-DD, got " + dateStr)
 	}
 
+	start, end := wallclock.DayBounds(date, tz)
 	if endOfDay {
-		t = t.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+		ts := end.Unix()
+		return &ts, nil
 	}
 
-	ts := t.Unix()
+	ts := start.Unix()
 	return &ts, nil
 }
 
@@ -479,7 +536,7 @@ func ResolveCommonNameToLabelIDs(ctx context.Context, deps *FilterLookupDeps, sp
 		return nil, nil
 	}
 
-	needle := strings.ToLower(norm.NFC.String(species))
+	needle := speciesindex.Fold(species)
 	matchedScientific := make([]string, 0, 16)
 	collect := func(sci, foldedCommon string) {
 		if strings.Contains(foldedCommon, needle) {
@@ -492,7 +549,7 @@ func ResolveCommonNameToLabelIDs(ctx context.Context, deps *FilterLookupDeps, sp
 		}
 	} else {
 		for sci, common := range deps.SciToCommon {
-			collect(sci, strings.ToLower(norm.NFC.String(common)))
+			collect(sci, speciesindex.Fold(common))
 		}
 	}
 	if len(matchedScientific) == 0 {
@@ -604,7 +661,7 @@ func ConvertSearchFilters(
 
 	sf := &SearchFilters{
 		// Timezone for hour calculations
-		TimezoneOffset: GetTimezoneOffset(tz),
+		TimeZone: tz,
 	}
 
 	// Date range conversion
@@ -733,7 +790,9 @@ func ConvertSearchFilters(
 // =============================================================================
 
 // ConvertAdvancedFilters converts AdvancedSearchFilters to repository SearchFilters.
-// This is the main entry point for filter conversion.
+// This is the main entry point for filter conversion. When
+// filters.CursorPagination is set, the result sorts by id ascending whatever
+// filters.SortBy says.
 //
 // Parameters:
 //   - ctx: Context for database lookups
@@ -765,7 +824,7 @@ func ConvertAdvancedFilters(
 		SortDesc: !filters.SortAscending,
 
 		// Timezone for hour calculations
-		TimezoneOffset: GetTimezoneOffset(tz),
+		TimeZone: tz,
 	}
 
 	// Map SortBy string to v2 sort field constants
@@ -796,6 +855,14 @@ func ConvertAdvancedFilters(
 	default: // "date_desc" or empty
 		sf.SortBy = SortFieldDetectedAt
 		// sf.SortDesc already set from !filters.SortAscending above
+	}
+
+	// Cursor pagination pages by id (WHERE id > MinID), so it must sort by id
+	// ascending, as the legacy store does. Any other order skips rows whose id is
+	// below the last id of a page but whose detection time is later.
+	if filters.CursorPagination {
+		sf.SortBy = SortFieldID
+		sf.SortDesc = false
 	}
 
 	// Time conversions
@@ -848,6 +915,11 @@ func ConvertAdvancedFilters(
 		if err != nil {
 			return nil, err
 		}
+		sourceIDs, err := ResolveSourcesToSourceIDs(ctx, deps, filters.Source)
+		if err != nil {
+			return nil, err
+		}
+		sf.AudioSourceIDs = intersectSourceIDs(sf.AudioSourceIDs, sourceIDs)
 	}
 
 	return sf, nil

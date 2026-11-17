@@ -30,7 +30,6 @@ export interface CatalogVariant {
   /** True for the embedded baseline variant (the built-in BirdNET v2.4 model); it carries no downloadable files. */
   builtIn?: boolean;
   sizeBytes: number;
-  headlineLatencyMs?: number;
   compatible: boolean;
   recommended: boolean;
   reasons?: VariantReason[];
@@ -56,10 +55,12 @@ export interface CatalogEntry {
   region: string;
   speciesCount: number;
   version: string;
-  /** Release channel: 'stable' for a GA build, 'preview' for a developer preview the gallery flags as not-GA. Always present. */
+  /** Release channel: 'stable' for a GA build, 'preview' for a developer preview the gallery flags as not-GA, 'experimental' for a published model whose performance in BirdNET-Go is not proven yet. Always present. */
   channel: string;
   /** Human-facing build tag shown next to the version for a non-stable channel (e.g. 'preview3.1'); absent for stable releases. */
   buildLabel?: string;
+  /** The visible catalog entry that replaces this one; absent when nothing does or the successor is hidden. */
+  supersededBy?: { id: string; name: string };
   upstreamUrl?: string;
   installed: boolean;
   compatible: boolean;
@@ -74,6 +75,8 @@ export interface CatalogEntry {
   installedVariantId?: string;
   /** The variant the gallery preselects for this host, absent when not eligible. */
   recommendedVariantId?: string;
+  /** Catalog IDs installed with this model; absent when it has none. May name hidden components the catalog does not list. */
+  dependsOn?: string[];
 }
 
 /** Response wrapper for the catalog endpoint. */
@@ -154,3 +157,48 @@ export interface ModelRegionsResponse {
   regions: RegionOption[]; // dropdown options, union across families
   families: RegionFamily[]; // per-family resolution
 }
+
+/**
+ * Classifier verdict on the acoustic model set. Mirrors Go
+ * classifier.AcousticModelsState (internal/classifier/orchestrator.go):
+ * "ok" means at least one acoustic model is loaded; "none_installed" means
+ * nothing is loaded and no enabled model failed (the supported N=0 state);
+ * "load_failed" means nothing is loaded because an enabled model failed to load.
+ */
+export type AcousticModelsState = 'ok' | 'none_installed' | 'load_failed';
+
+/**
+ * Wire form of AcousticModelsState as served by GET /api/v2/system/inference.
+ * The empty string is an API-only "no verdict yet" sentinel (no orchestrator is
+ * wired); it must never trigger a no-model UI.
+ */
+export type AcousticModelsStateWire = AcousticModelsState | '';
+
+/** The two verdicts in which no acoustic model is loaded and the UI must say so. */
+export const NO_ACOUSTIC_MODEL_STATES = ['none_installed', 'load_failed'] as const;
+
+export type NoAcousticModelState = (typeof NO_ACOUSTIC_MODEL_STATES)[number];
+
+/**
+ * Allow-list guard for the no-model verdicts. Anything else (including "ok",
+ * the "" sentinel, null and unknown future strings) is not a no-model state.
+ */
+export function isNoAcousticModelState(state: unknown): state is NoAcousticModelState {
+  return (
+    typeof state === 'string' && (NO_ACOUSTIC_MODEL_STATES as readonly string[]).includes(state)
+  );
+}
+
+/**
+ * What the audio source editors know about acoustic model availability.
+ * - unknown: not fetched yet, the fetch failed, the viewer is a guest, or the
+ *   server sent the "" sentinel. Editors fall back to the legacy default pick.
+ * - none: no model is loaded; `reason` separates N=0 from a load fault.
+ * - ready: at least one model is loaded; `defaultTargets` are the classifier
+ *   REGISTRY IDs (not config aliases) a source with an empty model list runs,
+ *   in DefaultTargets order (BirdNET v2.4 first when present).
+ */
+export type AcousticModelAvailability =
+  | { kind: 'unknown' }
+  | { kind: 'none'; reason: NoAcousticModelState }
+  | { kind: 'ready'; defaultTargets: readonly string[] };

@@ -474,3 +474,209 @@ func TestCatalogChecksum_DeterministicAndRoundTrips(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, a, d, "reordering entries must change the checksum")
 }
+
+// depValidationCatalog returns a small valid catalog with a dependency edge, which
+// each case below damages in one way.
+func depValidationCatalog() []CatalogEntry {
+	shared := func(role, name string) []CatalogFile {
+		return []CatalogFile{{RemotePath: name, LocalName: name, Role: role}}
+	}
+	return []CatalogEntry{
+		{ID: "top", DependsOn: []string{"geo", "tax"}, Files: []CatalogFile{{RemotePath: "m.onnx", LocalName: "m.onnx", Role: RoleModel}}},
+		{ID: "geo", Files: shared(RoleGeomodelModel, "geo.onnx")},
+		{ID: "tax", Hidden: true, Component: true, Files: shared(RoleTaxonomy, "tax.csv")},
+	}
+}
+
+func TestValidateCatalog_Dependencies(t *testing.T) {
+	t.Parallel()
+
+	modelFile := []CatalogFile{{RemotePath: "m.onnx", LocalName: "m.onnx", Role: RoleModel}}
+	tests := []struct {
+		name   string
+		mutate func(c []CatalogEntry) []CatalogEntry
+		want   string // substring of the error; empty means valid
+	}{
+		{name: "valid catalog", mutate: func(c []CatalogEntry) []CatalogEntry { return c }},
+		{name: "unknown dependency", want: "unknown", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].DependsOn = []string{"missing"}
+			return c
+		}},
+		{name: "self dependency", want: "itself", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].DependsOn = []string{"top"}
+			return c
+		}},
+		{name: "duplicate dependency", want: "more than once", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].DependsOn = []string{"geo", "geo"}
+			return c
+		}},
+		{name: "target with variants", want: "variants", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[1].Files = nil
+			c[1].Variants = []CatalogVariant{{ID: "fp32", Files: modelFile}}
+			return c
+		}},
+		{name: "target not shared-only", want: "shared-only", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[1].Files = modelFile
+			return c
+		}},
+		{name: "target with its own dependencies", want: "own dependencies", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[1].DependsOn = []string{"tax"}
+			return c
+		}},
+		{name: "component not hidden", want: "hidden", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[2].Hidden = false
+			return c
+		}},
+		{name: "component not shared-only", want: "shared-only", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[2].Files = modelFile
+			return c
+		}},
+		{name: "component with a registry id", want: "registry", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[2].RegistryID = RegistryIDPerchV2
+			return c
+		}},
+		{name: "component with dependencies", want: "dependencies", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[2].DependsOn = []string{"geo"}
+			return c
+		}},
+		{name: "component with a geomodel file", want: "geomodel", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[2].Files = []CatalogFile{{RemotePath: "g.onnx", LocalName: "g.onnx", Role: RoleGeomodelModel}}
+			return c
+		}},
+		{name: "inline shared file equal to the dependency file", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[1].Files[0].SHA256 = "abc123"
+			c[0].Files = append(c[0].Files, c[1].Files[0])
+			return c
+		}},
+		{name: "inline shared file equal by name but without a checksum", want: "differs", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].Files = append(c[0].Files, c[1].Files[0])
+			return c
+		}},
+		{name: "inline shared file differing from the dependency file", want: "differs", mutate: func(c []CatalogEntry) []CatalogEntry {
+			other := c[1].Files[0]
+			other.SHA256 = "different"
+			c[0].Files = append(c[0].Files, other)
+			return c
+		}},
+		{name: "own non-shared file named like a dependency file", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].Files = append(c[0].Files, CatalogFile{RemotePath: "x", LocalName: "tax.csv", Role: RoleLabels})
+			return c
+		}},
+		{name: "dependencies of different entries installing different files under one name", want: "different contents", mutate: func(c []CatalogEntry) []CatalogEntry {
+			return append(c,
+				CatalogEntry{ID: "top2", DependsOn: []string{"geo2"}, Files: []CatalogFile{{RemotePath: "m2.onnx", LocalName: "m2.onnx", Role: RoleModel}}},
+				CatalogEntry{ID: "geo2", Files: []CatalogFile{{RemotePath: "g2", LocalName: "geo.onnx", Role: RoleGeomodelModel, SHA256: "other"}}},
+			)
+		}},
+		{name: "checksum-less shared file repeated by another entry", want: "different contents", mutate: func(c []CatalogEntry) []CatalogEntry {
+			return append(c, CatalogEntry{ID: "geo2", Files: []CatalogFile{{RemotePath: "g2", LocalName: "geo.onnx", Role: RoleGeomodelModel}}})
+		}},
+		{name: "two dependencies installing different files under one name", want: "different contents", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[2].Files = []CatalogFile{{RemotePath: "t", LocalName: "geo.onnx", Role: RoleTaxonomy}}
+			return c
+		}},
+		{name: "successor is a known entry", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].SupersededBy = "geo"
+			return c
+		}},
+		{name: "successors form a chain", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].SupersededBy = "geo"
+			c[1].SupersededBy = "tax"
+			return c
+		}},
+		{name: "successors form a cycle", want: "cycle", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].SupersededBy = "geo"
+			c[1].SupersededBy = "tax"
+			c[2].SupersededBy = "top"
+			return c
+		}},
+		{name: "successor is unknown", want: "unknown", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].SupersededBy = "missing"
+			return c
+		}},
+		{name: "successor is the entry itself", want: "itself", mutate: func(c []CatalogEntry) []CatalogEntry {
+			c[0].SupersededBy = "top"
+			return c
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateCatalog(tc.mutate(depValidationCatalog()))
+			if tc.want == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+func TestValidateCatalog_SyntheticDependencyCatalogAndEmbeddedPass(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateCatalog(dependencyTestCatalog()))
+	require.NoError(t, validateCatalog(EmbeddedCatalog))
+}
+
+func TestCatalogChecksum_OmitemptyKeepsOldFilesPristine(t *testing.T) {
+	t.Parallel()
+
+	// An entry that leaves the new fields zero must marshal without them, so a
+	// pristine catalog written by an older version still hashes the same.
+	plain, err := json.Marshal(EmbeddedCatalog)
+	require.NoError(t, err)
+	assert.NotContains(t, string(plain), `"depends_on"`)
+	assert.NotContains(t, string(plain), `"component"`)
+
+	// Only entries that name a successor carry the entry-level key; the rest omit
+	// it. Variants are stripped: a withdrawn variant carries its own superseded_by.
+	var unsuperseded []CatalogEntry
+	for i := range EmbeddedCatalog {
+		if EmbeddedCatalog[i].SupersededBy == "" {
+			e := EmbeddedCatalog[i]
+			e.Variants = nil
+			unsuperseded = append(unsuperseded, e)
+		}
+	}
+	require.NotEmpty(t, unsuperseded)
+	omitted, err := json.Marshal(unsuperseded)
+	require.NoError(t, err)
+	assert.NotContains(t, string(omitted), `"superseded_by"`)
+
+	named, err := json.Marshal(CatalogEntry{ID: "old", SupersededBy: "new"})
+	require.NoError(t, err)
+	assert.Contains(t, string(named), `"superseded_by":"new"`)
+
+	var round []CatalogEntry
+	require.NoError(t, json.Unmarshal(plain, &round))
+	again, err := json.Marshal(round)
+	require.NoError(t, err)
+	assert.Equal(t, string(plain), string(again), "re-marshalled bytes must be identical")
+
+	want, err := catalogChecksum(EmbeddedCatalog)
+	require.NoError(t, err)
+	got, err := catalogChecksum(round)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestCatalogChecksum_RoundTripKeepsDependencyFields(t *testing.T) {
+	t.Parallel()
+
+	catalog := depValidationCatalog()
+	before, err := catalogChecksum(catalog)
+	require.NoError(t, err)
+
+	data, err := json.Marshal(catalog)
+	require.NoError(t, err)
+	var round []CatalogEntry
+	require.NoError(t, json.Unmarshal(data, &round))
+
+	assert.Equal(t, []string{"geo", "tax"}, round[0].DependsOn)
+	assert.True(t, round[2].Component)
+	after, err := catalogChecksum(round)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}

@@ -27,6 +27,9 @@ type ActionMockDatastore struct {
 	savedNotes   []*datastore.Note
 	savedResults [][]datastore.Results
 	saveErr      error
+	failSaves    int   // number of upcoming Save calls that fail with failSavesErr
+	failSavesErr error // error returned by those calls
+	saveCalls    int   // number of Save calls, failed or not
 	getErr       error
 	notes        map[uint]*datastore.Note // For Get() lookups
 }
@@ -45,6 +48,11 @@ func (m *ActionMockDatastore) Save(note *datastore.Note, results []datastore.Res
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.saveCalls++
+	if m.failSaves > 0 {
+		m.failSaves--
+		return m.failSavesErr
+	}
 	if m.saveErr != nil {
 		return m.saveErr
 	}
@@ -64,6 +72,21 @@ func (m *ActionMockDatastore) Save(note *datastore.Note, results []datastore.Res
 	m.notes[note.ID] = &noteCopy
 
 	return nil
+}
+
+// FailNextSaves makes the next n Save calls return err; later calls behave as usual.
+func (m *ActionMockDatastore) FailNextSaves(n int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failSaves = n
+	m.failSavesErr = err
+}
+
+// GetSaveCalls returns the number of Save calls, failed or not.
+func (m *ActionMockDatastore) GetSaveCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.saveCalls
 }
 
 // Get implements datastore.Interface.Get.
@@ -179,6 +202,17 @@ func (m *ActionMockDatastore) GetNoteClipPath(_ string) (string, error) {
 func (m *ActionMockDatastore) GetNoteModelType(_ string) (string, error) {
 	return "bird", nil
 }
+func (m *ActionMockDatastore) GetNoteKeptSpectrogram(_ string) (clipName, modelType string, err error) {
+	return "", "bird", nil
+}
+
+func (m *ActionMockDatastore) RecordClipSampleRate(_ context.Context, _ uint, _ string, _ int) error {
+	return nil
+}
+
+func (m *ActionMockDatastore) FillClipSampleRate(_ context.Context, _ uint, _ string, _ int) (bool, error) {
+	return false, nil
+}
 func (m *ActionMockDatastore) DeleteNoteClipPath(_ string) error {
 	return nil
 }
@@ -263,6 +297,9 @@ func (m *ActionMockDatastore) GetLockedNotesClipPaths() ([]string, error) {
 	return nil, nil
 }
 func (m *ActionMockDatastore) ClearNoteClipPathsByNames(_ []string) (int64, error) {
+	return 0, nil
+}
+func (m *ActionMockDatastore) RetainNoteSpectrogramsByClipNames(_ []string) (int64, error) {
 	return 0, nil
 }
 func (m *ActionMockDatastore) GetNoteClipReferences(_ uint, _ int) ([]diskmanager.ClipReference, error) {
@@ -382,9 +419,7 @@ func (m *ActionMockDatastore) GetActiveNotificationHistory(_ context.Context, _ 
 func (m *ActionMockDatastore) DeleteExpiredNotificationHistory(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
-func (m *ActionMockDatastore) SchemaVersion() string                           { return datastore.SchemaVersionLegacy }
-func (m *ActionMockDatastore) UpdateNameMaps(_ []string)                       {}
-func (m *ActionMockDatastore) SetNameResolver(_ datastore.SpeciesNameResolver) {}
+func (m *ActionMockDatastore) SchemaVersion() string { return datastore.SchemaVersionLegacy }
 func (m *ActionMockDatastore) GetDatabaseStats(_ context.Context) (*datastore.DatabaseStats, error) {
 	return &datastore.DatabaseStats{Type: "mock", Connected: true}, nil
 }
@@ -512,7 +547,10 @@ func (m *MockDetectionRepository) GetRecent(_ context.Context, _ int) ([]*detect
 func (m *MockDetectionRepository) Search(_ context.Context, _ *datastore.DetectionFilters) ([]*detection.Result, int64, error) {
 	return nil, 0, nil
 }
-func (m *MockDetectionRepository) GetBySpecies(_ context.Context, _ string, _ *datastore.DetectionFilters) ([]*detection.Result, int64, error) {
+func (m *MockDetectionRepository) SearchAdvanced(_ context.Context, _ *datastore.AdvancedSearchFilters) ([]*detection.Result, int64, error) {
+	return nil, 0, nil
+}
+func (m *MockDetectionRepository) GetBySpecies(_ context.Context, _, _, _ string, _, _, _ int) ([]*detection.Result, int64, error) {
 	return nil, 0, nil
 }
 func (m *MockDetectionRepository) GetByDateRange(_ context.Context, _, _ string, _, _ int) ([]*detection.Result, int64, error) {
@@ -548,6 +586,14 @@ func (m *MockDetectionRepository) CountAll(_ context.Context) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return int64(m.savedCount), nil
+}
+
+func (m *MockDetectionRepository) RecordClipSampleRate(_ context.Context, _ uint, _ string, _ int) error {
+	return nil
+}
+
+func (m *MockDetectionRepository) FillClipSampleRate(_ context.Context, _ uint, _ string, _ int) (bool, error) {
+	return false, nil
 }
 
 // Compile-time check that MockDetectionRepository implements datastore.DetectionRepository

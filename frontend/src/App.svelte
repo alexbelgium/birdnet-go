@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import Button from './lib/desktop/components/ui/Button.svelte';
   import LoadingSpinner from './lib/desktop/components/ui/LoadingSpinner.svelte';
   import RootLayout from './lib/desktop/layouts/RootLayout.svelte';
@@ -21,7 +21,13 @@
     getSpeciesDictVersion,
   } from './lib/stores/appState.svelte';
   import { navigation } from './lib/stores/navigation.svelte';
+  import { buildAppUrl } from './lib/utils/urlHelpers';
+  import { resolveLoginRedirect, DEFAULT_LOGIN_TARGET } from './lib/utils/loginRedirect';
   import { resolveAnalyticsRedirect } from './lib/desktop/features/analytics/registry/analyticsRouting';
+  // Type-only import (erased at build time, so GenericErrorPage stays lazily loaded via
+  // dynamic import below) used to type the dynamic component precisely instead of `any`.
+  import type GenericErrorPageComponent from './lib/desktop/views/GenericErrorPage.svelte';
+  import { resolveSettingsAlias } from './lib/utils/settingsAlias';
   import { settingsActions } from './lib/stores/settings.js';
   import { activateWatchdog } from './lib/stores/connectionState.svelte';
   import WizardDialog from './lib/desktop/features/wizard/WizardDialog.svelte';
@@ -29,8 +35,18 @@
     wizardState,
     WIZARD_DISMISSED_VERSION_KEY,
   } from './lib/desktop/features/wizard/wizardState.svelte';
+  import {
+    resolveWizardLaunch,
+    type SettingsLoadState,
+  } from './lib/desktop/features/wizard/wizardLaunch';
 
   const logger = getLogger('app');
+
+  // The brand is not translated, so it is not an i18n key.
+  const APP_NAME = 'BirdNET-Go';
+  const SETTINGS_TITLE_KEY = 'navigation.settings';
+  const LOGIN_TITLE_KEY = 'auth.loginTitle';
+  const TITLE_SEPARATOR = ' - ';
 
   /**
    * Client-side navigation function.
@@ -64,7 +80,7 @@
   let ErrorPage = $state<Component | null>(null);
   let ServerErrorPage = $state<Component | null>(null);
   let LiveStream = $state<Component | null>(null);
-  let GenericErrorPage = $state<any>(null);
+  let GenericErrorPage = $state<typeof GenericErrorPageComponent | null>(null);
 
   let currentRoute = $state<string>('');
   let currentPage = $state<string>('');
@@ -96,18 +112,62 @@
   // Reading navigation.currentPath makes this $derived re-evaluate on every
   // client-side route change so the redirect target always reflects the
   // current view (which is what the user expects when they log in mid-session).
+  // buildAppUrl adds the reverse-proxy prefix: LoginModal strips the prefixed UI base
+  // from this value, and the backend adds the base back.
   let postLoginRedirect = $derived.by(() => {
-    const path = navigation.currentPath || '/ui/';
+    const path = buildAppUrl(navigation.currentPath || '/ui/');
     if (typeof window !== 'undefined') {
       return path + window.location.search;
     }
     return path;
   });
 
+  // The login route (/ui/login) shows the same full-screen login form as private mode
+  // to a visitor who is not allowed in. The backend sends logged-out visitors of
+  // protected pages to /login?redirect=<page>, which the navigation store's `/ui` prefixing
+  // turns into this route; the form returns to the page after a password login. A visitor
+  // who is already allowed goes straight to that target.
+  let loginRouteActive = $derived(currentRoute === 'login' && securityEnabled && !accessAllowed);
+  // The validated post-login page (unprefixed); only meaningful on the login route.
+  let loginTarget = $derived(
+    currentRoute === 'login' ? resolveLoginRedirect(navigation.currentSearch) : DEFAULT_LOGIN_TARGET
+  );
+  let loginRedirectUrl = $derived(
+    currentRoute === 'login' ? buildAppUrl(loginTarget) : postLoginRedirect
+  );
+
   // App initialization state
   let appInitialized = $derived(appState.initialized);
+
+  // Outcome of the settings load started at app init; gates the onboarding wizard
+  let settingsLoad = $state<SettingsLoadState>('pending');
   let appLoading = $derived(appState.loading);
   let appError = $derived(appState.error);
+
+  // The single writer of document.title: "<Page> - BirdNET-Go". The precedence mirrors the
+  // template: while loading only the app name shows, then the login screen, then an init error
+  // (app name only). A settings section adds Settings after the section and a generic error page
+  // puts its code in front. A title that equals its key has no translation, so it is dropped.
+  let documentTitle = $derived.by(() => {
+    if (appLoading || (!appInitialized && !appError)) return APP_NAME;
+    const showsLogin = requireLogin || loginRouteActive;
+    if (appError && !showsLogin) return APP_NAME;
+    const page = translated(showsLogin ? LOGIN_TITLE_KEY : pageTitleKey);
+    if (!page) return APP_NAME;
+    // The generic error page shows its code, so the tab carries it too.
+    const code = !showsLogin && currentRoute === 'error-generic' ? dynamicErrorCode : null;
+    // A settings section is named after the section only, so the tab says it is part of Settings.
+    const inSettings =
+      !showsLogin && currentRoute === 'settings' && pageTitleKey !== SETTINGS_TITLE_KEY;
+    const parts = [code, page, inSettings ? translated(SETTINGS_TITLE_KEY) : null, APP_NAME];
+    return parts.filter(Boolean).join(TITLE_SEPARATOR);
+  });
+
+  // The translation of a key, or null when it has none (the lookup returns the key itself).
+  function translated(key: string): string | null {
+    const value = t(key);
+    return value && value !== key ? value : null;
+  }
 
   // Route configuration for better maintainability
   interface RouteConfig {
@@ -118,6 +178,7 @@
   }
 
   const routeConfigs: RouteConfig[] = [
+    { route: 'login', page: 'login', titleKey: LOGIN_TITLE_KEY, component: '' },
     { route: 'dashboard', page: 'dashboard', titleKey: 'navigation.dashboard', component: '' },
     {
       route: 'live-stream',
@@ -213,11 +274,12 @@
       titleKey: 'health.title',
       component: 'system-health',
     },
-    { route: 'settings', page: 'settings', titleKey: 'navigation.settings', component: 'settings' },
+    { route: 'settings', page: 'settings', titleKey: SETTINGS_TITLE_KEY, component: 'settings' },
   ];
 
   // Settings subpage title keys
   const settingsSubpages: Record<string, string> = {
+    '/analysis': 'settings.sections.analysis',
     '/main': 'settings.sections.node',
     '/userinterface': 'settings.sections.userinterface',
     '/audio': 'settings.sections.audio',
@@ -441,6 +503,7 @@
     [uiPath() + '/']: findRouteConfig('dashboard'),
     [uiPath()]: findRouteConfig('dashboard'),
     [uiPath('dashboard')]: findRouteConfig('dashboard'),
+    [uiPath('login')]: findRouteConfig('login'),
     [uiPath('live-stream')]: findRouteConfig('live-stream'),
     [uiPath('notifications')]: findRouteConfig('notifications'),
     // Fallbacks if handleRouting's redirect does not fire (e.g. an aggressive
@@ -504,6 +567,9 @@
   }
 
   function handleRouting(path: string): void {
+    // The title must match the section Settings.svelte renders for bare settings.
+    path = resolveSettingsAlias(path);
+
     // Analytics routes: redirect the bare hub, the retired /advanced path, and
     // legacy ?tab= deep links onto the per-view routes (single hop), preserving
     // other query params. resolveAnalyticsRedirect returns null when canonical.
@@ -532,8 +598,7 @@
 
     // Handle system and settings subpages
     if (UI_SYSTEM_PREFIX_RE.test(path)) {
-      const normalizedPath = path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
-      const exactMatch = pathToRouteMap.get(normalizedPath);
+      const exactMatch = pathToRouteMap.get(path);
       if (exactMatch) {
         currentRoute = exactMatch.route;
         currentPage = exactMatch.page;
@@ -582,7 +647,8 @@
       currentPage = 'error-generic';
       // For dynamic error titles from URL, we use a generic error key
       pageTitleKey = 'common.error';
-      dynamicErrorCode = errorCode || '500';
+      // errorCode is already truthy in this branch, so no '500' fallback is needed.
+      dynamicErrorCode = errorCode;
       loadComponent('error-generic');
     } else {
       // Unknown route, default to 404
@@ -618,10 +684,19 @@
     // Load settings at app startup so they are available on any page the user navigates to
     // first (e.g. System → Terminal) without requiring a visit to the Settings page.
     // Skip when authentication is required but not yet provided to avoid 401 console errors.
+    // The onboarding wizard saves settings, so it launches only once this load resolved.
     if (!securityEnabled || accessAllowed) {
-      settingsActions.loadSettings().catch(err => {
-        logger.error('Failed to load settings on app init', err);
-      });
+      settingsActions
+        .loadSettings()
+        .then(() => {
+          settingsLoad = 'loaded';
+        })
+        .catch(err => {
+          settingsLoad = 'failed';
+          logger.error('Failed to load settings on app init', err);
+        });
+    } else {
+      settingsLoad = 'skipped';
     }
 
     // Initial routing is handled by the reactive $effect below when appInitialized becomes true
@@ -643,30 +718,49 @@
     handleRouting(currentPath);
   });
 
-  // Wizard trigger: launch after first route loads
+  // A visitor who is already allowed has nothing to do on the login route: send them to
+  // the requested page. Keyed on the route and the access state, so it also covers access
+  // changing while the route is shown. The replace keeps Back from returning here. The
+  // target is read untracked: the redirect itself changes it, and must not run this again.
+  $effect(() => {
+    if (currentRoute !== 'login' || loginRouteActive) return;
+    const target = untrack(() => loginTarget);
+    navigation.redirect(target);
+  });
+
+  // Wizard trigger: launch after first route loads. Onboarding also waits for the
+  // App's settings load (see resolveWizardLaunch), so the effect re-runs when
+  // settingsLoad changes.
   let wizardChecked = $state(false);
   $effect(() => {
     if (!appInitialized || loadingComponent || wizardChecked) return;
-    wizardChecked = true;
+    if (appState.freshInstall && settingsLoad === 'pending') return;
 
     // Check localStorage dismissal before any wizard flow. This covers the case
     // where the server-side dismiss failed (e.g. 401 when not authenticated) but
     // the client-side fallback persisted the dismissal.
+    let dismissedVersion: string | null = null;
     try {
-      const dismissedVersion = localStorage.getItem(WIZARD_DISMISSED_VERSION_KEY);
-      if (dismissedVersion === appState.version) return;
+      dismissedVersion = localStorage.getItem(WIZARD_DISMISSED_VERSION_KEY);
     } catch {
       // localStorage unavailable (private browsing, etc.)
     }
 
-    if (appState.freshInstall) {
+    const decision = resolveWizardLaunch({
+      dismissedVersion,
+      version: appState.version,
+      freshInstall: appState.freshInstall,
+      newVersion: appState.newVersion,
+      settingsLoad,
+    });
+    if (decision === 'wait') return;
+    wizardChecked = true;
+
+    if (decision === 'onboarding') {
       wizardState.launch('onboarding', {
         currentVersion: appState.version,
       });
-      return;
-    }
-
-    if (appState.newVersion) {
+    } else if (decision === 'whats-new') {
       wizardState.launch('whats-new', {
         previousVersion: appState.previousVersion ?? undefined,
         currentVersion: appState.version,
@@ -714,6 +808,10 @@
   });
 </script>
 
+<svelte:head>
+  <title>{documentTitle}</title>
+</svelte:head>
+
 {#snippet renderRoute(component: Component | null)}
   {#if component}
     {@const Component = component}
@@ -728,16 +826,23 @@
       <LoadingSpinner size="lg" />
       <p class="text-[var(--color-base-content)]/70">{t('common.loading')}</p>
       {#if appState.retryCount > 0}
-        <p class="text-sm text-[var(--color-warning)]">
+        <p class="text-sm text-[var(--text-warning)]">
           {t('common.retrying')} ({appState.retryCount}/{MAX_RETRIES})...
         </p>
       {/if}
     </div>
   </div>
   <!-- Private mode: force login form before any app UI is visible -->
-{:else if requireLogin}
+{:else if requireLogin || loginRouteActive}
   <div class="flex h-screen w-full items-center justify-center bg-[var(--color-base-200)]">
-    <LoginModal isOpen={true} onClose={() => {}} redirectUrl={postLoginRedirect} {authConfig} />
+    <!-- Private mode keeps the form open; on the login route, closing goes to the dashboard -->
+    <LoginModal
+      isOpen={true}
+      onClose={() => {}}
+      onCancel={requireLogin ? undefined : () => navigation.redirect(DEFAULT_LOGIN_TARGET)}
+      redirectUrl={loginRedirectUrl}
+      {authConfig}
+    />
   </div>
   <!-- Show fatal error page if initialization failed -->
 {:else if appError}
@@ -746,11 +851,11 @@
   >
     <div class="max-w-lg rounded-lg bg-[var(--color-base-100)] shadow-xl">
       <div class="flex flex-col items-center p-6 text-center">
-        <div class="mb-4 text-6xl text-[var(--color-error)]">500</div>
-        <h2 class="text-xl font-semibold text-[var(--color-error)]">{t('error.server.title')}</h2>
+        <div class="mb-4 text-6xl text-[var(--text-error)]">500</div>
+        <h2 class="text-xl font-semibold text-[var(--text-error)]">{t('error.server.title')}</h2>
         <p class="mt-1 text-[var(--color-base-content)]/70">{t('error.server.description')}</p>
         <div class="mt-4 w-full rounded-lg bg-[var(--color-base-200)] p-4 text-left">
-          <p class="font-mono text-sm text-[var(--color-error)]">{appError}</p>
+          <p class="font-mono text-sm text-[var(--text-error)]">{appError}</p>
         </div>
         <div class="mt-6">
           <Button variant="primary" size="md" onclick={() => window.location.reload()}>

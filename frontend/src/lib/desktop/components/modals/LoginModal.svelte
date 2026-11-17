@@ -9,9 +9,10 @@
   - Secure state management
 -->
 <script lang="ts">
-  import { api } from '$lib/utils/api';
+  import { api, ApiError } from '$lib/utils/api';
   import { safeGet, safeElementAccess } from '$lib/utils/security';
-  import { extractRelativePath, getUiBasePath } from '$lib/utils/urlHelpers';
+  import { buildAppUrl, extractRelativePath, getUiBasePath } from '$lib/utils/urlHelpers';
+  import { MAX_LOGIN_REDIRECT_LENGTH } from '$lib/utils/loginRedirect';
   import { loggers } from '$lib/utils/logger';
   import { t } from '$lib/i18n';
   import { X, ShieldCheck, KeyRound } from '@lucide/svelte';
@@ -20,10 +21,9 @@
 
   // SECURITY: Define maximum password length to prevent DoS
   const MAX_PASSWORD_LENGTH = 512; // Reasonable limit for security
-  // Client-side cap on the captured redirect (path + query). Intentionally a bit
-  // tighter than the backend's authoritative security.MaxSafeRedirectLength (2048)
-  // so anything the client sends comfortably passes server validation.
-  const MAX_REDIRECT_LENGTH = 2000;
+
+  // Status the server answers with once the login attempt limit is used up
+  const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
 
   // Logger for authentication debugging
   const logger = loggers.auth;
@@ -33,7 +33,13 @@
 
   interface Props {
     isOpen: boolean;
+    /** Called when the dialog closes, including after a successful login. */
     onClose: () => void;
+    /**
+     * Called when the user dismisses the dialog (close button, backdrop, Escape);
+     * defaults to onClose. A successful login still calls onClose.
+     */
+    onCancel?: () => void;
     redirectUrl?: string;
     authConfig?: AuthConfig;
   }
@@ -41,6 +47,7 @@
   let {
     isOpen = false,
     onClose,
+    onCancel,
     // Empty by default so an omitted prop falls through to the proxy-aware
     // getUiBasePath() fallback instead of a hardcoded '/ui/' that ignores any
     // reverse-proxy prefix.
@@ -50,6 +57,10 @@
       enabledProviders: [],
     },
   }: Props = $props();
+
+  function cancel() {
+    (onCancel ?? onClose)();
+  }
 
   let password = $state('');
   let error = $state('');
@@ -77,7 +88,7 @@
       }
 
       // Check length (path + query). A generous cap covers heavily-filtered views.
-      if (url.length > MAX_REDIRECT_LENGTH) {
+      if (url.length > MAX_LOGIN_REDIRECT_LENGTH) {
         return false;
       }
 
@@ -204,8 +215,12 @@
       setTimeout(() => {
         window.location.reload();
       }, 500);
-    } catch {
-      error = t('auth.errors.loginFailed');
+    } catch (err) {
+      // A 429 means the attempt limit is used up, not that the password is wrong.
+      error =
+        err instanceof ApiError && err.status === HTTP_STATUS_TOO_MANY_REQUESTS
+          ? err.userMessage
+          : t('auth.errors.loginFailed');
       // Only re-enable on failure. On success the page navigates away (OAuth
       // callback redirect) or reloads, so keeping the control disabled here
       // prevents a double-submit firing redundant login requests mid-navigation.
@@ -243,8 +258,12 @@
       action: 'handleOAuthLogin',
     });
 
-    // Redirect to OAuth provider
-    window.location.href = endpoint;
+    // Redirect to OAuth provider. The endpoint is this app's own backend route
+    // (e.g. '/auth/google'), so it must carry the reverse-proxy base path when the
+    // UI is served behind a path-prefixing proxy such as Home Assistant Ingress.
+    // buildAppUrl is idempotent and open-redirect guarded, and the endpoint
+    // validation above has already restricted this to a relative path.
+    window.location.href = buildAppUrl(endpoint);
   }
 
   function handleSubmit(event: Event) {
@@ -286,7 +305,7 @@
           }
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          onClose();
+          cancel();
         }
       };
 
@@ -331,7 +350,7 @@
       <button
         type="button"
         class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3"
-        onclick={onClose}
+        onclick={cancel}
         disabled={isAnyLoading}
         aria-label="Close login dialog"
       >
@@ -345,7 +364,7 @@
         <div class="text-center space-y-2">
           <div class="flex justify-center mb-4">
             <div class="p-3 bg-[var(--color-primary)]/10 rounded-full">
-              <ShieldCheck class="size-8 text-[var(--color-primary)]" />
+              <ShieldCheck class="size-8 text-[var(--text-primary)]" />
             </div>
           </div>
           <h3 id="modal-title" class="text-2xl font-semibold">
@@ -383,7 +402,7 @@
               {#if error}
                 <div
                   id="loginError"
-                  class="text-[var(--color-error)] text-sm mt-2"
+                  class="text-[var(--text-error)] text-sm mt-2"
                   role="alert"
                   aria-live="polite"
                 >
@@ -441,8 +460,8 @@
 
     <div
       class="modal-backdrop bg-black/50"
-      onclick={onClose}
-      onkeydown={e => e.key === 'Escape' && onClose()}
+      onclick={cancel}
+      onkeydown={e => e.key === 'Escape' && cancel()}
       role="button"
       tabindex="-1"
       aria-label="Close modal"

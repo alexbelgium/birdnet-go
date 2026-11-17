@@ -63,7 +63,7 @@ func newHourlyRing(capacity int) *hourlyRing {
 
 // bucketStart returns the start-of-hour for a given time.
 func bucketStart(t time.Time) time.Time {
-	return t.Truncate(time.Hour)
+	return t.Truncate(time.Hour) //nolint:gocritic // absolute hour grid for rate counters, independent of the zone (Truncate is zone independent)
 }
 
 // record adds a delta to the current hour's bucket, rolling over as needed.
@@ -132,10 +132,7 @@ func (r *hourlyRing) recentBuckets(n int) []HourlyBucket {
 	if r.size == 0 || n <= 0 {
 		return nil
 	}
-	count := n
-	if count > r.size {
-		count = r.size
-	}
+	count := min(n, r.size)
 	result := make([]HourlyBucket, count)
 	for i := range count {
 		idx := (r.head - count + 1 + i + len(r.buckets)) % len(r.buckets)

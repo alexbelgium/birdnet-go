@@ -9,6 +9,7 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
+	"github.com/tphakala/birdnet-go/internal/wallclock"
 )
 
 // hours builds a [24]int from (hour, count) pairs for terse test fixtures.
@@ -44,7 +45,7 @@ func TestBuildSpeciesHourlyDistribution_NormalizesAndOrders(t *testing.T) {
 		3: hours([2]int{23, 1}),                              // total 1
 	}
 
-	got := buildSpeciesHourlyDistribution(top, hourlyByLabel)
+	got := buildSpeciesHourlyDistribution(top, hourlyByLabel, sciAsCommon)
 	require.Len(t, got, 3)
 
 	// Order preserved (descending volume from GetTopSpecies).
@@ -84,7 +85,7 @@ func TestBuildSpeciesHourlyDistribution_MergesLabelsSharingName(t *testing.T) {
 		3: hours([2]int{12, 2}), // Erithacus rubecula
 	}
 
-	got := buildSpeciesHourlyDistribution(top, hourlyByLabel)
+	got := buildSpeciesHourlyDistribution(top, hourlyByLabel, sciAsCommon)
 	require.Len(t, got, 2) // two distinct species, not three label rows
 
 	assert.Equal(t, "Turdus merula", got[0].ScientificName)
@@ -110,7 +111,7 @@ func TestBuildSpeciesHourlyDistribution_DropsZeroTotalSpecies(t *testing.T) {
 		1: hours([2]int{8, 5}),
 	}
 
-	got := buildSpeciesHourlyDistribution(top, hourlyByLabel)
+	got := buildSpeciesHourlyDistribution(top, hourlyByLabel, sciAsCommon)
 	require.Len(t, got, 1)
 	assert.Equal(t, "Turdus merula", got[0].ScientificName)
 }
@@ -118,12 +119,13 @@ func TestBuildSpeciesHourlyDistribution_DropsZeroTotalSpecies(t *testing.T) {
 func TestBuildSpeciesHourlyDistribution_Empty(t *testing.T) {
 	t.Parallel()
 
-	assert.Empty(t, buildSpeciesHourlyDistribution(nil, nil))
+	assert.Empty(t, buildSpeciesHourlyDistribution(nil, nil, sciAsCommon))
 
 	// Non-empty top but no hourly data -> every species drops out, never nil.
 	got := buildSpeciesHourlyDistribution(
 		[]repository.SpeciesCount{{LabelID: 1, ScientificName: "Turdus merula", Count: 5}},
 		map[uint][24]int{},
+		sciAsCommon,
 	)
 	assert.Empty(t, got)
 	assert.NotNil(t, got)
@@ -291,11 +293,11 @@ func TestBuildActivityHeatmap_InvalidDates(t *testing.T) {
 
 // dawnAt returns a civilDawnMinuteLookup that yields a constant civil dawn minute for every date.
 func dawnAt(minute int) civilDawnMinuteLookup {
-	return func(time.Time) (int, bool) { return minute, true }
+	return func(wallclock.Date) (int, bool) { return minute, true }
 }
 
 // noCivilDawn is a civilDawnMinuteLookup that reports civil dawn undefined for every date (polar).
-func noCivilDawn(time.Time) (int, bool) { return 0, false }
+func noCivilDawn(wallclock.Date) (int, bool) { return 0, false }
 
 // onsetByDate maps the returned days by date string for clear, order-independent assertions.
 func onsetByDate(days []datastore.DailyActivityOnset) map[string]datastore.DailyActivityOnset {
@@ -524,7 +526,7 @@ func TestBuildSpeciesConfidenceHistogram_BinsAndNormalizes(t *testing.T) {
 	species := []repository.SpeciesCount{{LabelID: 1, ScientificName: "Turdus merula"}}
 	confByLabel := map[uint][]float64{1: {0.1, 0.3, 0.55, 0.9}}
 
-	got := buildSpeciesConfidenceHistogram(species, confByLabel, 4, 1)
+	got := buildSpeciesConfidenceHistogram(species, confByLabel, 4, 1, sciAsCommon)
 	require.Len(t, got, 1)
 	assert.Equal(t, "Turdus merula", got[0].ScientificName)
 	assert.Equal(t, 4, got[0].Total)
@@ -543,7 +545,7 @@ func TestBuildSpeciesConfidenceHistogram_BinBoundaries(t *testing.T) {
 	species := []repository.SpeciesCount{{LabelID: 1, ScientificName: "Strix aluco"}}
 	confByLabel := map[uint][]float64{1: {0.0, 1.0}}
 
-	got := buildSpeciesConfidenceHistogram(species, confByLabel, 5, 1)
+	got := buildSpeciesConfidenceHistogram(species, confByLabel, 5, 1, sciAsCommon)
 	require.Len(t, got, 1)
 	require.Len(t, got[0].Bins, 5)
 	assert.Equal(t, 2, got[0].Total)
@@ -558,14 +560,14 @@ func TestBuildSpeciesConfidenceHistogram_BinCountParam(t *testing.T) {
 	confByLabel := map[uint][]float64{1: {0.2, 0.4, 0.6, 0.8}}
 
 	for _, bins := range []int{10, 20, 50} {
-		got := buildSpeciesConfidenceHistogram(species, confByLabel, bins, 1)
+		got := buildSpeciesConfidenceHistogram(species, confByLabel, bins, 1, sciAsCommon)
 		require.Len(t, got, 1)
 		assert.Len(t, got[0].Bins, bins, "bin count param is honored")
 		assert.InDelta(t, 1.0, confidenceBinSum(got[0].Bins), 1e-9)
 	}
 
 	// Non-positive bins yields an empty (non-nil) result rather than panicking.
-	empty := buildSpeciesConfidenceHistogram(species, confByLabel, 0, 1)
+	empty := buildSpeciesConfidenceHistogram(species, confByLabel, 0, 1, sciAsCommon)
 	assert.Empty(t, empty)
 	assert.NotNil(t, empty)
 }
@@ -583,7 +585,7 @@ func TestBuildSpeciesConfidenceHistogram_MinCountFilter(t *testing.T) {
 		2: {0.5, 0.6},
 	}
 
-	got := buildSpeciesConfidenceHistogram(species, confByLabel, 10, 5)
+	got := buildSpeciesConfidenceHistogram(species, confByLabel, 10, 5, sciAsCommon)
 	require.Len(t, got, 1)
 	assert.Equal(t, "Turdus merula", got[0].ScientificName)
 }
@@ -604,7 +606,7 @@ func TestBuildSpeciesConfidenceHistogram_MergesLabelsSharingName(t *testing.T) {
 		3: {0.5, 0.5, 0.5},
 	}
 
-	got := buildSpeciesConfidenceHistogram(species, confByLabel, 4, 1)
+	got := buildSpeciesConfidenceHistogram(species, confByLabel, 4, 1, sciAsCommon)
 	require.Len(t, got, 2) // two distinct species, not three label rows
 
 	assert.Equal(t, "Turdus merula", got[0].ScientificName)
@@ -630,7 +632,7 @@ func TestBuildSpeciesConfidenceHistogram_PreservesVolumeOrder(t *testing.T) {
 		3: {0.7, 0.8, 0.9},
 	}
 
-	got := buildSpeciesConfidenceHistogram(species, confByLabel, 10, 1)
+	got := buildSpeciesConfidenceHistogram(species, confByLabel, 10, 1, sciAsCommon)
 	require.Len(t, got, 3)
 	assert.Equal(t, "Turdus merula", got[0].ScientificName)
 	assert.Equal(t, "Erithacus rubecula", got[1].ScientificName)
@@ -640,7 +642,7 @@ func TestBuildSpeciesConfidenceHistogram_PreservesVolumeOrder(t *testing.T) {
 func TestBuildSpeciesConfidenceHistogram_Empty(t *testing.T) {
 	t.Parallel()
 
-	empty := buildSpeciesConfidenceHistogram(nil, nil, 20, 1)
+	empty := buildSpeciesConfidenceHistogram(nil, nil, 20, 1, sciAsCommon)
 	assert.Empty(t, empty)
 	assert.NotNil(t, empty)
 
@@ -649,6 +651,7 @@ func TestBuildSpeciesConfidenceHistogram_Empty(t *testing.T) {
 		[]repository.SpeciesCount{{LabelID: 1, ScientificName: "Turdus merula"}},
 		map[uint][]float64{},
 		20, 1,
+		sciAsCommon,
 	)
 	assert.Empty(t, got)
 	assert.NotNil(t, got)
@@ -1024,7 +1027,7 @@ func TestComputeYearOverYearWindows_Feb29PriorNonLeapClamps(t *testing.T) {
 	// Requesting Feb 29 of a leap year must clamp the previous window end to Feb 28 (the previous year
 	// is not a leap year), and the exclusive epoch end must be Mar 1 of the previous year - never Mar 2
 	// (which would happen if Feb 29 silently rolled forward before the +1-day step).
-	ref := time.Date(2024, time.February, 29, 12, 0, 0, 0, time.UTC)
+	ref := wallclock.Date{Year: 2024, Month: time.February, Day: 29}
 	w := computeYearOverYearWindows(ref, time.UTC)
 
 	assert.Equal(t, 2024, w.curYear)
@@ -1045,7 +1048,7 @@ func TestComputeYearOverYearWindows_Jan1Boundary(t *testing.T) {
 
 	// On Jan 1 both windows collapse to a single day, and the chart emits exactly one point. This guards
 	// the priorEnd +1-day boundary against an off-by-one that would query zero days.
-	ref := time.Date(2026, time.January, 1, 8, 0, 0, 0, time.UTC)
+	ref := wallclock.Date{Year: 2026, Month: time.January, Day: 1}
 	w := computeYearOverYearWindows(ref, time.UTC)
 
 	assert.Equal(t, "2026-01-01", w.curStart)
@@ -1064,24 +1067,12 @@ func TestComputeYearOverYearWindows_Jan1Boundary(t *testing.T) {
 func TestComputeYearOverYearWindows_MidYearNoClamp(t *testing.T) {
 	t.Parallel()
 
-	ref := time.Date(2026, time.June, 23, 0, 0, 0, 0, time.UTC)
+	ref := wallclock.Date{Year: 2026, Month: time.June, Day: 23}
 	w := computeYearOverYearWindows(ref, time.UTC)
 
 	assert.Equal(t, "2026-06-23", w.curEnd)
 	assert.Equal(t, "2025-06-23", w.priorEnd, "non-leap-edge dates map straight across years")
 }
 
-func TestComputeYearOverYearWindows_ProjectsRefIntoLoc(t *testing.T) {
-	t.Parallel()
-
-	// A ref whose own zone reads Jan 1 2024 but which is Dec 31 2023 in loc must resolve to loc's
-	// calendar date, not ref's. 2024-01-01 06:00 at UTC+12 is 2023-12-31 18:00 UTC.
-	east := time.FixedZone("UTC+12", 12*60*60)
-	ref := time.Date(2024, time.January, 1, 6, 0, 0, 0, east)
-	w := computeYearOverYearWindows(ref, time.UTC)
-
-	assert.Equal(t, 2023, w.curYear, "calendar date derived in loc, not ref's zone")
-	assert.Equal(t, "2023-12-31", w.curEnd)
-	assert.Equal(t, 2022, w.prevYear)
-	assert.Equal(t, "2022-12-31", w.priorEnd)
-}
+// sciAsCommon is the identity name resolver for builder tests that do not exercise name resolution.
+func sciAsCommon(scientificName string) string { return scientificName }

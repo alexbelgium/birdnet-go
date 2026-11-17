@@ -2,7 +2,6 @@ package telemetry
 
 import (
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,7 +66,7 @@ func InitForTesting(t TestingTB) (config *TestConfig, cleanup func()) {
 
 	// Mark as initialized and enable test mode
 	sentryInitialized = true
-	atomic.StoreInt32(&testMode, 1)
+	testMode.Store(testModeEnabled)
 
 	// Update telemetry enabled state for test mode
 	UpdateTelemetryEnabled()
@@ -110,7 +109,7 @@ func InitForTesting(t TestingTB) (config *TestConfig, cleanup func()) {
 	// Cleanup function
 	cleanup = func() {
 		// Reset telemetry worker first to avoid registration conflicts
-		telemetryWorker = nil
+		telemetryWorker.Store(nil)
 		telemetryInitialized.Store(false)
 
 		// Use the testing reset function which properly cleans up global state
@@ -121,7 +120,7 @@ func InitForTesting(t TestingTB) (config *TestConfig, cleanup func()) {
 
 		// Reset initialization state
 		sentryInitialized = false
-		atomic.StoreInt32(&testMode, 0)
+		testMode.Store(testModeDisabled)
 
 		// Clear deferred messages
 		deferredMutex.Lock()
@@ -318,3 +317,7 @@ func NewMockErrorEvent(component, message string, opts ...MockErrorEventOption) 
 	}
 	return event
 }
+
+// alwaysAllowed and neverAllowed are fixed consent gates for worker tests.
+func alwaysAllowed() bool { return true }
+func neverAllowed() bool  { return false }

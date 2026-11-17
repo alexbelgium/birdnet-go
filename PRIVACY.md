@@ -15,6 +15,8 @@ BirdNET-Go is committed to protecting your privacy while providing reliable bird
 - ✅ **No Hidden Collection** - Nothing is transmitted without your knowledge
 - ✅ **User Controlled** - Enable or disable anytime with immediate effect
 
+BirdNET-Go also switches off the Microsoft telemetry built into ONNX Runtime before loading it, unless you set `ORT_DISABLE_TELEMETRY` yourself. On Windows, ONNX Runtime reports through Windows event tracing, which that variable does not control; BirdNET-Go calls the ONNX Runtime API to turn those events off there instead.
+
 **By default, BirdNET-Go operates locally with minimal external data transmission.** The only default external connections are:
 
 - **Weather data**: Read-only requests to YR.no (Norway's meteorological service) for weather information
@@ -80,6 +82,8 @@ BirdNET-Go follows **Privacy by Design** principles:
 
 **IMPORTANT: The following telemetry data is ONLY collected when you explicitly enable it. By default, NO telemetry data is collected.**
 
+Builds older than about six months (183 days after their build date) do not send error reports, even with telemetry enabled. Update to a current release to resume reporting. Support dump uploads you request yourself still work.
+
 ### ✅ Technical Error Information (When Telemetry is Enabled)
 
 **Error Messages & Context**
@@ -108,6 +112,8 @@ BirdNET-Go follows **Privacy by Design** principles:
 
 - OS details, hardware specifications, runtime information
 - Disk usage and container information for troubleshooting
+- CPU model and features, kernel version, container memory limit, and the inference runtime state with the loaded models (library and model file names only, plus the container-side mount point of the models directory)
+- Connected USB devices (vendor and product IDs, manufacturer and product names, speed and device class) and sound cards (card name, the USB device behind it, and whether it can record). The device list never reads USB serial numbers.
 
 **Log Files**
 
@@ -119,6 +125,7 @@ BirdNET-Go follows **Privacy by Design** principles:
 
 - All sensitive configuration keys automatically redacted
 - URLs anonymized in log files
+- USB serial numbers in audio device identifiers are masked in the configuration and log files; the USB vendor and product IDs are kept
 - User control over what data to include in support packages
 
 ### ❌ Data We NEVER Collect (Telemetry)

@@ -39,6 +39,9 @@ CREATE TABLE migration_states (
     migrated_records INTEGER DEFAULT 0,
     error_message TEXT,
     related_data_error TEXT,
+    auxiliary_data_status TEXT NOT NULL DEFAULT '',
+    auxiliary_data_error TEXT,
+    auxiliary_data_started_at DATETIME,
     updated_at DATETIME
 )
 """
@@ -280,6 +283,393 @@ class HourlyWeatherSchemaTest(unittest.TestCase):
         # The repaired schema is clean on a re-check.
         _, _, recheck = self._run_contamination_check()
         self.assertEqual(recheck.status, "pass")
+
+
+_CURRENT_DYNAMIC_THRESHOLDS_DDL = """
+CREATE TABLE dynamic_thresholds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    species_name TEXT NOT NULL,
+    scientific_name TEXT,
+    level INTEGER NOT NULL DEFAULT 0,
+    current_value REAL NOT NULL,
+    base_threshold REAL NOT NULL,
+    high_conf_count INTEGER NOT NULL DEFAULT 0,
+    valid_hours INTEGER NOT NULL,
+    expires_at DATETIME NOT NULL,
+    last_triggered DATETIME NOT NULL,
+    first_created DATETIME NOT NULL,
+    trigger_count INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME,
+    updated_at DATETIME
+)
+"""
+
+_CURRENT_THRESHOLD_EVENTS_DDL = """
+CREATE TABLE threshold_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    species_name TEXT NOT NULL,
+    scientific_name TEXT,
+    previous_level INTEGER NOT NULL,
+    new_level INTEGER NOT NULL,
+    previous_value REAL NOT NULL,
+    new_value REAL NOT NULL,
+    change_reason TEXT NOT NULL,
+    confidence REAL DEFAULT 0,
+    created_at DATETIME
+)
+"""
+
+
+class CurrentThresholdSchemaTest(unittest.TestCase):
+    """The species-keyed threshold tables and the privacy rollup FK.
+
+    dynamic_thresholds and threshold_events no longer carry label_id (keyed by
+    species_name since #4195). db-doctor must accept that shape and must never
+    ALTER a label_id column into it: BirdNET-Go drops a threshold table that
+    still has label_id, so adding one would discard the user's learned data.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = os.path.join(self._tmp.name, "birdnet.db")
+
+    def _check(self, method_name):
+        doctor = db_doctor.DatabaseDoctor(self.path)
+        report = db_doctor.DiagnosticReport(db_path=self.path)
+        ro = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        try:
+            report.tables_present = doctor._get_tables(ro)
+            report.schema_version = "v2"
+            check = getattr(doctor, method_name)(ro, report)
+        finally:
+            ro.close()
+        return doctor, report, check
+
+    def test_current_threshold_tables_pass_the_schema_check(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute(_CURRENT_DYNAMIC_THRESHOLDS_DDL)
+        conn.execute(_CURRENT_THRESHOLD_EVENTS_DDL)
+        conn.commit()
+        conn.close()
+
+        _, _, check = self._check("_check_schema_contamination")
+        self.assertEqual(check.status, "pass", check.details)
+
+    def test_stale_label_id_threshold_tables_are_reported_and_left_alone(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            "CREATE TABLE dynamic_thresholds (id INTEGER PRIMARY KEY, "
+            "label_id INTEGER NOT NULL, level INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE threshold_events (id INTEGER PRIMARY KEY, "
+            "label_id INTEGER NOT NULL, new_level INTEGER)"
+        )
+        conn.execute("INSERT INTO dynamic_thresholds VALUES (1, 7, 1)")
+        conn.execute("INSERT INTO threshold_events VALUES (1, 7, 1)")
+        conn.commit()
+        conn.close()
+
+        doctor, report, check = self._check("_check_schema_contamination")
+        self.assertEqual(check.status, "fail")
+        self.assertFalse(check.fixable)
+        hints = [d for d in check.details if db_doctor.APP_RECREATED_HINT in d]
+        self.assertEqual(len(hints), 2, check.details)
+
+        report.checks.append(check)
+        conn = sqlite3.connect(self.path)
+        try:
+            result = doctor._fix_schema_contamination(conn, report)
+            self.assertNotEqual(result.status, "failed", result.details)
+            for table in ("dynamic_thresholds", "threshold_events"):
+                self.assertIn(
+                    f"{table}: {db_doctor.APP_RECREATED_HINT}", result.details,
+                )
+            for table, expected in (
+                ("dynamic_thresholds", ["id", "label_id", "level"]),
+                ("threshold_events", ["id", "label_id", "new_level"]),
+            ):
+                columns = [
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+                ]
+                self.assertEqual(columns, expected, table)
+                self.assertEqual(
+                    conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
+                    1, table,
+                )
+        finally:
+            conn.close()
+
+    def test_threshold_table_missing_a_column_gets_no_recreation_hint(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            _CURRENT_DYNAMIC_THRESHOLDS_DDL.replace(
+                "    scientific_name TEXT,\n", ""
+            )
+        )
+        conn.commit()
+        conn.close()
+
+        _, _, check = self._check("_check_schema_contamination")
+        self.assertEqual(check.status, "fail")
+        self.assertTrue(
+            any("scientific_name" in d for d in check.details), check.details,
+        )
+        self.assertFalse(
+            any(db_doctor.APP_RECREATED_HINT in d for d in check.details),
+            check.details,
+        )
+
+    def test_fix_leaves_model_name_only_threshold_table_without_a_hint(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            _CURRENT_DYNAMIC_THRESHOLDS_DDL.replace(
+                "    scientific_name TEXT,\n",
+                "    scientific_name TEXT,\n    model_name TEXT,\n",
+            )
+        )
+        conn.commit()
+        conn.close()
+
+        doctor, report, check = self._check("_check_schema_contamination")
+        report.checks.append(check)
+        conn = sqlite3.connect(self.path)
+        try:
+            result = doctor._fix_schema_contamination(conn, report)
+            columns = [
+                row[1] for row in conn.execute("PRAGMA table_info(dynamic_thresholds)")
+            ]
+        finally:
+            conn.close()
+        self.assertIn("model_name", columns)
+        self.assertFalse(
+            any(db_doctor.APP_RECREATED_HINT in d for d in result.details),
+            result.details,
+        )
+
+    def test_detections_recreation_keeps_clip_and_original_label_columns(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            "CREATE TABLE detections (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "model_id INTEGER, label_id INTEGER, source_id INTEGER, "
+            "detected_at INTEGER, begin_time INTEGER, end_time INTEGER, "
+            "confidence REAL, latitude REAL, longitude REAL, "
+            "clip_name VARCHAR(500), spectrogram_clip_name VARCHAR(500), "
+            "clip_sample_rate INTEGER, clip_denoised NUMERIC, "
+            "original_label_id INTEGER, processing_time_ms INTEGER, "
+            "unlikely NUMERIC, legacy_id INTEGER, created_at DATETIME)"
+        )
+        conn.execute(
+            "INSERT INTO detections (model_id, label_id, detected_at, "
+            "confidence, unlikely, spectrogram_clip_name, clip_sample_rate, "
+            "clip_denoised, original_label_id) "
+            "VALUES (1, 1, 1000, 0.9, 0, 'a.png', 48000, 1, 7)"
+        )
+        conn.commit()
+        conn.close()
+
+        doctor, report, check = self._check("_check_schema_contamination")
+        self.assertEqual(check.status, "fail")
+        self.assertTrue(check.fixable)
+        report.checks.append(check)
+
+        conn = sqlite3.connect(self.path)
+        try:
+            fix = doctor._fix_schema_contamination(conn, report)
+            row = conn.execute(
+                "SELECT spectrogram_clip_name, clip_sample_rate, clip_denoised, "
+                "original_label_id "
+                "FROM detections"
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(fix.status, "applied", fix.details)
+        self.assertEqual(row, ("a.png", 48000, 1, 7))
+
+    def test_missing_original_label_column_is_added_by_fix(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            "CREATE TABLE detections (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "model_id INTEGER, label_id INTEGER, source_id INTEGER, "
+            "detected_at INTEGER, begin_time INTEGER, end_time INTEGER, "
+            "confidence REAL, latitude REAL, longitude REAL, "
+            "clip_name VARCHAR(500), spectrogram_clip_name VARCHAR(500), "
+            "clip_sample_rate INTEGER, clip_denoised NUMERIC, "
+            "processing_time_ms INTEGER, unlikely NUMERIC, legacy_id INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO detections (model_id, label_id, detected_at, "
+            "confidence, unlikely) VALUES (1, 1, 1000, 0.9, 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        doctor, report, check = self._check("_check_schema_contamination")
+        self.assertEqual(check.status, "fail")
+        self.assertTrue(check.fixable)
+        report.checks.append(check)
+
+        conn = sqlite3.connect(self.path)
+        try:
+            fix = doctor._fix_schema_contamination(conn, report)
+            # PRAGMA table_info columns: (cid, name, type, notnull, dflt_value, pk)
+            columns = {
+                row[1]: row for row in conn.execute("PRAGMA table_info(detections)")
+            }
+            rows = conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual(fix.status, "applied", fix.details)
+        self.assertEqual(
+            columns["original_label_id"][2:4], ("INTEGER", 0)
+        )
+        self.assertEqual(rows, 1)
+
+    def test_privacy_rollup_fk_orphan_is_reported(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute("CREATE TABLE audio_sources (id INTEGER PRIMARY KEY)")
+        conn.execute(
+            "CREATE TABLE privacy_filter_hourlies ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, source_id INTEGER NOT NULL)"
+        )
+        conn.execute("INSERT INTO audio_sources (id) VALUES (1)")
+        conn.execute("INSERT INTO privacy_filter_hourlies (source_id) VALUES (1)")
+        conn.execute("INSERT INTO privacy_filter_hourlies (source_id) VALUES (99)")
+        conn.commit()
+        conn.close()
+
+        _, _, check = self._check("_check_foreign_keys")
+
+        self.assertEqual(check.message, "Found 1 foreign key violation(s)")
+        self.assertEqual(
+            check.details,
+            ["privacy_filter_hourlies.source_id -> audio_sources.id: "
+             "1 orphaned reference(s)"],
+        )
+
+    def test_privacy_discard_fk_orphans_are_reported(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute("CREATE TABLE audio_sources (id INTEGER PRIMARY KEY)")
+        conn.execute(
+            "CREATE TABLE privacy_filter_discards ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, source_id INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE privacy_filter_discard_hits ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, discard_id INTEGER NOT NULL)"
+        )
+        conn.execute("INSERT INTO audio_sources (id) VALUES (1)")
+        conn.execute("INSERT INTO privacy_filter_discards (id, source_id) VALUES (1, 1)")
+        conn.execute("INSERT INTO privacy_filter_discards (id, source_id) VALUES (2, NULL)")
+        conn.execute("INSERT INTO privacy_filter_discards (id, source_id) VALUES (3, 99)")
+        conn.execute("INSERT INTO privacy_filter_discard_hits (discard_id) VALUES (1)")
+        conn.execute("INSERT INTO privacy_filter_discard_hits (discard_id) VALUES (99)")
+        conn.commit()
+        conn.close()
+
+        _, _, check = self._check("_check_foreign_keys")
+
+        self.assertEqual(check.message, "Found 2 foreign key violation(s)")
+        self.assertEqual(
+            sorted(check.details),
+            ["privacy_filter_discard_hits.discard_id -> privacy_filter_discards.id: "
+             "1 orphaned reference(s)",
+             "privacy_filter_discards.source_id -> audio_sources.id: "
+             "1 orphaned reference(s)"],
+        )
+
+
+class OrphanedLabelFixTest(unittest.TestCase):
+    """The orphaned label repair must keep detections.model_id and the label's
+    model_id paired: labels are per model, so a name can exist in several."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = os.path.join(self._tmp.name, "birdnet.db")
+
+    def _run_fix(self, labels, detections):
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            "CREATE TABLE labels (id INTEGER PRIMARY KEY, "
+            "scientific_name TEXT NOT NULL, model_id INTEGER NOT NULL, "
+            "UNIQUE (scientific_name, model_id))"
+        )
+        conn.execute(
+            "CREATE TABLE detections (id INTEGER PRIMARY KEY, "
+            "model_id INTEGER NOT NULL, label_id INTEGER NOT NULL, "
+            "legacy_id INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, scientific_name TEXT)"
+        )
+        conn.execute("INSERT INTO notes VALUES (1, 'Parus major')")
+        conn.executemany("INSERT INTO labels VALUES (?, ?, ?)", labels)
+        conn.executemany("INSERT INTO detections VALUES (?, ?, ?, ?)", detections)
+        conn.commit()
+        conn.close()
+
+        doctor = db_doctor.DatabaseDoctor(self.path)
+        report = db_doctor.DiagnosticReport(db_path=self.path)
+        ro = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        try:
+            report.tables_present = doctor._get_tables(ro)
+            report.checks.append(doctor._check_foreign_keys(ro, report))
+        finally:
+            ro.close()
+
+        conn = sqlite3.connect(self.path)
+        try:
+            result = doctor._fix_orphaned_labels(conn, report)
+            label_id = conn.execute(
+                "SELECT label_id FROM detections WHERE id = 1"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        return result, label_id
+
+    def test_repair_picks_the_label_of_the_detections_model(self):
+        # The other model's label has the lower id and the lower model_id,
+        # so an unrestricted lookup picks it by rowid or by index order.
+        result, label_id = self._run_fix(
+            labels=[(10, "Parus major", 1), (20, "Parus major", 2)],
+            detections=[(1, 2, 999, 1)],
+        )
+        self.assertEqual(label_id, 20)
+        self.assertEqual(result.rows_affected, 1)
+        self.assertEqual(result.status, "applied")
+        self.assertEqual(result.message, "recovered 1 via legacy notes")
+
+    def test_repair_leaves_the_row_orphaned_when_only_another_model_has_the_label(self):
+        result, label_id = self._run_fix(
+            labels=[(10, "Parus major", 2)],
+            detections=[(1, 1, 999, 1)],
+        )
+        self.assertEqual(label_id, 999)
+        self.assertEqual(result.rows_affected, 0)
+        self.assertEqual(result.status, "skipped")
+        self.assertEqual(
+            result.message, "1 still orphaned (manual intervention needed)"
+        )
+
+    def test_repair_counts_rows_of_a_model_without_the_label_as_remaining(self):
+        # Detection 1 (model 2) has a label of its own model; detection 2
+        # (model 3) does not, so only detection 1 is repaired.
+        result, label_id = self._run_fix(
+            labels=[(10, "Parus major", 1), (20, "Parus major", 2)],
+            detections=[(1, 2, 999, 1), (2, 3, 998, 1)],
+        )
+        self.assertEqual(label_id, 20)
+        self.assertEqual(result.rows_affected, 1)
+        self.assertEqual(result.status, "applied")
+        self.assertEqual(
+            result.message,
+            "recovered 1 via legacy notes; 1 still orphaned "
+            "(manual intervention needed)",
+        )
 
 
 if __name__ == "__main__":

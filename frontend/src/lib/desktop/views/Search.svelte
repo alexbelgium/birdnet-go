@@ -2,10 +2,11 @@
   import WeatherInfo from '$lib/desktop/components/data/WeatherInfo.svelte';
   import SourceBadge from '$lib/desktop/features/dashboard/components/SourceBadge.svelte';
   import AudioPlayer from '$lib/desktop/components/media/AudioPlayer.svelte';
+  import SpectrogramImage from '$lib/desktop/components/media/SpectrogramImage.svelte';
   import MobileAudioPlayer from '$lib/desktop/components/media/MobileAudioPlayer.svelte';
   import DatePicker from '$lib/desktop/components/ui/DatePicker.svelte';
   import { handleBirdImageError } from '$lib/desktop/components/ui/image-utils';
-  import TimeOfDayIcon from '$lib/desktop/components/ui/TimeOfDayIcon.svelte';
+  import TimeOfDayIcon, { isTimeOfDay } from '$lib/desktop/components/ui/TimeOfDayIcon.svelte';
   import { getLocale, t } from '$lib/i18n';
   import { dashboardSettings } from '$lib/stores/settings';
   import { toastActions } from '$lib/stores/toast';
@@ -70,8 +71,10 @@
     verified: string;
     locked: boolean;
     hasAudio: boolean;
+    spectrogramOnly?: boolean; // audio removed by retention, spectrogram image kept
     source?: string;
     modelType?: string;
+    clipSampleRate?: number; // Hz; omitted when the server does not know it yet
   }
 
   interface AudioSourceOption {
@@ -229,6 +232,7 @@
   let selectedSpeciesName = $state('');
   let selectedDetectionId = $state<string | undefined>(undefined);
   let selectedModelType = $state('');
+  let selectedClipSampleRate = $state<number | undefined>(undefined);
 
   function openMobilePlayer(result: SearchResult) {
     if (!result?.id) return;
@@ -236,6 +240,7 @@
     selectedSpeciesName = localizeSpeciesName(result.scientificName, result.commonName);
     selectedDetectionId = result.id;
     selectedModelType = result.modelType ?? '';
+    selectedClipSampleRate = result.clipSampleRate;
     showMobilePlayer = true;
   }
 
@@ -245,6 +250,7 @@
     selectedSpeciesName = '';
     selectedDetectionId = undefined;
     selectedModelType = '';
+    selectedClipSampleRate = undefined;
   }
 
   // Form validation
@@ -630,7 +636,7 @@
               </div>
               <!-- Confidence error message -->
               {#if hasConfidenceError}
-                <div class="text-[var(--color-error)] text-sm mt-1" role="alert">
+                <div class="text-[var(--text-error)] text-sm mt-1" role="alert">
                   {t('search.errors.minMaxConfidence')}
                 </div>
               {/if}
@@ -832,7 +838,7 @@
           aria-busy="true"
         >
           <span
-            class="loading loading-spinner loading-lg text-[var(--color-primary)]"
+            class="loading loading-spinner loading-lg text-[var(--text-primary)]"
             aria-hidden="true"
           ></span>
           <p class="text-[var(--color-base-content)] opacity-50 text-center mt-4">
@@ -870,7 +876,10 @@
                   <td>{formatDate(result.timestamp)}</td>
                   <td>
                     <div class="flex items-center">
-                      <TimeOfDayIcon timeOfDay={result.timeOfDay as any} className="mr-1" />
+                      <TimeOfDayIcon
+                        timeOfDay={isTimeOfDay(result.timeOfDay) ? result.timeOfDay : undefined}
+                        className="mr-1"
+                      />
                       <span>{result.timeOfDay || t('search.detailsPanel.unknownSpecies')}</span>
                     </div>
                   </td>
@@ -1146,7 +1155,13 @@
                                 enableClipExtraction={clipExtractionEnabled}
                                 clipLabel={`${result.commonName}_${result.timestamp.replace(/[: ]/g, '-')}`}
                                 modelType={result.modelType}
+                                clipSampleRate={result.clipSampleRate}
                               />
+                            </div>
+                          {:else if result.spectrogramOnly}
+                            <!-- Retention removed the audio but kept the image: no player. -->
+                            <div class="bg-[var(--color-base-200)] rounded-box p-4">
+                              <SpectrogramImage detectionId={result.id} size="md" raw={false} />
                             </div>
                           {/if}
                         </div>
@@ -1168,7 +1183,10 @@
                 <!-- Time of Day + Date/Time -->
                 <div class="w-16 shrink-0 text-sm opacity-80">
                   <div class="flex items-center gap-1">
-                    <TimeOfDayIcon timeOfDay={result.timeOfDay as any} className="size-4" />
+                    <TimeOfDayIcon
+                      timeOfDay={isTimeOfDay(result.timeOfDay) ? result.timeOfDay : undefined}
+                      className="size-4"
+                    />
                     <span class="capitalize">{result.timeOfDay}</span>
                   </div>
                   <div class="mt-1 text-xs opacity-70 leading-tight">
@@ -1328,6 +1346,7 @@
                 speciesName={selectedSpeciesName}
                 detectionId={selectedDetectionId}
                 modelType={selectedModelType}
+                clipSampleRate={selectedClipSampleRate}
                 onClose={closeMobilePlayer}
               />
             </div>
@@ -1410,13 +1429,13 @@
   }
 
   .status-badge.correct {
-    background-color: #10b981;
-    color: white;
+    background-color: var(--color-success);
+    color: var(--color-success-content);
   }
 
   .status-badge.false {
-    background-color: #ef4444;
-    color: white;
+    background-color: var(--color-error);
+    color: var(--color-error-content);
   }
 
   .status-badge.unverified {
@@ -1425,8 +1444,8 @@
   }
 
   .status-badge.locked {
-    background-color: #f59e0b;
-    color: white;
+    background-color: var(--color-warning);
+    color: var(--color-warning-content);
   }
 
   .expanded-row td {
@@ -1523,11 +1542,11 @@
 
   .review-dropdown-item.correct:hover {
     background-color: color-mix(in srgb, var(--color-success) 15%, transparent);
-    color: var(--color-success);
+    color: var(--text-success);
   }
 
   .review-dropdown-item.false-positive:hover {
     background-color: color-mix(in srgb, var(--color-error) 15%, transparent);
-    color: var(--color-error);
+    color: var(--text-error);
   }
 </style>

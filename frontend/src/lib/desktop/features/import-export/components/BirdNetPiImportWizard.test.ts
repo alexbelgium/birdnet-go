@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 
 // Mock logger so tests can verify no password is leaked to log calls.
 vi.mock('$lib/utils/logger', () => ({
@@ -217,6 +218,14 @@ describe('BirdNetPiImportWizard', () => {
     });
   });
 
+  it('names the dialog with the wizard title', async () => {
+    render(BirdNetPiImportWizard, { props: { onClose } });
+
+    expect(
+      await screen.findByRole('dialog', { name: 'system.importExport.birdnetPi.wizardTitle' })
+    ).toBeInTheDocument();
+  });
+
   it('shows loading spinner on initial load', () => {
     render(BirdNetPiImportWizard, { props: { onClose } });
     // During loading the spinner should be present
@@ -319,6 +328,24 @@ describe('BirdNetPiImportWizard', () => {
     expect(dbAudioRadio).not.toBeDisabled();
   });
 
+  it('mode cards take their selected look from the checked radio', async () => {
+    render(BirdNetPiImportWizard, { props: { onClose } });
+    await navigatePastSource();
+
+    const labelOf = (name: RegExp) => {
+      const card = screen.getByRole('radio', { name }).closest('label');
+      if (!card) throw new Error('mode radio is not inside a label');
+      return card;
+    };
+    const dbOnly = labelOf(/system.importExport.mode.dbOnly.label/);
+    const dbAudio = labelOf(/system.importExport.mode.dbAudio.label/);
+
+    // The selected look is not hard-coded on one card; both cards share the :checked rule.
+    expect(dbOnly.className).toBe(dbAudio.className);
+    expect(dbOnly).toHaveClass('has-[:checked]:border-[var(--color-primary)]');
+    expect(dbOnly).not.toHaveClass('border-[var(--color-primary)]');
+  });
+
   it('db-audio disabled reason is not shown', async () => {
     render(BirdNetPiImportWizard, { props: { onClose } });
     await navigatePastSource();
@@ -379,6 +406,26 @@ describe('BirdNetPiImportWizard', () => {
         source_path: '/external/birdnet-pi/birds.db',
       });
     });
+  });
+
+  it('Tab from Cancel stays in the dialog while the import is starting', async () => {
+    // A request that never settles keeps Start disabled, with Cancel the last enabled control
+    vi.mocked(api.post).mockReturnValue(new Promise(() => {}));
+    render(BirdNetPiImportWizard, { props: { onClose } });
+    await navigatePastSource();
+    await waitFor(() => screen.getByText('system.importExport.mode.label'));
+    await fireEvent.click(screen.getByRole('button', { name: /common.buttons.next/ }));
+    await waitFor(() => screen.getByText('system.importExport.confirm.description'));
+    const start = screen.getByRole('button', { name: /system.importExport.confirm.startButton/ });
+    await fireEvent.click(start);
+    await waitFor(() => expect(start).toBeDisabled());
+    const cancel = screen.getByRole('button', { name: /cancel/i });
+    cancel.focus();
+
+    await userEvent.setup().tab();
+
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+    expect(start).not.toHaveFocus();
   });
 
   it('selecting db-audio posts mode db-audio to the API', async () => {
@@ -648,7 +695,7 @@ describe('BirdNetPiImportWizard', () => {
     expect(mockEsInstance?.close).toHaveBeenCalledOnce();
   });
 
-  // ---- SSE stall reconcile (server restart mid-import, Forgejo #1323) ----
+  // ---- SSE stall reconcile (server restart mid-import) ----
 
   it('stall with an empty job manager shows the interrupted state and closes the stream', async () => {
     render(BirdNetPiImportWizard, { props: { onClose } });

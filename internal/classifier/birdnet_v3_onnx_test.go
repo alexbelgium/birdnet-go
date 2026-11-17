@@ -115,6 +115,63 @@ func TestBirdNETV3_LoaderRegistered(t *testing.T) {
 
 	_, ok = openvinoCapableSecondaryBuilders[RegistryIDBirdNETV3]
 	assert.True(t, ok, "BirdNET v3.0 must have an OpenVINO-capable secondary builder")
+
+	_, ok = modelLoaders[RegistryIDBirdNETPlusV3]
+	assert.True(t, ok, "BirdNET+ V3.0 must have a modelLoaders entry")
+
+	_, ok = openvinoCapableSecondaryBuilders[RegistryIDBirdNETPlusV3]
+	assert.True(t, ok, "BirdNET+ V3.0 must have an OpenVINO-capable secondary builder")
+}
+
+// TestBirdNETV3_RegistryIDCarriesIdentity guards the parametrised registry ID: an
+// instance built for BirdNET+ V3.0 must report that ID and name and tag a failed
+// prediction with it, not with the BirdNET v3.0 preview's ID.
+func TestBirdNETV3_RegistryIDCarriesIdentity(t *testing.T) {
+	resetGlobalMetrics(t)
+	t.Cleanup(func() { resetGlobalMetrics(t) })
+	m := newTestMetrics(t)
+	SetMetrics(m)
+
+	info := ModelRegistry[RegistryIDBirdNETPlusV3]
+	boom := errors.Newf("backend inference failed").Category(errors.CategoryAudio).Build()
+	b := &BirdNETV3{
+		classifier: &predTelemetryClassifier{err: boom},
+		labels:     []string{"Aaa aaa_Alpha", "Bbb bbb_Beta"},
+		info:       info,
+	}
+
+	assert.Equal(t, RegistryIDBirdNETPlusV3, b.ModelID())
+	assert.Equal(t, ModelNameBirdNETPlusV30, b.ModelName())
+
+	_, err := b.Predict(t.Context(), [][]float32{{0.1, 0.2}})
+	require.Error(t, err)
+	assert.InDelta(t, 1.0, predictionCount(t, m, RegistryIDBirdNETPlusV3, "error"), 0,
+		"the failure must be tagged with the BirdNET+ V3.0 registry ID")
+	assert.InDelta(t, 0.0, predictionCount(t, m, RegistryIDBirdNETV3, "error"), 0,
+		"the failure must not be tagged with the BirdNET v3.0 preview ID")
+}
+
+// TestNewBirdNETV3_UnknownRegistryID verifies the constructor refuses a registry
+// ID it has no entry for instead of building an instance with empty metadata.
+func TestNewBirdNETV3_UnknownRegistryID(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewBirdNETV3(&BirdNETV3Config{RegistryID: "No_Such_Model"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown model registry ID")
+}
+
+// TestNewBirdNETV3_RejectsOtherArchitecture verifies the constructor refuses a
+// registry ID that exists but belongs to another model architecture, so a Perch or
+// BirdNET v2.4 identity can never be attached to the BirdNET v3.0 loader.
+func TestNewBirdNETV3_RejectsOtherArchitecture(t *testing.T) {
+	t.Parallel()
+
+	for _, id := range []string{RegistryIDPerchV2, RegistryIDBirdNETV24} {
+		_, err := NewBirdNETV3(&BirdNETV3Config{RegistryID: id})
+		require.Error(t, err, id)
+		assert.Contains(t, err.Error(), "not a BirdNET v3.0 architecture model", id)
+	}
 }
 
 // TestBirdNETV3_CatalogEntry guards the catalog entry shape: correct repo, visible
@@ -202,4 +259,27 @@ func TestBirdNETV3_Close(t *testing.T) {
 
 	_, err := b.Predict(t.Context(), [][]float32{{0.1}})
 	require.Error(t, err, "Predict after Close must fail via the nil-classifier guard")
+}
+
+// TestBirdNETV3Predict_RejectsNonFiniteScores verifies that a backend returning a
+// NaN or Inf score fails the window instead of handing a non-finite confidence to
+// the processor, where it would bypass the threshold filter. BirdNET v3.0 runs
+// the OpenVINO f16 GPU path that produced all-NaN Perch logits on Intel Arc, so
+// it needs the same guard.
+func TestBirdNETV3Predict_RejectsNonFiniteScores(t *testing.T) {
+	t.Parallel()
+	labels := []string{"Aaa aaa_Alpha", "Bbb bbb_Beta", "Ccc ccc_Gamma"}
+	for name, scores := range map[string][]float32{
+		"NaN":  {0.9, float32(math.NaN()), 0.1},
+		"+Inf": {float32(math.Inf(1)), 0.2, 0.1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			b := newTestBirdNETV3(&predTelemetryClassifier{logits: scores}, labels)
+			results, err := b.Predict(t.Context(), [][]float32{{0.1, 0.2, 0.3}})
+			require.Error(t, err)
+			assert.Nil(t, results)
+			assert.Contains(t, err.Error(), "non-finite score")
+		})
+	}
 }

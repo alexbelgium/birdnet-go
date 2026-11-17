@@ -8,6 +8,26 @@
 
   const historyCache = new Map<string, FullSeries>();
   const HISTORY_CACHE_MAX = 20;
+
+  // Bumped by every invalidation so a request that was already in flight when
+  // the cache was dropped cannot repopulate it with pre-change data.
+  let cacheGeneration = 0;
+
+  /**
+   * Drops cached histories so the next open refetches. Call after detections
+   * change (refresh, delete, review). Without a name every species is dropped.
+   */
+  export function invalidateSpeciesHistory(scientificName?: string): void {
+    cacheGeneration += 1;
+    if (scientificName === undefined) {
+      historyCache.clear();
+      return;
+    }
+    const prefix = `${scientificName}|`;
+    for (const key of [...historyCache.keys()]) {
+      if (key.startsWith(prefix)) historyCache.delete(key);
+    }
+  }
 </script>
 
 <script lang="ts">
@@ -16,10 +36,11 @@
   // Charts detection counts for one species over 7d/30d/90d/1y/2y/all-time
   // using the existing GET /api/v2/analytics/time/daily endpoint (which wraps
   // the series in {data: [...]}). Long ranges are aggregated client-side into
-  // week/month buckets so the chart stays readable. All strings are hardcoded
-  // English (no i18n) so the feature stays self-contained.
+  // week/month buckets so the chart stays readable. Rendered in the shared
+  // Modal for focus trapping and focus restoration.
   import { line as d3Line, curveMonotoneX } from 'd3-shape';
-  import { X } from '@lucide/svelte';
+  import Modal from '$lib/desktop/components/ui/Modal.svelte';
+  import { t } from '$lib/i18n';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { formatDetectionCount } from '../../utils/dailySummaryStats';
   import {
@@ -40,7 +61,7 @@
     parseYmd,
     rangeWindow,
     selectPeakIndices,
-    shortDayLabel,
+    fullDayLabel,
     topRoundedBarPath,
   } from '../../utils/speciesHistory';
 
@@ -63,14 +84,19 @@
   const TICK_CLAMP = 20; // keeps edge x-labels inside the plot
   const TOOLTIP_CLAMP = 64;
 
-  const RANGE_LABELS: Record<RangeKey, string> = {
-    '7d': 'last 7 days',
-    '30d': 'last 30 days',
-    '90d': 'last 90 days',
-    '1y': 'last 12 months',
-    '2y': 'last 2 years',
-    all: 'all time',
+  const RANGE_LABEL_KEYS: Record<RangeKey, string> = {
+    '7d': 'dashboard.dailySummary.history.ranges.last7d',
+    '30d': 'dashboard.dailySummary.history.ranges.last30d',
+    '90d': 'dashboard.dailySummary.history.ranges.last90d',
+    '1y': 'dashboard.dailySummary.history.ranges.last1y',
+    '2y': 'dashboard.dailySummary.history.ranges.last2y',
+    all: 'dashboard.dailySummary.history.ranges.all',
   };
+
+  function rangeLabel(key: RangeKey): string {
+    // eslint-disable-next-line security/detect-object-injection -- key is a typed RangeKey union
+    return t(RANGE_LABEL_KEYS[key]);
+  }
 
   // Deterministic skeleton bar heights (percent) shown before first data.
   const SKELETON_HEIGHTS = [35, 55, 40, 70, 50, 82, 45, 62, 38, 68, 52, 74, 44, 58];
@@ -119,6 +145,7 @@
     }
     fullData = null;
     const controller = new AbortController();
+    const generation = cacheGeneration;
     fetchSeries(ALL_TIME_START, selectedDate, controller.signal)
       .then(list => {
         let firstMs: number | null = null;
@@ -129,10 +156,12 @@
           }
         }
         const series: FullSeries = { byDate: toByDate(list), firstMs };
-        historyCache.set(key, series);
-        if (historyCache.size > HISTORY_CACHE_MAX) {
-          const oldest = historyCache.keys().next().value;
-          if (oldest !== undefined) historyCache.delete(oldest);
+        if (generation === cacheGeneration) {
+          historyCache.set(key, series);
+          if (historyCache.size > HISTORY_CACHE_MAX) {
+            const oldest = historyCache.keys().next().value;
+            if (oldest !== undefined) historyCache.delete(oldest);
+          }
         }
         fullData = series;
       })
@@ -297,16 +326,24 @@
     return bp ? axisLabel(bp, v.bucket) : '';
   });
 
+  const dialogTitle = $derived(t('dashboard.dailySummary.history.title', { species: displayName }));
+
   const subtitle = $derived.by(() => {
-    if (showError) return 'History unavailable';
+    if (showError) return t('dashboard.dailySummary.history.unavailable');
     const v = displayed;
-    if (!v) return 'Loading history…';
-    let text = `${formatDetectionCount(v.total)} detections · ${RANGE_LABELS[v.range]}`;
+    if (!v) return t('dashboard.dailySummary.history.loading');
+    const params = {
+      count: v.total,
+      formattedCount: formatDetectionCount(v.total),
+      range: rangeLabel(v.range),
+    };
     if (v.range === 'all' && fullData?.firstMs != null) {
-      const firstYear = new Date(fullData.firstMs).getUTCFullYear();
-      text += ` (since ${shortDayLabel(fullData.firstMs)}, ${firstYear})`;
+      return t('dashboard.dailySummary.history.subtitleSince', {
+        ...params,
+        since: fullDayLabel(fullData.firstMs),
+      });
     }
-    return text;
+    return t('dashboard.dailySummary.history.subtitle', params);
   });
 
   function formatAvg(avg: number): string {
@@ -334,11 +371,6 @@
 
   // ── Modal interaction ──
 
-  function handleBackdrop(e: MouseEvent): void {
-    // Only the backdrop itself closes; clicks inside the panel do not.
-    if (e.target === e.currentTarget) onClose();
-  }
-
   // Stop touches/clicks from reaching the swipe-to-change-day handler that wraps
   // the species list in DailySummaryCard.
   function stopTouch(e: TouchEvent): void {
@@ -351,51 +383,43 @@
   }
 </script>
 
-<svelte:window
-  onkeydown={(e: KeyboardEvent) => {
-    if (e.key === 'Escape') onClose();
-  }}
-/>
-
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<div
-  class="hist-overlay"
-  role="dialog"
-  tabindex="-1"
-  aria-modal="true"
-  aria-label="{displayName} detection history"
-  onclick={handleBackdrop}
+<Modal
+  isOpen={true}
+  title={dialogTitle}
+  size="2xl"
+  {onClose}
+  className="hist-panel w-full"
   ontouchstart={stopTouch}
   ontouchend={stopTouch}
 >
-  <div class="hist-panel">
-    <!-- Header -->
+  {#snippet header()}
     <div class="hist-header">
       <div class="hist-titles">
-        <span class="hist-title">{displayName}</span>
+        <h3 id="modal-title" class="hist-title">
+          {dialogTitle}
+        </h3>
         <span class="hist-subtitle">{subtitle}</span>
       </div>
-      <button class="hist-close" aria-label="Close history" onclick={onClose}>
-        <X class="size-4" />
-      </button>
     </div>
+  {/snippet}
 
+  <div class="hist-content">
     <!-- Stats strip -->
     {#if displayed && !displayed.empty}
       <div class="hist-stats" class:stale={refreshing}>
         <div class="hist-stat">
-          <span class="hist-stat-label">Total</span>
+          <span class="hist-stat-label">{t('dashboard.dailySummary.history.total')}</span>
           <span class="hist-stat-value">{formatDetectionCount(displayed.total)}</span>
         </div>
         <div class="hist-stat">
-          <span class="hist-stat-label">Peak</span>
+          <span class="hist-stat-label">{t('dashboard.dailySummary.history.peak')}</span>
           <span class="hist-stat-value">
             {formatDetectionCount(displayed.max)}
             {#if peakSubLabel}<span class="hist-stat-sub">{peakSubLabel}</span>{/if}
           </span>
         </div>
         <div class="hist-stat">
-          <span class="hist-stat-label">Avg/day</span>
+          <span class="hist-stat-label">{t('dashboard.dailySummary.history.avgPerDay')}</span>
           <span class="hist-stat-value">{formatAvg(displayed.avgPerDay)}</span>
         </div>
       </div>
@@ -404,21 +428,27 @@
     <!-- Chart -->
     <div class="hist-body">
       {#if showSkeleton}
-        <div class="hist-skeleton" role="status" aria-label="Loading detection history">
+        <div
+          class="hist-skeleton"
+          role="status"
+          aria-label={t('dashboard.dailySummary.history.loading')}
+        >
           {#each SKELETON_HEIGHTS as h, i (i)}
             <div class="hist-skel-bar" style:height="{h}%"></div>
           {/each}
         </div>
       {:else if showError}
         <div class="hist-state" role="alert">
-          <span>Failed to load history</span>
-          <button class="hist-retry" onclick={() => (retryToken += 1)}>Retry</button>
+          <span>{t('dashboard.dailySummary.history.loadFailed')}</span>
+          <button class="hist-retry" onclick={() => (retryToken += 1)}>
+            {t('dashboard.dailySummary.history.retry')}
+          </button>
         </div>
       {:else if displayed?.empty}
         <div class="hist-state">
-          <span>No detections in this period</span>
+          <span>{t('dashboard.dailySummary.history.empty')}</span>
           {#if displayed.range !== 'all'}
-            <span class="hist-state-hint">Try a longer range</span>
+            <span class="hist-state-hint">{t('dashboard.dailySummary.history.emptyHint')}</span>
           {/if}
         </div>
       {:else if displayed}
@@ -436,9 +466,12 @@
               height={chartH}
               viewBox="0 0 {chartW} {chartH}"
               role="img"
-              aria-label="{displayName}: {displayed.total} detections over {RANGE_LABELS[
-                displayed.range
-              ]}, peaking at {displayed.max}"
+              aria-label={t('dashboard.dailySummary.history.chartLabel', {
+                species: displayName,
+                count: displayed.total,
+                range: rangeLabel(displayed.range),
+                peak: displayed.max,
+              })}
               onpointerdown={hoverFromEvent}
               onpointermove={hoverFromEvent}
               onpointerleave={clearHover}
@@ -496,20 +529,32 @@
             {/if}
           {/if}
           {#if refreshing}
-            <div class="hist-refresh-pill" role="status">Loading…</div>
+            <div class="hist-refresh-pill" role="status">{t('common.loading')}</div>
           {/if}
         </div>
         {#if displayed.showAvg}
           <div class="hist-legend">
-            <span class="hist-legend-item"><span class="hist-swatch-bar"></span>daily</span>
-            <span class="hist-legend-item"><span class="hist-swatch-avg"></span>7-day avg</span>
+            <span class="hist-legend-item"
+              ><span class="hist-swatch-bar"></span>{t(
+                'dashboard.dailySummary.history.daily'
+              )}</span
+            >
+            <span class="hist-legend-item"
+              ><span class="hist-swatch-avg"></span>{t(
+                'dashboard.dailySummary.history.movingAverage'
+              )}</span
+            >
           </div>
         {/if}
       {/if}
     </div>
 
     <!-- Bottom range selector -->
-    <div class="hist-ranges" role="group" aria-label="History range">
+    <div
+      class="hist-ranges"
+      role="group"
+      aria-label={t('dashboard.dailySummary.history.rangeGroup')}
+    >
       {#each RANGE_PRESETS as preset (preset.key)}
         <button
           class="hist-range-btn"
@@ -517,47 +562,23 @@
           aria-pressed={range === preset.key}
           onclick={() => selectRange(preset.key)}
         >
-          {preset.label}
+          {preset.key === 'all' ? t('dashboard.dailySummary.history.allShort') : preset.label}
         </button>
       {/each}
     </div>
   </div>
-</div>
+</Modal>
 
 <style>
-  .hist-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 60;
-    display: flex;
-    padding: 1rem;
-    background: rgb(0 0 0 / 0.5);
-
-    /* Scrolls when the panel is taller than the viewport (landscape phones). */
-    overflow-y: auto;
+  /* Panel sizing on top of the shared Modal box. */
+  :global(.hist-panel) {
+    padding: 0.875rem;
   }
 
-  .hist-panel {
-    /* margin auto centers in the flex overlay yet keeps the top reachable
-       when the panel overflows a short viewport. */
-    margin: auto;
-    width: 100%;
-    max-width: 32rem;
-    background: var(--color-base-100);
-    border-radius: 1rem;
-    border: 1px solid color-mix(in srgb, var(--color-base-content) 12%, transparent);
-    box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
-    padding: 0.875rem;
+  .hist-content {
     display: flex;
     flex-direction: column;
     gap: 0.625rem;
-  }
-
-  /* Desktop gets a roomier chart */
-  @media (min-width: 1024px) {
-    .hist-panel {
-      max-width: 40rem;
-    }
   }
 
   .hist-header {
@@ -574,6 +595,8 @@
   }
 
   .hist-title {
+    margin: 0;
+    padding-right: 2rem;
     font-size: 0.95rem;
     font-weight: 700;
     color: var(--color-base-content);
@@ -585,29 +608,6 @@
   .hist-subtitle {
     font-size: 0.68rem;
     color: color-mix(in srgb, var(--color-base-content) 60%, transparent);
-  }
-
-  .hist-close {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 9999px;
-    background: color-mix(in srgb, var(--color-base-content) 10%, transparent);
-    color: var(--color-base-content);
-    border: none;
-    cursor: pointer;
-  }
-
-  .hist-close:hover {
-    background: color-mix(in srgb, var(--color-base-content) 20%, transparent);
-  }
-
-  .hist-close:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
   }
 
   /* ── Stats strip ── */

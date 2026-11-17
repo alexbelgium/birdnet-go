@@ -24,16 +24,16 @@
   import { cn } from '$lib/utils/cn';
   import type { Component } from 'svelte';
   import { Lightbulb } from '@lucide/svelte';
-  import type { IconProps } from '@lucide/svelte';
+  import type { LucideProps } from '@lucide/svelte';
 
   interface ActionConfig {
     label: string;
-    icon?: Component<IconProps>;
+    icon?: Component<LucideProps>;
     onclick: () => void;
   }
 
   interface Props {
-    icon: Component<IconProps>;
+    icon: Component<LucideProps>;
     title: string;
     description: string;
     hints?: string[];
@@ -80,7 +80,7 @@
   {#if hints && hints.length > 0}
     <div class="bg-[var(--color-base-200)]/50 rounded-lg p-4 mb-6 max-w-md text-left">
       <div class="flex items-center gap-2 mb-2">
-        <Lightbulb class="size-4 text-[var(--color-info)]" aria-hidden="true" />
+        <Lightbulb class="size-4 text-[var(--text-info)]" aria-hidden="true" />
         <span class="text-sm font-medium text-[var(--color-base-content)] opacity-80">
           {hintsTitle || 'Tips'}
         </span>

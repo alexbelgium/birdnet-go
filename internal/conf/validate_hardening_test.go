@@ -3,6 +3,7 @@ package conf
 import (
 	"math"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -129,6 +130,15 @@ func TestValidateExportPath(t *testing.T) {
 		{"null byte rejected", "clips\x00/etc/passwd", true, "null bytes"},
 		{"windows-style path treated as relative on unix", "C:\\data\\clips", false, ""},
 		{"dot-only rejected", "..", true, "path traversal"},
+		{"double dot inside a name allowed", "clips..old", false, ""},
+		{"nested double dot inside a name allowed", "data/clips..old/birds", false, ""},
+		{"trailing dots in a name allowed", "clips../birds", false, ""},
+		{"leading parent segment rejected", "../x", true, "path traversal"},
+		{"traversal past nested dir rejected", "a/../../x", true, "path traversal"},
+		{"trailing parent segment rejected", "data/..", true, "path traversal"},
+		{"windows backslash traversal rejected", `..\..\Windows\System32`, true, "path traversal"},
+		{"windows nested backslash traversal rejected", `data\..\..\secret`, true, "path traversal"},
+		{"mixed separator traversal rejected", `data/..\secret`, true, "path traversal"},
 	}
 
 	for _, tt := range tests {
@@ -168,6 +178,16 @@ func TestValidateAudioSettings_ExportPathTraversal(t *testing.T) {
 // -----------------------------------------------------------------------
 // Issue #501: EQ filter negative frequency and zero Q
 // -----------------------------------------------------------------------
+
+// TestMaxEQFrequencyIsNyquistOfHighestSampleRate keeps the equalizer frequency
+// ceiling tied to the supported capture rates, so adding a higher rate cannot
+// leave the ceiling behind.
+func TestMaxEQFrequencyIsNyquistOfHighestSampleRate(t *testing.T) {
+	t.Parallel()
+	highest := slices.Max(validSampleRates)
+	assert.Equal(t, MaxValidSampleRate, highest)
+	assert.InDelta(t, MaxEQFrequency, float64(highest)/2, 0)
+}
 
 func TestValidateEQFilters(t *testing.T) {
 	t.Parallel()
@@ -209,6 +229,17 @@ func TestValidateEQFilters(t *testing.T) {
 			name:    "boundary: max frequency accepted",
 			filters: []EqualizerFilter{{Frequency: MaxEQFrequency, Q: 1.0}},
 			wantErr: false,
+		},
+		{
+			name:    "ultrasonic notch above the 48 kHz Nyquist accepted",
+			filters: []EqualizerFilter{{Type: "BandReject", Frequency: 60000, Width: 1000, Q: 1.0}},
+			wantErr: false,
+		},
+		{
+			name:    "positive infinity frequency rejected",
+			filters: []EqualizerFilter{{Frequency: math.Inf(1), Q: 1.0}},
+			wantErr: true,
+			errMsg:  "exceeds maximum",
 		},
 		{
 			name:    "zero Q rejected",
@@ -426,6 +457,7 @@ func TestValidateWeatherSettings_InvalidProvider(t *testing.T) {
 		{"yrno provider allowed", "yrno", false},
 		{"openweather provider allowed", "openweather", false},
 		{"wunderground provider allowed", "wunderground", false},
+		{"pirateweather provider allowed", "pirateweather", false},
 		{"unknown provider rejected", "invalid_provider", true},
 		{"whitespace-only rejected", "  ", true},
 	}
@@ -439,6 +471,9 @@ func TestValidateWeatherSettings_InvalidProvider(t *testing.T) {
 				Wunderground: WundergroundSettings{
 					APIKey:    "testkey",
 					StationID: "KTEST1",
+				},
+				PirateWeather: PirateWeatherSettings{
+					APIKey: "testkey",
 				},
 			}
 
@@ -615,6 +650,8 @@ func TestValidateBirdNETSettings_NaNInfinityRejected(t *testing.T) {
 		{"NaN threshold", func(c *BirdNETConfig) { c.Threshold = math.NaN() }},
 		{"Inf threshold", func(c *BirdNETConfig) { c.Threshold = math.Inf(1) }},
 		{"NaN overlap", func(c *BirdNETConfig) { c.Overlap = math.NaN() }},
+		{"NaN alternateMinConfidence", func(c *BirdNETConfig) { c.AlternateMinConfidence = math.NaN() }},
+		{"Inf alternateMinConfidence", func(c *BirdNETConfig) { c.AlternateMinConfidence = math.Inf(1) }},
 		{"NaN longitude", func(c *BirdNETConfig) { c.Longitude = math.NaN() }},
 		{"Inf longitude", func(c *BirdNETConfig) { c.Longitude = math.Inf(1) }},
 		{"NaN latitude", func(c *BirdNETConfig) { c.Latitude = math.NaN() }},
@@ -713,4 +750,54 @@ func TestValidateSpeciesConfig_NaNThresholdRejected(t *testing.T) {
 	err := validateRealtimeSettings(settings)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "threshold")
+}
+
+func TestValidateModelConsensusSettings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		cfg       ModelConsensusSettings
+		wantError bool
+	}{
+		{"disabled zero accepted", ModelConsensusSettings{MinModels: 0}, false},
+		{"disabled in range accepted", ModelConsensusSettings{MinModels: MaxModelConsensusMinModels}, false},
+		{"disabled below minimum rejected", ModelConsensusSettings{MinModels: MinModelConsensusMinModels - 1}, true},
+		{"disabled above maximum rejected", ModelConsensusSettings{MinModels: MaxModelConsensusMinModels + 1}, true},
+		{"all species zero rejected", ModelConsensusSettings{AllSpecies: true, MinModels: 0}, true},
+		{"all species below minimum rejected", ModelConsensusSettings{AllSpecies: true, MinModels: MinModelConsensusMinModels - 1}, true},
+		{"listed species above maximum rejected", ModelConsensusSettings{ListedSpecies: true, MinModels: MaxModelConsensusMinModels + 1}, true},
+		{"enabled minimum accepted", ModelConsensusSettings{AllSpecies: true, MinModels: MinModelConsensusMinModels}, false},
+		{"enabled maximum accepted", ModelConsensusSettings{ListedSpecies: true, MinModels: MaxModelConsensusMinModels}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateModelConsensusSettings(&tt.cfg)
+			if tt.wantError {
+				assertValidationError(t, err, "model-consensus-min-models")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestValidateRealtimeSettings_ModelConsensusWired pins that the realtime
+// validator, which the settings API runs on every save, rejects an enabled model
+// consensus filter with an unusable minimum.
+func TestValidateRealtimeSettings_ModelConsensusWired(t *testing.T) {
+	t.Parallel()
+	settings := &RealtimeSettings{
+		Interval: DefaultRealtimeInterval,
+		Audio: AudioSettings{
+			Sources: []AudioSourceConfig{{Name: "test", Device: testAudioDeviceSysdefault, Model: "birdnet"}},
+			Export:  ExportSettings{Type: AudioExportTypeWAV},
+		},
+		ModelConsensus: ModelConsensusSettings{AllSpecies: true, MinModels: 9},
+	}
+
+	assertValidationError(t, validateRealtimeSettings(settings), "model-consensus-min-models")
+
+	settings.ModelConsensus.MinModels = MinModelConsensusMinModels
+	assert.NoError(t, validateRealtimeSettings(settings))
 }

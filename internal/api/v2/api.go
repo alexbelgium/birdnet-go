@@ -4,7 +4,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/tphakala/birdnet-go/internal/analysis/processor"
 	"github.com/tphakala/birdnet-go/internal/api/auth"
 	"github.com/tphakala/birdnet-go/internal/api/v2/alerts"
 	"github.com/tphakala/birdnet-go/internal/api/v2/analytics"
@@ -30,6 +28,7 @@ import (
 	mediaapi "github.com/tphakala/birdnet-go/internal/api/v2/media"
 	"github.com/tphakala/birdnet-go/internal/api/v2/models"
 	"github.com/tphakala/birdnet-go/internal/api/v2/notifications"
+	privacyapi "github.com/tphakala/birdnet-go/internal/api/v2/privacy"
 	rangeapi "github.com/tphakala/birdnet-go/internal/api/v2/range"
 	"github.com/tphakala/birdnet-go/internal/api/v2/species"
 	"github.com/tphakala/birdnet-go/internal/api/v2/sse"
@@ -48,6 +47,8 @@ import (
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/notification"
 	"github.com/tphakala/birdnet-go/internal/observability"
+	"github.com/tphakala/birdnet-go/internal/privacy"
+	"github.com/tphakala/birdnet-go/internal/speciesindex"
 	"github.com/tphakala/birdnet-go/internal/suncalc"
 )
 
@@ -106,9 +107,9 @@ type Controller struct {
 	// (species info, rarity, the all-species picker, the dictionary, thumbnails,
 	// and genus/family/tree lookups). Besides the shared *apicore.Core it receives
 	// two facade-owned function dependencies: a read accessor over the shared
-	// scientific-to-common name map (loadCommonNameMap) and the media domain's
-	// species-image proxy handler (ServeSpeciesImageProxy), both still owned by
-	// package api until their domains are extracted.
+	// orchestrator-owned species-index snapshot (loadNameMaps) and the media
+	// domain's species-image proxy handler (ServeSpeciesImageProxy), both still
+	// owned by package api until their domains are extracted.
 	species *species.Handler
 
 	// models serves the /api/v2/models/* endpoints (listing enabled classifier
@@ -146,6 +147,12 @@ type Controller struct {
 	// global event bus.
 	alerts *alerts.Handler
 
+	// privacyFilter serves the /api/v2/privacy-filter/* endpoints (hourly rollup
+	// and discarded detections, read-only). It needs only the shared
+	// *apicore.Core and builds its repositories in RegisterRoutes when a v2
+	// manager is set.
+	privacyFilter *privacyapi.Handler
+
 	// control serves the /api/v2/control/* endpoints (restart analysis, reload
 	// model, rebuild range filter, restart server/container, restart a single
 	// audio source, and list actions). Beyond the shared *apicore.Core it OWNS
@@ -167,6 +174,24 @@ type Controller struct {
 	audio *audioapi.Handler
 
 	controlChan chan string
+
+	// topologyReconfigureTimer debounces the audio-source reconfigure triggered
+	// by a model topology change (see OnModelTopologyChanged). A gallery variant
+	// switch fires the callback twice and each reconfigure re-probes every RTSP
+	// stream, so the two are coalesced into one. topologyReconfigureShutdown is
+	// set under topologyReconfigureMu by Shutdown so a callback that fires during
+	// teardown does not re-arm the timer.
+	topologyReconfigureMu       sync.Mutex
+	topologyReconfigureTimer    *time.Timer
+	topologyReconfigureShutdown bool
+
+	// optimizeNotices holds the scheduler that keeps the model optimize bell
+	// notice in sync (the models handler), published once the handler is
+	// constructed and started. It is atomic because the model topology callback
+	// is wired by the WithModelManager option, before New constructs c.models,
+	// and can fire from the analyzer's goroutines while New is still running;
+	// reading the plain c.models field there would race.
+	optimizeNotices atomic.Pointer[optimizeNoticeHook]
 
 	// DisableSaveSettings prevents persisting settings changes to disk.
 	// When set to true, all settings modifications remain in memory only.
@@ -258,14 +283,20 @@ type Controller struct {
 	// WithAuthService / WithNotificationService (see NewWithOptions).
 	appHandler *app.Handler
 
-	// Cached BirdNET name maps (facade-owned; see name_maps.go). They are shared
-	// infrastructure: the analytics, detections, and species domains read them via
-	// injected accessors, and internal/analysis drives them through
-	// UpdateCommonNameMap/SetNameResolver on *Controller.
-	nameMaps atomic.Value // stores *nameMaps; see internal/api/v2/name_maps.go
-	// nameResolver is the authoritative localized name source shared with the
-	// classifier orchestrator. Overrides label-derived names in the cached maps.
-	nameResolver atomic.Pointer[datastore.SpeciesNameResolver]
+	// names points at the BirdNET name index the facade reads through the
+	// name_maps.go accessors (the scientific<->common maps plus the authoritative
+	// resolver). The analytics, detections, and species domains read it via
+	// injected bound accessors. NewWithOptions seeds a facade-owned fallback
+	// service; WithSpeciesIndex replaces it with the orchestrator-owned shared
+	// service (ownsNames then false). The accessors treat a nil service (a
+	// bare-struct test) as an empty index.
+	names *speciesindex.Service
+
+	// ownsNames reports whether names is the facade's own fallback service (true)
+	// or the orchestrator-owned shared service injected via WithSpeciesIndex
+	// (false). Only a facade-owned service is seeded from labels in
+	// initInsightsRoutes; the shared service is rebuilt by the orchestrator.
+	ownsNames bool
 
 	// analytics serves the /api/v2/analytics/* species/time/confidence/sun/sources
 	// endpoints, the geographic /range/heatmap endpoint, the /insights/* +
@@ -336,6 +367,18 @@ func WithV2Manager(mgr datastoreV2.Manager) Option {
 	}
 }
 
+// WithDetectionRepository replaces the controller's default detection repository
+// (the datastore.Interface bridge built by apicore.NewCore) with repo. A nil repo
+// keeps the default. Domain handlers share the controller's core and read its Repo
+// per request, so the replacement reaches every handler.
+func WithDetectionRepository(repo datastore.DetectionRepository) Option {
+	return func(c *Controller) {
+		if repo != nil {
+			c.Repo = repo
+		}
+	}
+}
+
 // WithAudioEngine sets the AudioEngine for audio subsystem access.
 func WithAudioEngine(e *engine.AudioEngine) Option {
 	return func(c *Controller) {
@@ -347,10 +390,31 @@ func WithAudioEngine(e *engine.AudioEngine) Option {
 func WithModelManager(mm *classifier.ModelManager) Option {
 	return func(c *Controller) {
 		c.ModelManager = mm
-		// Wire the topology-changed callback so model add/remove broadcasts over
-		// the metrics SSE stream. The method value binds c; c.MetricsStore is read
-		// lazily at call time, so option ordering is irrelevant.
-		mm.SetTopologyChangedCallback(c.BroadcastInferenceTopologyChanged)
+		// Wire the topology-changed callback so a model add/remove both broadcasts
+		// over the metrics SSE stream AND re-registers the model against running
+		// audio sources. The method value binds c; c.MetricsStore and c.controlChan
+		// are read lazily at call time, so option ordering is irrelevant.
+		mm.SetTopologyChangedCallback(c.OnModelTopologyChanged)
+		// A model starting or stopping failing every analysis window changes the
+		// status snapshot (per-model health, the dashboard banner) but not the
+		// topology, so it only broadcasts; it must not reconfigure sources.
+		mm.SetInferenceHealthChangedCallback(c.BroadcastInferenceTopologyChanged)
+	}
+}
+
+// WithSpeciesIndex injects the orchestrator-owned species-name index, shared with
+// the datastore, so the facade reads the same snapshot the orchestrator rebuilds
+// from the union of loaded labels. When set, the facade does not own the service
+// and initInsightsRoutes does not seed it (the orchestrator is its only writer). A
+// nil service leaves the facade's own fallback in place. The domain handlers read
+// c.names at call time, so this may run after they were constructed.
+func WithSpeciesIndex(svc *speciesindex.Service) Option {
+	return func(c *Controller) {
+		if svc == nil {
+			return
+		}
+		c.names = svc
+		c.ownsNames = false
 	}
 }
 
@@ -366,7 +430,7 @@ func WithHealthErrorBuffer(buf *health.ErrorRingBuffer) Option {
 
 // New creates a new API controller, returning an error if initialization fails.
 // The controller owns the global settings singleton: it reads from the current
-// atomic snapshot on each request and publishes updates back via StoreSettings.
+// atomic snapshot on each request and publishes updates back through conf.UpdateSettings.
 func New(e *echo.Echo, ds datastore.Interface, settings *conf.Settings,
 	birdImageCache *imageprovider.BirdImageCache, sunCalc *suncalc.SunCalc,
 	controlChan chan string,
@@ -382,7 +446,7 @@ func New(e *echo.Echo, ds datastore.Interface, settings *conf.Settings,
 		return nil, err
 	}
 	// Force true: the pointer identity check in NewWithOptions can fail when
-	// an out-of-band StoreSettings call (range filter rebuild at startup)
+	// an out-of-band UpdateSettings call (range filter rebuild at startup)
 	// replaces the global pointer before this constructor runs.
 	c.isGlobalOwner = true
 	return c, nil
@@ -410,13 +474,22 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 		isGlobalOwner: settings == conf.GetSettings(),
 	}
 
+	// Initialize the facade-owned fallback species-name index before constructing
+	// any domain handler, since several capture the name-map accessors as bound
+	// methods. It stays empty until initInsightsRoutes seeds it from the current
+	// labels; WithSpeciesIndex may replace it with the orchestrator-owned shared
+	// service during the functional-options loop below (the accessors read c.names
+	// at call time, so the late swap is observed).
+	c.names = speciesindex.New(nil)
+	c.ownsNames = true
+
 	// Construct domain handlers around the shared core. They hold the same
 	// *apicore.Core pointer and register their routes in initRoutes.
 	c.weather = weather.New(c.Core)
 	c.rangeHandler = rangeapi.New(c.Core)
 	// The SSE handler receives the facade-owned auth check (isClientAuthenticated)
-	// so the public detection stream can anonymize the source DisplayName for
-	// unauthenticated subscribers (matching detections/analytics and the
+	// so the public detection and sound level streams can anonymize the source
+	// display name for unauthenticated subscribers (matching detections/analytics and the
 	// StreamAudioLevel precedent). The bound method value reads c.authService at
 	// call time, so the post-functional-option authService is observed per request.
 	c.sse = sse.New(c.Core, c.isClientAuthenticated)
@@ -427,7 +500,7 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	// constructed here, so the &c.settingsMutex address and the method values are
 	// stable for the controller's lifetime.
 	c.tlsHandler = tlsapi.New(c.Core, &c.settingsMutex,
-		c.getSettingsOrFallback, c.publishAndSaveSettings, c.handleSettingsChanges)
+		c.getSettingsOrFallback, c.updateAndSaveSettings, c.handleSettingsChanges)
 	// The integrations handler needs the same facade settings-save machinery as the
 	// TLS handler: the MQTT TLS certificate writes mutate persisted settings, so it
 	// receives the shared &c.settingsMutex (so those writes serialize against the
@@ -436,7 +509,7 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	// lifetime, so this can be wired before the functional options loop (it needs no
 	// option-set dependency).
 	c.integrations = integrations.New(c.Core, &c.settingsMutex,
-		c.getSettingsOrFallback, c.publishAndSaveSettings, c.handleSettingsChanges)
+		c.updateAndSaveSettings, c.handleSettingsChanges)
 	// The detections handler needs the same facade settings-save machinery as the
 	// integrations/TLS handlers (the review/ignore exclude-list mutation persists
 	// settings) plus four more facade-owned function dependencies whose subsystems
@@ -446,7 +519,7 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	// read their backing fields at call time (so the post-option authService is
 	// observed), so this is wired before the functional options loop.
 	c.detections = detections.New(c.Core, &c.settingsMutex,
-		c.getSettingsOrFallback, c.publishAndSaveSettings, c.handleSettingsChanges,
+		c.getSettingsOrFallback, c.updateAndSaveSettings, c.handleSettingsChanges,
 		c.isClientAuthenticated, c.loadCommonNameMap, c.loadFoldedCommonNameMap,
 		c.loadCommonToScientificMap)
 	// The analytics handler is injected the same facade-owned dependencies as
@@ -461,13 +534,13 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	// SecureFS in mediaapi.New). It is constructed BEFORE the species handler
 	// because species injects c.media.ServeSpeciesImageProxy (a method value on
 	// the media handler) for its thumbnail endpoint.
-	c.media = mediaapi.New(c.Core)
-	// The species handler delegates to two dependencies: loadCommonNameMap (the
-	// shared name-map read accessor, facade-owned in name_maps.go) and the media
-	// domain's species-image proxy handler
+	c.media = mediaapi.New(c.Core, c.isClientAuthenticated)
+	// The species handler delegates to two dependencies: loadNameMaps (the shared
+	// species-index snapshot read accessor, facade-owned in name_maps.go) and the
+	// media domain's species-image proxy handler
 	// (c.media.ServeSpeciesImageProxy). They are passed as bound method values; c
 	// is fully constructed here, so the method values are stable for its lifetime.
-	c.species = species.New(c.Core, c.loadCommonNameMap, c.media.ServeSpeciesImageProxy)
+	c.species = species.New(c.Core, c.loadNameMaps, c.media.ServeSpeciesImageProxy)
 	// The support handler needs only the shared core (settings, datastore, V2
 	// manager, and the error/log/goroutine helpers all promote from it).
 	c.support = support.New(c.Core)
@@ -482,6 +555,7 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	// the shared core here (V2Manager, auth middleware, and the error/log helpers
 	// all promote from it).
 	c.alerts = alerts.New(c.Core)
+	c.privacyFilter = privacyapi.New(c.Core)
 	// The control handler owns its sourceRestarter and receives the shared
 	// control-signal channel as a send-only injection. c.controlChan is already
 	// set in the Controller literal above; passing it here narrows it to a
@@ -555,6 +629,18 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	// changes after this point, so capturing it here is behaviorally identical to
 	// a per-request read; every other models dependency promotes from c.Core.
 	c.models = models.New(c.Core, c.authService)
+	// The optimize notice goes to the injected notification service, like the
+	// other notification producers here (nil keeps the process-wide one).
+	c.models.SetNotificationService(c.notificationService)
+	// Keep the model optimize bell notice in sync: evaluate it once at startup
+	// (the analyzer scans the installed models before it builds the web server),
+	// then after topology changes, model installs and uninstalls, and changes to
+	// the location, ModelRegion or primary model path. Skipped when routes are
+	// not initialized (tests), like every other background activity here.
+	if c.ModelManager != nil && initializeRoutes {
+		c.optimizeNotices.Store(&optimizeNoticeHook{scheduler: c.models})
+		c.models.StartOptimizeNoticeSync()
+	}
 
 	// Log auth configuration status
 	log := GetLogger()
@@ -591,9 +677,17 @@ func NewWithOptions(e *echo.Echo, ds datastore.Interface, settings *conf.Setting
 	// owns the diagnostics health infrastructure; its routes are registered in
 	// initRoutes below.
 	c.system = system.New(c.Core, c.startTime, c.healthErrorBuf, audioapi.LatestAudioLevels)
+	// The storage notices go to the injected notification service (nil keeps the
+	// process-wide one).
+	c.system.SetNotificationService(c.notificationService)
 
 	// Initialize routes if requested (skip in tests to avoid starting background goroutines)
 	if initializeRoutes {
+		// Evaluate the storage persistence notices once at startup, then after a
+		// settings save changes one of the paths. Skipped when routes are not
+		// initialized (tests), like every other background activity here.
+		c.system.StartStorageNoticeSync()
+
 		// Initialize synchronization channel for testing
 		c.goroutinesStarted = make(chan struct{})
 		c.initRoutes()
@@ -660,6 +754,7 @@ func (c *Controller) initRoutes() {
 		{"insights routes", c.initInsightsRoutes},
 		{"tls routes", func() { c.tlsHandler.RegisterRoutes(c.Group) }},
 		{"import routes", func() { c.imports.RegisterImportRoutes(c.Group) }},
+		{"privacy filter routes", func() { c.privacyFilter.RegisterRoutes(c.Group) }},
 	}
 
 	for _, initializer := range routeInitializers {
@@ -715,22 +810,21 @@ func (c *Controller) HealthCheck(ctx echo.Context) error {
 	// c.DS may be nil in the "datastore disabled" mode (see NewWithOptions); report
 	// that instead of dereferencing a nil datastore.
 	dbStatus := "connected"
-	var dbError string
 
 	if c.DS == nil {
 		dbStatus = "unavailable"
 	} else if _, dbErr := c.DS.GetLastDetections(1); dbErr != nil {
 		// Try a simple database operation to check connectivity
 		dbStatus = "disconnected"
-		dbError = dbErr.Error()
+		// Log the failure instead of returning it: this endpoint is reachable
+		// without credentials and raw driver text can carry host names, ports and paths.
+		c.log().Warn("Health check database probe failed",
+			logger.String("error", privacy.ScrubMessage(dbErr.Error())))
 		// If database is critical, we might want to change the overall status
 		// response["status"] = "degraded"
 	}
 
 	response["database_status"] = dbStatus
-	if dbError != "" {
-		response["database_error"] = dbError
-	}
 
 	// Add uptime if available
 	if c.startTime != nil {
@@ -799,6 +893,26 @@ func (c *Controller) Shutdown() {
 		c.alerts.Shutdown()
 	}
 
+	// Stop the topology-reconfigure debounce timer and mark it shut down so a
+	// model-topology callback that fires during teardown does not re-arm it. Done
+	// under topologyReconfigureMu, the same lock scheduleAudioSourceReconfigure
+	// takes, so the flag and the timer stay consistent.
+	c.topologyReconfigureMu.Lock()
+	c.topologyReconfigureShutdown = true
+	if c.topologyReconfigureTimer != nil {
+		c.topologyReconfigureTimer.Stop()
+		c.topologyReconfigureTimer = nil
+	}
+	c.topologyReconfigureMu.Unlock()
+
+	// Stop the pending model optimize notice evaluation, and ignore later ones.
+	if h := c.optimizeNotices.Load(); h != nil {
+		h.scheduler.StopOptimizeNoticeSync()
+	}
+
+	// Stop the pending storage notice evaluation, and ignore later ones.
+	c.system.StopStorageNoticeSync()
+
 	// Cancel context to stop all goroutines, then wait for them to finish.
 	c.Cancel()
 	c.Wait()
@@ -832,12 +946,6 @@ func (c *Controller) Shutdown() {
 		GetLogger().Error("Error flushing logs", logger.Error(err))
 	}
 
-	// TODO: The go-cache library's janitor goroutine cannot be stopped.
-	// Consider migrating to a context-aware cache implementation.
-	if c.DetectionCache != nil {
-		c.DetectionCache.Flush()
-	}
-
 	c.Debug("API Controller shutdown complete")
 }
 
@@ -850,30 +958,4 @@ func (c *Controller) HandleErrorForTest(ctx echo.Context, err error, message str
 		fullMessage = fmt.Sprintf("%s: %v", message, err)
 	}
 	return echo.NewHTTPError(code, fullMessage)
-}
-
-// InitializeAPI creates a new API controller and registers all routes.
-// Auth middleware and service should be passed via functional options.
-func InitializeAPI(e *echo.Echo, ds datastore.Interface, settings *conf.Settings,
-	birdImageCache *imageprovider.BirdImageCache, sunCalc *suncalc.SunCalc,
-	controlChan chan string, proc *processor.Processor,
-	metrics *observability.Metrics, opts ...Option) *Controller {
-
-	// Create API controller with metrics and functional options
-	apiController, err := New(e, ds, settings, birdImageCache, sunCalc, controlChan, metrics, opts...)
-	if err != nil {
-		GetLogger().Error("Failed to initialize API", logger.Error(err))
-		os.Exit(1)
-	}
-
-	// Assign processor after initialization
-	apiController.Processor = proc
-
-	// Log initialization
-	apiController.LogInfoIfEnabled("API v2 initialized",
-		logger.String("version", settings.Version),
-		logger.String("build_date", settings.BuildDate),
-	)
-
-	return apiController
 }

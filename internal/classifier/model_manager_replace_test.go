@@ -271,17 +271,18 @@ func TestOrchestrator_ResolveInstalledPaths_NonDefaultVariant(t *testing.T) {
 }
 
 // TestModelManager_InstallOrReplace_RollsBackOnLoadFailure verifies that when the
-// new variant is downloaded and swapped in but fails to LOAD, the switch rolls
-// back to the previous variant and reports failure rather than reporting success
-// with no classifier loaded. BSG is a known registry id with no loader, so
-// LoadModel fails deterministically after the unload.
+// new variant is downloaded but fails to activate, the switch rolls back to the
+// previous variant and reports failure rather than reporting success with no
+// classifier loaded. BSG is a loaded registry id with no variant-swap reload
+// builder, so ReloadForVariantSwap refuses deterministically; nothing is unloaded
+// or swapped, so the old variant is still serving when rollback restores it.
 func TestModelManager_InstallOrReplace_RollsBackOnLoadFailure(t *testing.T) {
 	entry, modelsDir, srvURL := twoVariantServerEntry(t)
 	entry.RegistryID = RegistryIDBSG
 
-	// Fake orchestrator with the model "loaded" (non-primary, nil instance so the
-	// unload closes nothing). LoadModel(BSG) has no registered loader, so the switch
-	// cannot re-load after the unload -> rollback.
+	// Fake orchestrator with the model "loaded" (present in the map). BSG has no
+	// variantSwapBuilder, so the gapless swap refuses before building or swapping,
+	// and the switch rolls back to the previous variant.
 	orch := &Orchestrator{models: map[string]*modelEntry{entry.RegistryID: {}}}
 	orch.SetModelsDir(modelsDir)
 	mm := NewModelManager(modelsDir, orch, nil)
@@ -301,39 +302,6 @@ func TestModelManager_InstallOrReplace_RollsBackOnLoadFailure(t *testing.T) {
 	assert.FileExists(t, fp32Path, "the previous variant's file must be kept on rollback")
 	_, statErr := os.Stat(int8Path)
 	assert.True(t, os.IsNotExist(statErr), "the failed new variant's file must be removed on rollback")
-}
-
-// TestModelManager_InstallOrReplace_UnloadFailureKeepsOldAndCleansNew verifies
-// that when the old model cannot be unloaded (it is the primary), the switch
-// aborts with the old variant intact and the freshly downloaded new files removed.
-func TestModelManager_InstallOrReplace_UnloadFailureKeepsOldAndCleansNew(t *testing.T) {
-	entry, modelsDir, srvURL := twoVariantServerEntry(t)
-	entry.RegistryID = RegistryIDBSG
-
-	// Primary models are refused by UnloadModel, forcing the unload-failure path.
-	primary := &BirdNET{ModelInfo: ModelInfo{ID: entry.RegistryID}}
-	orch := &Orchestrator{
-		ModelInfo: primary.ModelInfo,
-		models:    map[string]*modelEntry{entry.RegistryID: {instance: primary}},
-		primary:   primary,
-	}
-	orch.SetModelsDir(modelsDir)
-	mm := NewModelManager(modelsDir, orch, nil)
-
-	require.NoError(t, mm.InstallOrReplace(t.Context(), &entry, "", srvURL, nil))
-	fp32Path := filepath.Join(modelsDir, entry.ID, "model.onnx")
-	int8Path := filepath.Join(modelsDir, entry.ID, "model_int8.onnx")
-	require.FileExists(t, fp32Path)
-
-	err := mm.InstallOrReplace(t.Context(), &entry, "int8-arm", srvURL, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "still in use")
-
-	assert.Equal(t, "fp32", installedByID(t, mm, entry.ID).VariantID,
-		"an unload failure must leave the old variant installed")
-	assert.FileExists(t, fp32Path, "the old variant's file must be intact")
-	_, statErr := os.Stat(int8Path)
-	assert.True(t, os.IsNotExist(statErr), "the aborted switch's new file must be cleaned up")
 }
 
 // TestModelManager_InstallOrReplace_RejectsWhileDownloading verifies the
@@ -372,7 +340,37 @@ func TestInstalledModelBasenameHint(t *testing.T) {
 
 	s := &conf.Settings{}
 	s.Perch.ModelPath = "/models/perch-v2/perch_v2_int8_arm.onnx"
-	assert.Equal(t, "perch_v2_int8_arm.onnx", installedModelBasenameHint(s, RegistryIDPerchV2))
-	assert.Empty(t, installedModelBasenameHint(s, RegistryIDBirdNETV3), "a family with no recorded path yields no hint")
-	assert.Empty(t, installedModelBasenameHint(nil, RegistryIDPerchV2), "nil settings yields no hint")
+	assert.Equal(t, "perch_v2_int8_arm.onnx", installedModelBasenameHint(s, RegistryIDPerchV2, nil))
+	assert.Empty(t, installedModelBasenameHint(s, RegistryIDBirdNETV3, nil), "a family with no recorded path yields no hint")
+	assert.Empty(t, installedModelBasenameHint(nil, RegistryIDPerchV2, nil), "nil settings yields no hint")
+}
+
+// TestInstalledModelBasenameHint_PrefersLoadedPath pins the stale-variant
+// follow-up: after a
+// stale-path recovery the settings field still names the pre-recovery variant, so
+// the gallery scan must key off the file the LOADED instance is actually running,
+// not config.
+func TestInstalledModelBasenameHint_PrefersLoadedPath(t *testing.T) {
+	t.Parallel()
+
+	s := &conf.Settings{}
+	// Config still points at the stale, pre-recovery variant.
+	s.Perch.ModelPath = "/stale/perch_v2_fp32.onnx"
+
+	// A loaded instance whose resolved path is the RECOVERED variant wins over the
+	// stale config: the scan must report the running variant.
+	loaded := map[string]string{RegistryIDPerchV2: "/models/perch-v2/perch_v2_int8_arm.onnx"}
+	assert.Equal(t, "perch_v2_int8_arm.onnx", installedModelBasenameHint(s, RegistryIDPerchV2, loaded),
+		"the loaded instance's resolved path wins over the stale configured path")
+
+	// A loaded instance running the built-in (empty resolved path) yields no hint
+	// even though config still names a file: present-but-empty is authoritative.
+	builtin := map[string]string{RegistryIDPerchV2: ""}
+	assert.Empty(t, installedModelBasenameHint(s, RegistryIDPerchV2, builtin),
+		"a loaded instance running the built-in yields no hint, not a fallback to the stale config")
+
+	// A family ABSENT from the loaded map (no instance loaded: startup scan, or a
+	// family the user disabled) falls back to the configured value.
+	assert.Equal(t, "perch_v2_fp32.onnx", installedModelBasenameHint(s, RegistryIDPerchV2, map[string]string{}),
+		"with no loaded instance the hint falls back to the configured field")
 }

@@ -1,6 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
-import SpeciesHistoryModal from './SpeciesHistoryModal.svelte';
+import SpeciesHistoryModal, { invalidateSpeciesHistory } from './SpeciesHistoryModal.svelte';
+import en from '../../../../../../../static/messages/en.json';
+import { parsePlural } from '$lib/i18n/pluralParser';
+
+// Resolve keys against the real English catalog so the assertions check the
+// rendered copy, not just the key names.
+vi.mock('$lib/i18n', () => ({
+  getLocale: () => 'en',
+  t: (key: string, params?: Record<string, unknown>) => {
+    let node: unknown = en;
+    for (const part of key.split('.')) {
+      // eslint-disable-next-line security/detect-object-injection -- walking the static en.json catalog
+      node = (node as Record<string, unknown> | undefined)?.[part];
+    }
+    let text = typeof node === 'string' ? parsePlural(node, params ?? {}, 'en') : key;
+    for (const [name, value] of Object.entries(params ?? {})) {
+      text = text.replaceAll(`{${name}}`, String(value));
+    }
+    return text;
+  },
+}));
 
 // Exact response shape produced by GET /api/v2/analytics/time/daily
 // (GetDailyAnalytics in internal/api/v2/analytics): the series is wrapped in
@@ -139,7 +159,70 @@ describe('SpeciesHistoryModal', () => {
   it('closes on Escape', async () => {
     const onClose = vi.fn();
     renderModal({ scientificName: 'Escape species', onClose });
-    await fireEvent.keyDown(window, { key: 'Escape' });
+    await fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('refetches after invalidateSpeciesHistory drops the cached series', async () => {
+    const { unmount } = renderModal({ scientificName: 'Invalidated species' });
+    await waitFor(() => {
+      expect(screen.getByText('8 detections · last 30 days')).toBeInTheDocument();
+    });
+    unmount();
+    invalidateSpeciesHistory('Invalidated species');
+    fetchMock.mockClear();
+
+    renderModal({ scientificName: 'Invalidated species' });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+  });
+
+  it('does not let a request in flight during invalidation repopulate the cache', async () => {
+    let release: (() => void) | undefined;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise<Response>(resolve => {
+          release = () => resolve(apiResponse(SERIES));
+        })
+    );
+    const { unmount } = renderModal({ scientificName: 'Racing species' });
+    await waitFor(() => {
+      expect(release).toBeDefined();
+    });
+    invalidateSpeciesHistory('Racing species');
+    // Resolve every pending request after the invalidation.
+    fetchMock.mockImplementation(() => Promise.resolve(apiResponse(SERIES)));
+    release?.();
+    await waitFor(() => {
+      expect(screen.getByText('8 detections · last 30 days')).toBeInTheDocument();
+    });
+    unmount();
+    fetchMock.mockClear();
+
+    renderModal({ scientificName: 'Racing species' });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+  });
+
+  it('uses the singular form for a single detection', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(apiResponse([{ date: '2026-07-01', count: 1 }]))
+    );
+    renderModal({ scientificName: 'Singular species' });
+    await waitFor(() => {
+      expect(screen.getByText('1 detection · last 30 days')).toBeInTheDocument();
+    });
+  });
+
+  it('labels the dialog with the species title', async () => {
+    renderModal({ scientificName: 'Titled species' });
+    expect(
+      screen.getByRole('dialog', { name: 'Common Blackbird detection history' })
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
   });
 });

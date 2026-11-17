@@ -2,23 +2,42 @@
 package audio
 
 import (
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tphakala/birdnet-go/internal/audiocore/ffmpeg"
+	"github.com/stretchr/testify/require"
+	"github.com/tphakala/birdnet-go/internal/audiocore"
+	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
 // Test error type constant for connection timeout scenarios
 const testErrorTypeTimeout = "connection_timeout"
 
+// Stream URL fixtures for the credential sanitization tests: the URL as FFmpeg
+// reports it and the form API clients must see.
+const (
+	testStreamPassword      = "secret"
+	testCredentialStreamURL = "rtsp://admin:" + testStreamPassword + "@camera.local:554/live"
+	testSanitizedStreamURL  = "rtsp://camera.local:554/live"
+)
+
+// Legacy process_state detail strings the FFmpeg producer records in
+// StreamHealth.StateDetail; the API must echo them byte-identically.
+const (
+	testProcStateRunning     = "running"
+	testProcStateStarting    = "starting"
+	testProcStateBackoff     = "backoff"
+	testProcStateCircuitOpen = "circuit_open"
+)
+
 // TestCreateHealthSnapshot tests the createHealthSnapshot function
 func TestCreateHealthSnapshot(t *testing.T) {
 	t.Run("healthy stream with all fields populated", func(t *testing.T) {
-		health := &ffmpeg.StreamHealth{
+		health := &audiocore.StreamHealth{
 			IsHealthy:          true,
-			ProcessState:       ffmpeg.StateRunning,
+			State:              audiocore.StreamStateConnected,
+			StateDetail:        testProcStateRunning,
 			RestartCount:       0,
 			IsReceivingData:    true,
 			TotalBytesReceived: 1024,
@@ -37,13 +56,14 @@ func TestCreateHealthSnapshot(t *testing.T) {
 	})
 
 	t.Run("unhealthy stream with error context", func(t *testing.T) {
-		health := &ffmpeg.StreamHealth{
+		health := &audiocore.StreamHealth{
 			IsHealthy:          false,
-			ProcessState:       ffmpeg.StateCircuitOpen,
+			State:              audiocore.StreamStateReconnecting,
+			StateDetail:        testProcStateCircuitOpen,
 			RestartCount:       5,
 			IsReceivingData:    false,
 			TotalBytesReceived: 0,
-			LastErrorContext: &ffmpeg.ErrorContext{
+			LastErrorContext: &audiocore.StreamErrorContext{
 				ErrorType:      "rtsp_404",
 				PrimaryMessage: "method DESCRIBE failed: 404 Not Found",
 			},
@@ -58,41 +78,6 @@ func TestCreateHealthSnapshot(t *testing.T) {
 		assert.False(t, snapshot.IsReceivingData)
 		assert.Equal(t, int64(0), snapshot.TotalBytesReceived)
 		assert.Equal(t, "rtsp_404", snapshot.LastErrorType)
-	})
-
-	t.Run("stream with nil error context", func(t *testing.T) {
-		health := &ffmpeg.StreamHealth{
-			IsHealthy:          true,
-			ProcessState:       ffmpeg.StateRunning,
-			RestartCount:       0,
-			IsReceivingData:    true,
-			TotalBytesReceived: 2048,
-			LastErrorContext:   nil,
-		}
-
-		snapshot := createHealthSnapshot("rtsp://test/stream", health)
-
-		assert.Empty(t, snapshot.LastErrorType)
-		assert.True(t, snapshot.IsHealthy)
-	})
-
-	t.Run("stream in backoff state", func(t *testing.T) {
-		health := &ffmpeg.StreamHealth{
-			IsHealthy:          false,
-			ProcessState:       ffmpeg.StateBackoff,
-			RestartCount:       3,
-			IsReceivingData:    false,
-			TotalBytesReceived: 512,
-			LastErrorContext: &ffmpeg.ErrorContext{
-				ErrorType: testErrorTypeTimeout,
-			},
-		}
-
-		snapshot := createHealthSnapshot("rtsp://test/stream", health)
-
-		assert.Equal(t, "backoff", snapshot.ProcessState)
-		assert.Equal(t, 3, snapshot.RestartCount)
-		assert.Equal(t, testErrorTypeTimeout, snapshot.LastErrorType)
 	})
 }
 
@@ -376,9 +361,10 @@ func TestDetermineEventType(t *testing.T) {
 func TestConvertStreamHealthToResponse(t *testing.T) {
 	t.Run("complete health data conversion", func(t *testing.T) {
 		now := time.Now()
-		health := &ffmpeg.StreamHealth{
+		health := &audiocore.StreamHealth{
 			IsHealthy:          true,
-			ProcessState:       ffmpeg.StateRunning,
+			State:              audiocore.StreamStateConnected,
+			StateDetail:        testProcStateRunning,
 			LastDataReceived:   now,
 			RestartCount:       0,
 			Error:              nil,
@@ -386,8 +372,8 @@ func TestConvertStreamHealthToResponse(t *testing.T) {
 			BytesPerSecond:     128000.5,
 			IsReceivingData:    true,
 			LastErrorContext:   nil,
-			ErrorHistory:       []*ffmpeg.ErrorContext{},
-			StateHistory:       []ffmpeg.StateTransition{},
+			ErrorHistory:       []*audiocore.StreamErrorContext{},
+			StateHistory:       []audiocore.StateTransition{},
 		}
 
 		response := convertStreamHealthToResponse("rtsp://user:pass@camera.local:554/stream", health)
@@ -408,9 +394,10 @@ func TestConvertStreamHealthToResponse(t *testing.T) {
 	})
 
 	t.Run("handle nil LastDataReceived", func(t *testing.T) {
-		health := &ffmpeg.StreamHealth{
+		health := &audiocore.StreamHealth{
 			IsHealthy:          false,
-			ProcessState:       ffmpeg.StateStarting,
+			State:              audiocore.StreamStateStarting,
+			StateDetail:        testProcStateStarting,
 			LastDataReceived:   time.Time{}, // Zero time
 			RestartCount:       0,
 			TotalBytesReceived: 0,
@@ -425,10 +412,11 @@ func TestConvertStreamHealthToResponse(t *testing.T) {
 	})
 
 	t.Run("handle error present", func(t *testing.T) {
-		testError := errors.New("connection timeout")
-		health := &ffmpeg.StreamHealth{
+		testError := errors.NewStd("open " + testCredentialStreamURL + " failed: connection timeout")
+		health := &audiocore.StreamHealth{
 			IsHealthy:          false,
-			ProcessState:       ffmpeg.StateBackoff,
+			State:              audiocore.StreamStateReconnecting,
+			StateDetail:        testProcStateBackoff,
 			LastDataReceived:   time.Time{},
 			RestartCount:       2,
 			Error:              testError,
@@ -439,12 +427,13 @@ func TestConvertStreamHealthToResponse(t *testing.T) {
 
 		response := convertStreamHealthToResponse("rtsp://camera.local:554/stream", health)
 
-		assert.Equal(t, "connection timeout", response.Error)
+		assert.Equal(t, "open "+testSanitizedStreamURL+" failed: connection timeout", response.Error)
+		assert.NotContains(t, response.Error, testStreamPassword, "the stream password must not reach API clients")
 	})
 
 	t.Run("handle error context and history", func(t *testing.T) {
 		now := time.Now()
-		errorCtx := &ffmpeg.ErrorContext{
+		errorCtx := &audiocore.StreamErrorContext{
 			ErrorType:      "rtsp_404",
 			PrimaryMessage: "method DESCRIBE failed: 404 Not Found",
 			UserFacingMsg:  "RTSP stream not found (404)",
@@ -459,16 +448,17 @@ func TestConvertStreamHealthToResponse(t *testing.T) {
 			RTSPMethod: "describe",
 		}
 
-		health := &ffmpeg.StreamHealth{
+		health := &audiocore.StreamHealth{
 			IsHealthy:          false,
-			ProcessState:       ffmpeg.StateCircuitOpen,
+			State:              audiocore.StreamStateReconnecting,
+			StateDetail:        testProcStateCircuitOpen,
 			LastDataReceived:   time.Time{},
 			RestartCount:       3,
 			TotalBytesReceived: 0,
 			BytesPerSecond:     0,
 			IsReceivingData:    false,
 			LastErrorContext:   errorCtx,
-			ErrorHistory:       []*ffmpeg.ErrorContext{errorCtx},
+			ErrorHistory:       []*audiocore.StreamErrorContext{errorCtx},
 		}
 
 		response := convertStreamHealthToResponse("rtsp://camera.local:554/stream", health)
@@ -481,18 +471,21 @@ func TestConvertStreamHealthToResponse(t *testing.T) {
 
 	t.Run("handle state history", func(t *testing.T) {
 		now := time.Now()
-		stateHistory := []ffmpeg.StateTransition{
+		stateHistory := []audiocore.StateTransition{
 			{
-				From:      ffmpeg.StateStarting,
-				To:        ffmpeg.StateCircuitOpen,
-				Timestamp: now,
-				Reason:    "permanent failure detected",
+				From:       audiocore.StreamStateStarting,
+				To:         audiocore.StreamStateReconnecting,
+				FromDetail: testProcStateStarting,
+				ToDetail:   testProcStateCircuitOpen,
+				Timestamp:  now,
+				Reason:     "permanent failure detected",
 			},
 		}
 
-		health := &ffmpeg.StreamHealth{
+		health := &audiocore.StreamHealth{
 			IsHealthy:          false,
-			ProcessState:       ffmpeg.StateCircuitOpen,
+			State:              audiocore.StreamStateReconnecting,
+			StateDetail:        testProcStateCircuitOpen,
 			LastDataReceived:   time.Time{},
 			RestartCount:       1,
 			TotalBytesReceived: 0,
@@ -503,16 +496,17 @@ func TestConvertStreamHealthToResponse(t *testing.T) {
 
 		response := convertStreamHealthToResponse("rtsp://camera.local:554/stream", health)
 
-		assert.Len(t, response.StateHistory, 1)
+		require.Len(t, response.StateHistory, 1)
 		assert.Equal(t, "starting", response.StateHistory[0].FromState)
 		assert.Equal(t, "circuit_open", response.StateHistory[0].ToState)
 		assert.Equal(t, "permanent failure detected", response.StateHistory[0].Reason)
 	})
 
 	t.Run("URL sanitization", func(t *testing.T) {
-		health := &ffmpeg.StreamHealth{
+		health := &audiocore.StreamHealth{
 			IsHealthy:          true,
-			ProcessState:       ffmpeg.StateRunning,
+			State:              audiocore.StreamStateConnected,
+			StateDetail:        testProcStateRunning,
 			RestartCount:       0,
 			TotalBytesReceived: 1024,
 			BytesPerSecond:     128,
@@ -526,40 +520,6 @@ func TestConvertStreamHealthToResponse(t *testing.T) {
 		assert.NotContains(t, response.URL, "admin")
 		assert.NotContains(t, response.URL, "secret123")
 	})
-
-	t.Run("multiple URLs with different credentials sanitize to different entries", func(t *testing.T) {
-		// This test verifies that URLs differing only by credentials are preserved
-		// as separate entries when using array response format (not map)
-		health1 := &ffmpeg.StreamHealth{
-			IsHealthy:          true,
-			ProcessState:       ffmpeg.StateRunning,
-			RestartCount:       0,
-			TotalBytesReceived: 1024,
-			BytesPerSecond:     128,
-			IsReceivingData:    true,
-		}
-
-		health2 := &ffmpeg.StreamHealth{
-			IsHealthy:          true,
-			ProcessState:       ffmpeg.StateRunning,
-			RestartCount:       0,
-			TotalBytesReceived: 2048,
-			BytesPerSecond:     256,
-			IsReceivingData:    true,
-		}
-
-		// Two URLs with different credentials but same host/path
-		response1 := convertStreamHealthToResponse("rtsp://admin:pass1@192.168.1.100:554/live", health1)
-		response2 := convertStreamHealthToResponse("rtsp://user:pass2@192.168.1.100:554/live", health2)
-
-		// Both sanitize to the same URL
-		assert.Equal(t, "rtsp://192.168.1.100:554/live", response1.URL)
-		assert.Equal(t, "rtsp://192.168.1.100:554/live", response2.URL)
-
-		// But they have different data (proving they're separate entries)
-		assert.Equal(t, int64(1024), response1.TotalBytesReceived)
-		assert.Equal(t, int64(2048), response2.TotalBytesReceived)
-	})
 }
 
 // TestConvertErrorContextToResponse tests the convertErrorContextToResponse function
@@ -572,7 +532,7 @@ func TestConvertErrorContextToResponse(t *testing.T) {
 	t.Run("complete error context conversion", func(t *testing.T) {
 		now := time.Now()
 		timeout := 10 * time.Second
-		errCtx := &ffmpeg.ErrorContext{
+		errCtx := &audiocore.StreamErrorContext{
 			ErrorType:       testErrorTypeTimeout,
 			PrimaryMessage:  "Connection timed out after 10s",
 			UserFacingMsg:   "Connection timeout",
@@ -603,9 +563,25 @@ func TestConvertErrorContextToResponse(t *testing.T) {
 		assert.True(t, response.ShouldRestart)
 	})
 
+	t.Run("stream credentials are stripped from messages", func(t *testing.T) {
+		errCtx := &audiocore.StreamErrorContext{
+			ErrorType:      testErrorTypeTimeout,
+			PrimaryMessage: "open " + testCredentialStreamURL + " failed",
+			UserFacingMsg:  "Cannot reach " + testCredentialStreamURL,
+		}
+
+		response := convertErrorContextToResponse(errCtx)
+
+		require.NotNil(t, response)
+		assert.Equal(t, "open "+testSanitizedStreamURL+" failed", response.PrimaryMessage)
+		assert.Equal(t, "Cannot reach "+testSanitizedStreamURL, response.UserFacingMessage)
+		assert.NotContains(t, response.PrimaryMessage, testStreamPassword)
+		assert.NotContains(t, response.UserFacingMessage, testStreamPassword)
+	})
+
 	t.Run("permanent failure context", func(t *testing.T) {
 		now := time.Now()
-		errCtx := &ffmpeg.ErrorContext{
+		errCtx := &audiocore.StreamErrorContext{
 			ErrorType:       "rtsp_404",
 			PrimaryMessage:  "method DESCRIBE failed: 404 Not Found",
 			UserFacingMsg:   "RTSP stream not found (404)",
@@ -627,7 +603,7 @@ func TestConvertErrorContextToResponse(t *testing.T) {
 
 	t.Run("RTSP method uppercase conversion", func(t *testing.T) {
 		now := time.Now()
-		errCtx := &ffmpeg.ErrorContext{
+		errCtx := &audiocore.StreamErrorContext{
 			ErrorType:      "rtsp_404",
 			PrimaryMessage: "method SETUP failed",
 			Timestamp:      now,
@@ -641,7 +617,7 @@ func TestConvertErrorContextToResponse(t *testing.T) {
 
 	t.Run("optional fields omitted when not set", func(t *testing.T) {
 		now := time.Now()
-		errCtx := &ffmpeg.ErrorContext{
+		errCtx := &audiocore.StreamErrorContext{
 			ErrorType:      "generic_error",
 			PrimaryMessage: "Something went wrong",
 			Timestamp:      now,

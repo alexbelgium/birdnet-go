@@ -1,0 +1,359 @@
+/**
+ * Tests for the false positive filter cadence math.
+ *
+ * The parity fixture is shared with the Go test TestMinDetections_ParityFixture
+ * (internal/analysis/processor/mindetections_test.go), so the estimate shown
+ * before saving matches the backend count for the same overlap, level and clip.
+ */
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import type {
+  AnalysisCadenceInfo,
+  AnalysisCadenceModel,
+} from '$lib/desktop/features/system/inference.types';
+import {
+  BATTYBIRDNET_STEP_SECONDS,
+  BSG_BAT_STEP_DEFAULT_FRAMES,
+  BSG_BAT_STEP_MAX_FRAMES,
+  BSG_BAT_STEP_MIN_FRAMES,
+  bsgBatStepSeconds,
+  hasBirdCadenceModels,
+  minDetectionsForStep,
+  modelStepSeconds,
+  baseClipMinDetections,
+  overlapSecondsToNs,
+  planLagsSettings,
+  previewEffectiveOverlapSeconds,
+  previewReadout,
+  resolveBsgBatStepFrames,
+  savedReadout,
+} from './fpCadence';
+
+interface ParityRow {
+  modelId: string;
+  clipMs: number;
+  /** BSG-BAT analysis step in frames; absent or 0 means the default. */
+  stepFrames?: number;
+  overlapSec: number;
+  level: number;
+  confirmations: number;
+}
+
+const FIXTURE_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../../../../internal/analysis/processor/testdata/fp_confirmations.json'
+);
+
+function loadFixture(): ParityRow[] {
+  const parsed: unknown = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
+  if (!Array.isArray(parsed)) throw new Error('fixture is not an array');
+  return parsed.filter(
+    (r): r is ParityRow =>
+      typeof r === 'object' &&
+      r !== null &&
+      typeof r.modelId === 'string' &&
+      typeof r.clipMs === 'number' &&
+      (r.stepFrames === undefined || typeof r.stepFrames === 'number') &&
+      typeof r.overlapSec === 'number' &&
+      typeof r.level === 'number' &&
+      typeof r.confirmations === 'number'
+  );
+}
+
+function cadence(overrides: Partial<AnalysisCadenceInfo> = {}): AnalysisCadenceInfo {
+  return {
+    status: 'capped',
+    filterLevel: 5,
+    configuredOverlapSec: 2.8,
+    effectiveOverlapSec: 1.8,
+    minBaseStepMs: 1200,
+    sourceCount: 1,
+    modelCount: 3,
+    unknownLatencyModels: [],
+    models: [
+      {
+        id: 'BirdNET_V2.4',
+        name: 'BirdNET v2.4',
+        taxonGroup: 'bird',
+        clipMs: 3000,
+        stepMs: 1200,
+        probeLatencyMs: 166,
+        confirmations: 4,
+        windowsInReference: 5,
+      },
+      {
+        id: 'Bat',
+        name: 'Bat',
+        taxonGroup: 'bat',
+        clipMs: 3000,
+        stepMs: 1500,
+        confirmations: 4,
+        windowsInReference: 4,
+      },
+      {
+        id: 'BirdNET_V3.0',
+        name: 'BirdNET v3.0',
+        taxonGroup: 'bird',
+        clipMs: 5000,
+        stepMs: 2000,
+        probeLatencyMs: 874,
+        confirmations: 3,
+        windowsInReference: 3,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+const BSG_BAT_MODEL: AnalysisCadenceModel = {
+  id: 'BSG_BAT',
+  name: 'BSG-BAT',
+  taxonGroup: 'bat',
+  clipMs: 1024,
+  stepMs: 500,
+  confirmations: 5,
+  windowsInReference: 12,
+};
+
+describe('fpCadence', () => {
+  describe('taxon group classification', () => {
+    const [birdV24, bat, birdV3] = cadence().models;
+    const withModels = (models: AnalysisCadenceModel[]) => cadence({ models });
+
+    it('treats Bat only as no bird models', () => {
+      const info = withModels([bat]);
+      expect(hasBirdCadenceModels(info)).toBe(false);
+      expect(savedReadout(info)).toEqual([]);
+      expect(previewReadout(info, 2.8, 5)).toEqual([]);
+    });
+
+    it('treats BSG-BAT only as no bird models', () => {
+      const info = withModels([BSG_BAT_MODEL]);
+      expect(hasBirdCadenceModels(info)).toBe(false);
+      expect(savedReadout(info)).toEqual([]);
+      expect(previewReadout(info, 2.8, 5)).toEqual([]);
+    });
+
+    it('leaves out both bat-group models next to a bird model', () => {
+      const info = withModels([birdV24, bat, BSG_BAT_MODEL]);
+      expect(hasBirdCadenceModels(info)).toBe(true);
+      expect(savedReadout(info).map(r => r.id)).toEqual(['BirdNET_V2.4']);
+      expect(previewReadout(info, 2.8, 5).map(r => r.id)).toEqual(['BirdNET_V2.4']);
+    });
+
+    it('keeps every bird model when no bat model runs', () => {
+      const info = withModels([birdV24, birdV3]);
+      expect(hasBirdCadenceModels(info)).toBe(true);
+      expect(savedReadout(info).map(r => r.id)).toEqual(['BirdNET_V2.4', 'BirdNET_V3.0']);
+    });
+
+    it('treats a model without a taxon group as a bird model', () => {
+      expect(hasBirdCadenceModels(withModels([{ ...birdV24, taxonGroup: undefined }]))).toBe(true);
+    });
+  });
+
+  describe('parity with the backend', () => {
+    const rows = loadFixture();
+
+    it('loads the shared fixture', () => {
+      expect(rows.length).toBeGreaterThan(100);
+    });
+
+    /** The step the page uses for a row: the bat-group models have their own, bird models follow the overlap. */
+    function rowStepSeconds(row: ParityRow): number {
+      if (row.modelId === 'BSG_BAT') {
+        return bsgBatStepSeconds(resolveBsgBatStepFrames(row.stepFrames));
+      }
+      if (row.modelId === 'Bat') return BATTYBIRDNET_STEP_SECONDS;
+      return modelStepSeconds(row.clipMs, overlapSecondsToNs(row.overlapSec));
+    }
+
+    it('matches every backend confirmation count in the fixture', () => {
+      const mismatches = rows.filter(
+        row => minDetectionsForStep(rowStepSeconds(row), row.level) !== row.confirmations
+      );
+      expect(mismatches).toEqual([]);
+    });
+
+    it('covers BSG-BAT at the range ends and the default, and BattyBirdNET', () => {
+      const bsgFrames = new Set(
+        rows.filter(r => r.modelId === 'BSG_BAT').map(r => r.stepFrames ?? 0)
+      );
+      expect([...bsgFrames].sort((a, b) => a - b)).toEqual([
+        0,
+        BSG_BAT_STEP_MIN_FRAMES,
+        BSG_BAT_STEP_DEFAULT_FRAMES,
+        BSG_BAT_STEP_MAX_FRAMES,
+      ]);
+      expect(rows.some(r => r.modelId === 'Bat')).toBe(true);
+    });
+  });
+
+  describe('BSG-BAT step', () => {
+    it('keeps the backend range and default', () => {
+      // conf.MinBSGBatStepFrames, MaxBSGBatStepFrames and DefaultBSGBatStepFrames
+      expect([
+        BSG_BAT_STEP_MIN_FRAMES,
+        BSG_BAT_STEP_MAX_FRAMES,
+        BSG_BAT_STEP_DEFAULT_FRAMES,
+      ]).toEqual([100, 512, 250]);
+    });
+
+    it.each([
+      { stored: undefined, frames: BSG_BAT_STEP_DEFAULT_FRAMES },
+      { stored: 0, frames: BSG_BAT_STEP_DEFAULT_FRAMES },
+      { stored: 99, frames: BSG_BAT_STEP_DEFAULT_FRAMES },
+      { stored: 513, frames: BSG_BAT_STEP_DEFAULT_FRAMES },
+      { stored: Number.NaN, frames: BSG_BAT_STEP_DEFAULT_FRAMES },
+      { stored: 300.5, frames: BSG_BAT_STEP_DEFAULT_FRAMES },
+      { stored: 100, frames: 100 },
+      { stored: 333, frames: 333 },
+      { stored: 512, frames: 512 },
+    ])('resolves a stored $stored to $frames frames', ({ stored, frames }) => {
+      expect(resolveBsgBatStepFrames(stored)).toBe(frames);
+    });
+
+    it.each([
+      { frames: 100, seconds: 0.2 },
+      { frames: 250, seconds: 0.5 },
+      { frames: 375, seconds: 0.75 },
+      { frames: 512, seconds: 1.024 },
+    ])('turns $frames frames into $seconds s', ({ frames, seconds }) => {
+      expect(bsgBatStepSeconds(frames)).toBeCloseTo(seconds, 12);
+    });
+  });
+
+  describe('minDetectionsForStep', () => {
+    it('requires one confirmation with the filter off', () => {
+      expect(minDetectionsForStep(0.2, 0)).toBe(1);
+    });
+
+    it('reproduces the worked examples', () => {
+      expect(minDetectionsForStep(0.2, 5)).toBe(21);
+      expect(minDetectionsForStep(1.2, 5)).toBe(4);
+      expect(minDetectionsForStep(2.0, 5)).toBe(3);
+    });
+  });
+
+  describe('savedReadout', () => {
+    it('uses the server counts and leaves out the bat model', () => {
+      expect(savedReadout(cadence())).toEqual([
+        {
+          id: 'BirdNET_V2.4',
+          name: 'BirdNET v2.4',
+          confirmations: 4,
+          windows: 5,
+          stepSeconds: 1.2,
+        },
+        { id: 'BirdNET_V3.0', name: 'BirdNET v3.0', confirmations: 3, windows: 3, stepSeconds: 2 },
+      ]);
+    });
+  });
+
+  describe('previewEffectiveOverlapSeconds', () => {
+    it('keeps the plan effective overlap when only the level changes', () => {
+      expect(previewEffectiveOverlapSeconds(cadence(), 2.8, 4)).toBe(1.8);
+    });
+
+    it('keeps an off-grid configured overlap that fits when only the level changes', () => {
+      // The plan keeps 2.25 s (its duty fits) but reports the 0.8 s grid step;
+      // capping at 3 - 0.8 = 2.2 s would understate the overlap in use.
+      const offGrid = cadence({
+        status: 'ok',
+        configuredOverlapSec: 2.25,
+        effectiveOverlapSec: 2.25,
+        minBaseStepMs: 800,
+      });
+      expect(previewEffectiveOverlapSeconds(offGrid, 2.25, 4)).toBe(2.25);
+    });
+
+    it('caps a changed overlap at the smallest sustainable step', () => {
+      expect(previewEffectiveOverlapSeconds(cadence(), 2.4, 3)).toBeCloseTo(1.8, 9);
+      expect(previewEffectiveOverlapSeconds(cadence(), 1.5, 3)).toBe(1.5);
+    });
+
+    it('applies no cap with the filter off', () => {
+      expect(previewEffectiveOverlapSeconds(cadence(), 2.8, 0)).toBe(2.8);
+    });
+
+    it('runs an overloaded device at zero overlap', () => {
+      expect(
+        previewEffectiveOverlapSeconds(cadence({ status: 'overloaded', minBaseStepMs: 0 }), 2.7, 4)
+      ).toBe(0);
+    });
+
+    it('uses the edited overlap when the plan has no step limit', () => {
+      expect(
+        previewEffectiveOverlapSeconds(
+          cadence({ status: 'filterOff', configuredOverlapSec: 0, minBaseStepMs: 0 }),
+          2.4,
+          3
+        )
+      ).toBe(2.4);
+    });
+  });
+
+  describe('previewReadout', () => {
+    it('estimates each bird model at the capped overlap', () => {
+      const rows = previewReadout(cadence(), 2.8, 4);
+      expect(rows.map(r => [r.id, r.confirmations, Math.round(r.windows)])).toEqual([
+        ['BirdNET_V2.4', 3, 5],
+        ['BirdNET_V3.0', 2, 3],
+      ]);
+    });
+  });
+
+  describe('planLagsSettings', () => {
+    it('is false when the snapshot matches the saved settings', () => {
+      expect(planLagsSettings(cadence(), 2.8, 5)).toBe(false);
+    });
+
+    it('is true when the saved overlap differs from the plan', () => {
+      expect(planLagsSettings(cadence(), 2.4, 5)).toBe(true);
+    });
+
+    it('is true when the counts were computed for another level', () => {
+      // The snapshot was fetched before level 3 was saved; both are on the
+      // filter-on side, so no re-plan follows, only the next fetch clears it.
+      expect(planLagsSettings(cadence(), 2.8, 3)).toBe(true);
+      expect(planLagsSettings(cadence({ filterLevel: 3 }), 2.8, 3)).toBe(false);
+    });
+
+    it('is true when the plan is on the other side of the filter on/off line', () => {
+      // The snapshot already reads the saved level, but the re-plan is pending.
+      expect(planLagsSettings(cadence({ status: 'filterOff' }), 2.8, 5)).toBe(true);
+      expect(planLagsSettings(cadence({ filterLevel: 0 }), 2.8, 0)).toBe(true);
+      expect(planLagsSettings(cadence({ status: 'filterOff', filterLevel: 0 }), 2.8, 0)).toBe(
+        false
+      );
+    });
+  });
+
+  describe('baseClipMinDetections', () => {
+    // The count the level description stated before this module existed:
+    // max(0.1, 3 - overlap) seconds per window, ceil(6 / step * threshold).
+    const THRESHOLDS = [0, 0.2, 0.3, 0.5, 0.6, 0.7];
+    function previousCount(level: number, overlap: number): number {
+      if (level === 0) return 1;
+      const step = Math.max(0.1, 3 - overlap);
+      return Math.max(1, Math.ceil((6 / step) * (THRESHOLDS.at(level) ?? 0) - 1e-9));
+    }
+
+    it('matches the previous description count for every level and 0.01 s overlap', () => {
+      for (let level = 0; level <= 5; level++) {
+        for (let hundredths = 0; hundredths <= 290; hundredths++) {
+          const overlap = hundredths / 100;
+          expect(baseClipMinDetections(overlap, level), `level ${level}, ${overlap} s`).toBe(
+            previousCount(level, overlap)
+          );
+        }
+      }
+    });
+
+    it('needs 21 confirmations at level 5 and 2.8 s overlap', () => {
+      expect(baseClipMinDetections(2.8, 5)).toBe(21);
+    });
+  });
+});

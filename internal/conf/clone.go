@@ -14,8 +14,9 @@ import (
 
 // CloneSettings returns a deep copy of src that shares no slice or map backing
 // arrays with src. The returned pointer is safe to mutate before atomically
-// publishing via StoreSettings; readers holding the previous snapshot keep
-// seeing consistent values because src is never touched.
+// publishing (UpdateSettings hands its mutate function such a clone); readers
+// holding the previous snapshot keep seeing consistent values because src is
+// never touched.
 //
 // Every slice and map field reachable from the Settings struct must be cloned
 // here. TestCloneSettings_DeepIndependence is the primary guardrail: any
@@ -54,11 +55,9 @@ func CloneSettings(src *Settings) *Settings {
 
 	// Models.
 	dst.Models.Enabled = slices.Clone(src.Models.Enabled)
-	dst.Models.Installed = slices.Clone(src.Models.Installed)
 
 	// Realtime.Audio.
 	dst.Realtime.Audio.Sources = cloneAudioSources(src.Realtime.Audio.Sources)
-	dst.Realtime.Audio.SoxAudioTypes = slices.Clone(src.Realtime.Audio.SoxAudioTypes)
 	dst.Realtime.Audio.Equalizer.Filters = slices.Clone(src.Realtime.Audio.Equalizer.Filters)
 
 	// Realtime.Dashboard.
@@ -73,6 +72,9 @@ func CloneSettings(src *Settings) *Settings {
 
 	// Realtime.DaylightFilter.
 	dst.Realtime.DaylightFilter.Species = slices.Clone(src.Realtime.DaylightFilter.Species)
+
+	// Realtime.ModelConsensus.
+	dst.Realtime.ModelConsensus.Species = slices.Clone(src.Realtime.ModelConsensus.Species)
 
 	// Realtime.RTSP.
 	dst.Realtime.RTSP.Streams = cloneStreamConfigs(src.Realtime.RTSP.Streams)
@@ -97,6 +99,7 @@ func CloneSettings(src *Settings) *Settings {
 	// Security.
 	dst.Security.OAuthProviders = cloneOAuthProviders(src.Security.OAuthProviders)
 	dst.Security.TrustedProxies = slices.Clone(src.Security.TrustedProxies)
+	dst.Security.PlainHTTPSessionClients = slices.Clone(src.Security.PlainHTTPSessionClients)
 
 	// Backup.
 	dst.Backup.Targets = cloneBackupTargets(src.Backup.Targets)

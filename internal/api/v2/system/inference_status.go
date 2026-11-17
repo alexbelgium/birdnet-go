@@ -41,6 +41,20 @@ type InferenceStatusResponse struct {
 	VAD                  *VADStatusInfo `json:"vad,omitempty"`
 	RuntimeBaselineBytes int64          `json:"runtimeBaselineBytes,omitempty"`
 	SnapshotAtUnix       int64          `json:"snapshotAtUnix"`
+	// DefaultTargets are the registry IDs a source with an empty model list analyzes
+	// with (Orchestrator.DefaultTargets), in that order; empty at N = 0. The source
+	// editor pre-selects them for a new source (model de-privilege epic, Phase 4).
+	DefaultTargets []string `json:"defaultTargets"`
+	// AcousticModelsState is the classifier verdict: "ok", "none_installed" or
+	// "load_failed"; the dashboard shows its no-model banner whenever it is not "ok".
+	// The empty string ("") is an API-only sentinel meaning "unavailable": no processor
+	// or orchestrator is wired yet, so the classifier has produced no verdict.
+	AcousticModelsState string `json:"acousticModelsState"`
+	// AnalysisCadence reports the planned analysis cadence: configured versus
+	// effective overlap and the confirmation counts they imply. Omitted when no
+	// cadence plan has been published (no orchestrator wired, or before the audio
+	// pipeline starts).
+	AnalysisCadence *AnalysisCadenceInfo `json:"analysisCadence,omitempty"`
 }
 
 // VADStatusInfo reports the privacy-filter Silero VAD speech gate for the
@@ -49,8 +63,9 @@ type VADStatusInfo struct {
 	// Enabled is the configured VAD gate toggle (realtime.privacyfilter.vad.enabled).
 	Enabled bool `json:"enabled"`
 	// Available reports whether a model source resolves (an embedded model is
-	// present, or a modelpath override is set). When false the gate is inert even
-	// if Enabled is true (e.g. a noembed build with no modelpath).
+	// present, or a modelpath override is set). The embedded model ships in every
+	// build, so this is effectively always true; it is false only if no model
+	// source resolves at all.
 	Available bool `json:"available"`
 	// Loaded is true when a session is currently held (loaded and scoring). It is
 	// set on a successful load and cleared on unload or an inference error.
@@ -116,7 +131,7 @@ type HardwareInfo struct {
 	// can use them, so the UI can explain an unusable one instead of hiding it.
 	Accelerators []AcceleratorInfo `json:"accelerators,omitempty"`
 	// TotalRamBytes is the effective memory ceiling, host RAM clamped by any
-	// cgroup limit.
+	// cgroup limit. Omitted when the limit could not be determined exactly.
 	TotalRAMBytes int64 `json:"totalRamBytes,omitempty"`
 	// PhysicalCores is the physical core count.
 	PhysicalCores int `json:"physicalCores,omitempty"`
@@ -209,6 +224,71 @@ type InferenceModelStatus struct {
 	// detections for this model (the "Last heard" table), throttled per species so
 	// a continuously singing bird does not flood it. Empty when none.
 	RecentDetections []LastDetectionInfo `json:"recentDetections"`
+	// Health is the model's current inference health: whether its analysis
+	// windows are succeeding, with per-model telemetry. Absent when no
+	// orchestrator is wired, or for a model that loaded during the request.
+	Health *ModelHealthInfo `json:"health,omitempty"`
+}
+
+// Model health states reported in ModelHealthInfo.State.
+const (
+	// modelHealthOK: the latest analysis windows succeed (or failed fewer than
+	// classifier.InferenceFailureNoticeThreshold times in a row).
+	modelHealthOK = "ok"
+	// modelHealthFailing: the model failed its last
+	// classifier.InferenceFailureNoticeThreshold or more windows in a row.
+	modelHealthFailing = "failing"
+	// modelHealthIdle: loaded, but no analysis window has run yet.
+	modelHealthIdle = "idle"
+)
+
+// ModelHealthInfo is the current inference health of one loaded model: a live
+// state rather than the lifetime Stats.ErrorRate, plus the telemetry that says
+// whether the model is doing anything at all.
+type ModelHealthInfo struct {
+	// State is "ok", "failing" or "idle".
+	State string `json:"state"`
+	// ConsecutiveFailures is the current run of failed analysis windows.
+	ConsecutiveFailures int64 `json:"consecutiveFailures"`
+	// FailureThreshold is the run length at which State becomes "failing".
+	FailureThreshold int `json:"failureThreshold"`
+	// InferenceCount is the number of analysis windows the loaded instance ran,
+	// succeeded or failed.
+	InferenceCount int64 `json:"inferenceCount"`
+	// LastInferenceAtUnix is when the last window finished (Unix seconds), 0 when
+	// none has run.
+	LastInferenceAtUnix int64 `json:"lastInferenceAtUnix,omitempty"`
+	// LastSuccessAtUnix is when the last window succeeded (Unix seconds), 0 when
+	// none has.
+	LastSuccessAtUnix int64 `json:"lastSuccessAtUnix,omitempty"`
+	// ErrorClass is the class of the latest failure ("non_finite_output",
+	// "inference_error"), empty while no failure run is in progress.
+	ErrorClass string `json:"errorClass,omitempty"`
+}
+
+// buildModelHealth maps the classifier's per-model inference health onto the
+// API payload. It is pure.
+func buildModelHealth(h *classifier.ModelInferenceHealth) *ModelHealthInfo {
+	info := &ModelHealthInfo{
+		State:               modelHealthOK,
+		ConsecutiveFailures: h.ConsecutiveFailures,
+		FailureThreshold:    classifier.InferenceFailureNoticeThreshold,
+		InferenceCount:      h.InferenceCount,
+		ErrorClass:          h.ErrorClass,
+	}
+	switch {
+	case h.Failing:
+		info.State = modelHealthFailing
+	case h.InferenceCount == 0:
+		info.State = modelHealthIdle
+	}
+	if !h.LastInferenceAt.IsZero() {
+		info.LastInferenceAtUnix = h.LastInferenceAt.Unix()
+	}
+	if !h.LastSuccessAt.IsZero() {
+		info.LastSuccessAtUnix = h.LastSuccessAt.Unix()
+	}
+	return info
 }
 
 // ModelSpecInfo carries the audio input requirements of a model.
@@ -247,13 +327,21 @@ type ModelMemoryInfo struct {
 }
 
 // ModelSourceInfo describes one audio source attached to a model.
-// Fallback is true when the source is attached to the primary model by default
-// rather than by an explicit config selection.
+// Fallback is true when the source is attached as a default analysis target
+// (DefaultTargets) rather than by an explicit config selection.
 type ModelSourceInfo struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Type     string `json:"type,omitempty"`
 	Fallback bool   `json:"fallback,omitempty"`
+	// NotRunning marks a source that the configuration assigns to this model but
+	// whose audio does not actually reach it, because the audio router has no
+	// analysis buffer for the pair. That happens when the model failed to load or
+	// its buffer allocation failed, and it used to be invisible: the status
+	// reported the model as attached purely because the config said so, so the UI
+	// showed a model running while it analyzed nothing (GitHub #4201, #4204).
+	// Omitted when the source really is attached.
+	NotRunning bool `json:"notRunning,omitempty"`
 }
 
 // ModelMetricKeys carries the Prometheus-style metric key names for a model's
@@ -426,9 +514,10 @@ func applyRuntimeBackend(status *InferenceModelStatus, backend, precision string
 
 // GetInferenceStatus handles GET /api/v2/system/inference. It returns a
 // read-only snapshot of the inference subsystem: hardware, backends, loaded
-// models with per-model stats and memory, source attachment, and audio pipeline
-// metrics. The snapshot is assembled from live sources on every request so it
-// reflects hot-reload changes without any caching.
+// models with per-model stats, memory and current inference health, source
+// attachment, and audio pipeline metrics. The snapshot is assembled from live
+// sources on every request so it reflects hot-reload changes without any
+// caching.
 func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 	settings := c.CurrentSettings()
 
@@ -456,7 +545,8 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 	// because it carries no settings dependency. Handing them to the profile
 	// rather than letting it probe again keeps one probe behind every field of
 	// this response, so the backends card and the capability tokens cannot
-	// disagree, and halves the per-request OpenVINO device queries.
+	// disagree, and reads the OpenVINO device list once per request (from the
+	// out-of-process probe cache, see inference.OpenVINOHasDevice).
 	profile := hwprofile.Hardware().WithBackends(hwprofile.Backends{
 		TFLite: hwprofile.BackendStatus{Available: resp.Backends.TFLite.Available},
 		ONNX: hwprofile.BackendStatus{
@@ -478,7 +568,7 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 	if c.ModelManager != nil {
 		infos = c.ModelManager.ModelInfos()
 	}
-	// Fetch the orchestrator once: it is the live source for RSS, primary ID,
+	// Fetch the orchestrator once: it is the live source for RSS, default targets,
 	// load failures, per-model device, and per-model schedule status. The
 	// Processor guard mirrors the GetLastDetection guard below.
 	var orch *classifier.Orchestrator
@@ -486,15 +576,26 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 		orch = c.Processor.GetBirdNET()
 	}
 	var rss map[string]int64
-	primaryID := ""
+	var defaultIDs []string
 	var loadFailures map[string]int64
 	if orch != nil {
 		rss, resp.RuntimeBaselineBytes = orch.ModelRSS()
-		primaryID = orch.PrimaryModelID()
+		targets := orch.DefaultTargets()
+		defaultIDs = make([]string, len(targets))
+		for i := range targets {
+			defaultIDs[i] = targets[i].ID
+		}
 		loadFailures = orch.LoadFailures()
+		resp.AcousticModelsState = string(orch.AcousticModelsState())
+	}
+	// DefaultTargets never marshals as null (the frontend gates on it): it is empty at
+	// N = 0 or when no orchestrator is wired (model de-privilege epic, Phase 4).
+	resp.DefaultTargets = defaultIDs
+	if resp.DefaultTargets == nil {
+		resp.DefaultTargets = []string{}
 	}
 	counters := classifier.GetInferenceCounters().PeekAll()
-	attachments := buildSourceAttachments(settings, infos, primaryID)
+	attachments := buildSourceAttachments(settings, infos, defaultIDs, c.runningModelsBySource())
 
 	// Compute per-model device, backend, precision, and schedule status from the
 	// live orchestrator. The device/backend/precision triplet is read in one
@@ -507,7 +608,13 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 	runtimes := make(map[string]modelRuntime, len(infos))
 	paused := make(map[string]bool, len(infos))
 	scheduleLabels := make(map[string]string, len(infos))
+	var healthByID map[string]*ModelHealthInfo
 	if orch != nil {
+		health := orch.InferenceHealth()
+		healthByID = make(map[string]*ModelHealthInfo, len(health))
+		for i := range health {
+			healthByID[health[i].ModelID] = buildModelHealth(&health[i])
+		}
 		for i := range infos {
 			id := infos[i].ID
 			device, backend, precision := orch.GetModelRuntimeInfo(id)
@@ -611,6 +718,10 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 		resp.VAD = info
 	}
 
+	if orch != nil {
+		resp.AnalysisCadence = buildAnalysisCadence(orch.CadencePlan(), infos, settings)
+	}
+
 	resp.Models = make([]InferenceModelStatus, 0, len(infos))
 	for i := range infos {
 		id := infos[i].ID
@@ -629,6 +740,7 @@ func (c *Handler) GetInferenceStatus(ctx echo.Context) error {
 		status.Paused = paused[id]
 		status.ScheduleLabel = scheduleLabels[id]
 		status.RecentDetections = recentDetections[id]
+		status.Health = healthByID[id]
 		if status.RecentDetections == nil {
 			status.RecentDetections = []LastDetectionInfo{}
 		}
@@ -697,11 +809,21 @@ func sortInferenceModelsByName(models []InferenceModelStatus) {
 }
 
 // buildSourceAttachments computes, per loaded model registry ID, the audio
-// sources attached to it from configuration. A source whose Models resolve to a
-// loaded model attaches there; a source with no resolvable model falls back to
-// the primary model with Fallback=true. Live registry enrichment (DisplayName,
-// State) is deferred to Phase 2; Phase 1 uses config identity.
-func buildSourceAttachments(settings *conf.Settings, models []classifier.ModelInfo, primaryID string) map[string][]ModelSourceInfo {
+// sources attached to it. A source whose Models resolve to a loaded model
+// attaches there; a source with no resolvable model falls back to the default
+// targets (the first default only for a misconfigured, non-empty list) with
+// Fallback=true.
+//
+// running carries the audio router's actual per-source model set, keyed by
+// source display name (see (*Handler).runningModelsBySource). Configuration
+// alone is not evidence that a model analyzes a source: the router fans a
+// source out only to the models it has allocated an analysis buffer for, and a
+// model can be configured, loaded, and still receive nothing. Reporting from
+// config alone is what let the UI show Perch running while it analyzed no audio
+// (GitHub #4201, #4204). When running is nil the audio engine is not available
+// (the pipeline has not started, or this is a test), and the config-derived
+// view is the best answer available, so it is used unmarked.
+func buildSourceAttachments(settings *conf.Settings, models []classifier.ModelInfo, defaultIDs []string, running map[string]map[string]bool) map[string][]ModelSourceInfo {
 	loaded := make(map[string]bool, len(models))
 	for i := range models {
 		loaded[models[i].ID] = true
@@ -712,19 +834,49 @@ func buildSourceAttachments(settings *conf.Settings, models []classifier.ModelIn
 		// A source can feed several models at once. The runtime fans its audio out
 		// to every assigned+loaded model (see analysis.resolveModelTargets), so the
 		// status view must attach the source to all of them, not just the first.
-		matched := false
+		live, haveLive := running[name]
+		resolvedToLoaded := false
 		for _, cm := range configModels {
 			regID, ok := classifier.ResolveConfigModelID(cm)
 			if !ok || !loaded[regID] {
 				continue
 			}
-			out[regID] = append(out[regID], ModelSourceInfo{ID: name, Name: name, Type: sourceType, Fallback: false})
-			matched = true
+			// A configured model that resolves to a loaded model is a target,
+			// regardless of whether it currently has an analysis buffer. This mirrors
+			// the pipeline: resolveModelTargets filters on loaded, so a loaded target
+			// here is exactly what stops registerConsumersForSources from falling back.
+			resolvedToLoaded = true
+			// Surface the source either way, but say which it is: a model the router
+			// really feeds, or one the config assigns that gets no audio.
+			notRunning := haveLive && !live[regID]
+			out[regID] = append(out[regID], ModelSourceInfo{
+				ID: name, Name: name, Type: sourceType, Fallback: false, NotRunning: notRunning,
+			})
 		}
-		// No assigned model resolved to a loaded one: the primary model analyzes the
-		// source as the runtime fallback, so surface it there with Fallback=true.
-		if !matched && primaryID != "" {
-			out[primaryID] = append(out[primaryID], ModelSourceInfo{ID: name, Name: name, Type: sourceType, Fallback: true})
+		// The runtime falls back to the default targets only when a source resolves to
+		// NO loaded target (see registerConsumersForSources, which then analyzes the
+		// source with every DefaultTargets() model). Liveness does not enter that
+		// decision: a configured model that is loaded but currently has no analysis
+		// buffer is still the resolved target (surfaced with NotRunning above), not
+		// replaced by a fallback row the runtime never creates. Keying the fallback on
+		// resolvedToLoaded restores parity with the pipeline.
+		if !resolvedToLoaded {
+			// One fallback row per fallback target, each with its own liveness verdict.
+			// An empty config list fans out to every default target; a non-empty but
+			// unresolvable list falls back to the first default only (v2.4), matching the
+			// runtime, which analyzes a misconfigured source with the primary alone so an
+			// upgrade never adds a model to it. Empty at N = 0, so such a source gets no
+			// rows.
+			fallbackIDs := defaultIDs
+			if len(configModels) > 0 && len(defaultIDs) > 0 {
+				fallbackIDs = defaultIDs[:1]
+			}
+			for _, id := range fallbackIDs {
+				out[id] = append(out[id], ModelSourceInfo{
+					ID: name, Name: name, Type: sourceType, Fallback: true,
+					NotRunning: haveLive && !live[id],
+				})
+			}
 		}
 	}
 
@@ -735,6 +887,87 @@ func buildSourceAttachments(settings *conf.Settings, models []classifier.ModelIn
 	for i := range settings.Realtime.RTSP.Streams {
 		st := settings.Realtime.RTSP.Streams[i]
 		attach(st.Name, st.Type, st.Models)
+	}
+	return out
+}
+
+// runningModelsBySource reports which models the audio router actually feeds,
+// keyed by source display name then registry model ID.
+//
+// The buffer manager is the ground truth here, not the router's route table:
+// the router holds a single multiplexing BufferConsumer per source and cannot
+// say which models sit behind it, whereas an analysis buffer exists for exactly
+// the (source, model) pairs currently set up to analyze. The invariant: a buffer
+// exists for (source, model) iff that model is configured to analyze that source
+// and is loaded. Buffers are created by bufMgr.AllocateAnalysis (three call
+// sites: the initial per-source registration, a later model-change reconfigure,
+// and the engine's own pre-allocation of the primary model's buffer in
+// AddSource) and removed by deallocateStaleAnalysisBuffers. That is the same
+// state sourceModelsChanged diffs, so the status view and the pipeline's own
+// reconfigure decision agree on what is running.
+//
+// Two source states are reported as "no live evidence" (the key is left absent,
+// so the caller keeps the unmarked config-derived view) rather than as negative:
+//   - A DisplayName shared by more than one registry source. DisplayName is
+//     unique only within audio.sources and within rtsp.streams, never across
+//     them; on a collision a live set cannot be mapped to one config entry, so
+//     the key is dropped rather than risk marking a healthy model not running.
+//   - An empty buffer set. A source is in the registry from AddSource before its
+//     buffers are allocated, so an empty set is INDETERMINATE ("not yet"), not a
+//     claim that the source runs nothing.
+//
+// Returns nil when the audio engine is not wired up (before the pipeline starts,
+// or in tests), which the caller reads as "no live evidence available".
+func (c *Handler) runningModelsBySource() map[string]map[string]bool {
+	if c == nil || c.Core == nil {
+		return nil
+	}
+	eng := c.Engine.Load()
+	if eng == nil {
+		return nil
+	}
+	registry := eng.Registry()
+	bufMgr := eng.BufferManager()
+	if registry == nil || bufMgr == nil {
+		return nil
+	}
+
+	sources := registry.List()
+
+	// Count DisplayName occurrences first so a name shared by more than one
+	// registry source can be dropped entirely below (see the doc comment).
+	nameCounts := make(map[string]int, len(sources))
+	for _, src := range sources {
+		if src == nil {
+			continue
+		}
+		nameCounts[src.DisplayName]++
+	}
+
+	out := make(map[string]map[string]bool, len(sources))
+	for _, src := range sources {
+		if src == nil {
+			continue
+		}
+		// Collision: cannot map a live set to a single config entry, so omit it.
+		if nameCounts[src.DisplayName] > 1 {
+			continue
+		}
+		// Key by DisplayName: it is what the registry carries for both audio
+		// sources and RTSP streams, and it is what the config-side attachment
+		// above uses as the source name.
+		models := make(map[string]bool)
+		for modelID := range bufMgr.AnalysisBuffers(src.ID) {
+			models[modelID] = true
+		}
+		// An empty buffer set is indeterminate (source registered, buffers not yet
+		// allocated), so omit the source: the caller then reads haveLive=false for
+		// it and keeps the unmarked config-derived view rather than reporting every
+		// assigned model as not running.
+		if len(models) == 0 {
+			continue
+		}
+		out[src.DisplayName] = models
 	}
 	return out
 }

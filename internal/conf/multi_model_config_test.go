@@ -56,15 +56,15 @@ func TestMigrateSourceModels_SingularToPlural(t *testing.T) {
 	assert.Empty(t, settings.Realtime.Audio.Sources[0].Model, "legacy field should be cleared")
 }
 
-func TestMigrateSourceModels_DefaultToBirdNET(t *testing.T) {
+func TestMigrateSourceModels_LeavesEmptyListForDefaults(t *testing.T) {
 	t.Parallel()
 	settings := &Settings{}
 	settings.Realtime.Audio.Sources = []AudioSourceConfig{
 		{Name: "Mic1", Device: "hw:0,0"},
 	}
 	migrated := settings.MigrateSourceModels()
-	require.True(t, migrated)
-	assert.Equal(t, []string{"birdnet"}, settings.Realtime.Audio.Sources[0].Models)
+	assert.False(t, migrated, "an empty source is no longer filled here; that is MigrateSourceTargetDefaults")
+	assert.Empty(t, settings.Realtime.Audio.Sources[0].Models, "an empty list now means the default targets")
 }
 
 func TestMigrateSourceModels_SkipIfModelsAlreadySet(t *testing.T) {
@@ -78,15 +78,89 @@ func TestMigrateSourceModels_SkipIfModelsAlreadySet(t *testing.T) {
 	assert.Equal(t, []string{"birdnet", "perch_v2"}, settings.Realtime.Audio.Sources[0].Models)
 }
 
-func TestMigrateSourceModels_StreamConfigMigration(t *testing.T) {
+func TestMigrateSourceModels_LeavesStreamsUntouched(t *testing.T) {
 	t.Parallel()
 	settings := &Settings{}
 	settings.Realtime.RTSP.Streams = []StreamConfig{
 		{Name: "Cam1", URL: "rtsp://host/audio"},
 	}
 	migrated := settings.MigrateSourceModels()
-	require.True(t, migrated)
-	assert.Equal(t, []string{"birdnet"}, settings.Realtime.RTSP.Streams[0].Models)
+	assert.False(t, migrated, "streams have no singular Model field, so MigrateSourceModels does not touch them")
+	assert.Empty(t, settings.Realtime.RTSP.Streams[0].Models, "an empty stream list now means the default targets")
+}
+
+// TestMigrateSourceTargetDefaults covers the one-shot Phase 4 migration that pins a
+// pre-Phase-4 empty source or stream model list to ["birdnet"] (the old meaning of
+// empty) and stamps ConfigVersion so it never runs twice.
+func TestMigrateSourceTargetDefaults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		version     int
+		sources     []AudioSourceConfig
+		streams     []StreamConfig
+		wantChanged bool
+		wantSources [][]string // expected Models per source, in order
+		wantStreams [][]string // expected Models per stream, in order
+	}{
+		{
+			name:        "empty source list is pinned to birdnet and stamped",
+			sources:     []AudioSourceConfig{{Name: "Mic1"}},
+			wantChanged: true,
+			wantSources: [][]string{{"birdnet"}},
+		},
+		{
+			name:        "empty stream list is pinned to birdnet",
+			streams:     []StreamConfig{{Name: "Cam1", URL: "rtsp://h/a"}},
+			wantChanged: true,
+			wantStreams: [][]string{{"birdnet"}},
+		},
+		{
+			name:        "non-empty lists are left untouched but the file is stamped",
+			sources:     []AudioSourceConfig{{Name: "Mic1", Models: []string{"perch_v2"}}},
+			streams:     []StreamConfig{{Name: "Cam1", URL: "rtsp://h/a", Models: []string{"birdnet", "perch_v2"}}},
+			wantChanged: true,
+			wantSources: [][]string{{"perch_v2"}},
+			wantStreams: [][]string{{"birdnet", "perch_v2"}},
+		},
+		{
+			name:        "an already-migrated file keeps its empty lists and does not run again",
+			version:     configVersionSourceTargetDefaults,
+			sources:     []AudioSourceConfig{{Name: "Mic1"}},
+			streams:     []StreamConfig{{Name: "Cam1", URL: "rtsp://h/a"}},
+			wantChanged: false,
+			wantSources: [][]string{nil},
+			wantStreams: [][]string{nil},
+		},
+		{
+			name:        "no sources or streams still stamps the version once",
+			wantChanged: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			settings := &Settings{ConfigVersion: tt.version}
+			settings.Realtime.Audio.Sources = tt.sources
+			settings.Realtime.RTSP.Streams = tt.streams
+
+			changed := settings.MigrateSourceTargetDefaults()
+			assert.Equal(t, tt.wantChanged, changed)
+			assert.Equal(t, configVersionSourceTargetDefaults, settings.ConfigVersion,
+				"the version is stamped whether or not a list was filled")
+			for i := range tt.wantSources {
+				assert.Equal(t, tt.wantSources[i], settings.Realtime.Audio.Sources[i].Models, "source %d models", i)
+			}
+			for i := range tt.wantStreams {
+				assert.Equal(t, tt.wantStreams[i], settings.Realtime.RTSP.Streams[i].Models, "stream %d models", i)
+			}
+
+			// Idempotent: a second call never changes anything again.
+			assert.False(t, settings.MigrateSourceTargetDefaults(), "second run is a no-op")
+		})
+	}
 }
 
 func TestValidateModelConfig_NoErrorsWithJustBirdNET(t *testing.T) {
@@ -134,7 +208,7 @@ func TestApplyModelValidation_AcceptsCatalogAliases(t *testing.T) {
 	// the early-load path without an "unknown model ID" warning. Regression for
 	// Sentry BIRDNET-GO-2FZ.
 	settings := &Settings{}
-	settings.Models.Enabled = []string{"birdnet", "perch-v2", "birdnet-v3.0", "birdnet-v2.4"}
+	settings.Models.Enabled = []string{"birdnet", "perch-v2", "birdnet-v3.0", "birdnet-plus-v3.0", "birdnet-v2.4", "bsg-bat"}
 
 	err := settings.applyModelValidation()
 	require.NoError(t, err)
@@ -147,16 +221,20 @@ func TestValidAudioModels_AcceptsCatalogAliases(t *testing.T) {
 	// A per-source model set to a hyphenated catalog ID must not fail startup.
 	assert.True(t, ValidAudioModels["perch-v2"])
 	assert.True(t, ValidAudioModels["birdnet-v3.0"])
+	assert.True(t, ValidAudioModels["birdnet-plus-v3.0"])
+	assert.True(t, ValidAudioModels["birdnet_plus_v3.0"])
 	assert.True(t, ValidAudioModels["birdnet-v2.4"])
+	assert.True(t, ValidAudioModels["bsg-bat"])
+	assert.True(t, ValidAudioModels["bsg_bat"])
 }
 
 func TestMigrateModelIDAliases_CanonicalizesCatalogIDs(t *testing.T) {
 	t.Parallel()
 
 	settings := &Settings{}
-	settings.Models.Enabled = []string{"birdnet", "perch-v2", "birdnet-v3.0"}
+	settings.Models.Enabled = []string{"birdnet", "perch-v2", "birdnet-v3.0", "birdnet-plus-v3.0", "bsg-bat"}
 	settings.Realtime.Audio.Sources = []AudioSourceConfig{
-		{Name: "Mic1", Model: "perch-v2", Models: []string{"birdnet-v2.4", "bsg-finland"}},
+		{Name: "Mic1", Model: "perch-v2", Models: []string{"birdnet-v2.4", "bsg-finland", "BSG-BAT"}},
 	}
 	settings.Realtime.RTSP.Streams = []StreamConfig{
 		{URL: "rtsp://x", Models: []string{"perch-v2"}},
@@ -165,9 +243,9 @@ func TestMigrateModelIDAliases_CanonicalizesCatalogIDs(t *testing.T) {
 	changed := settings.MigrateModelIDAliases()
 	require.True(t, changed, "catalog-style IDs should be normalized")
 
-	assert.Equal(t, []string{"birdnet", "perch_v2", "birdnet_v3.0"}, settings.Models.Enabled)
+	assert.Equal(t, []string{"birdnet", "perch_v2", "birdnet_v3.0", "birdnet_plus_v3.0", "bsg_bat"}, settings.Models.Enabled)
 	assert.Equal(t, "perch_v2", settings.Realtime.Audio.Sources[0].Model)
-	assert.Equal(t, []string{"birdnet", "bsg"}, settings.Realtime.Audio.Sources[0].Models)
+	assert.Equal(t, []string{"birdnet", "bsg", "bsg_bat"}, settings.Realtime.Audio.Sources[0].Models)
 	assert.Equal(t, []string{"perch_v2"}, settings.Realtime.RTSP.Streams[0].Models)
 
 	// Idempotent: a second pass over already-canonical config changes nothing.

@@ -11,9 +11,14 @@ import "github.com/tphakala/birdnet-go/internal/errors"
 const DefaultPrecisionHint = "f16"
 
 // PrecisionF32 is the OpenVINO INFERENCE_PRECISION_HINT for full f32 inference.
-// Used to override the f16 default for models that the GPU plugin miscompiles at
-// f16 (see classifier.openVINOPrecisionFor for the BirdNET v2.4 iGPU case).
+// Used to override the f16 default for models that break at f16 (see
+// classifier.openVINOPrecisionFor for the per-model, per-device policy).
 const PrecisionF32 = "f32"
+
+// DefaultLibraryName is the soname the backend dlopens when no library path is
+// configured. It mirrors the fallback in ovbind_load (backend_openvino.go) and
+// is used only to report which library a path-less load resolved to.
+const DefaultLibraryName = "libopenvino_c.so"
 
 const (
 	// DeviceCPU is the OpenVINO CPU device. ARMv8.2 f16 acceleration runs here.
