@@ -17,6 +17,6 @@ func TestHistoricBatNamesFrench(t *testing.T) {
 	index.Rebuild(nil, "")
 	ds := &Datastore{}
 	ds.SetSpeciesIndex(index)
-	assert.Equal(t, "European free-tailed bat", ds.resolveCommonName("Tadarida teniotis"))
-	assert.Equal(t, "Common noctule", ds.resolveCommonName("Nyctalus noctula"))
+	assert.Equal(t, "Molosse de Cestoni", ds.resolveCommonName("Tadarida teniotis"))
+	assert.Equal(t, "Noctule commune", ds.resolveCommonName("Nyctalus noctula"))
 }

@@ -2999,7 +2999,9 @@
         {/if}
       </div>
 
-      <div class="mt-2 grid grid-cols-1 gap-6 border-t border-[var(--border-100)] pt-5 md:grid-cols-2">
+      <div
+        class="mt-2 grid grid-cols-1 gap-6 border-t border-[var(--border-100)] pt-5 md:grid-cols-2"
+      >
         <BatModelThresholds />
       </div>
 
