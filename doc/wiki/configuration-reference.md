@@ -107,6 +107,18 @@ BirdNETV3Config holds configuration for the BirdNET v3.0 acoustic classifier.
 | `birdnetv3.threshold` | number | confidence threshold for detections (applied only when OverrideThreshold is true) |
 | `birdnetv3.locale` | string | locale for species label translation |
 
+## birdnetplus
+
+BirdNETPlusConfig holds configuration for the BirdNET+ v3.0 acoustic classifier.
+
+| Setting | Type | Description |
+|---------|------|-------------|
+| `birdnetplus.modelpath` | string | path to BirdNET+ v3.0 ONNX model file |
+| `birdnetplus.labelpath` | string | path to BirdNET+ v3.0 label file |
+| `birdnetplus.overridethreshold` | boolean | when true, gate BirdNET+ v3.0 detections on Threshold instead of following BirdNET.Threshold |
+| `birdnetplus.threshold` | number | confidence threshold for detections (applied only when OverrideThreshold is true) |
+| `birdnetplus.locale` | string | locale for species label translation |
+
 ## bat
 
 BatConfig holds configuration for bat detection using BirdNET v2.4 embeddings.
@@ -121,6 +133,7 @@ BatConfig holds configuration for bat detection using BirdNET v2.4 embeddings.
 | `bat.nighttimeonly` | boolean | restrict bat detection to nighttime (civil dusk to civil dawn) |
 | `bat.falsepositivefilter.level` | integer | Filtering aggressivity level (0-5): 0=Off, 1=Lenient, 2=Moderate, 3=Balanced, 4=Strict, 5=Maximum |
 | `bat.ultrasonicfilter.enabled` | boolean | enable ultrasonic validation filter |
+| `bat.ultrasonicfilter.discardunlikely` | boolean | discard detections tagged unlikely instead of saving them; applies only while enabled |
 | `bat.ultrasonicfilter.cvthreshold` | number | detections with US frame CV below this are tagged unlikely |
 | `bat.ultrasonicfilter.fftsize` | integer | FFT window size in samples (a power of 2, at least 2) |
 | `bat.ultrasonicfilter.hopsize` | integer | STFT hop size in samples, 1 to fftsize |

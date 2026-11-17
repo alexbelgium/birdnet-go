@@ -526,6 +526,33 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "BirdNETPlusConfig": {
+      "properties": {
+        "modelpath": {
+          "type": "string",
+          "description": "path to BirdNET+ v3.0 ONNX model file"
+        },
+        "labelpath": {
+          "type": "string",
+          "description": "path to BirdNET+ v3.0 label file"
+        },
+        "overridethreshold": {
+          "type": "boolean",
+          "description": "when true, gate BirdNET+ v3.0 detections on Threshold instead of following BirdNET.Threshold"
+        },
+        "threshold": {
+          "type": "number",
+          "description": "confidence threshold for detections (applied only when OverrideThreshold is true)"
+        },
+        "locale": {
+          "type": "string",
+          "description": "locale for species label translation"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "BirdNETPlusConfig holds configuration for the BirdNET+ v3.0 acoustic classifier."
+    },
     "BirdNETV3Config": {
       "properties": {
         "modelpath": {
@@ -1552,6 +1579,10 @@
           },
           "type": "array",
           "description": "Custom OAuth scopes (OIDC default: openid, profile, email)"
+        },
+        "postLogoutRedirect": {
+          "type": "boolean",
+          "description": "PostLogoutRedirect sends the browser back to the instance after sign-out at\nthe identity provider. OIDC only. The return URL must be registered there."
         }
       },
       "additionalProperties": false,
@@ -2335,6 +2366,10 @@
           "$ref": "#/$defs/BirdNETV3Config",
           "description": "BirdNET v3.0 acoustic classifier configuration"
         },
+        "birdnetplus": {
+          "$ref": "#/$defs/BirdNETPlusConfig",
+          "description": "BirdNET+ v3.0 acoustic classifier configuration"
+        },
         "bat": {
           "$ref": "#/$defs/BatConfig",
           "description": "Bat detection configuration"
@@ -2757,6 +2792,10 @@
         "enabled": {
           "type": "boolean",
           "description": "enable ultrasonic validation filter"
+        },
+        "discardunlikely": {
+          "type": "boolean",
+          "description": "discard detections tagged unlikely instead of saving them; applies only while enabled"
         },
         "cvthreshold": {
           "type": "number",

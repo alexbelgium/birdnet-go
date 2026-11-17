@@ -4,7 +4,7 @@ vars:
   BINARY_DIR: bin
   BINARY_NAME: birdnet-go
   TFLITE_VERSION: v2.17.1
-  ONNXRUNTIME_VERSION: '1.31.1'
+  ONNXRUNTIME_VERSION: '1.32.0'
   # golangci-lint version .golangci.yaml is written for; keep in sync with
   # .github/workflows/golangci-lint.yml, .husky/pre-commit and
   # .devcontainer/postCreateCommand.sh;
@@ -200,12 +200,13 @@ tasks:
       - '[ -f "{{.AVICOMMONS_JSON_FILE}}" ]'
 
   sync-region-snapshots:
-    desc: Refresh the embedded region snapshots, coverage maps, and vendored model manifests from a sibling acoustic-models checkout
+    desc: Refresh the embedded region snapshots, coverage maps, vendored model manifests, and document-only manifests from a sibling acoustic-models checkout
     vars:
       ACOUSTIC_MODELS_DIR: '{{.ACOUSTIC_MODELS_DIR | default "../acoustic-models"}}'
       REGION_DATA_DIR: internal/classifier/region/data
       MAPS_DIR: internal/classifier/region/data/maps
       GEN_MANIFESTS_DIR: internal/classifier/gen/manifests
+      GEN_DOCUMENT_MANIFESTS_DIR: internal/classifier/gen/manifests/documents
     cmds:
       - |
         SRC="{{.ACOUSTIC_MODELS_DIR}}/models/manifests"
@@ -215,7 +216,7 @@ tasks:
           exit 1
         fi
         # Embedded region tables (bbox / tier / countries) read at runtime.
-        for f in Perch-v2-Models.regions.json BirdNET-v3.0-Models.regions.json; do
+        for f in Perch-v2-Models.regions.json BirdNET-v3.0-Models.regions.json BirdNET-Plus-V3.0.regions.json; do
           cp "$SRC/$f" "{{.REGION_DATA_DIR}}/$f"
           echo "synced $f"
         done
@@ -224,11 +225,22 @@ tasks:
         # ./internal/classifier" joins models.json against regions.json, so a
         # stale models.json here silently regenerates the catalog against the old
         # region set (the two inputs disagree on which tiles exist).
-        for f in Perch-v2-Models.models.json BirdNET-v3.0-Models.models.json; do
+        for f in Perch-v2-Models.models.json BirdNET-v3.0-Models.models.json BirdNET-Plus-V3.0.models.json; do
           cp "$SRC/$f" "{{.GEN_MANIFESTS_DIR}}/$f"
           echo "synced $f"
         done
-        echo "Refreshed region snapshots and model manifests. Next: run"
+        # Document-only manifests: families the catalog lists but does not generate
+        # regional variants for. The generator reads only their repo and
+        # family_meta.documents, so a new gallery entry's licence and policy
+        # documents reach the binary. They stay apart from the manifests above
+        # because the catalog consistency test compares every manifest in that
+        # directory with the catalog's models.
+        mkdir -p "{{.GEN_DOCUMENT_MANIFESTS_DIR}}"
+        for f in BirdNET-Geomodel.models.json BirdNET-v2.4.models.json BattyBirdNET-onnx.models.json BSG-BAT.models.json; do
+          cp "$SRC/$f" "{{.GEN_DOCUMENT_MANIFESTS_DIR}}/$f"
+          echo "synced $f (documents)"
+        done
+        echo "Refreshed region snapshots, model manifests and document manifests. Next: run"
         echo "  go run ./gen -update-labels-checksums   (from internal/classifier; networked)"
         echo "  go generate ./internal/classifier"
         echo "and if tiers changed, update golden_tier_test.go."
