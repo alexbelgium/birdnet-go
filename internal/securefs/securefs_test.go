@@ -1,11 +1,14 @@
 package securefs
 
 import (
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -487,6 +490,128 @@ func TestStatRel(t *testing.T) {
 	assert.Error(t, err, "StatRel should fail for path traversal attempt")
 }
 
+// TestOpenRegularRel verifies that OpenRegularRel opens only regular files
+// that resolve inside the root, and that it never consults the stat cache.
+func TestOpenRegularRel(t *testing.T) {
+	t.Parallel()
+
+	const content = "clip bytes"
+
+	tests := []struct {
+		name string
+		// setup prepares the base directory and returns the relative path to open.
+		setup func(t *testing.T, sfs *SecureFS, base string) string
+		// wantErr is matched with errors.Is.
+		wantErr error
+		// wantAnyErr requires some error without a specific sentinel.
+		wantAnyErr bool
+		// notErr is a sentinel the error must not match.
+		notErr error
+	}{
+		{
+			name: "regular file",
+			setup: func(t *testing.T, _ *SecureFS, base string) string {
+				t.Helper()
+				require.NoError(t, os.WriteFile(filepath.Join(base, "clip.wav"), []byte(content), 0o600))
+				return "clip.wav"
+			},
+		},
+		{
+			name: "symlink escaping the root",
+			setup: func(t *testing.T, _ *SecureFS, base string) string {
+				t.Helper()
+				outside := filepath.Join(t.TempDir(), "outside.wav")
+				require.NoError(t, os.WriteFile(outside, []byte(content), 0o600))
+				if err := os.Symlink(outside, filepath.Join(base, "esc.wav")); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				return "esc.wav"
+			},
+			wantAnyErr: true,
+			notErr:     fs.ErrNotExist,
+		},
+		{
+			name: "symlink escaping the root after a cached StatRel",
+			setup: func(t *testing.T, sfs *SecureFS, base string) string {
+				t.Helper()
+				clip := filepath.Join(base, "swap.wav")
+				require.NoError(t, os.WriteFile(clip, []byte(content), 0o600))
+				// Warm the stat cache while the clip is a regular file.
+				_, err := sfs.StatRel("swap.wav")
+				require.NoError(t, err)
+				outside := filepath.Join(t.TempDir(), "outside.wav")
+				require.NoError(t, os.WriteFile(outside, []byte(content), 0o600))
+				require.NoError(t, os.Remove(clip))
+				if err := os.Symlink(outside, clip); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				return "swap.wav"
+			},
+			wantAnyErr: true,
+			notErr:     fs.ErrNotExist,
+		},
+		{
+			// Only an implementation that trusts the cached stat (still a regular
+			// file) can get this wrong; the root's own confinement does not apply.
+			name: "directory swapped in after a cached StatRel",
+			setup: func(t *testing.T, sfs *SecureFS, base string) string {
+				t.Helper()
+				clip := filepath.Join(base, "swapdir.wav")
+				require.NoError(t, os.WriteFile(clip, []byte(content), 0o600))
+				_, err := sfs.StatRel("swapdir.wav")
+				require.NoError(t, err)
+				require.NoError(t, os.Remove(clip))
+				require.NoError(t, os.Mkdir(clip, 0o750))
+				return "swapdir.wav"
+			},
+			wantErr: ErrNotRegularFile,
+		},
+		{
+			name: "directory",
+			setup: func(t *testing.T, _ *SecureFS, base string) string {
+				t.Helper()
+				require.NoError(t, os.Mkdir(filepath.Join(base, "dir.wav"), 0o750))
+				return "dir.wav"
+			},
+			wantErr: ErrNotRegularFile,
+		},
+		{
+			name: "missing",
+			setup: func(*testing.T, *SecureFS, string) string {
+				return "missing.wav"
+			},
+			wantErr: fs.ErrNotExist,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sfs, base := setupSecureFS(t)
+			rel := tt.setup(t, sfs, base)
+
+			f, err := sfs.OpenRegularRel(rel)
+			if tt.wantErr == nil && !tt.wantAnyErr {
+				require.NoError(t, err)
+				defer func() { _ = f.Close() }()
+				got, readErr := io.ReadAll(f)
+				require.NoError(t, readErr)
+				assert.Equal(t, content, string(got))
+				return
+			}
+
+			require.Error(t, err)
+			assert.Nil(t, f)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			}
+			if tt.notErr != nil {
+				assert.NotErrorIs(t, err, tt.notErr)
+			}
+		})
+	}
+}
+
 // TestCacheUtilities verifies cache utility functions
 func TestCacheUtilities(t *testing.T) {
 	t.Parallel()
@@ -595,11 +720,76 @@ func TestServeRelativeFile_FileNotFound_NoEnhancedError(t *testing.T) {
 	require.ErrorAs(t, err, &httpErr, "should return *echo.HTTPError")
 	assert.Equal(t, http.StatusNotFound, httpErr.Code, "should be 404")
 
-	// The internal error chain must NOT contain an EnhancedError —
+	// The internal error chain must NOT contain an EnhancedError:
 	// that would trigger telemetry hooks and notification bells.
 	if httpErr.Internal != nil {
-		var enhErr *errors.EnhancedError
-		assert.False(t, errors.As(httpErr.Internal, &enhErr),
+		_, isEnhErr := errors.AsType[*errors.EnhancedError](httpErr.Internal)
+		assert.False(t, isEnhErr,
 			"file-not-found should not produce EnhancedError in error chain")
 	}
+}
+
+// serveRelative serves relPath through sfs with the given request headers and
+// returns the recorded response.
+func serveRelative(t *testing.T, sfs *SecureFS, relPath string, reqHeaders, respHeaders map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, "/"+relPath, http.NoBody)
+	for k, v := range reqHeaders {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	for k, v := range respHeaders {
+		rec.Header().Set(k, v)
+	}
+	ctx := echo.New().NewContext(req, rec)
+	require.NoError(t, sfs.ServeRelativeFile(ctx, relPath))
+	return rec
+}
+
+// TestServeRelativeFile_ETag pins the validator contract of the file server: the
+// ETag changes when the size changes even if the modification time does not (a
+// browser holding a response cached under a different size must not get a 304),
+// a matching If-None-Match gets a 304, and an ETag set by the caller is kept.
+func TestServeRelativeFile_ETag(t *testing.T) {
+	t.Parallel()
+
+	sfs, dir := setupSecureFS(t)
+	const name = "clip.wav"
+	path := filepath.Join(dir, name)
+	modTime := time.Date(2024, time.March, 5, 10, 30, 0, 0, time.UTC)
+	writeAt := func(content string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		require.NoError(t, os.Chtimes(path, modTime, modTime))
+	}
+
+	writeAt("first version")
+	first := serveRelative(t, sfs, name, nil, nil)
+	require.Equal(t, http.StatusOK, first.Code)
+	etag := first.Header().Get("ETag")
+	require.NotEmpty(t, etag, "the server must set an ETag")
+
+	// The subtests share the served file and run in order: the last two replace
+	// or reuse the state the earlier ones leave behind.
+	t.Run("matching If-None-Match gets 304", func(t *testing.T) {
+		rec := serveRelative(t, sfs, name, map[string]string{"If-None-Match": etag}, nil)
+		assert.Equal(t, http.StatusNotModified, rec.Code)
+	})
+
+	t.Run("same modification time but different size gets fresh content", func(t *testing.T) {
+		writeAt("second, longer version")
+		rec := serveRelative(t, sfs, name, map[string]string{"If-None-Match": etag}, nil)
+		assert.Equal(t, http.StatusOK, rec.Code, "an ETag from a different size must not validate")
+		assert.Equal(t, "second, longer version", rec.Body.String())
+		newETag := rec.Header().Get("ETag")
+		require.NotEmpty(t, newETag, "the rewritten file needs its own ETag")
+		assert.NotEqual(t, etag, newETag)
+	})
+
+	t.Run("caller supplied ETag is kept", func(t *testing.T) {
+		const custom = `"caller-etag"`
+		rec := serveRelative(t, sfs, name, nil, map[string]string{"ETag": custom})
+		assert.Equal(t, custom, rec.Header().Get("ETag"))
+	})
 }

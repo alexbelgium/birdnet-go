@@ -46,9 +46,60 @@ type Handler struct {
 	// is an injectable seam: nil means "use the default live probe"
 	// (defaultHardwareProfile), and tests set it to synthetic hardware. A
 	// per-Handler field rather than a package global, so tests stay parallel-safe.
-	// It receives the request's already-probed ONNX Runtime status so the default
-	// probe does not re-check ORT that GetModelCatalog just checked.
+	// It receives the caller's already-probed ONNX Runtime status (a catalog or
+	// install request, or the optimize notice evaluation) so the default probe
+	// does not re-check ORT.
 	hardwareProfile func(ort inference.ORTStatus) hwprofile.Profile
+	// ensureOVProbe runs the out-of-process OpenVINO device probe before a
+	// production-profile ranking that may not wait on a request (see
+	// ensureHostProbed). nil means inference.EnsureOpenVINOProbe; tests inject a
+	// counter.
+	ensureOVProbe func()
+	// ortProbe reports the ONNX Runtime status for the configured library path.
+	// nil means inference.CheckORTAvailability; tests inject a fixed status so
+	// the install gate and the recommender do not depend on the host runtime.
+	ortProbe func(configuredPath string) inference.ORTStatus
+	// notices is the notification sink for the optimize bell notice. nil means
+	// the process-wide notification service; tests inject a fake.
+	notices noticeService
+	// optimize latches the optimize bell notice and its debounce timer
+	// (optimize_notice.go). Handler is only ever used by pointer, so the mutexes
+	// inside are never copied.
+	optimize optimizeNotice
+	// superseded latches the superseded-model bell notice (superseded_notice.go),
+	// evaluated alongside the optimize notice.
+	superseded supersededNotice
+	// modelRuntime reports the live backend and precision of each loaded model,
+	// keyed by registry ID. It is an injectable seam: nil means the live default
+	// (liveModelRuntime, read from the model manager and the orchestrator), and
+	// tests inject a fixed map. A per-Handler field so tests stay parallel-safe.
+	modelRuntime func() map[string]listedModelRuntime
+	// loadErrors reports the last load error text per registry ID for enabled
+	// models that failed to load. Injectable like modelRuntime: nil means the live
+	// orchestrator's LoadErrors, and tests inject a fixed map.
+	loadErrors func() map[string]string
+	// announceListChange tells connected clients that the model list changed. nil
+	// means a topology broadcast on the metrics store, and tests inject a counter.
+	announceListChange func()
+}
+
+// Model load states reported in ModelListItem.State.
+const (
+	// ModelStateLoaded means the model is loaded and can run.
+	ModelStateLoaded = "loaded"
+	// ModelStateFailed means the model is enabled, not loaded, and its last load
+	// attempt failed.
+	ModelStateFailed = "failed"
+	// ModelStatePending means the model is enabled, not loaded, and no load error
+	// is on record, so a load is still expected.
+	ModelStatePending = "pending"
+)
+
+// listedModelRuntime is the live execution backend and runtime precision of one
+// loaded model, as the list endpoint reports them.
+type listedModelRuntime struct {
+	backend   string
+	precision string
 }
 
 // New builds a models Handler around the shared core and the facade-injected
@@ -78,11 +129,27 @@ func (c *Handler) RegisterRoutes(g *echo.Group) {
 
 // ModelListItem represents a model in the API response.
 type ModelListItem struct {
-	ID                    string `json:"id"`                              // Config alias (e.g., "birdnet", "perch_v2")
-	Name                  string `json:"name"`                            // Display name (e.g., "BirdNET v2.4 (TFLite)")
+	ID   string `json:"id"`   // Config alias (e.g., "birdnet", "perch_v2")
+	Name string `json:"name"` // Display name without a backend suffix (e.g., "BirdNET v2.4")
+	// RegistryID is the classifier registry ID (e.g., "BirdNET_V2.4"). It is the
+	// join key against the registry-ID entries in the defaultTargets list served by
+	// GET /api/v2/system/inference, letting the frontend map default targets back to
+	// the config aliases this endpoint uses (model de-privilege epic, Phase 4).
+	RegistryID            string `json:"registryId"`
 	Category              string `json:"category"`                        // Model category (e.g., "bird", "bat")
 	MinSampleRate         int    `json:"minSampleRate,omitempty"`         // Minimum required sample rate in Hz
 	RecommendedSampleRate int    `json:"recommendedSampleRate,omitempty"` // Recommended sample rate in Hz
+	// Backend is the live execution backend of the loaded model (for example
+	// "TFLite", "ONNX" or "OpenVINO"). Omitted when the model is not loaded or the
+	// request may not receive host-derived data.
+	Backend string `json:"backend,omitempty"`
+	// Precision is the live runtime precision of the loaded model (for example
+	// "FP32" or "INT8"). Omitted under the same conditions as Backend.
+	Precision string `json:"precision,omitempty"`
+	// State is the model's load state: ModelStateLoaded, ModelStateFailed or
+	// ModelStatePending. Unlike Backend and Precision it is not host-derived, so it
+	// is reported to every caller.
+	State string `json:"state"`
 }
 
 // CatalogEntryResponse represents a model in the catalog API response.
@@ -98,15 +165,21 @@ type CatalogEntryResponse struct {
 	SpeciesCount  int    `json:"speciesCount"`
 	Version       string `json:"version"`
 	// Channel is the release channel: "stable" for a GA build, "preview" for a
-	// developer-preview build the gallery flags as not the final release. Always
-	// populated (defaults to "stable") so the frontend never has to guess.
+	// developer-preview build the gallery flags as not the final release, and
+	// "experimental" for a published model whose performance in BirdNET-Go is not
+	// proven yet. Always populated (defaults to "stable") so the frontend never has
+	// to guess.
 	Channel string `json:"channel"`
 	// BuildLabel is a human-facing build tag shown next to Version for a non-stable
 	// channel (e.g. "preview3.1"); omitted for stable releases.
-	BuildLabel  string `json:"buildLabel,omitempty"`
-	UpstreamURL string `json:"upstreamUrl,omitempty"`
-	Installed   bool   `json:"installed"`
-	Compatible  bool   `json:"compatible"`
+	BuildLabel string `json:"buildLabel,omitempty"`
+	// SupersededBy names the visible catalog entry that replaces this one. Omitted
+	// when nothing replaces it or the successor is hidden, so the gallery never
+	// points at a model it does not show.
+	SupersededBy *CatalogSuccessorResponse `json:"supersededBy,omitempty"`
+	UpstreamURL  string                    `json:"upstreamUrl,omitempty"`
+	Installed    bool                      `json:"installed"`
+	Compatible   bool                      `json:"compatible"`
 	// IncompatibleReason is a structured, localizable code (an i18n key stem such
 	// as "backend.onnx_unavailable"), never a raw English message, so the fully
 	// i18n'd gallery can translate it; a client renders it through the same reason
@@ -115,8 +188,15 @@ type CatalogEntryResponse struct {
 	// this passive listing; it is returned in full when the user attempts to
 	// install the model.
 	IncompatibleReason string `json:"incompatibleReason,omitempty"`
-	TotalSizeBytes     int64  `json:"totalSizeBytes"`
-	HasGeomodel        bool   `json:"hasGeomodel"`
+	// TotalSizeBytes is the download size of the default variant: its own files plus the
+	// files of its dependencies.
+	TotalSizeBytes int64 `json:"totalSizeBytes"`
+	// HasGeomodel reports whether the default variant brings a geomodel, inline or
+	// through a dependency.
+	HasGeomodel bool `json:"hasGeomodel"`
+	// DependsOn lists the catalog IDs installed together with this model. It may name
+	// hidden components that the catalog response does not list. Omitted when empty.
+	DependsOn []string `json:"dependsOn,omitempty"`
 	// Permanent marks the built-in BirdNET v2.4 classifier: always installed, never
 	// uninstallable, only its variant may be swapped. The gallery renders a built-in
 	// badge instead of Remove/Reinstall for it.
@@ -133,6 +213,12 @@ type CatalogEntryResponse struct {
 	RecommendedVariantID string `json:"recommendedVariantId,omitempty"`
 }
 
+// CatalogSuccessorResponse identifies the catalog entry that supersedes another.
+type CatalogSuccessorResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // CatalogVariantResponse describes one selectable hardware or regional variant of
 // a catalog entry for the gallery UI.
 type CatalogVariantResponse struct {
@@ -144,9 +230,8 @@ type CatalogVariantResponse struct {
 	Installed    bool   `json:"installed"`
 	// BuiltIn marks the embedded baseline variant (the built-in BirdNET v2.4 model).
 	// It carries no downloadable files; the gallery labels it and shows no size.
-	BuiltIn           bool  `json:"builtIn,omitempty"`
-	SizeBytes         int64 `json:"sizeBytes"`
-	HeadlineLatencyMs int   `json:"headlineLatencyMs,omitempty"`
+	BuiltIn   bool  `json:"builtIn,omitempty"`
+	SizeBytes int64 `json:"sizeBytes"`
 	// Compatible reports whether this variant can run on the host. It defaults to
 	// true (no hardware evaluation performed) so a client that did not receive
 	// recommendations does not render every variant as incompatible.
@@ -188,7 +273,105 @@ type installModelRequest struct {
 	AllowIncompatible bool `json:"allowIncompatible"`
 }
 
-// ListModels returns classifier models that are enabled in the configuration.
+// liveModelRuntime reads the backend and precision of every loaded model, keyed
+// by registry ID. The orchestrator's live instance wins when it reports a value;
+// the loaded model's own info is the fallback. Without a model manager the
+// result is empty, so no model is reported as loaded.
+func (c *Handler) liveModelRuntime() map[string]listedModelRuntime {
+	if c.ModelManager == nil {
+		return nil
+	}
+	var instanceRuntime func(id string) (backend, precision string)
+	if c.Processor != nil {
+		if orch := c.Processor.GetBirdNET(); orch != nil {
+			instanceRuntime = func(id string) (backend, precision string) {
+				_, backend, precision = orch.GetModelRuntimeInfo(id)
+				return backend, precision
+			}
+		}
+	}
+	return mergeModelRuntime(c.ModelManager.ModelInfos(), instanceRuntime)
+}
+
+// mergeModelRuntime builds the runtime map for the loaded models. A non-empty
+// value from instanceRuntime (the live instance, which may be nil) replaces the
+// one from the model's info. The precedence matches applyRuntimeBackend in the
+// system package, which serves GET /api/v2/system/inference.
+func mergeModelRuntime(infos []classifier.ModelInfo, instanceRuntime func(id string) (backend, precision string)) map[string]listedModelRuntime {
+	runtime := make(map[string]listedModelRuntime, len(infos))
+	for i := range infos {
+		item := listedModelRuntime{backend: infos[i].Backend, precision: string(infos[i].Quantization)}
+		if instanceRuntime != nil {
+			backend, precision := instanceRuntime(infos[i].ID)
+			if backend != "" {
+				item.backend = backend
+			}
+			if precision != "" {
+				item.precision = precision
+			}
+		}
+		runtime[infos[i].ID] = item
+	}
+	return runtime
+}
+
+// liveLoadErrors reads the orchestrator's current load errors, keyed by registry
+// ID. Without a processor or orchestrator there are none.
+func (c *Handler) liveLoadErrors() map[string]string {
+	if c.Processor == nil {
+		return nil
+	}
+	orch := c.Processor.GetBirdNET()
+	if orch == nil {
+		return nil
+	}
+	return orch.LoadErrors()
+}
+
+// modelState classifies an enabled model: loaded when the runtime reported it,
+// failed when its load error is on record, else pending.
+func modelState(loaded bool, loadErrors map[string]string, registryID string) string {
+	if loaded {
+		return ModelStateLoaded
+	}
+	if _, failed := loadErrors[registryID]; failed {
+		return ModelStateFailed
+	}
+	return ModelStatePending
+}
+
+// announceModelListChange tells connected clients that the model list changed.
+// It covers the changes the model manager does not announce itself: an uninstall
+// of a model that was not loaded, and an install whose hot load failed. It is
+// also called after a successful install, reinstall or uninstall, where a model
+// that loaded or unloaded is announced by the manager as well, so a client can
+// receive two events and refetches once after its debounce. It only broadcasts;
+// it does not schedule an audio reconfigure.
+func (c *Handler) announceModelListChange() {
+	if c.announceListChange != nil {
+		c.announceListChange()
+		return
+	}
+	if c.MetricsStore != nil {
+		c.MetricsStore.BroadcastTopologyChanged()
+	}
+}
+
+// catalogCategory returns the category of the catalog entry for a registry ID,
+// defaulting to "bird" when the catalog has no entry for it.
+func catalogCategory(catalog []classifier.CatalogEntry, registryID string) string {
+	for i := range catalog {
+		if catalog[i].RegistryID == registryID {
+			return catalog[i].Category
+		}
+	}
+	return "bird"
+}
+
+// ListModels returns classifier models that are enabled in the configuration,
+// each with its load state (loaded, failed or pending). Loaded models also carry
+// their live backend and precision, for requests that may receive host-derived
+// data (see recommendationsAllowed).
 func (c *Handler) ListModels(ctx echo.Context) error {
 	// Read from the live settings (atomic pointer) so that models added
 	// at runtime (via gallery install) are immediately visible.
@@ -202,27 +385,41 @@ func (c *Handler) ListModels(ctx echo.Context) error {
 
 	models := make([]ModelListItem, 0, len(enabled))
 
+	// The loaded set decides each model's state for every caller. Backend and
+	// precision are host-derived and this route is public, so they follow the same
+	// gate as the catalog's host data.
+	readRuntime := c.modelRuntime
+	if readRuntime == nil {
+		readRuntime = c.liveModelRuntime
+	}
+	runtime := readRuntime()
+	readErrors := c.loadErrors
+	if readErrors == nil {
+		readErrors = c.liveLoadErrors
+	}
+	loadErrors := readErrors()
+	withRuntime := c.recommendationsAllowed(ctx)
+
 	// Snapshot the active catalog once (honors a user-edited model-catalog.json).
 	catalog := classifier.ActiveCatalog()
 	for id := range classifier.ModelRegistry {
 		info := classifier.ModelRegistry[id]
 		for _, alias := range info.ConfigAliases {
 			if enabled[strings.ToLower(alias)] {
-				// Determine category from catalog entry (if any), default to "bird".
-				category := "bird"
-				for j := range catalog {
-					if catalog[j].RegistryID == id {
-						category = catalog[j].Category
-						break
-					}
+				live, loaded := runtime[id]
+				if !withRuntime {
+					live = listedModelRuntime{}
 				}
-
 				models = append(models, ModelListItem{
 					ID:                    alias,
-					Name:                  info.DisplayName(),
-					Category:              category,
+					Name:                  info.Name,
+					RegistryID:            id,
+					Category:              catalogCategory(catalog, id),
 					MinSampleRate:         info.Spec.MinRawSampleRate,
 					RecommendedSampleRate: info.Spec.RecommendedSampleRate,
+					Backend:               live.backend,
+					Precision:             live.precision,
+					State:                 modelState(loaded, loadErrors, id),
 				})
 				break // one entry per model
 			}
@@ -246,14 +443,66 @@ func (c *Handler) ListModels(ctx echo.Context) error {
 // variant vocabulary.
 const incompatibleReasonONNXUnavailable = "backend.onnx_unavailable"
 
+// removeHasDependentsKey is the i18n key of the 409 returned when an uninstall is
+// refused because other installed models need the model. The frontend interpolates
+// error_params.name and error_params.models into it.
+const removeHasDependentsKey = "analysis.gallery.errors.removeHasDependents"
+
+// operationInProgressKey is the i18n key of the 409 returned when an install,
+// reinstall or uninstall is refused because another model operation holds the
+// manager's operation slot. The frontend interpolates error_params.name (the model
+// whose operation is running); error_params.operation and error_params.running
+// ({id, name}) identify it.
+const operationInProgressKey = "analysis.gallery.errors.operationInProgress"
+
+// operationInProgressMsg is the message of the operation-in-progress 409.
+const operationInProgressMsg = "another model operation is in progress"
+
+// operationInProgressResponse answers the 409 for a refused model operation.
+func (c *Handler) operationInProgressResponse(ctx echo.Context, err error, busy *classifier.OperationInProgressError) error {
+	return c.HandleErrorWithKey(ctx, err, operationInProgressMsg, http.StatusConflict,
+		operationInProgressKey, map[string]any{
+			"name":      busy.Running.Name,
+			"operation": string(busy.Operation),
+			"running":   busy.Running,
+		})
+}
+
+// beginOperationError maps a BeginOperation failure: a busy slot is the 409, anything
+// else is a server error.
+func (c *Handler) beginOperationError(ctx echo.Context, err error) error {
+	if busy, ok := errors.AsType[*classifier.OperationInProgressError](err); ok {
+		return c.operationInProgressResponse(ctx, err, busy)
+	}
+	return c.HandleError(ctx, err, "failed to start model operation", http.StatusInternalServerError)
+}
+
+// visibleSuccessor resolves a SupersededBy id against the visible entries and
+// returns nil when the id is empty or names an entry the gallery does not show.
+// Only the immediate successor is considered: a chain that passes through a
+// hidden entry stops there, so hiding an entry also withdraws the notes that
+// point at it.
+func visibleSuccessor(visible []classifier.CatalogEntry, id string) *CatalogSuccessorResponse {
+	if id == "" {
+		return nil
+	}
+	for i := range visible {
+		if visible[i].ID == id {
+			return &CatalogSuccessorResponse{ID: visible[i].ID, Name: visible[i].Name}
+		}
+	}
+	return nil
+}
+
 // GetModelCatalog returns the embedded model catalog enriched with install
-// status and compatibility information.
+// status and compatibility information. An entry's successor is reported only when
+// the successor is itself visible.
 func (c *Handler) GetModelCatalog(ctx echo.Context) error {
 	visible := classifier.VisibleCatalog()
 	catalog := make([]CatalogEntryResponse, 0, len(visible))
 
 	// Check ORT availability once, reuse for all entries that require ONNX.
-	ortStatus := inference.CheckORTAvailability(c.CurrentSettings().BirdNET.ONNXRuntimePath)
+	ortStatus := c.checkORT(c.CurrentSettings().BirdNET.ONNXRuntimePath)
 
 	// Hardware recommendations are gated to authenticated (or auth-not-required)
 	// requests, so an anonymous caller on an auth-enabled instance cannot read the
@@ -273,11 +522,10 @@ func (c *Handler) GetModelCatalog(ctx echo.Context) error {
 	for i := range visible {
 		entry := &visible[i]
 
-		// Compute total size from all files.
-		var totalSize int64
-		for _, f := range entry.Files {
-			totalSize += f.SizeBytes
-		}
+		// Compute the default variant's total size from all files it installs,
+		// including its dependencies' files.
+		defaultFiles, _ := classifier.EffectiveFiles(entry, "")
+		totalSize := sumFileSizes(defaultFiles)
 
 		// Check install status via ModelManager, capturing which variant is on disk.
 		installed := false
@@ -310,12 +558,14 @@ func (c *Handler) GetModelCatalog(ctx echo.Context) error {
 			Version:              entry.Version,
 			Channel:              channelOrDefault(entry.Channel),
 			BuildLabel:           entry.BuildLabel,
+			SupersededBy:         visibleSuccessor(visible, entry.SupersededBy),
 			UpstreamURL:          entry.UpstreamURL,
 			Installed:            installed,
 			Compatible:           compatible,
 			IncompatibleReason:   incompatibleReason,
 			TotalSizeBytes:       totalSize,
-			HasGeomodel:          classifier.HasGeomodelFiles(entry),
+			HasGeomodel:          classifier.ProvidesGeomodel(entry, ""),
+			DependsOn:            entry.DependsOn,
 			Permanent:            classifier.IsPermanentEntry(entry),
 			InstalledVariantID:   installedVariantID,
 			RecommendedVariantID: recommendedVariant[entry.ID],
@@ -347,7 +597,7 @@ func (c *Handler) GetModelCatalog(ctx echo.Context) error {
 // buildVariantResponses maps a catalog entry's variants to their API form,
 // joining in the per-variant recommendations when recs is non-nil (recs is nil
 // when the request is not eligible for hardware recommendations, and is keyed by
-// variant ID). It returns nil for a flat (single-variant) entry so the field is
+// variant ID). It returns nil for a flat entry (no Variants) so the field is
 // omitted, and hides a Legacy (superseded) variant unless it is the one
 // currently installed, so the gallery never offers a fresh install of a
 // deprecated build.
@@ -363,30 +613,18 @@ func buildVariantResponses(entry *classifier.CatalogEntry, installed bool, insta
 			continue
 		}
 
-		var sizeBytes int64
-		for _, f := range v.Files {
-			sizeBytes += f.SizeBytes
-		}
-
-		// Headline latency: the smallest positive measured latency across this
-		// variant's benchmarks, or 0 when none were measured.
-		headlineLatencyMs := 0
-		for _, b := range v.Benchmarks {
-			if b.LatencyMs > 0 && (headlineLatencyMs == 0 || b.LatencyMs < headlineLatencyMs) {
-				headlineLatencyMs = b.LatencyMs
-			}
-		}
+		variantFiles, _ := classifier.EffectiveFiles(entry, v.ID)
+		sizeBytes := sumFileSizes(variantFiles)
 
 		resp := CatalogVariantResponse{
-			ID:                v.ID,
-			Region:            v.Region,
-			Precision:         v.Precision,
-			SpeciesCount:      v.SpeciesCount,
-			Default:           v.Default,
-			Installed:         isInstalledVariant,
-			BuiltIn:           v.BuiltIn,
-			SizeBytes:         sizeBytes,
-			HeadlineLatencyMs: headlineLatencyMs,
+			ID:           v.ID,
+			Region:       v.Region,
+			Precision:    v.Precision,
+			SpeciesCount: v.SpeciesCount,
+			Default:      v.Default,
+			Installed:    isInstalledVariant,
+			BuiltIn:      v.BuiltIn,
+			SizeBytes:    sizeBytes,
 			// Neutral default: without a recommendation the variant is not claimed
 			// incompatible. Overwritten below when recommendations are present.
 			Compatible: true,
@@ -568,7 +806,9 @@ func (c *Handler) recommendationsAllowed(ctx echo.Context) bool {
 
 // rankCatalog computes the per-host variant recommendations for the visible
 // catalog, indexed by catalog ID then variant ID, plus the recommended variant
-// per entry.
+// per entry. The RAM floor check uses the profile's RAM upper bound, so a host
+// whose cgroup limit was unreadable is still blocked when even the upper bound
+// is below a variant's floor.
 func (c *Handler) rankCatalog(entries []classifier.CatalogEntry, ort inference.ORTStatus) (byVariant map[string]map[string]recommend.Recommendation, recommended map[string]string, hostArch string) {
 	profileFn := c.hardwareProfile
 	if profileFn == nil {
@@ -578,7 +818,7 @@ func (c *Handler) rankCatalog(entries []classifier.CatalogEntry, ort inference.O
 	hostArch = profile.Arch
 	recs := recommend.Rank(&recommend.Input{
 		Capabilities:   profile.Capabilities(),
-		TotalRAMBytes:  profile.TotalRAMBytes,
+		TotalRAMBytes:  profile.RAMUpperBound(),
 		DeviceClass:    recommend.DeviceClass(profile.Board.Tier, profile.Arch),
 		ResolvedRegion: c.resolveRecommendRegion(),
 		Entries:        entries,
@@ -608,6 +848,10 @@ func (c *Handler) rankCatalog(entries []classifier.CatalogEntry, ort inference.O
 // entry with no variants, or a variant it produced no verdict for), for which
 // there is nothing to gate; callers must treat gated==false as "allow". An empty
 // variantID resolves to the entry's default variant, matching install semantics.
+// It does not wait for the OpenVINO device probe: this runs on the install
+// request, and a probe child that hangs can take up to its timeout, longer than
+// the server's write timeout. The startup optimize evaluation runs the probe a
+// few seconds after boot, and allowIncompatible overrides the gate.
 func (c *Handler) requestedVariantCompatibility(entry *classifier.CatalogEntry, variantID string, ort inference.ORTStatus) (compatible, gated bool, blockers []recommend.Reason, hostArch string) {
 	if entry == nil || len(entry.Variants) == 0 {
 		return true, false, nil, ""
@@ -625,6 +869,34 @@ func (c *Handler) requestedVariantCompatibility(entry *classifier.CatalogEntry, 
 		return true, false, nil, hostArch
 	}
 	return rec.Compatible, true, rec.Blockers, hostArch
+}
+
+// checkORT probes ONNX Runtime availability through the ortProbe seam, falling
+// back to inference.CheckORTAvailability when no probe is injected.
+func (c *Handler) checkORT(configuredPath string) inference.ORTStatus {
+	if c.ortProbe != nil {
+		return c.ortProbe(configuredPath)
+	}
+	return inference.CheckORTAvailability(configuredPath)
+}
+
+// ensureHostProbed runs the out-of-process OpenVINO device probe when the live
+// host profile is in use, so the optimize bell notice, which persists until the
+// next trigger, sees the real device list. Without it, a host that loaded the
+// OpenVINO core without probing (the explicit-CPU plan path) reports no OpenVINO
+// device, because inference.OpenVINOHasDevice never enumerates in-process (issue
+// #4236). It blocks while a probe child runs (a cached verdict returns at once;
+// a timed-out probe is retried on the next call), so it is only called off the
+// request path. It is a no-op under the hardwareProfile test seam.
+func (c *Handler) ensureHostProbed() {
+	if c.hardwareProfile != nil {
+		return
+	}
+	if c.ensureOVProbe != nil {
+		c.ensureOVProbe()
+		return
+	}
+	inference.EnsureOpenVINOProbe()
 }
 
 // variantOrDefault renders a variant id for messages and logs, mapping the empty
@@ -670,10 +942,11 @@ func formatBlockers(blockers []recommend.Reason) string {
 }
 
 // defaultHardwareProfile resolves the live host profile from the already-probed
-// ONNX Runtime status plus a per-request OpenVINO device probe, mirroring the
+// ONNX Runtime status plus the OpenVINO device list, mirroring the
 // inference-status endpoint (internal/api/v2/system/inference_status.go). The ORT
-// status is passed in (probed once per request by GetModelCatalog) rather than
-// re-probed here, and the OpenVINO device list feeds GPU capability derivation.
+// status is passed in (probed once by each caller) rather than re-probed here,
+// and the OpenVINO device list, answered from the out-of-process probe cache
+// (inference.OpenVINOHasDevice), feeds GPU capability derivation.
 // It is the production value of the hardwareProfile seam.
 func defaultHardwareProfile(ort inference.ORTStatus) hwprofile.Profile {
 	ov := inference.CheckOpenVINOAvailability()
@@ -715,6 +988,11 @@ func (c *Handler) GetInstalledModels(ctx echo.Context) error {
 
 // InstallModel starts an asynchronous model download and installation.
 // It returns 202 Accepted immediately while the download runs in the background.
+// It reserves the manager's operation slot before answering, so a request made
+// while another model operation runs gets a synchronous 409 with
+// operationInProgressKey instead of a 202 for work that never starts. When the
+// background install succeeds it announces the list change, whether or not the
+// hot load of the model succeeded.
 func (c *Handler) InstallModel(ctx echo.Context) error {
 	catalogID := ctx.Param("id")
 	if catalogID == "" {
@@ -729,7 +1007,7 @@ func (c *Handler) InstallModel(ctx echo.Context) error {
 	// Hidden entries are foundation-only: excluded from the gallery and not meant to
 	// be installed by ID. The permanent BirdNET v2.4 entry is intentionally NOT
 	// hidden: it is always installed, and an install request against it is a
-	// within-model variant swap routed to InstallOrReplace -> replacePrimaryVariant.
+	// within-model variant swap routed to InstallOrReplace -> replaceVariant.
 	if entry.Hidden {
 		return c.HandleError(ctx, nil, "catalog entry "+catalogID+" is not available for installation", http.StatusNotFound)
 	}
@@ -758,7 +1036,7 @@ func (c *Handler) InstallModel(ctx echo.Context) error {
 	// Probe ORT once: it gates ONNX-only variants below and also feeds the hardware
 	// profile the compatibility gate consults, mirroring how GetModelCatalog probes
 	// it a single time per request.
-	ortStatus := inference.CheckORTAvailability(c.CurrentSettings().BirdNET.ONNXRuntimePath)
+	ortStatus := c.checkORT(c.CurrentSettings().BirdNET.ONNXRuntimePath)
 
 	// Reject installation of ONNX-dependent models when ORT is unavailable. The gate
 	// is variant-scoped: an entry may be ORT-free overall (e.g. BirdNET v2.4, whose
@@ -798,9 +1076,23 @@ func (c *Handler) InstallModel(ctx echo.Context) error {
 			logger.String("operation", "model_install_incompatible_override"))
 	}
 
+	// Reserve the operation slot synchronously, so a refusal reaches the client as a
+	// 409. The lease is handed to the goroutine below, which releases it; nothing
+	// between here and c.Go can return.
+	lease, err := c.ModelManager.BeginOperation(classifier.OperationInstall, catalogID)
+	if err != nil {
+		return c.beginOperationError(ctx, err)
+	}
+
 	// Start async install in a background goroutine.
 	progressChan := make(chan classifier.DownloadState, 16)
 	c.Go(func() {
+		defer lease.Release()
+		// Re-evaluate the optimize notice whatever the outcome, panic included: an
+		// install whose hot-load fails still records the install without a
+		// topology event, and a failed swap may roll back to a different installed
+		// variant. Deferred first, so it runs after the recover below.
+		defer c.ScheduleOptimizeNoticeSync()
 		defer func() {
 			if r := recover(); r != nil {
 				c.LogErrorIfEnabled("Panic during model install",
@@ -809,12 +1101,14 @@ func (c *Handler) InstallModel(ctx echo.Context) error {
 				)
 			}
 		}()
-		if err := c.ModelManager.InstallOrReplace(c.Context(), &entry, req.VariantID, "", progressChan); err != nil {
+		if err := lease.InstallOrReplace(c.Context(), &entry, req.VariantID, "", progressChan); err != nil {
 			c.LogErrorIfEnabled("Model install failed",
 				logger.String("catalog_id", catalogID),
 				logger.String("variant_id", req.VariantID),
 				logger.Error(err),
 			)
+		} else {
+			c.announceModelListChange()
 		}
 		close(progressChan)
 
@@ -831,7 +1125,9 @@ func (c *Handler) InstallModel(ctx echo.Context) error {
 
 // ReinstallModel re-downloads missing or corrupt files for an installed model.
 // Files that pass SHA256 validation are skipped. It returns 202 Accepted
-// immediately while the re-download runs in the background.
+// immediately while the re-download runs in the background. Like InstallModel it
+// answers a synchronous 409 with operationInProgressKey while another model
+// operation runs, and announces the list change when the reinstall succeeds.
 func (c *Handler) ReinstallModel(ctx echo.Context) error {
 	catalogID := ctx.Param("id")
 	if catalogID == "" {
@@ -860,13 +1156,27 @@ func (c *Handler) ReinstallModel(ctx echo.Context) error {
 		return c.HandleError(ctx, nil, "model manager is not available", http.StatusServiceUnavailable)
 	}
 
+	// Reserve the operation slot synchronously (see InstallModel), before the
+	// installed check, so an uninstall cannot complete between the check and the
+	// 202. A validation failure below releases it; the goroutine owns it after.
+	lease, err := c.ModelManager.BeginOperation(classifier.OperationReinstall, catalogID)
+	if err != nil {
+		return c.beginOperationError(ctx, err)
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			lease.Release()
+		}
+	}()
+
 	if !c.ModelManager.IsInstalled(catalogID) {
 		return c.HandleError(ctx, nil, "model "+catalogID+" is not installed", http.StatusBadRequest)
 	}
 
 	// Reject reinstall of ONNX-dependent models when ORT is unavailable.
 	if entry.RequiresONNX {
-		ortStatus := inference.CheckORTAvailability(c.CurrentSettings().BirdNET.ONNXRuntimePath)
+		ortStatus := c.checkORT(c.CurrentSettings().BirdNET.ONNXRuntimePath)
 		if !ortStatus.Available {
 			return c.HandleError(ctx, nil,
 				"model requires ONNX Runtime "+inference.ORTRequiredVersion()+": "+ortStatus.Error,
@@ -874,9 +1184,12 @@ func (c *Handler) ReinstallModel(ctx echo.Context) error {
 		}
 	}
 
-	// Start async reinstall in a background goroutine.
+	// Start async reinstall in a background goroutine, which now owns the lease.
+	handedOff = true
 	progressChan := make(chan classifier.DownloadState, 16)
 	c.Go(func() {
+		defer lease.Release()
+		defer c.ScheduleOptimizeNoticeSync() // see InstallModel
 		defer func() {
 			if r := recover(); r != nil {
 				c.LogErrorIfEnabled("Panic during model reinstall",
@@ -885,11 +1198,13 @@ func (c *Handler) ReinstallModel(ctx echo.Context) error {
 				)
 			}
 		}()
-		if err := c.ModelManager.Reinstall(c.Context(), &entry, "", progressChan); err != nil {
+		if err := lease.Reinstall(c.Context(), &entry, "", progressChan); err != nil {
 			c.LogErrorIfEnabled("Model reinstall failed",
 				logger.String("catalog_id", catalogID),
 				logger.Error(err),
 			)
+		} else {
+			c.announceModelListChange()
 		}
 		close(progressChan)
 
@@ -903,7 +1218,19 @@ func (c *Handler) ReinstallModel(ctx echo.Context) error {
 	})
 }
 
-// UninstallModel removes a downloaded model from disk.
+// sumFileSizes returns the total size in bytes of files.
+func sumFileSizes(files []classifier.CatalogFile) int64 {
+	var total int64
+	for _, f := range files {
+		total += f.SizeBytes
+	}
+	return total
+}
+
+// UninstallModel removes a downloaded model from disk. It answers 409 with the
+// removeHasDependentsKey i18n key when other installed models still need it, and
+// with operationInProgressKey while another model operation runs. A successful
+// uninstall announces the list change.
 func (c *Handler) UninstallModel(ctx echo.Context) error {
 	catalogID := ctx.Param("id")
 	if catalogID == "" {
@@ -914,9 +1241,32 @@ func (c *Handler) UninstallModel(ctx echo.Context) error {
 		return c.HandleError(ctx, nil, "model manager is not available", http.StatusServiceUnavailable)
 	}
 
+	wasInstalled := c.ModelManager.IsInstalled(catalogID)
 	if err := c.ModelManager.Uninstall(catalogID); err != nil {
+		if busy, ok := errors.AsType[*classifier.OperationInProgressError](err); ok {
+			return c.operationInProgressResponse(ctx, err, busy)
+		}
+		if de, ok := errors.AsType[*classifier.DependentsError](err); ok {
+			return c.HandleErrorWithKey(ctx, err, "model is required by installed models", http.StatusConflict,
+				removeHasDependentsKey, map[string]any{
+					"name":       de.Name,
+					"models":     de.DependentNames(),
+					"dependents": de.Dependents,
+				})
+		}
+		// A failed file cleanup comes after the model left the installed set and
+		// the config, so the list changed anyway: announce it before the error.
+		// A refusal leaves the installed set as it was and announces nothing.
+		if wasInstalled && !c.ModelManager.IsInstalled(catalogID) {
+			c.ScheduleOptimizeNoticeSync()
+			c.announceModelListChange()
+		}
 		return c.HandleError(ctx, err, "failed to uninstall model", http.StatusInternalServerError)
 	}
+	// Uninstalling a model that was not loaded fires no topology event, but it
+	// can remove an optimize offer, so re-evaluate the notice here.
+	c.ScheduleOptimizeNoticeSync()
+	c.announceModelListChange()
 
 	return ctx.JSON(http.StatusOK, map[string]string{
 		"catalogId": catalogID,
@@ -925,7 +1275,9 @@ func (c *Handler) UninstallModel(ctx echo.Context) error {
 }
 
 // StreamInstallProgress streams model download progress as Server-Sent Events.
-// The stream closes automatically when the download completes or fails.
+// The stream closes automatically when the download completes or fails. Completion
+// is reported only once the entry's operation has released the manager's operation
+// slot, so a client that starts the next operation on it is not refused with 409.
 func (c *Handler) StreamInstallProgress(ctx echo.Context) error {
 	catalogID := ctx.Param("id")
 	if catalogID == "" {
@@ -978,6 +1330,12 @@ func (c *Handler) StreamInstallProgress(ctx echo.Context) error {
 				// No active download. Check if the model is already installed,
 				// which means the download completed before we connected.
 				if c.ModelManager.IsInstalled(catalogID) {
+					if c.ModelManager.OperationRunningFor(catalogID) {
+						// Installed, but the operation still runs (the post-install
+						// hot-load, or a reinstall not yet registered): wait for it.
+						time.Sleep(apicore.SSEEventLoopSleep)
+						continue
+					}
 					completeState := classifier.DownloadState{
 						CatalogID: catalogID,
 						Status:    classifier.StatusComplete,

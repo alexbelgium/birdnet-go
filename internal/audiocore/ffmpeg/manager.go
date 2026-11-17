@@ -144,23 +144,24 @@ func (m *Manager) SetOnStreamReset(fn func(sourceID string)) {
 // applied by withManagerDefaults.
 func (m *Manager) streamConfigFromSpec(spec *audiocore.StreamSpec) *StreamConfig {
 	return &StreamConfig{
-		URL:                  spec.URL,
-		SourceID:             spec.SourceID,
-		SourceName:           spec.SourceName,
-		Type:                 string(spec.Type),
-		SampleRate:           spec.SampleRate,
-		SourceSampleRate:     spec.SourceSampleRate,
-		BitDepth:             spec.BitDepth,
-		Channels:             spec.Channels,
-		SourceChannels:       spec.SourceChannels,
-		ChannelMode:          spec.ChannelMode,
-		MediaMode:            spec.MediaMode,
-		Transport:            spec.Transport,
-		HealthyDataThreshold: spec.HealthyDataThreshold,
-		Debug:                spec.Debug,
-		FFmpegPath:           m.opts.FFmpegPath,
-		FFmpegParameters:     m.opts.FFmpegParameters,
-		LogLevel:             m.opts.LogLevel,
+		URL:                       spec.URL,
+		SourceID:                  spec.SourceID,
+		SourceName:                spec.SourceName,
+		Type:                      string(spec.Type),
+		SampleRate:                spec.SampleRate,
+		SourceSampleRate:          spec.SourceSampleRate,
+		SourceSampleRateEstimated: spec.SourceSampleRateEstimated,
+		BitDepth:                  spec.BitDepth,
+		Channels:                  spec.Channels,
+		SourceChannels:            spec.SourceChannels,
+		ChannelMode:               spec.ChannelMode,
+		MediaMode:                 spec.MediaMode,
+		Transport:                 spec.Transport,
+		HealthyDataThreshold:      spec.HealthyDataThreshold,
+		Debug:                     spec.Debug,
+		FFmpegPath:                m.opts.FFmpegPath,
+		FFmpegParameters:          m.opts.FFmpegParameters,
+		LogLevel:                  m.opts.LogLevel,
 	}
 }
 
@@ -371,18 +372,17 @@ func (m *Manager) ReconfigureStream(sourceID string, cfg *StreamConfig) error {
 }
 
 // StreamHealth returns health information for the stream identified by sourceID.
+// An untracked sourceID returns an error wrapping audiocore.ErrSourceNotFound.
+// The miss is expected (sound-card sources are never tracked here, and the
+// liveness watchdog and the stream health API probe IDs that may be absent), so
+// it is a plain wrapped error and is not reported to telemetry.
 func (m *Manager) StreamHealth(sourceID string) (*audiocore.StreamHealth, error) {
 	m.mu.RLock()
 	stream, exists := m.streams[sourceID]
 	m.mu.RUnlock()
 
 	if !exists {
-		return nil, errors.Newf("no stream found for sourceID: %s", sourceID).
-			Category(errors.CategoryValidation).
-			Component("ffmpeg-manager").
-			Context("operation", "stream_health").
-			Context("source_id", sourceID).
-			Build()
+		return nil, fmt.Errorf("ffmpeg stream health: %w: %s", audiocore.ErrSourceNotFound, sourceID)
 	}
 
 	h := stream.GetHealth()

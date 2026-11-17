@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
@@ -49,10 +50,12 @@ const (
 	// SourceInactive means the source exists but is not currently capturing.
 	SourceInactive SourceState = iota
 
-	// SourceStarting means the source is initialising its connection or device.
+	// SourceStarting means capture is being opened.
 	SourceStarting
 
-	// SourceRunning means the source is actively capturing and dispatching frames.
+	// SourceRunning means capture has been started. For network streams the
+	// connection itself is established asynchronously, and its health is
+	// reported by the stream manager (StreamHealth), not by this state.
 	SourceRunning
 
 	// SourceError means the source has encountered an unrecoverable error.
@@ -106,6 +109,14 @@ type AudioSource struct {
 	// SourceSampleRate is the actual sample rate of the remote source,
 	// discovered by probing. Zero means unknown.
 	SourceSampleRate int `json:"sourceSampleRate,omitempty"`
+
+	// SourceSampleRateEstimated marks SourceSampleRate as a fallback estimate
+	// carried over from a previous probe rather than a fresh one. It persists here
+	// so a stop/resume round-trip (e.g. quiet hours) that rebuilds the stream from
+	// the registry keeps forcing output resampling instead of trusting a possibly
+	// stale rate (#4350). Not serialised: it is an internal resampling hint, not
+	// part of the source's API/SSE representation.
+	SourceSampleRateEstimated bool `json:"-"`
 
 	// BitDepth is the capture bit depth (e.g., 16).
 	BitDepth int `json:"bitDepth"`
@@ -178,6 +189,17 @@ func (s *AudioSource) String() string {
 	return s.SafeString
 }
 
+// EffectiveSampleRate returns the rate in Hz at which the source delivers
+// frames to the router: its registered SampleRate when positive, else the
+// default capture rate. It is safe to call on a nil source, so a failed
+// registry lookup falls back to the default rate.
+func (s *AudioSource) EffectiveSampleRate() int {
+	if s == nil {
+		return conf.SampleRate
+	}
+	return conf.EffectiveSampleRate(s.SampleRate)
+}
+
 // StreamTypeToSourceType converts a stream type string (e.g., "rtsp", "http")
 // to the corresponding SourceType constant.
 func StreamTypeToSourceType(streamType string) SourceType {
@@ -230,6 +252,14 @@ type SourceConfig struct {
 	// SourceSampleRate is the actual sample rate of the remote source, discovered
 	// by probing. Zero means unknown (probe failed or not probed).
 	SourceSampleRate int
+
+	// SourceSampleRateEstimated marks SourceSampleRate as a fallback estimate
+	// carried over from a previous probe rather than a fresh probe result (the
+	// current probe failed). When true, output resampling must be forced so the
+	// pipeline receives exactly SampleRate even if the live source rate has
+	// since changed and no longer matches the estimate (#4350). Ignored by the
+	// native ingest path, which resamples from the true decoded rate.
+	SourceSampleRateEstimated bool
 
 	// BitDepth is the desired capture bit depth (e.g., 16).
 	BitDepth int

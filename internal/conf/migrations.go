@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -72,19 +73,12 @@ func migrateStreamEnabledDefaults() bool {
 // configs that predate the field so session signing remains stable across
 // restarts. Unlike the security package's temporary runtime fallback, this
 // updates the loaded settings and best-effort saves the generated secret.
-func ensureSessionSecret(settings *Settings) error {
+func ensureSessionSecret(settings *Settings) {
 	if settings.Security.SessionSecret != "" {
-		return nil
+		return
 	}
 
-	sessionSecret, err := GenerateRandomSecret()
-	if err != nil {
-		return errors.New(err).
-			Component("conf").
-			Category(errors.CategoryConfiguration).
-			Context("operation", "generate_session_secret").
-			Build()
-	}
+	sessionSecret := GenerateRandomSecret()
 
 	settings.Security.SessionSecret = sessionSecret
 
@@ -98,21 +92,19 @@ func ensureSessionSecret(settings *Settings) error {
 	// This ensures the secret remains the same across restarts
 	configFile := viper.ConfigFileUsed()
 	if configFile == "" {
-		return nil
+		return
 	}
 
 	if err := SaveYAMLConfig(configFile, settings); err != nil {
 		// Log the error but don't fail - the generated secret will work for this session
 		GetLogger().Warn("Failed to save generated SessionSecret to config file", logger.Error(err))
-		return nil
+		return
 	}
 
 	// Set secure file permissions after saving
 	if err := os.Chmod(configFile, 0o600); err != nil {
 		GetLogger().Warn("Failed to set secure permissions on config file", logger.Error(err))
 	}
-
-	return nil
 }
 
 // EnsureProfilingToken mints diagnostics.profiling.token when the pprof
@@ -136,31 +128,22 @@ func ensureSessionSecret(settings *Settings) error {
 //
 // The caller owns persistence, and is told whether anything changed so it can
 // decide whether a write is needed.
-func EnsureProfilingToken(settings *Settings) (bool, error) {
+func EnsureProfilingToken(settings *Settings) bool {
 	if settings == nil {
-		return false, nil
+		return false
 	}
 
 	profiling := &settings.Diagnostics.Profiling
 	if !profiling.Enabled || profiling.Token != "" || settings.IsAuthProviderConfigured() {
-		return false, nil
+		return false
 	}
 
-	token, err := GenerateRandomSecret()
-	if err != nil {
-		return false, errors.New(err).
-			Component("conf").
-			Category(errors.CategoryConfiguration).
-			Context("operation", "generate_profiling_token").
-			Build()
-	}
-
-	profiling.Token = token
+	profiling.Token = GenerateRandomSecret()
 
 	// The value itself is never logged.
 	GetLogger().Info("Generated profiling token; no authentication provider is configured, so /debug/pprof/ requires the token from diagnostics.profiling.token")
 
-	return true, nil
+	return true
 }
 
 // migrateLegacyProvider converts a legacy SocialProvider to the new OAuthProviderConfig format.
@@ -214,9 +197,9 @@ func (s *Settings) MigrateOAuthConfig() bool {
 		name   string
 		config SocialProvider
 	}{
-		{"google", s.Security.GoogleAuth},
-		{"github", s.Security.GithubAuth},
-		{"microsoft", s.Security.MicrosoftAuth},
+		{OAuthProviderGoogle, s.Security.GoogleAuth},
+		{OAuthProviderGitHub, s.Security.GithubAuth},
+		{OAuthProviderMicrosoft, s.Security.MicrosoftAuth},
 	}
 
 	var migrated bool
@@ -361,36 +344,154 @@ func (s *Settings) MigrateAudioSourceConfig() bool {
 	return true
 }
 
-// MigrateSourceModels migrates the legacy singular Model field to the new
-// Models list on AudioSourceConfig and StreamConfig. Sources with neither
-// Model nor Models set default to ["birdnet"]. Returns true if any migration
-// occurred.
+// MigrateSourceModels folds the legacy singular Model field into the Models list on
+// AudioSourceConfig. It no longer fills an empty list: an empty per-source model list
+// now means "the orchestrator's default targets" (model de-privilege epic, Phase 4),
+// and MigrateSourceTargetDefaults pins every pre-Phase-4 empty list once. StreamConfig
+// never had a singular field, so it is untouched here. Returns true if any source was
+// folded.
 func (s *Settings) MigrateSourceModels() bool {
 	migrated := false
 
 	for i := range s.Realtime.Audio.Sources {
 		src := &s.Realtime.Audio.Sources[i]
-		if len(src.Models) > 0 {
+		if len(src.Models) > 0 || src.Model == "" {
 			continue
 		}
-		if src.Model != "" {
-			src.Models = []string{src.Model}
-			src.Model = ""
-		} else {
-			src.Models = []string{ModelIDBirdNET}
-		}
-		migrated = true
-	}
-
-	for _, stream := range s.Realtime.RTSP.AllStreams() {
-		if len(stream.Models) > 0 {
-			continue
-		}
-		stream.Models = []string{ModelIDBirdNET}
+		src.Models = []string{src.Model}
+		src.Model = ""
 		migrated = true
 	}
 
 	return migrated
+}
+
+// Config file versions. Each constant names the one-shot migration that raises the file to
+// that version; currentConfigVersion is the newest one this build applies. A freshly
+// generated config is stamped with currentConfigVersion (stampConfigVersion) so this
+// build's one-shot migrations never rewrite a file it just created.
+//
+// A migration step that runs OUTSIDE conf.Load() must NEVER gate on ConfigVersion: Part A
+// of the models-enabled-authoritative migration raises ConfigVersion to at least 2 inside Load(), so a
+// later step (e.g. the classifier's one-shot auto-enable capture in ScanInstalled) that
+// gated on ConfigVersion<2 would be silently disabled by that stamp. Such steps use an
+// independent companion marker instead (see ModelsConfig.AutoEnableMigrated).
+const (
+	// configVersionSourceTargetDefaults: an empty per-source or per-stream model list changed
+	// meaning from "the built-in BirdNET v2.4" to "the orchestrator's default targets" (model
+	// de-privilege epic, Phase 4); MigrateSourceTargetDefaults pins every pre-Phase-4 empty
+	// list to ["birdnet"] once so no source changes targets.
+	configVersionSourceTargetDefaults = 1
+
+	// configVersionModelsEnabledAuthoritative: models.enabled became the only source of the
+	// enabled model set (model de-privilege epic, Phase 4). Before it the orchestrator enabled
+	// BirdNET v2.4 implicitly, ahead of every listed model, whether or not the list named it;
+	// MigrateModelsEnabledAuthoritative writes that implicit lead out once so every existing
+	// install keeps loading the same models in the same order.
+	configVersionModelsEnabledAuthoritative = 2
+
+	// configVersionLogDeduplicationDefaults: builds from 2025-08-15 to 2026-02-19 had no viper
+	// default for realtime.logdeduplication, so a save wrote the Go zero value (enabled false,
+	// interval 0) to disk, where it beats the defaults that exist now;
+	// MigrateLogDeduplicationDefaults restores the defaults once.
+	configVersionLogDeduplicationDefaults = 3
+
+	// currentConfigVersion is the newest config version this build applies.
+	currentConfigVersion = configVersionLogDeduplicationDefaults
+)
+
+// MigrateSourceTargetDefaults writes ["birdnet"] into every source and stream whose
+// model list is empty, exactly once per config file, then stamps ConfigVersion.
+// Before Phase 4 an empty list meant BirdNET v2.4 (MigrateSourceModels filled it on
+// every load); after Phase 4 an empty list means DefaultTargets(), which can include
+// secondaries. Writing the old meaning out explicitly keeps every existing source on
+// exactly the models it analyzed with before the upgrade. v2.4 is embedded and
+// implicitly enabled at every config version below this one, so no runtime "is v2.4
+// loaded" check is needed: the version stamp is that evidence. Returns true when a
+// list or the stamp changed, so persistMigration writes the file.
+func (s *Settings) MigrateSourceTargetDefaults() bool {
+	if s.ConfigVersion >= configVersionSourceTargetDefaults {
+		return false
+	}
+	for i := range s.Realtime.Audio.Sources {
+		if src := &s.Realtime.Audio.Sources[i]; len(src.Models) == 0 {
+			src.Models = []string{ModelIDBirdNET}
+		}
+	}
+	for _, stream := range s.Realtime.RTSP.AllStreams() {
+		if len(stream.Models) == 0 {
+			stream.Models = []string{ModelIDBirdNET}
+		}
+	}
+	s.ConfigVersion = configVersionSourceTargetDefaults
+	return true
+}
+
+// MigrateModelsEnabledAuthoritative makes models.enabled the authoritative, ordered enable
+// set (model de-privilege epic, Phase 4). Before this version the orchestrator enabled
+// BirdNET v2.4 implicitly and ALWAYS loaded it first, whether or not the list named it;
+// once the orchestrator collapses to config-order loading, only the list order decides the
+// load order, so an existing install whose list omits v2.4 (or names it later) would change
+// its load order. Exactly once per config file, at a version below 2, this reproduces the
+// legacy v2.4-first order: if a v2.4 spelling is already present it is MOVED to the front
+// (keeping its spelling), otherwise "birdnet" is prepended; then ConfigVersion is stamped
+// to 2. An explicit empty list at a lower version still loaded v2.4 implicitly, so it gets
+// "birdnet" prepended too; after this version an empty list means "no acoustic model" and
+// is left alone. Runs after MigrateSourceTargetDefaults, so a version-0 file gets both.
+// Returns true when the list or the stamp changed, so persistMigration writes the file.
+func (s *Settings) MigrateModelsEnabledAuthoritative() bool {
+	if s.ConfigVersion >= configVersionModelsEnabledAuthoritative {
+		return false
+	}
+	switch idx := slices.IndexFunc(s.Models.Enabled, isBirdNETV24ConfigID); {
+	case idx < 0:
+		// v2.4 absent (including an explicit empty list): prepend the canonical spelling.
+		s.Models.Enabled = append([]string{ModelIDBirdNET}, s.Models.Enabled...)
+	case idx > 0:
+		// v2.4 present but not first: move it to the front keeping its spelling, so the
+		// config-order load reproduces the legacy v2.4-first order byte-for-byte. A later
+		// duplicate v2.4 spelling is left in place; the loader deduplicates it.
+		v24 := s.Models.Enabled[idx]
+		s.Models.Enabled = slices.Delete(s.Models.Enabled, idx, idx+1)
+		s.Models.Enabled = append([]string{v24}, s.Models.Enabled...)
+	default:
+		// idx == 0: v2.4 already leads; only the version stamp below changes.
+	}
+	s.ConfigVersion = configVersionModelsEnabledAuthoritative
+	return true
+}
+
+// MigrateLogDeduplicationDefaults restores the log deduplication defaults over the
+// exact zero pair (enabled false, health check interval 0) that builds without viper
+// defaults for the section wrote to disk, exactly once per config file, then stamps
+// ConfigVersion. Any other combination is a user choice and is kept: a disabled
+// section keeps a nonzero interval, and an enabled one with interval 0 already uses
+// the runtime fallback. Returns true when the section or the stamp changed, so
+// persistMigration writes the file.
+func (s *Settings) MigrateLogDeduplicationDefaults() bool {
+	if s.ConfigVersion >= configVersionLogDeduplicationDefaults {
+		return false
+	}
+	if dedup := &s.Realtime.LogDeduplication; !dedup.Enabled && dedup.HealthCheckIntervalSeconds == 0 {
+		dedup.Enabled = true
+		dedup.HealthCheckIntervalSeconds = DefaultLogDeduplicationHealthCheckSeconds
+		GetLogger().Info("Restored log deduplication defaults over a zeroed config section",
+			logger.Bool("enabled", dedup.Enabled),
+			logger.Int("health_check_interval_seconds", dedup.HealthCheckIntervalSeconds))
+	}
+	s.ConfigVersion = configVersionLogDeduplicationDefaults
+	return true
+}
+
+// isBirdNETV24ConfigID reports whether a models.enabled entry names the BirdNET v2.4 family
+// under either config spelling, case-insensitively. MigrateModelIDAliases runs later in
+// Load, so the catalog spelling ("birdnet-v2.4") can still be present here; matching it
+// keeps the migration from prepending a duplicate "birdnet". The conf package cannot read
+// the classifier registry (import cycle), so the two spellings are the alias set from
+// ModelRegistry[RegistryIDBirdNETV24].ConfigAliases; TestModelRegistry_V24AliasesMatchConf
+// pins the two lists in lockstep.
+func isBirdNETV24ConfigID(id string) bool {
+	return strings.EqualFold(id, ModelIDBirdNET) || strings.EqualFold(id, ModelIDBirdNETCatalog)
 }
 
 // normalizeRTSPStreamEnabledDefaults materializes enabled=true for legacy raw
@@ -436,10 +537,12 @@ func normalizeRTSPStreamEnabledDefaults(rawStreams any) ([]any, bool) {
 // many regional catalog IDs mapping to one registry entry, so there is no
 // single canonical spelling to normalize toward.
 var catalogModelIDAliases = map[string]string{
-	ModelIDBirdNETCatalog:   ModelIDBirdNET,
-	ModelIDBirdNETV3Catalog: ModelIDBirdNETV3,
-	ModelIDPerchV2Catalog:   ModelIDPerchV2,
-	ModelIDBSGCatalog:       ModelIDBSG,
+	ModelIDBirdNETCatalog:       ModelIDBirdNET,
+	ModelIDBirdNETV3Catalog:     ModelIDBirdNETV3,
+	ModelIDBirdNETPlusV3Catalog: ModelIDBirdNETPlusV3,
+	ModelIDPerchV2Catalog:       ModelIDPerchV2,
+	ModelIDBSGCatalog:           ModelIDBSG,
+	ModelIDBSGBatCatalog:        ModelIDBSGBat,
 }
 
 // canonicalizeModelID returns the canonical config ID for a catalog-style
@@ -520,6 +623,61 @@ func (s *Settings) MigrateModelIDAliases() bool {
 	return changed
 }
 
+// Legacy birdnet.version field values. The orchestrator no longer selects the
+// BirdNET family from birdnet.version (model de-privilege epic, Phase 3): the family
+// is loaded like any other model. NewBirdNET still branches on the field for its
+// Tier-2 identity fallback (removed in a later phase), which is why the migration
+// clears it, so that fallback is not taken. These values are recognized only so the
+// migration can retire the field cleanly.
+const (
+	legacyBirdNETVersionV24 = "2.4"
+	legacyBirdNETVersionV30 = "3.0"
+)
+
+// MigrateBirdNETVersion retires the birdnet.version field. It used to select the
+// BirdNET model family; v2.4 is now loaded like any other model and the orchestrator
+// no longer selects the family from it. The migration clears it (which also disables
+// NewBirdNET's remaining Tier-2 fallback on the field) and, for the "3.0" value,
+// enables the v3.0 model
+// as a gallery-managed model so the config keeps working. A "3.0" config that also
+// carried a custom birdnet.modelpath/labelpath (a manually obtained v3.0 model run
+// as the primary) has those cleared here: the primary slot is now the embedded v2.4
+// baseline, and leaving a v3.0 model file on it would mispair the v2.4 identity
+// (48 kHz / 3 s) with a v3.0 model, so the paths are dropped and the v3.0 model
+// serves through the enabled gallery entry instead. An unknown value (which
+// previously aborted startup) is dropped with a warning. Returns whether anything
+// changed.
+func (s *Settings) MigrateBirdNETVersion() bool {
+	version := s.BirdNET.Version
+	if version == "" {
+		return false
+	}
+
+	switch version {
+	case legacyBirdNETVersionV24:
+		// v2.4 is the built-in model and is always loaded; only the dead field
+		// needs clearing.
+	case legacyBirdNETVersionV30:
+		if !slices.Contains(s.Models.Enabled, ModelIDBirdNETV3) {
+			s.Models.Enabled = append(s.Models.Enabled, ModelIDBirdNETV3)
+		}
+		// Drop any custom v3.0 primary paths so they are not mispaired with the
+		// embedded v2.4 baseline that now occupies the primary slot.
+		clearedCustomPath := s.BirdNET.ModelPath != "" || s.BirdNET.LabelPath != ""
+		s.BirdNET.ModelPath = ""
+		s.BirdNET.LabelPath = ""
+		GetLogger().Info("Migrated legacy birdnet.version=3.0 by enabling the v3.0 model",
+			logger.String("model", ModelIDBirdNETV3),
+			logger.Bool("cleared_custom_primary_path", clearedCustomPath))
+	default:
+		GetLogger().Warn("Dropping unknown birdnet.version during migration; the field is no longer used",
+			logger.String("version", version))
+	}
+
+	s.BirdNET.Version = ""
+	return true
+}
+
 // ValidateModelConfig checks model-related configuration for errors and
 // warnings. Returns a slice of warning/error strings. Fatal errors are
 // prefixed with "error:"; non-fatal issues with "warning:".
@@ -539,8 +697,11 @@ func (s *Settings) ValidateModelConfig(knownIDs map[string]bool, checkSourceRefs
 
 	// During early config loading, models.enabled is not yet synchronized
 	// with gallery-installed models (ScanInstalled runs later), so these
-	// checks produce false positives. The orchestrator re-validates with
-	// the authoritative model list after startup sync is complete.
+	// checks produce false positives. The only production caller passes
+	// false, and nothing re-runs this check with source references turned
+	// on, so a source or stream that lists a model missing from
+	// models.enabled is not rejected here; the analysis pipeline skips such
+	// aliases at runtime.
 	if checkSourceRefs {
 		enabledSet := make(map[string]bool, len(s.Models.Enabled))
 		for _, id := range s.Models.Enabled {
@@ -571,14 +732,14 @@ func (s *Settings) ValidateModelConfig(knownIDs map[string]bool, checkSourceRefs
 // errors are collected and returned together so the user can fix them in
 // one pass.
 func (s *Settings) applyModelValidation() error {
-	// Fallback known-ID set used during config loading before the classifier
-	// package is available; the orchestrator re-validates with the authoritative
-	// classifier.KnownConfigIDs() later. Reuse ValidAudioModels (the same
-	// canonical + catalog-alias set, kept in lockstep with the registry by
-	// TestKnownConfigIDs_MatchesConfValidAudioModels) rather than hand-maintaining
-	// a third copy that could drift. The extra "" default key is harmless here
-	// because models.enabled never contains an empty entry. ValidateModelConfig
-	// only reads the map.
+	// Known-ID set used during config loading, before the classifier package
+	// is available; classifier.KnownConfigIDs() is not consulted here. Reuse
+	// ValidAudioModels (the same canonical + catalog-alias set, kept in
+	// lockstep with the registry by
+	// TestKnownConfigIDs_MatchesConfValidAudioModels) rather than
+	// hand-maintaining a third copy that could drift. The extra "" default key
+	// is harmless here because models.enabled never contains an empty entry.
+	// ValidateModelConfig only reads the map.
 	modelIssues := s.ValidateModelConfig(ValidAudioModels, false)
 	var fatalErrors []string
 	for _, issue := range modelIssues {

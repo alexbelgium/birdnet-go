@@ -10,12 +10,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	speciestracker "github.com/tphakala/birdnet-go/internal/analysis/species"
+	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	v2 "github.com/tphakala/birdnet-go/internal/datastore/v2"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
+	"github.com/tphakala/birdnet-go/internal/detection"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"github.com/tphakala/birdnet-go/internal/speciesindex"
 )
 
 // buildTestConfig constructs the shared repositories and Config for in-memory test datastores.
@@ -55,11 +59,15 @@ func buildConfigForManager(t *testing.T, manager v2.Manager, testLogger logger.L
 
 	db := manager.DB()
 
+	// A prefixed manager (a MySQL install migrated from legacy) needs prefixed
+	// repositories, or they would address tables that do not exist.
+	useV2Prefix := manager.TablePrefix() != ""
+
 	// Create lookup table entries for tests
 	// The LabelType and TaxonomicClass tables should be created by Initialize()
-	labelTypeRepo := repository.NewLabelTypeRepository(db, nil, false)
-	taxClassRepo := repository.NewTaxonomicClassRepository(db, nil, false)
-	modelRepo := repository.NewModelRepository(db, nil, false, isMySQL)
+	labelTypeRepo := repository.NewLabelTypeRepository(db, nil, useV2Prefix)
+	taxClassRepo := repository.NewTaxonomicClassRepository(db, nil, useV2Prefix)
+	modelRepo := repository.NewModelRepository(db, nil, useV2Prefix, isMySQL)
 
 	ctx := t.Context()
 
@@ -77,15 +85,15 @@ func buildConfigForManager(t *testing.T, manager v2.Manager, testLogger logger.L
 
 	avesClassID := avesClass.ID
 
-	// Create repositories. useV2Prefix=false (fresh install / clean table names);
+	// Create repositories. useV2Prefix follows the manager's table prefix;
 	// isMySQL selects the dialect-specific SQL the repositories generate.
-	detectionRepo := repository.NewDetectionRepository(db, nil, false, isMySQL)
-	labelRepo := repository.NewLabelRepository(db, nil, false, isMySQL)
-	sourceRepo := repository.NewAudioSourceRepository(db, nil, false, isMySQL)
-	weatherRepo := repository.NewWeatherRepository(db, nil, false, isMySQL)
-	imageCacheRepo := repository.NewImageCacheRepository(db, nil, labelRepo, false, isMySQL)
-	thresholdRepo := repository.NewDynamicThresholdRepository(db, nil, false, isMySQL)
-	notificationRepo := repository.NewNotificationHistoryRepository(db, nil, labelRepo, false, isMySQL)
+	detectionRepo := repository.NewDetectionRepository(db, nil, useV2Prefix, isMySQL)
+	labelRepo := repository.NewLabelRepository(db, nil, useV2Prefix, isMySQL)
+	sourceRepo := repository.NewAudioSourceRepository(db, nil, useV2Prefix, isMySQL)
+	weatherRepo := repository.NewWeatherRepository(db, nil, useV2Prefix, isMySQL)
+	imageCacheRepo := repository.NewImageCacheRepository(db, nil, labelRepo, useV2Prefix, isMySQL)
+	thresholdRepo := repository.NewDynamicThresholdRepository(db, nil, useV2Prefix, isMySQL)
+	notificationRepo := repository.NewNotificationHistoryRepository(db, nil, labelRepo, useV2Prefix, isMySQL)
 
 	return &Config{
 		Manager:            manager,
@@ -112,7 +120,7 @@ func setupTestDatastore(t *testing.T) (ds *Datastore, cleanup func()) {
 	cfg, cfgCleanup := buildTestConfig(t, nil)
 	ds, err := New(cfg)
 	require.NoError(t, err)
-	return ds, func() { _ = ds.Close(); cfgCleanup() }
+	return ds, func() { assert.NoError(t, ds.Close()); cfgCleanup() } // nolint:testifylint // assert not require: cfgCleanup must still run if Close errors; require would Goexit and skip it
 }
 
 // setupTestDatastoreWithLabels creates a V2OnlyDatastore with species label mappings for testing.
@@ -123,7 +131,7 @@ func setupTestDatastoreWithLabels(t *testing.T, labels []string) (ds *Datastore,
 	cfg, cfgCleanup := buildTestConfig(t, labels)
 	ds, err := New(cfg)
 	require.NoError(t, err)
-	return ds, func() { _ = ds.Close(); cfgCleanup() }
+	return ds, func() { assert.NoError(t, ds.Close()); cfgCleanup() } // nolint:testifylint // assert not require: cfgCleanup must still run if Close errors; require would Goexit and skip it
 }
 
 // seedDetection creates (or reuses) a label for sciName and inserts one detection
@@ -229,10 +237,176 @@ func TestV2OnlyDatastore_GetSpeciesLastDetectionDateBefore(t *testing.T) {
 		assert.Empty(t, got)
 	})
 
+	t.Run("sound class name does not prefix-match a longer class", func(t *testing.T) {
+		seedDetection(t, ds, "Car", day(9))
+		seedDetection(t, ds, "Car_passing_by", day(12))
+
+		got, err := ds.GetSpeciesLastDetectionDateBefore(ctx, "Car", cutoff)
+		require.NoError(t, err)
+		assert.Equal(t, "2024-06-09", got)
+
+		got, err = ds.GetSpeciesLastDetectionDateBefore(ctx, "Car_passing_by", cutoff)
+		require.NoError(t, err)
+		assert.Equal(t, "2024-06-12", got)
+	})
+
+	t.Run("single-token class without a longer sibling keeps the legacy prefix match", func(t *testing.T) {
+		seedDetection(t, ds, "Dog_Dog", day(8))
+
+		got, err := ds.GetSpeciesLastDetectionDateBefore(ctx, "Dog", cutoff)
+		require.NoError(t, err)
+		assert.Equal(t, "2024-06-08", got)
+	})
+
 	t.Run("returns empty for an unknown species", func(t *testing.T) {
 		got, err := ds.GetSpeciesLastDetectionDateBefore(ctx, "Nonexistent species", cutoff)
 		require.NoError(t, err)
 		assert.Empty(t, got)
+	})
+}
+
+// TestV2OnlyDatastore_GetSpeciesFirstAndLastDetectionTimeBefore pins the
+// first/last previous-detection query used by the MQTT payload: the strict
+// before bound (the current detection is excluded), the legacy
+// concatenated-label match, false-positive exclusion, and the nil semantics
+// for a species with no prior detections.
+func TestV2OnlyDatastore_GetSpeciesFirstAndLastDetectionTimeBefore(t *testing.T) {
+	t.Parallel()
+
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+	ds.timezone = time.UTC
+	ctx := t.Context()
+
+	before := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	day := func(d int, h int) time.Time { return time.Date(2024, 6, d, h, 30, 0, 0, time.UTC) }
+
+	t.Run("returns earliest and most-recent prior detections", func(t *testing.T) {
+		seedDetection(t, ds, "Turdus merula", day(10, 8))
+		seedDetection(t, ds, "Turdus merula", day(13, 18))
+		seedDetection(t, ds, "Turdus merula", day(20, 9)) // on/after before: excluded
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Turdus merula", before)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotNil(t, last)
+		assert.Equal(t, day(10, 8), *first)
+		assert.Equal(t, day(13, 18), *last)
+	})
+
+	t.Run("first and last are equal with a single prior detection", func(t *testing.T) {
+		seedDetection(t, ds, "Erithacus rubecula", day(11, 6))
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Erithacus rubecula", before)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotNil(t, last)
+		assert.Equal(t, *first, *last)
+		assert.Equal(t, day(11, 6), *first)
+	})
+
+	t.Run("returns nils when the only detection is on or after the bound", func(t *testing.T) {
+		seedDetection(t, ds, "Strix aluco", day(20, 9))
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Strix aluco", before)
+		require.NoError(t, err)
+		assert.Nil(t, first)
+		assert.Nil(t, last)
+	})
+
+	t.Run("excludes a detection at exactly the bound instant", func(t *testing.T) {
+		seedDetection(t, ds, "Cyanistes caeruleus", before)
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Cyanistes caeruleus", before)
+		require.NoError(t, err)
+		assert.Nil(t, first)
+		assert.Nil(t, last)
+	})
+
+	t.Run("matches a legacy concatenated label via the LIKE prefix", func(t *testing.T) {
+		seedDetection(t, ds, "Passer domesticus_tikataikka", day(11, 7))
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Passer domesticus", before)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotNil(t, last)
+		assert.Equal(t, day(11, 7), *first)
+		assert.Equal(t, day(11, 7), *last)
+	})
+
+	t.Run("excludes detections reviewed as false positive", func(t *testing.T) {
+		det := seedDetection(t, ds, "Fringilla coelebs", day(10, 8))
+		require.NoError(t, ds.manager.DB().Create(&entities.DetectionReview{
+			DetectionID: det.ID,
+			Verified:    entities.VerificationFalsePositive,
+		}).Error)
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Fringilla coelebs", before)
+		require.NoError(t, err)
+		assert.Nil(t, first)
+		assert.Nil(t, last)
+	})
+
+	t.Run("each bound skips false positives but keeps reviewed-correct detections", func(t *testing.T) {
+		// Both ends of the range are false positives, so each bound must skip
+		// its own end. The newest genuine detection carries a "correct" review,
+		// which must not be excluded along with the false positives.
+		review := func(ts time.Time, status entities.VerificationStatus) {
+			t.Helper()
+			det := seedDetection(t, ds, "Sylvia atricapilla", ts)
+			require.NoError(t, ds.manager.DB().Create(&entities.DetectionReview{
+				DetectionID: det.ID,
+				Verified:    status,
+			}).Error)
+		}
+		review(day(9, 8), entities.VerificationFalsePositive)
+		seedDetection(t, ds, "Sylvia atricapilla", day(10, 8))
+		seedDetection(t, ds, "Sylvia atricapilla", day(12, 8))
+		review(day(13, 8), entities.VerificationCorrect)
+		review(day(14, 8), entities.VerificationFalsePositive)
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Sylvia atricapilla", before)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotNil(t, last)
+		assert.Equal(t, day(10, 8), *first)
+		assert.Equal(t, day(13, 8), *last)
+	})
+
+	t.Run("sound class name does not prefix-match a longer class", func(t *testing.T) {
+		seedDetection(t, ds, "Car", day(9, 7))
+		seedDetection(t, ds, "Car_passing_by", day(12, 7))
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Car", before)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotNil(t, last)
+		assert.Equal(t, day(9, 7), *first)
+		assert.Equal(t, day(9, 7), *last)
+
+		first, last, err = ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Car_passing_by", before)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotNil(t, last)
+		assert.Equal(t, day(12, 7), *first)
+		assert.Equal(t, day(12, 7), *last)
+	})
+
+	t.Run("single-token class without a longer sibling keeps the legacy prefix match", func(t *testing.T) {
+		seedDetection(t, ds, "Dog_Dog", day(8, 7))
+
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Dog", before)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotNil(t, last)
+		assert.Equal(t, day(8, 7), *first)
+	})
+
+	t.Run("returns nils for an unknown species", func(t *testing.T) {
+		first, last, err := ds.GetSpeciesFirstAndLastDetectionTimeBefore(ctx, "Nonexistent species", before)
+		require.NoError(t, err)
+		assert.Nil(t, first)
+		assert.Nil(t, last)
 	})
 }
 
@@ -541,6 +715,29 @@ func TestV2OnlyDatastore_DynamicThreshold_DeleteByCommonName(t *testing.T) {
 	all, err = ds.GetAllDynamicThresholds()
 	require.NoError(t, err)
 	assert.Empty(t, all, "threshold should be deleted when using common name")
+}
+
+// TestV2OnlyDatastore_DeleteDynamicThreshold_NotFoundSemantics verifies the
+// Interface contract: deleting a species with no stored threshold succeeds,
+// while genuine database failures are still returned.
+func TestV2OnlyDatastore_DeleteDynamicThreshold_NotFoundSemantics(t *testing.T) {
+	t.Run("MissingRowReturnsNil", func(t *testing.T) {
+		ds, cleanup := setupTestDatastore(t)
+		defer cleanup()
+
+		require.NoError(t, ds.DeleteDynamicThreshold("never saved"))
+	})
+
+	t.Run("GenuineDBErrorStillReturned", func(t *testing.T) {
+		ds, cleanup := setupTestDatastore(t)
+		defer cleanup()
+
+		require.NoError(t, ds.Close())
+
+		err := ds.DeleteDynamicThreshold("never saved")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, repository.ErrDynamicThresholdNotFound)
+	})
 }
 
 // TestV2OnlyDatastore_DynamicThreshold_GetByCommonName verifies case-insensitive
@@ -881,8 +1078,8 @@ func TestV2OnlyDatastore_ThresholdReads_ErrorTelemetry(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, repository.ErrDynamicThresholdNotFound,
 			"not-found sentinel must propagate so callers can distinguish a benign miss from a genuine DB fault")
-		var ee *errors.EnhancedError
-		require.True(t, errors.As(err, &ee),
+		ee, ok := errors.AsType[*errors.EnhancedError](err)
+		require.True(t, ok,
 			"not-found must be a CategoryNotFound EnhancedError so the API maps it to 404")
 		assert.Equal(t, string(errors.CategoryNotFound), ee.GetCategory(),
 			"not-found must be CategoryNotFound, never CategoryDatabase (which would be Sentry noise)")
@@ -898,8 +1095,8 @@ func TestV2OnlyDatastore_ThresholdReads_ErrorTelemetry(t *testing.T) {
 		assertDatastoreWrapped := func(t *testing.T, err error, op string) {
 			t.Helper()
 			require.Error(t, err, "%s should surface the DB error", op)
-			var ee *errors.EnhancedError
-			require.True(t, errors.As(err, &ee), "%s error must be an EnhancedError", op)
+			ee, ok := errors.AsType[*errors.EnhancedError](err)
+			require.True(t, ok, "%s error must be an EnhancedError", op)
 			assert.Equal(t, "datastore", ee.GetComponent(), "%s must tag datastore component", op)
 			assert.Equal(t, string(errors.CategoryDatabase), ee.GetCategory(), "%s must tag database category", op)
 		}
@@ -1191,7 +1388,6 @@ func TestV2OnlyDatastore_ImplementsInterface(t *testing.T) {
 
 // === Data gap regression tests ===
 // These tests verify bugs identified in the v2only datastore audit (2026-02-21).
-// See docs/plans/2026-02-21-v2only-datastore-data-gaps.md for full findings.
 
 // saveTestNote is a helper that saves a note and returns its ID.
 func saveTestNote(t *testing.T, ds *Datastore, date, timeStr, species string, confidence float64) {
@@ -1509,6 +1705,58 @@ func TestV2OnlyDatastore_Save_DuplicatePredictionLabels(t *testing.T) {
 	assert.Len(t, preds, 2, "duplicate label should be collapsed to single prediction")
 }
 
+// TestV2OnlyDatastore_Save_ResolvesSourceAndKeepsHighestDuplicateConfidence pins
+// behaviours of the shared v2 write path that the other Save tests leave open: the
+// unlikely flag,
+// the audio source row takes the note's node name and display name (and a note
+// with no source gets none), and duplicate prediction labels keep the highest
+// confidence.
+func TestV2OnlyDatastore_Save_ResolvesSourceAndKeepsHighestDuplicateConfidence(t *testing.T) {
+	t.Parallel()
+
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+
+	note := &datastore.Note{
+		Date:           "2024-06-15",
+		Time:           "08:30:00",
+		ScientificName: "Periparus ater",
+		Confidence:     0.99,
+		Unlikely:       true,
+		SourceNode:     "garage-node",
+		Source:         datastore.AudioSource{SafeString: "rtsp_garage", DisplayName: "Garage"},
+	}
+	results := []datastore.Results{
+		{Species: "Periparus ater_Coal Tit", Confidence: 0.50},
+		{Species: "Periparus ater_Coal Tit", Confidence: 0.92},
+		{Species: "Periparus ater_Coal Tit", Confidence: 0.70},
+	}
+	require.NoError(t, ds.Save(note, results))
+	require.NotZero(t, note.ID)
+
+	var det entities.Detection
+	require.NoError(t, ds.manager.DB().First(&det, note.ID).Error)
+	assert.True(t, det.Unlikely, "the unlikely flag must reach the stored detection")
+	require.NotNil(t, det.SourceID, "a note with a source must reference an audio source row")
+	var src entities.AudioSource
+	require.NoError(t, ds.manager.DB().First(&src, *det.SourceID).Error)
+	assert.Equal(t, "rtsp_garage", src.SourceURI)
+	assert.Equal(t, "garage-node", src.NodeName)
+	require.NotNil(t, src.DisplayName)
+	assert.Equal(t, "Garage", *src.DisplayName)
+
+	var preds []entities.DetectionPrediction
+	require.NoError(t, ds.manager.DB().Where("detection_id = ?", note.ID).Find(&preds).Error)
+	require.Len(t, preds, 1, "duplicate labels collapse to one prediction")
+	assert.InDelta(t, float64(float32(0.92)), preds[0].Confidence, 1e-9, "the highest duplicate confidence is kept")
+
+	bare := &datastore.Note{Date: "2024-06-15", Time: "08:31:00", ScientificName: "Parus major", Confidence: 0.8}
+	require.NoError(t, ds.Save(bare, nil))
+	var bareDet entities.Detection
+	require.NoError(t, ds.manager.DB().First(&bareDet, bare.ID).Error)
+	assert.Nil(t, bareDet.SourceID, "a note without a source gets no audio source row")
+}
+
 // TestGetTopBirdsData_SpeciesCode verifies that species codes from eBird taxonomy
 // are populated in the GetTopBirdsData response. Regression test for issue #2191.
 func TestGetTopBirdsData_SpeciesCode(t *testing.T) {
@@ -1526,7 +1774,7 @@ func TestGetTopBirdsData_SpeciesCode(t *testing.T) {
 	cfg.SpeciesCodeMap = speciesCodeMap
 	ds, err := New(cfg)
 	require.NoError(t, err)
-	defer func() { _ = ds.Close(); cfgCleanup() }()
+	t.Cleanup(func() { assert.NoError(t, ds.Close()); cfgCleanup() }) // nolint:testifylint // assert not require: cfgCleanup must still run if Close errors; require would Goexit and skip it
 
 	now := time.Now().UTC()
 	dateStr := now.Format(time.DateOnly)
@@ -1687,7 +1935,7 @@ func TestGetSpeciesSummaryData_NoDateFilter(t *testing.T) {
 	cfg.SpeciesCodeMap = speciesCodeMap
 	ds, err := New(cfg)
 	require.NoError(t, err)
-	defer func() { _ = ds.Close(); cfgCleanup() }()
+	t.Cleanup(func() { assert.NoError(t, ds.Close()); cfgCleanup() }) // nolint:testifylint // assert not require: cfgCleanup must still run if Close errors; require would Goexit and skip it
 
 	now := time.Now().UTC()
 
@@ -1742,10 +1990,10 @@ func TestGetSpeciesSummaryData_WithDateFilter(t *testing.T) {
 	assert.Empty(t, summaries, "should return empty for dates with no detections")
 }
 
-func TestV2OnlyDatastore_UpdateNameMaps(t *testing.T) {
+func TestV2OnlyDatastore_SetSpeciesIndex_SwapsSnapshot(t *testing.T) {
 	t.Parallel()
 
-	// Start with English labels
+	// Start with English labels; New() seeds the fallback index from cfg.Labels.
 	englishLabels := []string{
 		"Turdus merula_Common Blackbird",
 		"Parus major_Great Tit",
@@ -1753,41 +2001,76 @@ func TestV2OnlyDatastore_UpdateNameMaps(t *testing.T) {
 	ds, cleanup := setupTestDatastoreWithLabels(t, englishLabels)
 	t.Cleanup(cleanup)
 
-	// Verify initial English resolution
+	// Verify initial English resolution off the fallback seed.
 	assert.Equal(t, "Common Blackbird", ds.resolveCommonName("Turdus merula"))
 	assert.Equal(t, "Great Tit", ds.resolveCommonName("Parus major"))
 	assert.Equal(t, "Turdus merula", ds.resolveToScientificName("common blackbird"))
 
-	// Switch to Finnish labels
-	finnishLabels := []string{
+	// Inject a shared index rebuilt with Finnish labels, the way the orchestrator
+	// hands the datastore its service in APIServerService.Start.
+	finnish := speciesindex.New(nil)
+	finnish.Rebuild([]string{
 		"Turdus merula_mustarastas",
 		"Parus major_talitiainen",
 		"Strix aluco_lehtopöllö",
-	}
-	ds.UpdateNameMaps(finnishLabels)
+	}, "")
+	ds.SetSpeciesIndex(finnish)
 
-	// Verify Finnish resolution
+	// Verify Finnish resolution after the swap.
 	assert.Equal(t, "mustarastas", ds.resolveCommonName("Turdus merula"))
 	assert.Equal(t, "talitiainen", ds.resolveCommonName("Parus major"))
 	assert.Equal(t, "lehtopöllö", ds.resolveCommonName("Strix aluco"))
 
-	// Verify reverse lookup works with new locale
+	// Verify reverse lookup works with the new locale.
 	assert.Equal(t, "Turdus merula", ds.resolveToScientificName("mustarastas"))
 
-	// Verify old English names no longer resolve
+	// Verify old English names no longer resolve.
 	assert.Equal(t, "common blackbird", ds.resolveToScientificName("common blackbird"),
 		"Old English common name should no longer resolve to scientific name")
 
-	// Verify unknown species still falls back to scientific name
+	// Verify unknown species still falls back to scientific name.
 	assert.Equal(t, "Unknown species", ds.resolveCommonName("Unknown species"))
 }
 
-func TestV2OnlyDatastore_UpdateNameMaps_ConcurrentAccess(t *testing.T) {
+// TestV2OnlyDatastore_FallbackSeedWithoutSharedIndex pins that New seeds the
+// fallback index from cfg.Labels for a datastore that is never handed the shared
+// service (file-analysis commands, fresh install, tests), byte-identical to Phase 1.
+func TestV2OnlyDatastore_FallbackSeedWithoutSharedIndex(t *testing.T) {
+	t.Parallel()
+
+	ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Turdus merula_Common Blackbird"})
+	t.Cleanup(cleanup)
+
+	// No SetSpeciesIndex call: resolution must still work off the constructor seed.
+	assert.Equal(t, "Common Blackbird", ds.resolveCommonName("Turdus merula"))
+	assert.Equal(t, "Turdus merula", ds.resolveToScientificName("common blackbird"))
+}
+
+// TestV2OnlyDatastore_SetSpeciesIndex_NilIgnored pins that a nil service is ignored,
+// leaving the existing (fallback) index in place rather than clearing it.
+func TestV2OnlyDatastore_SetSpeciesIndex_NilIgnored(t *testing.T) {
+	t.Parallel()
+
+	ds, cleanup := setupTestDatastoreWithLabels(t, []string{"Turdus merula_Common Blackbird"})
+	t.Cleanup(cleanup)
+
+	ds.SetSpeciesIndex(nil)
+	assert.Equal(t, "Common Blackbird", ds.resolveCommonName("Turdus merula"),
+		"a nil SetSpeciesIndex must leave the existing index in place")
+}
+
+func TestV2OnlyDatastore_SetSpeciesIndex_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
 	labels := []string{"Turdus merula_Common Blackbird"}
 	ds, cleanup := setupTestDatastoreWithLabels(t, labels)
 	t.Cleanup(cleanup)
+
+	// Prebuild the two shared snapshots the writer swaps between.
+	english := speciesindex.New(nil)
+	english.Rebuild([]string{"Turdus merula_Common Blackbird"}, "")
+	finnish := speciesindex.New(nil)
+	finnish.Rebuild([]string{"Turdus merula_mustarastas"}, "")
 
 	var wg sync.WaitGroup
 	const goroutines = 50
@@ -1810,7 +2093,7 @@ func TestV2OnlyDatastore_UpdateNameMaps_ConcurrentAccess(t *testing.T) {
 	for range goroutines / 2 {
 		wg.Go(func() {
 			for range iterations {
-				// Both snapshots map some common name → "Turdus merula",
+				// Both snapshots map some common name to "Turdus merula",
 				// so the scientific name should always resolve correctly
 				sci := ds.resolveToScientificName("common blackbird")
 				if sci != "common blackbird" {
@@ -1824,61 +2107,22 @@ func TestV2OnlyDatastore_UpdateNameMaps_ConcurrentAccess(t *testing.T) {
 		})
 	}
 
-	// Concurrent writer
+	// Concurrent writer swapping the shared index (atomic pointer Store).
 	wg.Go(func() {
 		for range iterations {
-			ds.UpdateNameMaps([]string{"Turdus merula_mustarastas"})
-			ds.UpdateNameMaps([]string{"Turdus merula_Common Blackbird"})
+			ds.SetSpeciesIndex(finnish)
+			ds.SetSpeciesIndex(english)
 		}
 	})
 
 	wg.Wait()
 }
 
-// batchFakeResolver misses ResolveLocal (the cold-path branch) and resolves only via the
-// batch seam, like the real resolver does for out-of-working-set bats.
-type batchFakeResolver struct{ batch map[string]string }
-
-func (b *batchFakeResolver) Resolve(string, string) string      { return "" }
-func (b *batchFakeResolver) ResolveLocal(string) (string, bool) { return "", false }
-func (b *batchFakeResolver) ResolveLocalizedBatch(names []string) map[string]string {
-	out := make(map[string]string, len(names))
-	for _, n := range names {
-		if v, ok := b.batch[n]; ok {
-			out[n] = v
-		}
-	}
-	return out
-}
-
-func TestBuildNameMaps_SecondaryModelScientificOnlyLabelIsReverseSearchable(t *testing.T) {
-	t.Parallel()
-
-	r := &batchFakeResolver{batch: map[string]string{"Barbastella barbastellus": "mopsilepakko"}}
-	nm := buildNameMaps([]string{"Barbastella barbastellus"}, r)
-
-	// Reverse exact map is NFC-folded, lowercased.
-	assert.Equal(t, "Barbastella barbastellus", nm.species["mopsilepakko"])
-	// Forward + substring maps present too.
-	assert.Equal(t, "mopsilepakko", nm.common["Barbastella barbastellus"])
-	assert.Equal(t, "mopsilepakko", nm.commonFolded["Barbastella barbastellus"])
-}
-
-func TestBuildNameMaps_AmbiguousCommonNameDeletedNotLastWriterWins(t *testing.T) {
-	t.Parallel()
-
-	// Two scientific names sharing one common name must not silently route to an
-	// arbitrary winner; the ambiguous reverse key is dropped.
-	nm := buildNameMaps([]string{"Strix aluco_Owl", "Bubo bubo_Owl"}, nil)
-	_, ok := nm.species["owl"]
-	assert.False(t, ok, "ambiguous common name must be deleted from the exact reverse map")
-
-	// The forward display maps must still contain both species so their common names
-	// are shown correctly in the UI. Ambiguity handling must only drop the reverse
-	// lookup key, not the forward display names.
-	assert.Equal(t, "Owl", nm.common["Strix aluco"], "forward map must retain common name for Strix aluco")
-	assert.Equal(t, "Owl", nm.common["Bubo bubo"], "forward map must retain common name for Bubo bubo")
-}
+// Note: the name-map builder behaviors previously exercised here through
+// buildNameMaps directly (scientific-only labels reverse-searchable via the batch
+// seam, and the ambiguous-common-name drop) now live in internal/speciesindex,
+// where the shared builder is owned and golden-tested against both former
+// builders.
 
 // TestUnixTimeOrZero verifies that a non-positive epoch yields the zero time (so the
 // API renders an empty timestamp) instead of the 1970 epoch origin, while a positive
@@ -1931,11 +2175,52 @@ func TestConvertToNewSpeciesData_ZeroEpoch(t *testing.T) {
 	assert.NotEmpty(t, got[1].LastSeenDate)
 }
 
+func TestV2OnlyDatastore_NewSpeciesWindowAfterMidnightReload(t *testing.T) {
+	ds, cleanup := setupTestDatastore(t)
+	t.Cleanup(cleanup)
+	location, err := time.LoadLocation("Europe/Amsterdam")
+	require.NoError(t, err)
+	ds.timezone = location
+	day := time.Now().In(location).AddDate(0, 0, -7)
+	first := time.Date(day.Year(), day.Month(), day.Day(), 23, 59, 50, 0, location)
+	savedAt := first.Add(15 * time.Second)
+	note := &datastore.Note{
+		ScientificName: "Parus major", Confidence: 0.95,
+		Date: savedAt.Format(time.DateOnly), Time: savedAt.Format(time.TimeOnly),
+		BeginTime: first, EndTime: savedAt,
+	}
+	require.NoError(t, ds.Save(note, nil))
+	// Reproduce mixed history through the supported Save boundary: an epoch-zero
+	// audio start is persisted as integer zero, not SQL NULL.
+	missing := *note
+	missing.ID = 0
+	missing.Time = savedAt.Add(time.Minute).Format(time.TimeOnly)
+	missing.BeginTime = time.UnixMilli(0)
+	missing.EndTime = time.Time{}
+	require.NoError(t, ds.Save(&missing, nil))
+	got, err := ds.GetNewSpeciesDetections(t.Context(), "1900-01-01", savedAt.Format(time.DateOnly), 100, 0)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, savedAt.Format(time.DateOnly), got[0].FirstSeenDate)
+	assert.True(t, first.Equal(got[0].FirstBeginTime))
+	assert.Equal(t, first.Format(time.DateOnly), got[0].FirstBeginTime.Format(time.DateOnly))
+
+	tracker := speciestracker.NewTrackerFromSettings(ds, &conf.SpeciesTrackingSettings{
+		Enabled: true, NewSpeciesWindowDays: 7, NotificationSuppressionHours: 168,
+	})
+	t.Cleanup(func() { assert.NoError(t, tracker.Close()) })
+	require.NoError(t, tracker.InitFromDatabase())
+	isNew, _, novelty := tracker.CheckAndUpdateSpeciesWithNovelty("Parus major", first.Add(168*time.Hour))
+	assert.False(t, isNew, "reloading must not extend notification eligibility past suppression")
+	assert.True(t, novelty.NoveltyEpisodeActive, "restoring the audio date must preserve the first-ever novelty episode")
+	assert.GreaterOrEqual(t, novelty.NoveltyEpisodeDays, 7, "first-ever metadata must still match novelty alert rules")
+}
+
 // TestV2OnlyDatastore_GetSpeciesDiversityData_TimezoneBucketing verifies the date grouping in
 // GetSpeciesDiversityData buckets by the configured timezone, not UTC or the OS-local zone. A
 // detection at a fixed UTC instant 30 minutes before midnight must group on the NEXT calendar day
 // when the configured zone is UTC+5. The negative assertion (the UTC date does not match) proves
-// the bucketing is genuinely offset-aware, and exercises the BETWEEN date filter end-to-end.
+// the bucketing is genuinely offset-aware, and exercises the date range filter end-to-end.
 func TestV2OnlyDatastore_GetSpeciesDiversityData_TimezoneBucketing(t *testing.T) {
 	ds, cleanup := setupTestDatastore(t)
 	defer cleanup()
@@ -2054,4 +2339,377 @@ func TestV2OnlyDatastore_DynamicThreshold_EmptySpeciesRejected(t *testing.T) {
 		ExpiresAt:     time.Now().Add(24 * time.Hour),
 	}})
 	require.Error(t, batchErr, "empty species name must be rejected in batch save")
+}
+
+// TestV2OnlyDatastore_Save_PersistsModelContributions verifies that saving a detection
+// via DetectionRepository.Save (and Datastore.Save) persists per-model consensus
+// contributions to detection_model_contributions and deduplicates colliding model IDs (#4648).
+func TestV2OnlyDatastore_Save_PersistsModelContributions(t *testing.T) {
+	t.Parallel()
+
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+	ctx := t.Context()
+
+	repo := NewDetectionRepository(ds)
+
+	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	result := &detection.Result{
+		Timestamp:  now,
+		SourceNode: "Large Garage Wall",
+		Species: detection.Species{
+			ScientificName: "Poecile carolinensis",
+			CommonName:     "carolina chickadee",
+		},
+		Confidence: 0.92,
+		Model:      detection.ModelInfo{Name: "BirdNET", Version: "2.4", Variant: "default"},
+		ModelContributions: map[string]detection.ResultModelContrib{
+			"BirdNET_V2.4": {
+				Model:         detection.ModelInfo{Name: "BirdNET", Version: "2.4", Variant: "default"},
+				HitCount:      8,
+				MaxConfidence: 0.92,
+				MinConfidence: 0.55,
+				ConfidenceSum: 5.4,
+				FirstHitAt:    now,
+				LastHitAt:     now.Add(6 * time.Second),
+			},
+			"BirdNET_V3.0": {
+				Model:         detection.ModelInfo{Name: "BirdNET", Version: "3.0", Variant: "EUNA"},
+				HitCount:      5,
+				MaxConfidence: 0.87,
+				MinConfidence: 0.61,
+				ConfidenceSum: 3.7,
+				FirstHitAt:    now.Add(time.Second),
+				LastHitAt:     now.Add(5 * time.Second),
+			},
+			"Perch_V2": {
+				Model:         detection.ModelInfo{Name: "Perch", Version: "2", Variant: "default"},
+				HitCount:      3,
+				MaxConfidence: 0.84,
+			},
+			"Bat": {
+				Model: detection.ModelInfo{Name: "BatNET", Version: "1", Variant: "default"},
+			},
+		},
+	}
+
+	require.NoError(t, repo.Save(ctx, result, nil))
+	require.NotZero(t, result.ID)
+
+	var contribs []entities.DetectionModelContribution
+	require.NoError(t, ds.manager.DB().
+		Preload("Model").
+		Where("detection_id = ?", result.ID).
+		Find(&contribs).Error)
+	require.Len(t, contribs, 4, "hit models and the zero-hit model must be saved in detection_model_contributions")
+
+	byModel := make(map[string]entities.DetectionModelContribution, len(contribs))
+	for _, c := range contribs {
+		require.NotNil(t, c.Model)
+		key := fmt.Sprintf("%s_%s_%s", c.Model.Name, c.Model.Version, c.Model.Variant)
+		byModel[key] = c
+	}
+
+	require.Contains(t, byModel, "BirdNET_2.4_default")
+	assert.Equal(t, 8, byModel["BirdNET_2.4_default"].HitCount)
+	assert.InDelta(t, 0.92, byModel["BirdNET_2.4_default"].MaxConfidence, 1e-9)
+	v24 := byModel["BirdNET_2.4_default"]
+	require.NotNil(t, v24.MinConfidence)
+	require.NotNil(t, v24.ConfidenceSum)
+	require.NotNil(t, v24.FirstHitAt)
+	require.NotNil(t, v24.LastHitAt)
+	assert.InDelta(t, 0.55, *v24.MinConfidence, 1e-9)
+	assert.InDelta(t, 5.4, *v24.ConfidenceSum, 1e-9)
+	assert.Equal(t, now.UnixMilli(), *v24.FirstHitAt)
+	assert.Equal(t, now.Add(6*time.Second).UnixMilli(), *v24.LastHitAt)
+
+	require.Contains(t, byModel, "BirdNET_3.0_EUNA")
+	assert.Equal(t, 5, byModel["BirdNET_3.0_EUNA"].HitCount)
+	assert.InDelta(t, 0.87, byModel["BirdNET_3.0_EUNA"].MaxConfidence, 1e-9)
+	v30 := byModel["BirdNET_3.0_EUNA"]
+	require.NotNil(t, v30.MinConfidence)
+	require.NotNil(t, v30.ConfidenceSum)
+	require.NotNil(t, v30.FirstHitAt)
+	require.NotNil(t, v30.LastHitAt)
+	assert.InDelta(t, 0.61, *v30.MinConfidence, 1e-9)
+	assert.InDelta(t, 3.7, *v30.ConfidenceSum, 1e-9)
+	assert.Equal(t, now.Add(time.Second).UnixMilli(), *v30.FirstHitAt)
+	assert.Equal(t, now.Add(5*time.Second).UnixMilli(), *v30.LastHitAt)
+
+	require.Contains(t, byModel, "Perch_2_default")
+	assert.Equal(t, 3, byModel["Perch_2_default"].HitCount)
+	assert.InDelta(t, 0.84, byModel["Perch_2_default"].MaxConfidence, 1e-9)
+	perch := byModel["Perch_2_default"]
+	assert.Nil(t, perch.MinConfidence, "unknown stats are stored as NULL, not zero")
+	assert.Nil(t, perch.ConfidenceSum)
+	assert.Nil(t, perch.FirstHitAt)
+	assert.Nil(t, perch.LastHitAt)
+
+	require.Contains(t, byModel, "BatNET_1_default")
+	bat := byModel["BatNET_1_default"]
+	assert.Zero(t, bat.HitCount, "a model active without a hit is stored with a hit count of 0")
+	assert.Zero(t, bat.MaxConfidence)
+	assert.Nil(t, bat.MinConfidence)
+	assert.Nil(t, bat.ConfidenceSum)
+	assert.Nil(t, bat.FirstHitAt)
+	assert.Nil(t, bat.LastHitAt)
+
+	// Also verify deduplication when two contribution entries resolve to the same AIModel row.
+	dupNote := &datastore.Note{
+		ScientificName: "Spizella pallida",
+		CommonName:     "clay-colored sparrow",
+		Date:           "2026-10-17",
+		Time:           "12:01:00",
+		Confidence:     0.93,
+		ModelContributions: map[string]detection.ResultModelContrib{
+			"default_a": {
+				Model:         detection.ModelInfo{}, // resolves via WithDefaults() to BirdNET 2.4 default
+				HitCount:      2,
+				MaxConfidence: 0.81,
+				MinConfidence: 0.7,
+				ConfidenceSum: 1.5,
+				FirstHitAt:    now.Add(2 * time.Second),
+				LastHitAt:     now.Add(9 * time.Second),
+			},
+			"default_b": {
+				Model:         detection.ModelInfo{Name: "BirdNET", Version: "2.4", Variant: "default"},
+				HitCount:      4,
+				MaxConfidence: 0.93,
+				MinConfidence: 0.6,
+				ConfidenceSum: 3.1,
+				FirstHitAt:    now.Add(time.Second),
+				LastHitAt:     now.Add(4 * time.Second),
+			},
+		},
+	}
+	require.NoError(t, ds.Save(dupNote, nil))
+	require.NotZero(t, dupNote.ID)
+
+	var dupContribs []entities.DetectionModelContribution
+	require.NoError(t, ds.manager.DB().
+		Where("detection_id = ?", dupNote.ID).
+		Find(&dupContribs).Error)
+	require.Len(t, dupContribs, 1, "colliding ModelIDs must be merged into a single row")
+	assert.Equal(t, 6, dupContribs[0].HitCount)
+	assert.InDelta(t, 0.93, dupContribs[0].MaxConfidence, 1e-9)
+	merged := dupContribs[0]
+	require.NotNil(t, merged.MinConfidence)
+	require.NotNil(t, merged.ConfidenceSum)
+	require.NotNil(t, merged.FirstHitAt)
+	require.NotNil(t, merged.LastHitAt)
+	assert.InDelta(t, 0.6, *merged.MinConfidence, 1e-9, "min of mins")
+	assert.InDelta(t, 4.6, *merged.ConfidenceSum, 1e-9, "sum of sums")
+	assert.Equal(t, now.Add(time.Second).UnixMilli(), *merged.FirstHitAt, "earliest first hit")
+	assert.Equal(t, now.Add(9*time.Second).UnixMilli(), *merged.LastHitAt, "latest last hit")
+
+	// When one side of a collision lacks stats, the merged row has none: a sum
+	// over only some of the hits would give a wrong mean.
+	partialNote := &datastore.Note{
+		ScientificName: "Spizella pusilla",
+		CommonName:     "field sparrow",
+		Date:           "2026-10-17",
+		Time:           "12:02:00",
+		Confidence:     0.9,
+		ModelContributions: map[string]detection.ResultModelContrib{
+			"with_stats": {
+				Model:         detection.ModelInfo{},
+				HitCount:      2,
+				MaxConfidence: 0.8,
+				MinConfidence: 0.7,
+				ConfidenceSum: 1.5,
+				FirstHitAt:    now,
+				LastHitAt:     now.Add(time.Second),
+			},
+			"without_stats": {
+				Model:         detection.ModelInfo{Name: "BirdNET", Version: "2.4", Variant: "default"},
+				HitCount:      1,
+				MaxConfidence: 0.9,
+			},
+		},
+	}
+	require.NoError(t, ds.Save(partialNote, nil))
+
+	var partialContribs []entities.DetectionModelContribution
+	require.NoError(t, ds.manager.DB().
+		Where("detection_id = ?", partialNote.ID).
+		Find(&partialContribs).Error)
+	require.Len(t, partialContribs, 1)
+	assert.Equal(t, 3, partialContribs[0].HitCount)
+	assert.Nil(t, partialContribs[0].MinConfidence)
+	assert.Nil(t, partialContribs[0].ConfidenceSum)
+	assert.Nil(t, partialContribs[0].FirstHitAt)
+	assert.Nil(t, partialContribs[0].LastHitAt)
+
+	// A zero-hit entry that resolves to the same model as a hit entry never takes
+	// its row: the stored row keeps the hit entry's count and statistics.
+	zeroHitNote := &datastore.Note{
+		ScientificName: "Spizella breweri",
+		CommonName:     "brewer's sparrow",
+		Date:           "2026-10-17",
+		Time:           "12:03:00",
+		Confidence:     0.8,
+		ModelContributions: map[string]detection.ResultModelContrib{
+			"zero_hit": {Model: detection.ModelInfo{Name: "BirdNET", Version: "2.4", Variant: "default"}},
+			"with_hits": {
+				Model:         detection.ModelInfo{},
+				HitCount:      2,
+				MaxConfidence: 0.8,
+				MinConfidence: 0.7,
+				ConfidenceSum: 1.5,
+				FirstHitAt:    now,
+				LastHitAt:     now.Add(time.Second),
+			},
+		},
+	}
+	require.NoError(t, ds.Save(zeroHitNote, nil))
+
+	var zeroHitContribs []entities.DetectionModelContribution
+	require.NoError(t, ds.manager.DB().
+		Where("detection_id = ?", zeroHitNote.ID).
+		Find(&zeroHitContribs).Error)
+	require.Len(t, zeroHitContribs, 1)
+	assert.Equal(t, 2, zeroHitContribs[0].HitCount)
+	require.NotNil(t, zeroHitContribs[0].ConfidenceSum)
+	assert.InDelta(t, 1.5, *zeroHitContribs[0].ConfidenceSum, 1e-9)
+}
+
+// zeroHitKeyCount is how many zero-hit entries the order test puts next to its hit
+// entry. Each range over the map starts at a random position, so with this many
+// entries that resolve to the hit entry's model, a missing hits-first order puts a
+// zero-hit entry in front of the hit entry in nearly every call.
+const zeroHitKeyCount = 8
+
+// resolveOrderRuns is how many times the order test resolves the same map. Every
+// call ranges over the map afresh, so each one draws a new order.
+const resolveOrderRuns = 50
+
+// TestResolveModelContributions_HitEntryKeepsItsRowWhateverTheMapOrder pins that a
+// zero-hit entry resolving to the same model as a hit entry never takes the row of
+// the hit entry or clears its statistics. The hit count alone is the same in both
+// orders, so the test checks the statistics, which a zero-hit row in front of the
+// hit entry would clear.
+func TestResolveModelContributions_HitEntryKeepsItsRowWhateverTheMapOrder(t *testing.T) {
+	t.Parallel()
+
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+
+	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	contribs := map[string]detection.ResultModelContrib{
+		"with_hits": {
+			Model:         detection.ModelInfo{}, // resolves via WithDefaults() to BirdNET 2.4 default
+			HitCount:      2,
+			MaxConfidence: 0.8,
+			MinConfidence: 0.7,
+			ConfidenceSum: 1.5,
+			FirstHitAt:    now,
+			LastHitAt:     now.Add(time.Second),
+		},
+	}
+	for i := range zeroHitKeyCount {
+		contribs[fmt.Sprintf("zero_hit_%d", i)] = detection.ResultModelContrib{
+			Model: detection.ModelInfo{Name: "BirdNET", Version: "2.4", Variant: "default"},
+		}
+	}
+
+	for run := range resolveOrderRuns {
+		rows := ds.resolveModelContributions(t.Context(), contribs)
+		require.Len(t, rows, 1, "run %d: entries resolving to one model must give one row", run)
+		row := rows[0]
+		require.Equal(t, 2, row.HitCount, "run %d", run)
+		require.NotNil(t, row.ConfidenceSum, "run %d: the hit entry's statistics must survive", run)
+		require.NotNil(t, row.MinConfidence, "run %d", run)
+		require.NotNil(t, row.FirstHitAt, "run %d", run)
+		require.NotNil(t, row.LastHitAt, "run %d", run)
+		assert.InDelta(t, 1.5, *row.ConfidenceSum, 1e-9, "run %d", run)
+	}
+}
+
+// TestV2OnlyDatastore_Save_KeepsDetectionWhenContributionsFail verifies that model
+// contributions are best-effort: a failure to persist them must not fail the save
+// or roll back the detection (#4648).
+func TestV2OnlyDatastore_Save_KeepsDetectionWhenContributionsFail(t *testing.T) {
+	t.Parallel()
+
+	ds, cleanup := setupTestDatastore(t)
+	defer cleanup()
+
+	// Make every contribution write fail while detections stay writable.
+	require.NoError(t, ds.manager.DB().Migrator().DropTable(&entities.DetectionModelContribution{}))
+
+	note := &datastore.Note{
+		ScientificName: "Poecile carolinensis",
+		CommonName:     "carolina chickadee",
+		Date:           "2026-10-17",
+		Time:           "12:00:00",
+		Confidence:     0.92,
+		ModelContributions: map[string]detection.ResultModelContrib{
+			"BirdNET_V2.4": {
+				Model:         detection.ModelInfo{Name: "BirdNET", Version: "2.4", Variant: "default"},
+				HitCount:      8,
+				MaxConfidence: 0.92,
+			},
+		},
+	}
+
+	require.NoError(t, ds.Save(note, nil), "a contribution failure must not fail the detection save")
+	require.NotZero(t, note.ID, "the detection ID must still be propagated to the note")
+
+	var count int64
+	require.NoError(t, ds.manager.DB().Model(&entities.Detection{}).
+		Where("id = ?", note.ID).Count(&count).Error)
+	assert.Equal(t, int64(1), count, "the detection row must survive a contribution failure")
+}
+
+// TestMergeContribution_Stats pins both orders of a merge, which the map-iteration
+// order of resolveModelContributions leaves random: stats survive only when both
+// sides have them, whichever side arrived first.
+func TestMergeContribution_Stats(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	withStats := detection.ResultModelContrib{
+		HitCount: 2, MaxConfidence: 0.8, MinConfidence: 0.7, ConfidenceSum: 1.5,
+		FirstHitAt: base, LastHitAt: base.Add(time.Second),
+	}
+	withoutStats := detection.ResultModelContrib{HitCount: 1, MaxConfidence: 0.9}
+
+	assertNoStats := func(t *testing.T, e *entities.DetectionModelContribution) {
+		t.Helper()
+		assert.Equal(t, 3, e.HitCount)
+		assert.InDelta(t, 0.9, e.MaxConfidence, 1e-9)
+		assert.Nil(t, e.FirstHitAt)
+		assert.Nil(t, e.LastHitAt)
+		assert.Nil(t, e.MinConfidence)
+		assert.Nil(t, e.ConfidenceSum)
+	}
+
+	t.Run("destination has stats, merged entry lacks them", func(t *testing.T) {
+		t.Parallel()
+		dst := contributionEntity(1, &withStats)
+		mergeContribution(dst, &withoutStats)
+		assertNoStats(t, dst)
+	})
+	t.Run("destination lacks stats, merged entry has them", func(t *testing.T) {
+		t.Parallel()
+		dst := contributionEntity(1, &withoutStats)
+		mergeContribution(dst, &withStats)
+		assertNoStats(t, dst)
+	})
+	t.Run("both have stats", func(t *testing.T) {
+		t.Parallel()
+		other := detection.ResultModelContrib{
+			HitCount: 1, MaxConfidence: 0.6, MinConfidence: 0.6, ConfidenceSum: 0.6,
+			FirstHitAt: base.Add(-time.Second), LastHitAt: base.Add(5 * time.Second),
+		}
+		dst := contributionEntity(1, &withStats)
+		mergeContribution(dst, &other)
+		require.NotNil(t, dst.FirstHitAt)
+		require.NotNil(t, dst.LastHitAt)
+		require.NotNil(t, dst.MinConfidence)
+		require.NotNil(t, dst.ConfidenceSum)
+		assert.Equal(t, base.Add(-time.Second).UnixMilli(), *dst.FirstHitAt)
+		assert.Equal(t, base.Add(5*time.Second).UnixMilli(), *dst.LastHitAt)
+		assert.InDelta(t, 0.6, *dst.MinConfidence, 1e-9)
+		assert.InDelta(t, 2.1, *dst.ConfidenceSum, 1e-9)
+	})
 }

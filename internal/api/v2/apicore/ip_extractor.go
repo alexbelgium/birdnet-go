@@ -1,305 +1,78 @@
-// ip_extractor.go provides a trusted-proxy-gated client IP extractor for Echo.
+// ip_extractor.go provides the client IP extractor for Echo.
 //
-// The extractor only honors proxy-supplied client-IP headers (CF-Connecting-IP,
-// X-Forwarded-For, X-Real-IP) when the immediate connection peer is a trusted
-// reverse proxy. On a directly-exposed instance this prevents a client from
-// spoofing its source IP, which feeds rate limiting, ban/allow lists, and logs.
+// The extractor reports the client the rate limiters resolve (see
+// proxytrust.Checker.RateLimitClient). Forwarded headers that disagree with each
+// other, or that a configured proxy cannot verify, are not recorded, and an
+// untrusted peer's headers are ignored. A client that an unlisted loopback,
+// link-local or private peer names consistently (a lone CF-Connecting-IP,
+// X-Forwarded-For or X-Real-IP with a usable address included) is recorded as
+// named, so such a host can still choose the address that appears in logs. The trust primitives live in
+// internal/security/proxytrust; authentication decisions use its stricter
+// AuthClientIP rather than this extractor.
 package apicore
 
 import (
-	"net"
 	"net/http"
-	"slices"
 	"strings"
-	"sync/atomic"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"github.com/tphakala/birdnet-go/internal/security/proxytrust"
 )
-
-// headerCFConnectingIP is Cloudflare's client-IP header. Echo has no constant
-// for it (it only defines X-Forwarded-For and X-Real-IP), so it is named here.
-const headerCFConnectingIP = "CF-Connecting-IP"
 
 // Canonical map keys for the forwarded headers. http.Header stores keys in
 // canonical MIME form, so direct map lookups (used on the per-request untrusted
 // path) must use the canonical spelling. "CF-Connecting-IP" is not already
 // canonical, so precomputing it avoids re-canonicalizing on every request.
 var (
-	canonicalCFConnectingIP = http.CanonicalHeaderKey(headerCFConnectingIP)
+	canonicalCFConnectingIP = http.CanonicalHeaderKey(proxytrust.HeaderCFConnectingIP)
 	canonicalXForwardedFor  = http.CanonicalHeaderKey(echo.HeaderXForwardedFor)
 	canonicalXRealIP        = http.CanonicalHeaderKey(echo.HeaderXRealIP)
 )
 
-// parseIPFromHeader attempts to parse a valid IP from a header value.
-// Returns the IP string if valid, empty string otherwise.
-func parseIPFromHeader(headerValue string) string {
-	if headerValue == "" {
-		return ""
-	}
-	// Strip IPv6 zone ID (e.g., %wlan0) before parsing.
-	// net.ParseIP does not handle zone identifiers, and iOS Safari
-	// commonly connects via IPv6 link-local addresses with zone IDs.
-	if before, _, found := strings.Cut(headerValue, "%"); found {
-		headerValue = before
-	}
-	ip := net.ParseIP(headerValue)
-	if ip != nil {
-		return ip.String()
-	}
-	return ""
-}
-
-// cloudflareEdgeCIDRs lists Cloudflare's published proxy IP ranges
-// (https://www.cloudflare.com/ips/). These ranges are stable and change rarely;
-// kept in sync manually. Expanded from the Security.TrustedProxies "cloudflare"
-// preset (conf.TrustedProxyCloudflarePreset).
-var cloudflareEdgeCIDRs = []string{
-	// IPv4
-	"173.245.48.0/20",
-	"103.21.244.0/22",
-	"103.22.200.0/22",
-	"103.31.4.0/22",
-	"141.101.64.0/18",
-	"108.162.192.0/18",
-	"190.93.240.0/20",
-	"188.114.96.0/20",
-	"197.234.240.0/22",
-	"198.41.128.0/17",
-	"162.158.0.0/15",
-	"104.16.0.0/13",
-	"104.24.0.0/14",
-	"172.64.0.0/13",
-	"131.0.72.0/22",
-	// IPv6
-	"2400:cb00::/32",
-	"2606:4700::/32",
-	"2803:f800::/32",
-	"2405:b500::/32",
-	"2405:8100::/32",
-	"2a06:98c0::/29",
-	"2c0f:f248::/32",
-}
-
-// trustedProxyChecker decides whether an immediate peer address is a trusted
-// reverse proxy whose forwarded client-IP headers may be honored. Loopback,
-// link-local, and private (RFC1918/ULA) addresses are always trusted, matching
-// Echo's default TrustOption behavior, plus any operator-configured CIDR ranges.
-type trustedProxyChecker struct {
-	// raw is the Security.TrustedProxies slice this checker was built from. It is
-	// used to detect configuration changes for hot-reload so the CIDR list is not
-	// re-parsed on every request.
-	raw    []string
-	ranges []*net.IPNet
-}
-
-// buildTrustedProxyChecker parses the configured trusted-proxy entries into a
-// checker. Blank entries are skipped and the reserved "cloudflare" preset
-// expands to Cloudflare's published ranges. Invalid CIDRs are silently skipped
-// here (conf validation rejects them at load time; this is defense in depth).
-func buildTrustedProxyChecker(trustedProxies []string) *trustedProxyChecker {
-	tc := &trustedProxyChecker{raw: slices.Clone(trustedProxies)}
-	for _, entry := range trustedProxies {
-		trimmed := strings.TrimSpace(entry)
-		switch {
-		case trimmed == "":
-			continue
-		case strings.EqualFold(trimmed, conf.TrustedProxyCloudflarePreset):
-			tc.appendCIDRs(cloudflareEdgeCIDRs)
-		default:
-			tc.appendCIDRs([]string{trimmed})
-		}
-	}
-	return tc
-}
-
-// appendCIDRs parses and appends valid trusted-proxy entries, skipping any that
-// fail to parse. Each entry may be a CIDR or a bare IP (a single host).
-func (tc *trustedProxyChecker) appendCIDRs(entries []string) {
-	for _, entry := range entries {
-		if network, ok := parseProxyCIDR(entry); ok {
-			tc.ranges = append(tc.ranges, network)
-		}
-	}
-}
-
-// parseProxyCIDR parses a trusted-proxy entry as either a CIDR or a bare IP
-// (treated as a single host: /32 for IPv4, /128 for IPv6). Returns false if the
-// entry is neither.
-//
-// The single-host network is built directly from the parsed IP rather than by
-// appending a suffix and re-parsing: an IPv4-mapped IPv6 string (e.g.
-// "::ffff:192.0.2.1") has a non-nil To4(), so a naive "/32" suffix would make
-// net.ParseCIDR read it as a 128-bit address with a 32-bit mask, trusting a /32
-// IPv6 range (2^96 hosts) instead of one host. Using To4() yields a true /32.
-func parseProxyCIDR(entry string) (*net.IPNet, bool) {
-	entry = strings.TrimSpace(entry)
-	if _, network, err := net.ParseCIDR(entry); err == nil {
-		return network, true
-	}
-	if ip := net.ParseIP(entry); ip != nil {
-		if v4 := ip.To4(); v4 != nil {
-			return &net.IPNet{IP: v4, Mask: net.CIDRMask(32, 32)}, true
-		}
-		return &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}, true
-	}
-	return nil, false
-}
-
-// trust reports whether ip is a trusted proxy peer.
-func (tc *trustedProxyChecker) trust(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() {
-		return true
-	}
-	for _, network := range tc.ranges {
-		if network.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
-// trustForwardedHop reports whether an X-Forwarded-For hop is an explicitly
-// configured trusted proxy. It is deliberately NARROWER than trust(): it does
-// not trust loopback/link-local/private by default, only operator-configured
-// CIDRs (including the cloudflare preset, whose ranges are in tc.ranges).
-//
-// The asymmetry is intentional. The immediate peer (trust()) is the real TCP
-// socket and cannot be forged, so trusting private/loopback peers by default is
-// safe and keeps home-LAN setups zero-config. An X-Forwarded-For hop is
-// attacker-supplied, and a real client is frequently on a private address; if
-// private hops were skipped as proxies, a LAN client could prepend a forged
-// entry and have its real (private) hop skipped, spoofing its attributed IP.
-func (tc *trustedProxyChecker) trustForwardedHop(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	for _, network := range tc.ranges {
-		if network.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
-// clientIPFromXFF resolves the real client IP from an X-Forwarded-For header,
-// assuming the immediate peer is already known to be a trusted proxy. It walks
-// the hop chain from the rightmost (closest to this server) entry leftward,
-// skipping hops that are explicitly configured proxies (trustForwardedHop), and
-// returns the first non-proxy address: the real external client. If every hop
-// is a configured proxy, the leftmost entry is returned as the original client.
-//
-// Walking from the right, and skipping only configured proxies, defeats
-// spoofing: a client cannot forge a leftmost entry, because proxies append the
-// address they actually saw, so the attacker's real address sits to the right
-// of any value they injected and is never skipped. Multi-hop chains with
-// internal proxies therefore require those proxies' CIDRs in
-// security.trustedproxies for correct attribution. Returns "" for an empty or
-// malformed header, letting the caller fall back to the next source.
-func (tc *trustedProxyChecker) clientIPFromXFF(xff string) string {
-	if xff == "" {
-		return ""
-	}
-	parts := strings.Split(xff, ",")
-	for i, part := range slices.Backward(parts) {
-		hop := strings.TrimSpace(part)
-		// Strip an IPv6 zone id (e.g. fe80::1%eth0) before parsing.
-		if before, _, found := strings.Cut(hop, "%"); found {
-			hop = before
-		}
-		ip := net.ParseIP(hop)
-		if ip == nil {
-			// Malformed hop: nothing further left can be trusted; fall back.
-			return ""
-		}
-		if !tc.trustForwardedHop(ip) {
-			return ip.String() // nearest non-proxy hop = real client
-		}
-		if i == 0 {
-			// All hops are configured proxies; the leftmost is the original client.
-			return ip.String()
-		}
-	}
-	return ""
-}
-
-// resolveTrustedProxyChecker returns the checker for the current configuration,
-// rebuilding and caching it only when the Security.TrustedProxies list changes.
-// This keeps the trusted set hot-reloadable without re-parsing CIDRs per request.
-func resolveTrustedProxyChecker(cache *atomic.Pointer[trustedProxyChecker], getSettings func() *conf.Settings) *trustedProxyChecker {
-	var trustedProxies []string
+// resolveTrustedProxyChecker returns the checker for the current configuration
+// from cache, rebuilding it only when the Security.TrustedProxies list changes.
+func resolveTrustedProxyChecker(cache *proxytrust.Cache, getSettings func() *conf.Settings) *proxytrust.Checker {
+	var settings *conf.Settings
 	if getSettings != nil {
-		if settings := getSettings(); settings != nil {
-			trustedProxies = settings.Security.TrustedProxies
-		}
+		settings = getSettings()
 	}
-	if cached := cache.Load(); cached != nil && slices.Equal(cached.raw, trustedProxies) {
-		return cached
-	}
-	checker := buildTrustedProxyChecker(trustedProxies)
-	cache.Store(checker)
-	return checker
+	return cache.ResolveSettings(settings)
 }
 
-// peerAddrFromRequest extracts the immediate peer address from req.RemoteAddr,
-// returning the parsed IP (nil if unparseable) and the raw host string for
-// fallback. An IPv6 zone identifier, if present, is stripped before parsing.
-func peerAddrFromRequest(req *http.Request) (peerIP net.IP, host string) {
-	var err error
-	if host, _, err = net.SplitHostPort(req.RemoteAddr); err != nil {
-		// No port (e.g. a bare "[::1]" or "127.0.0.1"). Strip IPv6 brackets so
-		// net.ParseIP can parse it, otherwise a bracketed loopback/private peer
-		// would fail to parse and be treated as untrusted.
-		host = strings.TrimSuffix(strings.TrimPrefix(req.RemoteAddr, "["), "]")
+// attributionIP is the Echo IPExtractor behind echo.Context.RealIP: the client
+// address that logs and the tunnel label record. It resolves the request the way
+// the rate limiters do (see proxytrust.Checker.RateLimitClient), so forwarded
+// headers that disagree or that a configured proxy cannot verify are not
+// recorded:
+//
+//   - A direct request, one a configured proxy verified, and one an unconfigured
+//     local proxy made consistent claims for (a lone CF-Connecting-IP, X-Forwarded-For or
+//     X-Real-IP with a usable address included), yield the resolved client.
+//   - A request whose forwarded headers do not verify yields the peer address.
+//   - An untrusted peer yields its own address, and its forwarded headers are
+//     ignored, leaving a DEBUG breadcrumb naming the peer.
+//
+// The address is for attribution only, never authentication or authorization
+// (authentication uses proxytrust.Checker.AuthClientIP). The trusted-proxy list
+// is read from the live settings on every call, so a settings save takes effect
+// on the next request.
+func (c *Core) attributionIP(req *http.Request) string {
+	checker := c.ProxyChecker()
+	res := checker.RateLimitClient(req)
+	if res.Source == proxytrust.SourceDirect && !checker.TrustsPeer(res.Peer) {
+		// Untrusted peer: forwarded headers are ignored. Leave a DEBUG
+		// breadcrumb naming the peer so a misconfigured trusted proxy is
+		// self-diagnosing, without flooding logs (a public instance gets
+		// constant scanner header noise, so this stays at DEBUG).
+		logIgnoredForwardedHeader(req, res.PeerHost)
 	}
-	if before, _, found := strings.Cut(host, "%"); found {
-		host = before
+	if res.Client != nil {
+		return res.Client.String()
 	}
-	peerIP = net.ParseIP(host)
-	return peerIP, host
-}
-
-// newTrustedProxyIPExtractor returns an Echo IPExtractor that honors proxy
-// client-IP headers (CF-Connecting-IP, then X-Forwarded-For, then X-Real-IP)
-// only when the immediate peer is a trusted proxy, otherwise falling back to the
-// real connection address. The trusted set is read from Security.TrustedProxies
-// via getSettings on each request so changes take effect without a restart.
-func newTrustedProxyIPExtractor(getSettings func() *conf.Settings) echo.IPExtractor {
-	var cache atomic.Pointer[trustedProxyChecker]
-	return func(req *http.Request) string {
-		peerIP, peerHost := peerAddrFromRequest(req)
-
-		// Only honor forwarded client-IP headers from a trusted proxy peer.
-		if checker := resolveTrustedProxyChecker(&cache, getSettings); checker.trust(peerIP) {
-			if ip := parseIPFromHeader(req.Header.Get(headerCFConnectingIP)); ip != "" {
-				return ip
-			}
-			if ip := checker.clientIPFromXFF(req.Header.Get(echo.HeaderXForwardedFor)); ip != "" {
-				return ip
-			}
-			if ip := parseIPFromHeader(req.Header.Get(echo.HeaderXRealIP)); ip != "" {
-				return ip
-			}
-		} else {
-			// Untrusted peer: forwarded headers are ignored. Leave a DEBUG
-			// breadcrumb naming the peer so a misconfigured trusted proxy is
-			// self-diagnosing, without flooding logs (a public instance gets
-			// constant scanner header noise, so this stays at DEBUG).
-			logIgnoredForwardedHeader(req, peerHost)
-		}
-
-		// Untrusted peer, or trusted peer with no forwarded headers: use the
-		// real peer address.
-		if peerIP != nil {
-			return peerIP.String()
-		}
-		return peerHost
-	}
+	return res.PeerHost
 }
 
 // logIgnoredForwardedHeader emits a DEBUG breadcrumb when forwarded client-IP
@@ -319,7 +92,7 @@ func logIgnoredForwardedHeader(req *http.Request, peerHost string) {
 	}
 	present := make([]string, 0, 3)
 	if cfPresent {
-		present = append(present, headerCFConnectingIP)
+		present = append(present, proxytrust.HeaderCFConnectingIP)
 	}
 	if xffPresent {
 		present = append(present, echo.HeaderXForwardedFor)

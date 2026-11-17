@@ -23,12 +23,14 @@
   import SourceBadge from './SourceBadge.svelte';
   import PlayOverlay from './PlayOverlay.svelte';
   import SpeciesInfoBar from './SpeciesInfoBar.svelte';
+  import SpectrogramImage from '$lib/desktop/components/media/SpectrogramImage.svelte';
   import ActionMenu from '$lib/desktop/components/ui/ActionMenu.svelte';
   import AudioSettingsButton from './AudioSettingsButton.svelte';
   import AudibleBatsButton from './AudibleBatsButton.svelte';
   import { useAudibleBats } from '$lib/utils/useAudibleBats.svelte';
   import { cn } from '$lib/utils/cn';
   import { downloadDetectionAudio } from '$lib/utils/audioDownload';
+  import { getPlaybackDenoiseDefault } from '$lib/utils/playbackDenoise';
   import { createSpectrogramLoader } from '$lib/utils/spectrogramLoader.svelte';
   import { DEFAULT_PLAYBACK_SPEED } from '$lib/utils/audio';
   import { get } from 'svelte/store';
@@ -101,7 +103,13 @@
   // generated `url` while the spectrogram keeps spanning the full original clip.
   const MODEL_TYPE_BAT = 'bat';
   const isBatDetection = $derived(detection.modelType === MODEL_TYPE_BAT);
-  const audibleBats = useAudibleBats({ getDetectionId: () => detection.id });
+  // Set by the play overlay when the default's denoised clip failed and the stored clip
+  // plays: the audible copy then carries no denoise either. Read when the request is made.
+  let denoiseFailed = false;
+  const audibleBats = useAudibleBats({
+    getDetectionId: () => detection.id,
+    getDenoise: () => (denoiseFailed ? '' : getPlaybackDenoiseDefault()),
+  });
 
   // Reset derived playback if this card instance is recycled to a different
   // detection (keyed {#each} normally avoids this, but guard defensively).
@@ -151,6 +159,10 @@
     isAudioSettingsOpen = false;
     onFreezeEnd?.();
   }
+
+  const showsSpectrogram = $derived(
+    Boolean(detection.clipName) || Boolean(detection.spectrogramOnly)
+  );
 
   // Start/stop loader based on visibility. Skip entirely when this detection has
   // no clip: there is no spectrogram to fetch.
@@ -212,31 +224,24 @@
 >
   <!-- Inner container with overflow-hidden for spectrogram clipping -->
   <!-- Compact (shorter) layout when there is no spectrogram to display -->
-  <div class="detection-card-inner" class:compact={!detection.clipName}>
-    <!-- Spectrogram Background (hidden when this detection has no clip) -->
+  <div class="detection-card-inner" class:compact={!showsSpectrogram}>
+    <!-- Spectrogram Background (hidden when this detection has neither a clip nor a kept image) -->
     {#if detection.clipName}
       <div class="spectrogram-container">
         {#if loader.showSpinner}
           <div class="spectrogram-loading">
-            <span class="loading loading-spinner loading-md text-[var(--color-base-content)]/50"
-            ></span>
+            <span class="loading loading-spinner loading-md"></span>
             {#if loader.isQueued}
-              <span class="text-xs text-[var(--color-base-content)]/40 mt-1"
-                >{t('components.audio.waiting')}</span
-              >
+              <span class="text-xs mt-1">{t('components.audio.waiting')}</span>
             {:else if loader.isGenerating}
-              <span class="text-xs text-[var(--color-base-content)]/40 mt-1"
-                >{t('components.audio.generating')}</span
-              >
+              <span class="text-xs mt-1">{t('components.audio.generating')}</span>
             {/if}
           </div>
         {/if}
 
         {#if loader.error}
           <div class="spectrogram-error">
-            <span class="text-sm text-[var(--color-base-content)]/50"
-              >{t('components.audio.spectrogramUnavailable')}</span
-            >
+            <span class="text-sm">{t('components.audio.spectrogramUnavailable')}</span>
           </div>
         {:else if loader.spectrogramUrl}
           <img
@@ -249,6 +254,18 @@
             onerror={() => loader.handleImageError()}
           />
         {/if}
+      </div>
+    {:else if detection.spectrogramOnly}
+      <!-- Retention removed the audio but kept the image: no loader, no polling. Same
+           size and raw flag as the list view's player so the same cached file is used. -->
+      <div class="spectrogram-container">
+        <SpectrogramImage
+          detectionId={detection.id.toString()}
+          size="md"
+          raw={true}
+          cover
+          alt={t('components.audio.spectrogramForSpecies', { species: detection.commonName })}
+        />
       </div>
     {:else}
       <!-- Neutral background placeholder keeps the card's shape/aspect ratio -->
@@ -284,6 +301,8 @@
         playbackSpeed={audioPlaybackSpeed}
         onAudioContextAvailable={handleAudioContextAvailable}
         audibleBatsSrc={audibleBats.url}
+        denoisePreset={getPlaybackDenoiseDefault()}
+        onDenoiseFailedChange={failed => (denoiseFailed = failed)}
       />
     {/if}
 
@@ -392,6 +411,14 @@
     transition: opacity 0.3s ease;
   }
 
+  /* The media area is a dark surface in both themes, with or without an image: the badges, the
+     species bar and the status text over it are light. */
+  .spectrogram-container,
+  .spectrogram-loading,
+  .spectrogram-error {
+    background: linear-gradient(135deg, var(--media-surface-from) 0%, var(--media-surface-to) 100%);
+  }
+
   .spectrogram-loading,
   .spectrogram-error,
   .spectrogram-placeholder {
@@ -401,18 +428,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--color-base-200) 80%, transparent) 0%,
-      color-mix(in srgb, var(--color-base-300) 60%, transparent) 100%
-    );
-  }
-
-  /* Dark theme spectrogram background */
-  :global([data-theme='dark']) .spectrogram-loading,
-  :global([data-theme='dark']) .spectrogram-error,
-  :global([data-theme='dark']) .spectrogram-placeholder {
-    background: linear-gradient(135deg, rgb(30 41 59 / 0.9) 0%, rgb(15 23 42 / 0.95) 100%);
+    color: rgb(255 255 255 / 0.75);
   }
 
   /* New detection animation */

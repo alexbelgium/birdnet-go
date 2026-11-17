@@ -18,7 +18,10 @@ type StreamManager interface {
 	StartStream(spec *StreamSpec) error
 	// StopStream stops capture for sourceID and forgets it.
 	StopStream(sourceID string) error
-	// StreamHealth returns a point-in-time snapshot for one stream.
+	// StreamHealth returns a point-in-time snapshot for one stream. A sourceID the
+	// manager does not track returns an error wrapping ErrSourceNotFound, which
+	// callers treat as an expected miss, so implementations must not report it to
+	// telemetry.
 	StreamHealth(sourceID string) (*StreamHealth, error)
 	// AllStreamHealth returns snapshots for every tracked stream, keyed by source ID.
 	AllStreamHealth() map[string]*StreamHealth
@@ -50,6 +53,12 @@ type StreamSpec struct {
 	SampleRate int
 	// SourceSampleRate is the probed source rate; 0 when unknown.
 	SourceSampleRate int
+	// SourceSampleRateEstimated marks SourceSampleRate as a fallback estimate
+	// (the current probe failed and a previous value was reused). When true the
+	// FFmpeg producer forces output resampling so the pipeline always receives
+	// SampleRate even if the live source rate has changed (#4350). Ignored by the
+	// native producer, which resamples from the true decoded rate.
+	SourceSampleRateEstimated bool
 	// BitDepth is the output bit depth in bits (16).
 	BitDepth int
 	// Channels is the target channel count (1).

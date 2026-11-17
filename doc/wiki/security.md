@@ -45,39 +45,49 @@ security:
     redirecturi: "https://your.domain.com/auth/github/callback"
 ```
 
-## Authentication Bypass
+#### Allowed users: prefer user IDs
 
-If you are running BirdNET-Go on a trusted network, you can bypass authentication either by configuring a Cloudflare Tunnel with Cloudflare Access enabled, or by specifying a trusted subnet. Both options will allow access to the application without any authentication.
+The allowed users list accepts user IDs and email addresses. Use the user ID the provider issues where you can (for an OIDC provider, the `sub` claim). An email address is not a stable identifier: a provider may let users change their address or reuse it for another account, and OpenID Connect Core 1.0 (section 5.7) advises against using it to identify a user. BirdNET-Go matches the address the provider sends and does not check whether the provider verified it. With Microsoft sign-in this matters most, because the address comes from an account attribute that the administrator of any Microsoft Entra tenant can set, so allow Microsoft users by user ID.
 
-Both options can be configured through the web interface or in the `config.yaml` file:
+### OIDC identity provider with a private certificate authority
+
+BirdNET-Go checks the certificate of an OIDC identity provider against the system certificate store, like other outgoing TLS connections that have no CA setting of their own. When the provider's certificate is signed by a private certificate authority, the console and `logs/security.log` show an `OIDC discovery failed` line with a certificate error. Each request to the identity provider times out after ten seconds.
+
+- **Docker:** mount the CA certificate (PEM) into the container, for example under `/config`, and set `SSL_CERT_FILE` to its path inside the container (`SSL_CERT_FILE=/config/my-ca.pem`). Public certificate authorities stay trusted, because the system certificate directories are still read. `SSL_CERT_DIR` replaces the directory list instead, so include `/etc/ssl/certs` when you use it. The variables are read once at startup, so restart the container after changing them. A path that does not exist is ignored without an error.
+- **Linux without Docker:** add the CA to the system store (`sudo update-ca-certificates` on Debian, Ubuntu and Raspberry Pi OS), or set `SSL_CERT_FILE` in the service environment.
+- **Windows and macOS:** add the CA to the system certificate store. Do not use the variables there, since they replace the system store.
+
+These settings apply to every outgoing TLS connection of BirdNET-Go that uses the system certificate store, not only to OIDC. A connection with its own CA setting, such as MQTT with a CA certificate configured, uses that certificate instead.
+
+### OIDC sign-out
+
+Signing out of BirdNET-Go also signs the user out at the identity provider when the provider publishes an end-session endpoint in its discovery document. The end-session URL must use HTTPS, except when the configured issuer URL itself uses `http://`, in which case an HTTP end-session URL is accepted.
+
+By default the user stays on the identity provider's page after that sign-out. To send the browser back to BirdNET-Go, enable the post-logout return option of the OIDC provider (`postLogoutRedirect: true` in its `oauthProviders` entry). The return URL is `<base URL>/ui/`, built from the Base URL or Host setting, and it is sent only when the session holds an ID token. Register that exact URL as a post-logout redirect URI at the identity provider first. A provider that does not know the URL may refuse the redirect or show an error page, which is why the option is off by default.
 
 ```yaml
 security:
-  allowcftunnelbypass: true
+  oauthProviders:
+    - provider: oidc
+      enabled: true
+      issuerUrl: "https://auth.example.com/application/o/birdnet-go/"
+      postLogoutRedirect: true
+```
+
+## Authentication Bypass
+
+On a trusted network you can let clients from a given subnet skip authentication entirely.
+
+Set it in the web interface, or in `config.yaml`:
+
+```yaml
+security:
   allowsubnetbypass:
     enabled: true
     subnet: "192.168.1.0/24,10.0.0.0/8"
 ```
 
-### Cloudflare Access Authentication Bypass
-
-Cloudflare Access provides an authentication layer that uses your existing identity providers, such as Google or GitHub accounts, to control access to your applications. When using Cloudflare Access for authentication, you can configure BirdNET-Go to trust traffic coming through the Cloudflare tunnel. The system authenticates requests by validating the `Cf-Access-Jwt-Assertion` header containing a JWT token from Cloudflare.
-
-To add even more security, you can also require that the Cloudflare Team Domain Name and Policy audience are valid in the JWT token. Enable these by defining them in the `config.yaml` file:
-
-```yaml
-security:
-  allowcloudflarebypass:
-    enabled: true
-    teamdomain: "your-subdomain-of-cloudflareaccess.com"
-    audience: "your-policy-auddience"
-```
-
-See the following links for more information on Cloudflare Access:
-
-- [Cloudflare tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
-- [Create a remotely-managed tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/)
-- [Self-hosted applications](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/)
+> **Note**: BirdNET-Go used to check Cloudflare Access tokens itself, through the `allowcftunnelbypass` and `allowcloudflarebypass` settings. That support is gone, and those keys are now ignored. When BirdNET-Go sits behind a Cloudflare Tunnel, protect it with Cloudflare Access on the Cloudflare side, with BirdNET-Go's own login, or with both. The [Cloudflare Tunnel guide](cloudflare_tunnel_guide.md) describes the tunnel setup.
 
 ### Subnet-based Authentication Bypass
 

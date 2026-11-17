@@ -13,6 +13,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"github.com/tphakala/birdnet-go/internal/suncalc"
 )
 
 // InitializeFreshInstall creates a new v2-only datastore for fresh installations.
@@ -185,6 +186,9 @@ func InitializeFreshInstall(settings *conf.Settings, log logger.Logger, speciesC
 		AvesClassID:        &avesClassID,
 		Labels:             settings.BirdNET.Labels, // Required for locale-specific common name resolution
 		SpeciesCodeMap:     speciesCodeMap,
+		// Sun calculator for civil dawn (dawn-chorus onset) and time-of-day classification,
+		// matching the legacy datastore.New wiring. It follows the live station location.
+		SunCalc: suncalc.NewSunCalcWithSource(conf.LiveLocation(settings)),
 	})
 	if err != nil {
 		_ = manager.Close()
@@ -206,20 +210,24 @@ func InitializeFreshInstall(settings *conf.Settings, log logger.Logger, speciesC
 }
 
 // initializeMigrationStateAsCompleted sets the migration state to COMPLETED.
-// For fresh installs, migration is effectively "complete" since there's nothing to migrate.
+// For fresh installs, migration is effectively "complete" since there's nothing to migrate,
+// and the auxiliary data outcome is recorded as not required.
 func initializeMigrationStateAsCompleted(manager v2.Manager) error {
 	db := manager.DB()
 
 	now := time.Now()
 	state := entities.MigrationState{
-		ID:              1,
-		State:           entities.MigrationStatusCompleted,
-		StartedAt:       &now,
-		CompletedAt:     &now,
-		TotalRecords:    0,
-		MigratedRecords: 0,
-		LastMigratedID:  0,
-		ErrorMessage:    "",
+		ID:          1,
+		State:       entities.MigrationStatusCompleted,
+		StartedAt:   &now,
+		CompletedAt: &now,
+		// Nothing to migrate: record that, with the attempt marker equal to StartedAt.
+		AuxiliaryDataStatus:    entities.AuxiliaryDataStatusNotRequired,
+		AuxiliaryDataStartedAt: &now,
+		TotalRecords:           0,
+		MigratedRecords:        0,
+		LastMigratedID:         0,
+		ErrorMessage:           "",
 	}
 
 	return db.Save(&state).Error

@@ -9,18 +9,12 @@ import (
 	"github.com/tphakala/birdnet-go/internal/conf"
 )
 
-// birdBaseClipLength is the BirdNET reference analysis-clip length. Models with a
-// different clip (e.g. Perch 5s) derive their false-positive step from their own
-// clip instead of the 3s bird default.
-const birdBaseClipLength = 3 * time.Second
-
 // getMinimumOverlapForLevel returns the minimum overlap required for each filtering level.
 // Higher levels require higher overlap to generate more detections for filtering.
 //
-// Hardware limits:
-//   - RPi 3B/Zero 2: ~541ms inference time, max overlap 2.4 (600ms steps)
-//   - RPi 4: ~166ms inference time, max overlap 2.8 (200ms steps)
-//   - RPi 5: ~100ms inference time, max overlap 2.9+ (100ms steps)
+// Whether the hardware sustains the overlap a level asks for is not decided
+// here: the analysis cadence cap lowers the effective overlap toward what the
+// hardware sustains.
 func getMinimumOverlapForLevel(level int) float64 {
 	switch level {
 	case 0:
@@ -30,11 +24,11 @@ func getMinimumOverlapForLevel(level int) float64 {
 	case 2:
 		return 2.2 // Moderate (800ms steps)
 	case 3:
-		return 2.4 // Balanced (600ms steps) - RPi 3B max
+		return 2.4 // Balanced (600ms steps)
 	case 4:
-		return 2.7 // Strict (300ms steps) - RPi 4 required
+		return 2.7 // Strict (300ms steps)
 	case 5:
-		return 2.8 // Maximum (200ms steps) - RPi 4 required
+		return 2.8 // Maximum (200ms steps)
 	default:
 		return 2.2 // Default to Moderate
 	}
@@ -61,19 +55,6 @@ func getThresholdForLevel(level int) float64 {
 		return 0.70 // 70% of 6s window
 	default:
 		return 0.30 // Default to Moderate
-	}
-}
-
-// getHardwareRequirementForLevel returns a human-readable description of
-// the hardware requirements for each filtering level.
-func getHardwareRequirementForLevel(level int) string {
-	switch level {
-	case 0, 1, 2, 3:
-		return "Any (RPi 3B or better)"
-	case 4, 5:
-		return "RPi 4 or better required"
-	default:
-		return "Unknown"
 	}
 }
 
@@ -117,41 +98,51 @@ func getRecommendedLevelForOverlap(overlap float64) (level int, overlapSufficien
 	return 0, true
 }
 
-// calculateMinDetectionsForModel routes to the correct minDetections calculation
-// based on the model ID. Bat models use a fixed 50% overlap (1.5s step) instead
-// of the user-configurable BirdNET overlap, and read from a separate filter
-// config. For the 3s BirdNET model the bird path's step (3.0 - overlap) matches
-// the buffer's cadence, which now honors birdnet.overlap (issue #4096).
-func calculateMinDetectionsForModel(settings *conf.Settings, modelID string) int {
-	if modelID == classifier.RegistryIDBat {
-		return calculateBatMinDetections(settings)
+// MinDetectionsForModel returns the confirmation count the false positive filter
+// requires for a model at the given effective base overlap, routing to the
+// correct minDetections calculation based on the model ID. The flush path and the
+// API readouts both use it, so the readouts match the filter. Bat-group models
+// read from a separate filter config, and the Bat model uses a fixed 50% overlap
+// (1.5s step) instead of the user-configurable BirdNET overlap. For the 3s BirdNET model the bird path's step (3.0 - overlap) matches
+// the buffer's cadence, which follows the effective base overlap (issue #4096).
+//
+// baseOverlap is the effective base overlap (the published cadence plan's, else
+// the configured birdnet.overlap); see Processor.effectiveBaseOverlap.
+func MinDetectionsForModel(settings *conf.Settings, modelID string, baseOverlap time.Duration) int {
+	if isBatGroupModel(modelID) {
+		spec, _ := classifier.RegistrySpec(modelID, settings)
+		return batGroupMinDetections(settings, modelID, spec, baseOverlap)
 	}
-	// For a model whose analysis clip differs from the 3s BirdNET base (e.g. Perch
-	// 5s), derive the step from the model's own clip and effective overlap so the
-	// confirmation window matches the buffer cadence. The 3s bird path (and its
-	// overlap-validation warnings) is preserved unchanged.
-	if info, ok := classifier.ModelRegistry[modelID]; ok && info.Spec.ClipLength > 0 && info.Spec.ClipLength != birdBaseClipLength {
-		step := info.Spec.BufferInterval(classifier.ResolveModelOverlap(modelID, info.Spec, settings)).Seconds()
+	if spec, ok := classifier.RegistrySpec(modelID, settings); ok {
+		return minDetectionsForSpec(settings, modelID, spec, baseOverlap)
+	}
+	return calculateMinDetectionsFromSettings(settings, baseOverlap)
+}
+
+// minDetectionsForSpec returns the confirmation count for a non-bat model with
+// the given spec. A model whose analysis clip differs from the 3s BirdNET base
+// clip (e.g. Perch 5s), or one with a fixed StepSamples, derives the step from
+// its own buffer cadence so the confirmation window matches it. The 3s bird path
+// derives its step from the effective base overlap in
+// calculateMinDetectionsFromSettings.
+func minDetectionsForSpec(settings *conf.Settings, modelID string, spec classifier.ModelSpec, baseOverlap time.Duration) int {
+	if spec.ClipLength > 0 && (spec.ClipLength != classifier.AnalysisBaseClipLength || spec.StepSamples > 0) {
+		step := spec.BufferInterval(classifier.ResolveModelOverlap(modelID, spec, baseOverlap)).Seconds()
 		return minDetectionsForSegment(step, settings.Realtime.FalsePositiveFilter.Level)
 	}
-	return calculateMinDetectionsFromSettings(settings)
+	return calculateMinDetectionsFromSettings(settings, baseOverlap)
 }
 
 // Shared constants for the false-positive confirmation-count math.
 const (
-	// fpReferenceWindowSeconds is the typical duration of a bird vocalization;
+	// ReferenceWindowSeconds is the typical duration of a bird vocalization;
 	// minDetections is how many analysis windows within this window must confirm.
-	fpReferenceWindowSeconds = 6.0
+	// Exported for API readouts of how many analysis windows fall inside it.
+	ReferenceWindowSeconds = 6.0
 	// fpMinSegmentLength floors the analysis step to avoid dividing by ~0.
 	fpMinSegmentLength = 0.1
 	// fpEpsilon absorbs floating-point rounding before Ceil (e.g. 5.0000000003).
 	fpEpsilon = 1e-9
-	// batClipSeconds is the bat model's analysis clip length (3s). batOverlapSeconds
-	// is its fixed 50% overlap, giving a 1.5s analysis step. The bat model's fixed
-	// overlap is applied by classifier.ResolveModelOverlap (RegistryIDBat ->
-	// ClipLength/2); these constants keep the FP confirmation math in step with it.
-	batClipSeconds    = 3.0
-	batOverlapSeconds = 1.5
 )
 
 // minDetectionsForSegment computes the minimum number of confirming detections
@@ -173,18 +164,37 @@ func minDetectionsForSegment(segmentSeconds float64, level int) int {
 	if segmentSeconds < fpMinSegmentLength {
 		segmentSeconds = fpMinSegmentLength
 	}
-	maxDetections := fpReferenceWindowSeconds / segmentSeconds
+	maxDetections := ReferenceWindowSeconds / segmentSeconds
 	required := maxDetections*getThresholdForLevel(level) - fpEpsilon
 	return int(math.Max(1, math.Ceil(required)))
 }
 
-// calculateBatMinDetections computes the minimum detection count for bat models.
-// The bat model's buffer overlap is fixed at 50% (by classifier.ResolveModelOverlap,
+// isBatGroupModel reports whether the registry entry with the given ID belongs to
+// the bat taxon group. Bat-group models share the bat false positive filter
+// config and the ultrasonic validation filter.
+func isBatGroupModel(modelID string) bool {
+	return classifier.TaxonGroupFor(modelID) == classifier.TaxonGroupBat
+}
+
+// batGroupMinDetections computes the minimum detection count for a bat-group
+// model from the bat filter level and the model's own analysis step, which is
+// spec.BufferInterval at the overlap classifier.ResolveModelOverlap resolves for
+// it. For the Bat model that is a 1.5s step (3s clip, fixed 50% overlap). The
+// spec must carry the live step (classifier.RegistrySpec applies the settings),
+// not the static registry copy.
+func batGroupMinDetections(settings *conf.Settings, modelID string, spec classifier.ModelSpec, baseOverlap time.Duration) int {
+	step := spec.BufferInterval(classifier.ResolveModelOverlap(modelID, spec, baseOverlap)).Seconds()
+	return minDetectionsForSegment(step, settings.Bat.FalsePositiveFilter.Level)
+}
+
+// calculateBatMinDetections computes the minimum detection count for the Bat
+// model. Its buffer overlap is fixed at 50% (by classifier.ResolveModelOverlap,
 // which returns ClipLength/2 for RegistryIDBat), giving a 1.5-second step for a
 // 3-second clip. Within a 6-second reference window, this yields 4 possible
-// detections.
+// detections. The base overlap does not affect it.
 func calculateBatMinDetections(settings *conf.Settings) int {
-	return minDetectionsForSegment(batClipSeconds-batOverlapSeconds, settings.Bat.FalsePositiveFilter.Level)
+	spec, _ := classifier.RegistrySpec(classifier.RegistryIDBat, settings)
+	return batGroupMinDetections(settings, classifier.RegistryIDBat, spec, 0)
 }
 
 // visibilityThresholds holds precomputed per-model visibility thresholds.
@@ -192,15 +202,20 @@ func calculateBatMinDetections(settings *conf.Settings) int {
 type visibilityThresholds map[string]int
 
 // precomputeVisibilityThresholds calculates visibility thresholds for bird and
-// bat models once per settings snapshot so callers can look up by model ID
+// bat-group models once per settings snapshot so callers can look up by model ID
 // without recomputing inside a loop or under a lock.
-func precomputeVisibilityThresholds(settings *conf.Settings) visibilityThresholds {
-	birdVis := CalculateVisibilityThreshold(calculateMinDetectionsFromSettings(settings))
-	batVis := CalculateVisibilityThreshold(calculateBatMinDetections(settings))
-	return visibilityThresholds{
-		"":                       birdVis, // default for unknown model IDs
-		classifier.RegistryIDBat: batVis,
+func precomputeVisibilityThresholds(settings *conf.Settings, baseOverlap time.Duration) visibilityThresholds {
+	birdVis := CalculateVisibilityThreshold(calculateMinDetectionsFromSettings(settings, baseOverlap))
+	vt := visibilityThresholds{
+		"": birdVis, // default for unknown model IDs
 	}
+	for id := range classifier.ModelRegistry {
+		if isBatGroupModel(id) {
+			spec, _ := classifier.RegistrySpec(id, settings)
+			vt[id] = CalculateVisibilityThreshold(batGroupMinDetections(settings, id, spec, baseOverlap))
+		}
+	}
+	return vt
 }
 
 // getThreshold returns the visibility threshold for a model ID, falling back
@@ -224,9 +239,9 @@ func getLevelDescription(level int) string {
 	case 3:
 		return "Balanced filtering - requires 5 confirmations. Original pre-September 2025 behavior, good for quality USB mics in average conditions."
 	case 4:
-		return "Strict filtering - requires 12 confirmations. Needs RPi 4+. For high-quality microphones capturing lots of environmental detail."
+		return "Strict filtering - requires 12 confirmations. For high-quality microphones capturing lots of environmental detail."
 	case 5:
-		return "Maximum filtering - requires 21 confirmations. Needs RPi 4+. For professional-grade microphones with high sensitivity that capture everything including wind, leaves, and distant sounds."
+		return "Maximum filtering - requires 21 confirmations. For professional-grade microphones with high sensitivity that capture everything including wind, leaves, and distant sounds."
 	default:
 		return "Unknown filtering level"
 	}

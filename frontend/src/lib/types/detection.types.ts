@@ -11,6 +11,13 @@ export interface SourceInfo {
   displayName?: string;
 }
 
+/** The species the model itself picked for a detection. */
+export interface OriginalSpecies {
+  scientificName: string;
+  commonName: string;
+  speciesCode: string;
+}
+
 export interface Detection {
   id: number;
   date: string;
@@ -24,11 +31,13 @@ export interface Detection {
   commonName: string;
   confidence: number;
   modelType?: string; // AI model type (e.g. 'bird', 'bat'); drives the spectrogram frequency range
+  clipSampleRate?: number; // Sample rate of the saved clip in Hz; omitted by the API when unknown
   verified: 'correct' | 'false_positive' | 'unverified';
   locked: boolean;
   unlikely?: boolean;
   comments?: Comment[];
   clipName?: string;
+  spectrogramOnly?: boolean; // audio removed by retention, spectrogram image kept
   weather?: Weather;
   timeOfDay?: string;
   // Species tracking metadata
@@ -40,6 +49,8 @@ export interface Detection {
   daysThisYear?: number; // Days since first this year
   daysThisSeason?: number; // Days since first this season
   currentSeason?: string; // Current season name
+  // The model's own pick, present once a reviewer changed the species (kept after a change back)
+  originalSpecies?: OriginalSpecies;
 }
 
 export interface PaginatedDetectionResponse {

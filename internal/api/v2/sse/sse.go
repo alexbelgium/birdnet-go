@@ -17,6 +17,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/observability/metrics"
+	"golang.org/x/time/rate"
 )
 
 // SSE connection configuration
@@ -35,7 +36,27 @@ const (
 	// Rate limits
 	sseRateLimitRequests = 10              // SSE rate limit requests per window
 	sseRateLimitWindow   = 1 * time.Minute // SSE rate limit time window
+	// sseRateLimitBurst is how many connections one client may open in quick
+	// succession. It lets page refreshes and quick navigation reconnect without
+	// waiting for a token.
+	sseRateLimitBurst = 10
+	// sseRateLimitRefillTime is how long an exhausted bucket takes to fill again.
+	// Idle visitors are kept at least that long, so forgetting one never grants
+	// more connections than the refill would have.
+	sseRateLimitRefillTime = sseRateLimitWindow * sseRateLimitBurst / sseRateLimitRequests
 )
+
+// streamRateLimiterStoreConfig returns the per-client limiter settings shared by the
+// stream endpoints: sseRateLimitRequests connections per sseRateLimitWindow with
+// a burst of sseRateLimitBurst. Echo reads Rate as requests per second, so the
+// per-window count is converted.
+func streamRateLimiterStoreConfig() middleware.RateLimiterMemoryStoreConfig {
+	return middleware.RateLimiterMemoryStoreConfig{
+		Rate:      rate.Limit(float64(sseRateLimitRequests) / sseRateLimitWindow.Seconds()),
+		Burst:     sseRateLimitBurst,
+		ExpiresIn: sseRateLimitRefillTime,
+	}
+}
 
 // Handler serves the SSE stream endpoints. It embeds *apicore.Core by pointer so
 // the shared SSE hub (SSEManager), write primitives (SendSSEMessage,
@@ -44,10 +65,11 @@ const (
 //
 // isClientAuthenticated is injected from the facade (the auth-service check that
 // lives on facade-owned state, matching the detections/analytics domains). The
-// detection stream evaluates it ONCE at connect time so unauthenticated
-// subscribers receive a sanitized payload that omits the raw audio source
-// DisplayName (which can embed internal host details), exposing only the stable
-// Source.ID.
+// detection and sound level streams evaluate it ONCE at connect time so
+// unauthenticated subscribers receive a sanitized payload that omits the raw
+// audio source DisplayName (which can embed internal host details). The
+// detection stream exposes only the stable Source.ID; the sound level stream
+// sets name to the stable source id.
 type Handler struct {
 	*apicore.Core
 
@@ -56,8 +78,8 @@ type Handler struct {
 
 // New constructs the SSE endpoint handler from the shared core and the
 // facade-injected auth check. isClientAuthenticated is read once per connection
-// (at connect time) to decide whether the detection stream exposes the raw source
-// DisplayName to that subscriber.
+// (at connect time) to decide whether the detection and sound level streams
+// expose the raw source display name to that subscriber.
 func New(core *apicore.Core, isClientAuthenticated func(ctx echo.Context) bool) *Handler {
 	return &Handler{
 		Core:                  core,
@@ -69,15 +91,11 @@ func New(core *apicore.Core, isClientAuthenticated func(ctx echo.Context) bool) 
 // preserving the exact routes, order and per-route middleware (the SSE rate
 // limiter on the two stream endpoints) from the original initSSERoutes.
 func (c *Handler) RegisterRoutes(g *echo.Group) {
-	// Create rate limiter for SSE connections (10 requests per minute per IP)
+	// Rate limiter for SSE connections: 10 per minute per client (per /64 for
+	// IPv6) with a burst of 10 (see streamRateLimiterStoreConfig)
 	rateLimiterConfig := middleware.RateLimiterConfig{
-		Store: middleware.NewRateLimiterMemoryStoreWithConfig(
-			middleware.RateLimiterMemoryStoreConfig{
-				Rate:      sseRateLimitRequests, // Requests per window
-				ExpiresIn: sseRateLimitWindow,   // Rate limit window
-			},
-		),
-		IdentifierExtractor: middleware.DefaultRateLimiterConfig.IdentifierExtractor,
+		Store:               apicore.NewRateLimiterStore(streamRateLimiterStoreConfig()),
+		IdentifierExtractor: c.RateLimitKey,
 		ErrorHandler: func(context echo.Context, err error) error {
 			return context.JSON(http.StatusTooManyRequests, map[string]string{
 				"error": "Rate limit exceeded for SSE connections",
@@ -101,11 +119,9 @@ func (c *Handler) RegisterRoutes(g *echo.Group) {
 }
 
 // createSSEClient creates a new SSE client with common settings
-func createSSEClient(clientID string, ctx echo.Context, streamType string) *apicore.SSEClient {
+func createSSEClient(clientID, streamType string) *apicore.SSEClient {
 	return &apicore.SSEClient{
 		ID:         clientID,
-		Request:    ctx.Request(),
-		Response:   ctx.Response(),
 		Done:       make(chan struct{}, sseDoneChannelBuffer), // Signal-only buffered channel to prevent blocking on cleanup
 		StreamType: streamType,
 	}
@@ -152,7 +168,7 @@ func (c *Handler) handleSSEStream(ctx echo.Context, streamType, message, logPref
 
 	// Generate client ID and create client
 	clientID := apicore.GenerateCorrelationID()
-	client := createSSEClient(clientID, ctx, streamType)
+	client := createSSEClient(clientID, streamType)
 
 	// Allow custom setup
 	if setupFunc != nil {
@@ -299,10 +315,14 @@ func pendingPayloadForClient(pending any, authenticated bool) any {
 }
 
 // runSSEEventLoopMulti handles the SSE event loop for detection streams,
-// which receive both detection events and pending detection snapshots.
+// which receive both detection events and pending detection snapshots. It blocks
+// until an event, a heartbeat tick or a disconnect is ready, so an idle client
+// costs no wakeups between heartbeats.
 func (c *Handler) runSSEEventLoopMulti(ctx echo.Context, client *apicore.SSEClient, clientID, endpoint string) error {
 	ticker := time.NewTicker(apicore.SSEHeartbeatInterval)
 	defer ticker.Stop()
+
+	reqDone := ctx.Request().Context().Done()
 
 	for {
 		select {
@@ -313,71 +333,85 @@ func (c *Handler) runSSEEventLoopMulti(ctx echo.Context, client *apicore.SSEClie
 			}
 			c.RecordSSEMessage(endpoint, "heartbeat")
 
-		case <-ctx.Request().Context().Done():
+		case <-reqDone:
 			return nil
 
 		case <-client.Done:
 			return nil
 
-		default:
-			sent := false
-
-			// Check for detection data
-			select {
-			case detection, ok := <-client.Channel:
-				if !ok {
-					return nil
-				}
-				// Per-client send path: unauthenticated subscribers receive a copy
-				// with the source DisplayName stripped (only Source.ID exposed). The
-				// shared broadcast struct is never mutated; see
-				// sanitizeDetectionForUnauthenticated.
-				payload := detectionPayloadForClient(&detection, client.Authenticated)
-				if err := c.SendSSEMessage(ctx, "detection", payload); err != nil {
-					c.LogErrorIfEnabled("Failed to send SSE detection",
-						logger.String("client_id", clientID),
-						logger.String("endpoint", endpoint),
-						logger.Error(err),
-					)
-					c.RecordSSEError(endpoint, "send_failed")
-					return err
-				}
-				c.RecordSSEMessage(endpoint, "detection")
-				sent = true
-			default:
+		case detection, ok := <-client.Channel:
+			if !ok || streamEnded(reqDone, client.Done) {
+				return nil
 			}
-
-			// Check for pending data
-			if client.PendingChan != nil {
-				select {
-				case pending, ok := <-client.PendingChan:
-					if !ok {
-						return nil
-					}
-					// Same per-client anonymization as the detection path: the
-					// pending snapshot also carries the source display name, so
-					// unauthenticated subscribers receive a sanitized copy.
-					pending = pendingPayloadForClient(pending, client.Authenticated)
-					if err := c.SendSSEMessage(ctx, "pending", pending); err != nil {
-						c.LogErrorIfEnabled("Failed to send SSE pending",
-							logger.String("client_id", clientID),
-							logger.String("endpoint", endpoint),
-							logger.Error(err),
-						)
-						c.RecordSSEError(endpoint, "send_failed")
-						return err
-					}
-					c.RecordSSEMessage(endpoint, "pending")
-					sent = true
-				default:
-				}
+			// Per-client send path: unauthenticated subscribers receive a copy
+			// with the source DisplayName stripped (only Source.ID exposed). The
+			// shared broadcast struct is never mutated; see
+			// sanitizeDetectionForUnauthenticated.
+			payload := detectionPayloadForClient(&detection, client.Authenticated)
+			if err := c.SendSSEMessage(ctx, "detection", payload); err != nil {
+				c.LogErrorIfEnabled("Failed to send SSE detection",
+					logger.String("client_id", clientID),
+					logger.String("endpoint", endpoint),
+					logger.Error(err),
+				)
+				c.RecordSSEError(endpoint, "send_failed")
+				return err
 			}
+			c.RecordSSEMessage(endpoint, "detection")
 
-			if !sent {
-				time.Sleep(apicore.SSEEventLoopSleep)
+		// A nil PendingChan blocks forever, so this case is simply never ready.
+		case pending, ok := <-client.PendingChan:
+			if !ok || streamEnded(reqDone, client.Done) {
+				return nil
 			}
+			// Same per-client anonymization as the detection path: the
+			// pending snapshot also carries the source display name, so
+			// unauthenticated subscribers receive a sanitized copy.
+			pending = pendingPayloadForClient(pending, client.Authenticated)
+			if err := c.SendSSEMessage(ctx, "pending", pending); err != nil {
+				c.LogErrorIfEnabled("Failed to send SSE pending",
+					logger.String("client_id", clientID),
+					logger.String("endpoint", endpoint),
+					logger.Error(err),
+				)
+				c.RecordSSEError(endpoint, "send_failed")
+				return err
+			}
+			c.RecordSSEMessage(endpoint, "pending")
 		}
 	}
+}
+
+// streamEnded reports whether the request or the client has already ended. A
+// select picks among ready cases at random, so a data case can win even after a
+// disconnect; the event loops check this before writing an event so a pending
+// disconnect takes precedence over buffered events.
+func streamEnded(reqDone, clientDone <-chan struct{}) bool {
+	select {
+	case <-reqDone:
+		return true
+	case <-clientDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// soundLevelPayloadForClient returns the sound level event to serialize for a
+// single subscriber. Authenticated subscribers receive the event unchanged,
+// including the source display name. Unauthenticated subscribers receive a COPY
+// whose Name is the stable source id (Source), because the display name can
+// embed internal host details for stream sources without a user-configured name.
+// Source is the stable id (the pipeline builds the processor with the source id,
+// audio_pipeline_service.go:825, and the processor emits it as Source,
+// audiocore/soundlevel/processor.go:99), so it is kept. The input is never mutated;
+// the OctaveBands map is shared with the input but only read.
+func soundLevelPayloadForClient(event *apicore.SSESoundLevelData, authenticated bool) apicore.SSESoundLevelData {
+	out := *event
+	if !authenticated {
+		out.Name = out.Source
+	}
+	return out
 }
 
 // StreamSoundLevels handles the SSE connection for real-time sound level streaming
@@ -386,19 +420,16 @@ func (c *Handler) StreamSoundLevels(ctx echo.Context) error {
 		func(client *apicore.SSEClient) {
 			client.Channel = make(chan apicore.SSEDetectionData, sseMinimalBufferSize)            // Minimal buffer, not used for sound levels
 			client.SoundLevelChan = make(chan apicore.SSESoundLevelData, sseSoundLevelBufferSize) // Buffer for sound level data
+			// Capture the authentication state ONCE at connect time, as the
+			// detection stream does, so the per-client send path below can decide
+			// whether to expose the source display name.
+			client.Authenticated = c.clientAuthenticated(ctx)
 		},
 		func(ctx echo.Context, client *apicore.SSEClient, clientID string) error {
-			return c.runSSEEventLoop(ctx, client, clientID, soundLevelStreamEndpoint,
-				func() (any, bool) {
-					select {
-					case soundLevel, ok := <-client.SoundLevelChan:
-						if !ok {
-							return nil, false // Channel closed, no more data
-						}
-						return soundLevel, true
-					default:
-						return nil, false
-					}
+			return runSSEEventLoop(c, ctx, client, clientID, soundLevelStreamEndpoint,
+				client.SoundLevelChan,
+				func(soundLevel *apicore.SSESoundLevelData) any {
+					return soundLevelPayloadForClient(soundLevel, client.Authenticated)
 				},
 				"soundlevel",
 				apicore.StreamTypeSoundLevels,
@@ -406,12 +437,18 @@ func (c *Handler) StreamSoundLevels(ctx echo.Context) error {
 		})
 }
 
-// runSSEEventLoop handles the common SSE event loop pattern for all stream types
-func (c *Handler) runSSEEventLoop(ctx echo.Context, client *apicore.SSEClient, clientID string, endpoint string,
-	dataReceiver func() (any, bool), eventType string, heartbeatType string) error {
+// runSSEEventLoop handles the common SSE event loop pattern for single-channel
+// stream types: it writes each value received on data (converted by toPayload)
+// as an eventType event, and sends a heartbeat every SSEHeartbeatInterval. It
+// blocks until an event, a heartbeat tick or a disconnect is ready, so an idle
+// client costs no wakeups between heartbeats.
+func runSSEEventLoop[T any](c *Handler, ctx echo.Context, client *apicore.SSEClient, clientID, endpoint string,
+	data <-chan T, toPayload func(*T) any, eventType, heartbeatType string) error {
 
 	ticker := time.NewTicker(apicore.SSEHeartbeatInterval)
 	defer ticker.Stop()
+
+	reqDone := ctx.Request().Context().Done()
 
 	for {
 		select {
@@ -423,7 +460,7 @@ func (c *Handler) runSSEEventLoop(ctx echo.Context, client *apicore.SSEClient, c
 			}
 			c.RecordSSEMessage(endpoint, "heartbeat")
 
-		case <-ctx.Request().Context().Done():
+		case <-reqDone:
 			// Client disconnected
 			return nil
 
@@ -431,24 +468,23 @@ func (c *Handler) runSSEEventLoop(ctx echo.Context, client *apicore.SSEClient, c
 			// Client marked for removal
 			return nil
 
-		default:
-			// Check for data on the channel (non-blocking)
-			if data, hasData := dataReceiver(); hasData {
-				if err := c.SendSSEMessage(ctx, eventType, data); err != nil {
-					c.LogErrorIfEnabled("Failed to send SSE message",
-						logger.String("client_id", clientID),
-						logger.String("endpoint", endpoint),
-						logger.String("event_type", eventType),
-						logger.Error(err),
-					)
-					c.RecordSSEError(endpoint, "send_failed")
-					return err
-				}
-				c.RecordSSEMessage(endpoint, eventType)
-			} else {
-				// Small sleep to prevent busy-waiting when no data
-				time.Sleep(apicore.SSEEventLoopSleep)
+		case value, ok := <-data:
+			// A closed channel means the client was removed (RemoveClient closes
+			// it together with Done).
+			if !ok || streamEnded(reqDone, client.Done) {
+				return nil
 			}
+			if err := c.SendSSEMessage(ctx, eventType, toPayload(&value)); err != nil {
+				c.LogErrorIfEnabled("Failed to send SSE message",
+					logger.String("client_id", clientID),
+					logger.String("endpoint", endpoint),
+					logger.String("event_type", eventType),
+					logger.Error(err),
+				)
+				c.RecordSSEError(endpoint, "send_failed")
+				return err
+			}
+			c.RecordSSEMessage(endpoint, eventType)
 		}
 	}
 }

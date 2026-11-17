@@ -21,6 +21,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"github.com/tphakala/birdnet-go/internal/wallclock"
 )
 
 const maxSpeciesBatch = 10
@@ -1205,10 +1206,11 @@ func (c *Handler) writeActivityHeatmapCSV(ctx echo.Context, data *datastore.Acti
 
 // speciesHourlyDistributionItem is one species' row in the ridgeline wire payload: the stable
 // scientific-name key, its 24 normalized hour-of-day buckets (index = station-local hour 0..23,
-// summing to 1.0), and the raw detection count. The localized common name is resolved client-side
-// (the v2 label schema stores no common name), matching the sibling species charts.
+// summing to 1.0), and the raw detection count. The server-locale common name rides along so the
+// payload is self-describing and the UI never has to look it up separately.
 type speciesHourlyDistributionItem struct {
 	ScientificName string      `json:"scientificName"`
+	CommonName     string      `json:"commonName"`
 	Buckets        [24]float64 `json:"buckets"`
 	Total          int         `json:"total"`
 }
@@ -1220,6 +1222,7 @@ func newSpeciesHourlyDistributionResponse(data []datastore.SpeciesHourlyDistribu
 	for i := range data {
 		items = append(items, speciesHourlyDistributionItem{
 			ScientificName: data[i].ScientificName,
+			CommonName:     data[i].CommonName,
 			Buckets:        data[i].Buckets,
 			Total:          data[i].Total,
 		})
@@ -1332,7 +1335,6 @@ func (c *Handler) GetDawnChorusOnset(ctx echo.Context) error {
 // Nocturnal activity clock sun endpoint constants (design spec section 6.4).
 const (
 	sunNoonHour       = 12 // anchor a date at local noon before a SunCalc lookup (see GetAnalyticsSun)
-	sunHoursPerDay    = 24 // for the range-midpoint day count
 	sunMinutesPerHour = 60 // minute-of-day conversion
 )
 
@@ -1364,21 +1366,19 @@ func localMinuteOfDay(t time.Time) int {
 // resolveSunRepresentativeDate picks the single date the nocturnal clock's sun times represent.
 // A multi-day range collapses to its calendar midpoint (the chart notes this in its tooltip); a
 // single `date` (or a lone `start_date`) is used directly; absent all three, today is used. The
-// range bounds are parsed in UTC so every day is exactly 24h (DST-free), making the day count
-// exact; the midpoint is then a pure calendar offset (AddDate), and only its Y-M-D is used
-// downstream. Inputs are pre-validated by the handler.
+// range bounds are calendar dates, so the day count and the midpoint offset are pure date
+// arithmetic with no zone or DST involved. Inputs are pre-validated by the handler.
 func resolveSunRepresentativeDate(dateParam, startDate, endDate string) string {
 	switch {
 	case dateParam != "":
 		return dateParam
 	case startDate != "" && endDate != "":
-		start, errS := time.Parse(time.DateOnly, startDate)
-		end, errE := time.Parse(time.DateOnly, endDate)
+		start, errS := wallclock.ParseDate(startDate)
+		end, errE := wallclock.ParseDate(endDate)
 		if errS != nil || errE != nil {
 			return startDate // defensive: handler validated both already
 		}
-		days := int(end.Sub(start).Hours()) / sunHoursPerDay
-		return start.AddDate(0, 0, days/2).Format(time.DateOnly)
+		return start.AddDays(wallclock.DaysBetween(start, end) / 2).String()
 	case startDate != "":
 		return startDate
 	default:
@@ -1651,10 +1651,11 @@ func (c *Handler) GetSpeciesHourlyDistribution(ctx echo.Context) error {
 
 // acousticSuccessionItem is one species' row in the acoustic-succession wire payload: the stable
 // scientific-name key, its 24 raw hour-of-day detection counts (index = station-local hour 0..23),
-// and the total detection count. The localized common name is resolved client-side (the v2 label
-// schema stores no common name), matching the sibling species charts.
+// and the total detection count. The server-locale common name rides along so the payload
+// is self-describing and the UI never has to look it up separately.
 type acousticSuccessionItem struct {
 	ScientificName string  `json:"scientificName"`
+	CommonName     string  `json:"commonName"`
 	Counts         [24]int `json:"counts"`
 	Total          int     `json:"total"`
 }
@@ -1666,6 +1667,7 @@ func newAcousticSuccessionResponse(data []datastore.SpeciesHourlyCounts) []acous
 	for i := range data {
 		items = append(items, acousticSuccessionItem{
 			ScientificName: data[i].ScientificName,
+			CommonName:     data[i].CommonName,
 			Counts:         data[i].Counts,
 			Total:          data[i].Total,
 		})
@@ -1689,10 +1691,11 @@ func (c *Handler) GetAcousticSuccession(ctx echo.Context) error {
 
 // confidenceDistributionItem is one species' row in the confidence-distribution wire payload: its
 // scientific-name key, its normalized confidence bins (each the fraction of the species' detections
-// in that bin, summing to ~1.0), and the raw detection count. The localized common name is resolved
-// client-side (the v2 label schema stores no common name), matching the sibling species charts.
+// in that bin, summing to ~1.0), and the raw detection count. The server-locale common name rides
+// along so the payload is self-describing and the UI never has to look it up separately.
 type confidenceDistributionItem struct {
 	ScientificName string    `json:"scientificName"`
+	CommonName     string    `json:"commonName"`
 	Bins           []float64 `json:"bins"`
 	Total          int       `json:"total"`
 }
@@ -1709,6 +1712,7 @@ func newConfidenceDistributionResponse(data []datastore.SpeciesConfidenceHistogr
 		}
 		items = append(items, confidenceDistributionItem{
 			ScientificName: data[i].ScientificName,
+			CommonName:     data[i].CommonName,
 			Bins:           bins,
 			Total:          data[i].Total,
 		})
@@ -2122,10 +2126,11 @@ func (c *Handler) GetYearOverYear(ctx echo.Context) error {
 
 // speciesPhenologyItem is one species' residency row in the phenology wire payload: its
 // scientific-name key, its first and last station-local detection dates (YYYY-MM-DD), and the
-// in-range detection count. The localized common name is resolved client-side (the v2 label schema
-// stores no common name), matching the sibling species charts.
+// in-range detection count. The server-locale common name rides along so the payload is
+// self-describing and the UI never has to look it up separately.
 type speciesPhenologyItem struct {
 	ScientificName string `json:"scientificName"`
+	CommonName     string `json:"commonName"`
 	FirstSeen      string `json:"firstSeen"`
 	LastSeen       string `json:"lastSeen"`
 	Count          int    `json:"count"`
@@ -2138,6 +2143,7 @@ func newSpeciesPhenologyResponse(data []datastore.SpeciesPhenologyPoint) []speci
 	for i := range data {
 		items = append(items, speciesPhenologyItem{
 			ScientificName: data[i].ScientificName,
+			CommonName:     data[i].CommonName,
 			FirstSeen:      data[i].FirstSeen,
 			LastSeen:       data[i].LastSeen,
 			Count:          data[i].Count,

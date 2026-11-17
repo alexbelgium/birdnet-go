@@ -1,6 +1,10 @@
 package repository
 
-import "github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
+import (
+	"time"
+
+	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
+)
 
 // VerificationFilter wraps VerificationStatus for search filters.
 type VerificationFilter entities.VerificationStatus
@@ -30,16 +34,17 @@ type SearchFilters struct {
 	// StartTime filters detections on or after this Unix timestamp (optional).
 	StartTime *int64
 
-	// EndTime filters detections on or before this Unix timestamp (optional).
+	// EndTime filters detections before this Unix timestamp (exclusive, optional).
 	EndTime *int64
 
 	// IncludedHours filters by hour of day (0-23).
 	// Supports non-contiguous ranges (e.g., dawn + night = [5,6,20,21,22,23,0,1,2,3,4]).
 	IncludedHours []int
 
-	// TimezoneOffset is the timezone offset in seconds for hour calculation.
-	// Used with IncludedHours to extract local hour from Unix timestamp.
-	TimezoneOffset int
+	// TimeZone is the station time zone in which IncludedHours are read as
+	// wall-clock hours: each detection is shifted by the UTC offset in effect at
+	// its own detected_at, so DST changes inside the range are handled. nil means UTC.
+	TimeZone *time.Location
 
 	// MinConfidence filters detections with confidence >= this value (optional).
 	MinConfidence *float64
@@ -57,7 +62,7 @@ type SearchFilters struct {
 	// IsLocked filters by lock status (optional).
 	IsLocked *bool
 
-	// SortBy specifies sort field: "detected_at", "confidence", "species", or "status".
+	// SortBy specifies sort field: "detected_at", "confidence", "species", "status", or "id".
 	SortBy string
 
 	// SortDesc specifies descending sort order when true.
@@ -69,7 +74,8 @@ type SearchFilters struct {
 	// Offset specifies number of results to skip.
 	Offset int
 
-	// MinID filters to records with ID > MinID (cursor-based pagination).
+	// MinID filters to records with ID > MinID (cursor-based pagination). It needs
+	// SortBy "id" with SortDesc false (see SortFieldID), or pages can skip rows.
 	MinID uint
 }
 
@@ -124,19 +130,6 @@ type SpeciesCount struct {
 	ScientificName string
 
 	// Count is the number of detections.
-	Count int64
-}
-
-// DailyCount represents detection count for a specific date.
-// Note: Date uses string format (YYYY-MM-DD) rather than Unix timestamp
-// because daily aggregations are timezone-dependent and the string format
-// is more natural for display and grouping purposes.
-type DailyCount struct {
-	// Date in YYYY-MM-DD format, bucketed in the configured timezone (offset-adjusted),
-	// not necessarily the database/OS-local zone.
-	Date string
-
-	// Count is the number of detections on this date.
 	Count int64
 }
 
@@ -254,6 +247,9 @@ type NewSpeciesData struct {
 	// FirstDetected is the Unix timestamp of the very first detection.
 	FirstDetected int64
 
+	// FirstBeginTime is the earliest audio start in Unix milliseconds, when available.
+	FirstBeginTime int64
+
 	// CountInPeriod is how many non-false-positive detections of the species fall inside the
 	// queried [start, end) window, across every model's label for it.
 	CountInPeriod int
@@ -266,4 +262,41 @@ type NewSpeciesData struct {
 
 	// Confidence is the confidence score of the first detection.
 	Confidence float64
+}
+
+// DetectionNeighbors holds the IDs of the detections next to one detection in
+// record ID order. A zero ID means there is no such detection (IDs start at 1).
+type DetectionNeighbors struct {
+	// Previous is the greatest detection ID below the detection's.
+	Previous uint
+	// Next is the smallest detection ID above the detection's.
+	Next uint
+	// PreviousSameSpecies is the greatest ID below the detection's among
+	// detections of the same species.
+	PreviousSameSpecies uint
+	// NextSameSpecies is the smallest ID above the detection's among detections
+	// of the same species.
+	NextSameSpecies uint
+}
+
+// SpeciesStats holds the all-time statistics of one species across every model's
+// labels. Detections reviewed as false positives are left out of Detections,
+// FirstDetectedAt, LastDetectedAt, AvgConfidence and MaxConfidence; the two review
+// counts cover every reviewed detection of the species. With Detections == 0 the
+// times and confidences are 0 and carry no meaning.
+type SpeciesStats struct {
+	// Detections is the number of detections not reviewed as false positive.
+	Detections int64
+	// FirstDetectedAt is the Unix seconds of the earliest such detection.
+	FirstDetectedAt int64
+	// LastDetectedAt is the Unix seconds of the latest such detection.
+	LastDetectedAt int64
+	// AvgConfidence is the mean confidence of such detections, 0 to 1.
+	AvgConfidence float64
+	// MaxConfidence is the highest confidence of such detections, 0 to 1.
+	MaxConfidence float64
+	// CorrectReviews is the number of detections reviewed as correct.
+	CorrectReviews int64
+	// FalsePositiveReviews is the number of detections reviewed as false positive.
+	FalsePositiveReviews int64
 }

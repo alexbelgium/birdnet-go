@@ -1,5 +1,5 @@
 <!--
-  LiveStreamPage.svelte — Full-page live audio spectrogram viewer
+  LiveStreamPage.svelte: Full-page live audio spectrogram viewer
 
   Connects to the HLS audio stream via hls.js, feeds it through the
   useSpectrogramAnalyser composable, and renders a scrolling waterfall
@@ -194,7 +194,8 @@
 
       if (signal.aborted) return;
 
-      activeStreamToken = data.stream_token;
+      const streamToken = data.stream_token;
+      activeStreamToken = streamToken;
       const hlsUrl = buildAppUrl(data.playlist_url);
 
       // Create audio element
@@ -220,7 +221,7 @@
         });
       });
       audioElement.addEventListener('playing', () => {
-        if (!hasStalled) return; // Ignore initial play — only log stall recovery
+        if (!hasStalled) return; // Ignore initial play, only log stall recovery
         hasStalled = false;
         logger.warn('Audio element: resumed from stall', {
           currentTime: audioElement?.currentTime?.toFixed(3),
@@ -336,7 +337,7 @@
             spectro.disconnect();
             return;
           }
-          startHeartbeat(activeStreamToken!);
+          startHeartbeat(streamToken);
           if (activeSourceId) {
             connectDetectionStream(activeSourceId);
           }
@@ -356,7 +357,7 @@
             });
             stopStream();
           } else {
-            // Non-fatal errors — log for debugging buffer issues
+            // Non-fatal errors, log for debugging buffer issues
             const info: Record<string, unknown> = {
               type: data.type,
               details: data.details,
@@ -406,7 +407,7 @@
           spectro.disconnect();
           return;
         }
-        startHeartbeat(activeStreamToken!);
+        startHeartbeat(streamToken);
         if (activeSourceId) {
           connectDetectionStream(activeSourceId);
         }
@@ -632,7 +633,7 @@
     return () => document.removeEventListener('keydown', handler);
   });
 
-  // No auto-start — browsers block AudioContext and audio.play() without a
+  // No auto-start, browsers block AudioContext and audio.play() without a
   // user gesture. The user must click the play button to start streaming.
   function handleStartClick() {
     if (selectedSourceId) {
@@ -640,7 +641,7 @@
     }
   }
 
-  // Periodic buffer health monitor — logs buffer state every 10s to help
+  // Periodic buffer health monitor, logs buffer state every 10s to help
   // diagnose intermittent audio gaps. Uses warn level so it appears in production.
   $effect(() => {
     if (!audioElement || !isStreaming) return;
@@ -742,7 +743,7 @@
         }
       }
 
-      // Prune labels older than LABEL_MAX_AGE_MS — runs regardless of playingDate
+      // Prune labels older than LABEL_MAX_AGE_MS, runs regardless of playingDate
       // availability so labels don't freeze on screen during buffer stalls
       const cutoff = now - LABEL_MAX_AGE_MS;
       overlayLabels = overlayLabels.filter(l => l.birthTime >= cutoff);
@@ -772,7 +773,7 @@
       class="flex flex-none items-center gap-4 border-b border-[var(--color-base-200)] px-4 py-3"
     >
       <div class="flex items-center gap-2">
-        <Radio class="size-5 text-[var(--color-primary)]" />
+        <Radio class="size-5 text-[var(--text-primary)]" />
         <h1 class="text-lg font-semibold">{t('spectrogram.page.title')}</h1>
       </div>
 
@@ -783,6 +784,7 @@
         </span>
         <SelectDropdown
           options={sourceOptions}
+          aria-label={t('spectrogram.page.sourceLabel')}
           value={selectedSourceId}
           placeholder={sources.length > 0
             ? t('spectrogram.page.sourceLabel')
@@ -805,7 +807,7 @@
           <span>{t('common.loading')}</span>
         </div>
       {:else if isStreaming}
-        <div class="flex items-center gap-1 text-sm text-[var(--color-success)]">
+        <div class="flex items-center gap-1 text-sm text-[var(--text-success)]">
           <span class="inline-block size-2 rounded-full bg-[var(--color-success)]"></span>
           <span>{t('spectrogram.page.connected')}</span>
         </div>
@@ -837,7 +839,7 @@
     {#if connectionError}
       <div
         role="alert"
-        class="m-4 flex items-center gap-2 rounded-lg bg-[var(--color-error)]/10 p-3 text-sm text-[var(--color-error)]"
+        class="m-4 flex items-center gap-2 rounded-lg bg-[var(--color-error)]/10 p-3 text-sm text-[var(--text-error)]"
       >
         <AlertCircle class="size-4 shrink-0" />
         <span>{connectionError}</span>
@@ -861,7 +863,7 @@
           className="h-full w-full"
         />
       {:else}
-        <!-- Click to start — user gesture required for AudioContext -->
+        <!-- Click to start, user gesture required for AudioContext -->
         <button
           onclick={handleStartClick}
           disabled={!selectedSourceId || sources.length === 0}
@@ -903,7 +905,7 @@
   <div
     class="col-span-12 flex flex-col items-center justify-center gap-4 rounded-2xl border border-border-100 bg-[var(--color-base-100)] p-12 shadow-sm"
   >
-    <AlertCircle class="size-8 text-[var(--color-warning)]" />
+    <AlertCircle class="size-8 text-[var(--text-warning)]" />
     <p class="text-center text-[var(--color-base-content)]/70">
       {t('spectrogram.error.accessDenied')}
     </p>

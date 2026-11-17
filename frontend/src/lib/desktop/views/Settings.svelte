@@ -55,10 +55,6 @@
   });
 </script>
 
-<svelte:head>
-  <title>{t('pageTitle.settings')}</title>
-</svelte:head>
-
 <main class="col-span-12 w-full">
   <!-- Restart-required is shown by the global RestartBanner (RootLayout),
        driven by backend restart state. -->
@@ -66,7 +62,14 @@
   <!-- Global Error Display -->
   {#if store.error}
     <div class="mb-6">
-      <ErrorAlert message={store.error} onDismiss={() => settingsActions.clearError()} />
+      <!-- A save failure the store showed as a toast was already announced by the toast,
+           so the banner announces only errors no toast showed. -->
+      <ErrorAlert
+        message={store.error}
+        dismissible
+        role={store.errorToasted ? undefined : 'alert'}
+        onDismiss={() => settingsActions.clearError()}
+      />
     </div>
   {/if}
 

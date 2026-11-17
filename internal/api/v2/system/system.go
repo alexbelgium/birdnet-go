@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	slashpath "path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -108,7 +110,7 @@ type DiskInfo struct {
 type ProcessInfo struct {
 	PID    int32   `json:"pid"`
 	Name   string  `json:"name"`
-	Status string  `json:"status"` // e.g., "running", "sleeping", "zombie"
+	Status string  `json:"status"` // e.g., "running", "sleep", "zombie"
 	CPU    float64 `json:"cpu"`    // CPU usage percentage
 	Memory uint64  `json:"memory"` // Memory usage in bytes (RSS)
 	Uptime int64   `json:"uptime"` // Uptime in seconds
@@ -648,7 +650,7 @@ func (c *Handler) GetDiskInfo(ctx echo.Context) error {
 
 	disks := make([]DiskInfo, 0, len(partitions))
 	for _, partition := range partitions {
-		if skipFilesystem(partition.Fstype) {
+		if skipFilesystem(partition.Fstype) || isFileMount(partition.Mountpoint) {
 			continue
 		}
 		diskInfo := c.buildDiskInfo(partition, ioCounters, uptimeMs)
@@ -707,10 +709,14 @@ func (c *Handler) populateDiskUsage(info *DiskInfo, mountpoint string) {
 	}
 }
 
-// populateIOMetrics adds IO metrics to disk info
+// populateIOMetrics adds IO metrics to disk info. The counters come from the
+// whole disk that holds the device when ioCounters lists it, otherwise from the
+// device's own entry.
 func (c *Handler) populateIOMetrics(info *DiskInfo, device string, ioCounters map[string]disk.IOCountersStat, uptimeMs uint64) {
-	deviceName := getDeviceBaseName(device)
-	counter, exists := ioCounters[deviceName]
+	counter, exists := ioCounters[getDeviceBaseName(device)]
+	if !exists {
+		counter, exists = ioCounters[slashpath.Base(device)]
+	}
 	if !exists {
 		return
 	}
@@ -748,21 +754,37 @@ func (c *Handler) calculateIOBusyPerc(counter *disk.IOCountersStat, uptimeMs uin
 	return busyPerc
 }
 
-// getDeviceBaseName extracts the base device name (e.g., "sda" from "/dev/sda1")
-func getDeviceBaseName(device string) string {
-	// First get the basename (remove directory path)
-	base := filepath.Base(device)
+// wholeDiskSubmatch is the capture group in partitionSuffixPatterns that
+// holds the whole-disk name.
+const wholeDiskSubmatch = 1
 
-	// Then remove any numbers at the end (partition numbers)
-	for i, b := range slices.Backward([]byte(base)) {
-		if b < '0' || b > '9' {
-			if i < len(base)-1 {
-				return base[:i+1]
-			}
-			return base
+// partitionSuffixPatterns map a partition device name to the whole disk it
+// belongs to. Each pattern is anchored and captures the whole-disk name in
+// group wholeDiskSubmatch. Names that match none (loop0, dm-0, md0, C:) are
+// their own key.
+var partitionSuffixPatterns = []*regexp.Regexp{
+	// Linux disks whose name ends in a letter: the partition number follows directly (sda1 -> sda).
+	regexp.MustCompile(`^((?:sd|hd|vd|xvd)[a-z]+)\d+$`),
+	// Linux disks whose name ends in a digit: the kernel puts "p" before the partition number (nvme0n1p1 -> nvme0n1, mmcblk0p1 -> mmcblk0).
+	regexp.MustCompile(`^(.*\d)p\d+$`),
+	// macOS slices and APFS snapshots (disk3s1, disk3s1s1 -> disk3). The result only helps when the counters map lists that disk.
+	regexp.MustCompile(`^(disk\d+)s\d+(?:s\d+)?$`),
+}
+
+// getDeviceBaseName returns the IO counter key of the whole disk that holds
+// device (sda1 -> sda, nvme0n1p1 -> nvme0n1, disk3s1 -> disk3). A device with
+// no partition suffix (loop0, dm-0, C:) is returned as its own basename. It
+// uses the slash-only path package (imported as slashpath, since path is a
+// common local name in this file) so a Windows drive string such as "C:"
+// passes through unchanged on every OS.
+func getDeviceBaseName(device string) string {
+	name := slashpath.Base(device)
+	for _, re := range partitionSuffixPatterns {
+		if m := re.FindStringSubmatch(name); m != nil {
+			return m[wholeDiskSubmatch]
 		}
 	}
-	return base
+	return name
 }
 
 // isRemoteFilesystem returns true if the filesystem is a network mount
@@ -800,7 +822,7 @@ func (c *Handler) getSingleProcessInfo(p *process.Process) (ProcessInfo, error) 
 		c.LogWarnIfEnabled("Failed to get process status", logger.Any("pid", p.Pid), logger.String("name", name), logger.Error(err))
 	case len(statusList) > 0:
 		// Use the first status code returned
-		status = mapProcessStatus(statusList[0])
+		status = normalizeProcessStatus(statusList[0])
 	default:
 		status = valueUnknown
 	}
@@ -860,27 +882,16 @@ func (c *Handler) getSingleProcessInfo(p *process.Process) (ProcessInfo, error) 
 	}, nil
 }
 
-// mapProcessStatus converts OS-specific process status codes to readable strings.
-func mapProcessStatus(statusCode string) string {
-	switch statusCode {
-	case "R": // Running or Runnable (Linux/macOS)
-		return "running"
-	case "S": // Sleeping (Linux/macOS)
-		return "sleeping"
-	case "D": // Disk Sleep (Linux)
-		return "disk sleep"
-	case "Z": // Zombie (Linux/macOS)
-		return "zombie"
-	case "T": // Stopped (Linux/macOS)
-		return "stopped"
-	case "W": // Paging (Linux)
-		return "paging"
-	case "I": // Idle (macOS/FreeBSD)
-		return "idle"
-	// Add more specific codes if needed, or default
-	default:
-		return strings.ToLower(statusCode) // Use the code itself if not recognized
+// normalizeProcessStatus converts a gopsutil process status into the value the API reports.
+// gopsutil already translates OS state letters into words, so the value is only lowercased.
+// On Linux and the BSDs it is one of: running, sleep, idle, stop, blocked, wait, lock, zombie;
+// Solaris adds daemon, detached, system and orphan. An empty value, which gopsutil returns for
+// an unrecognized state letter, is reported as "unknown".
+func normalizeProcessStatus(status string) string {
+	if status == "" {
+		return valueUnknown
 	}
+	return strings.ToLower(status)
 }
 
 // GetProcessInfo returns a list of running processes and their basic information
@@ -1073,6 +1084,17 @@ var fsTypeCategories = map[string]FileSystemCategory{
 // skipFsPrefixes lists filesystem type prefixes that indicate virtual or system filesystems.
 var skipFsPrefixes = [...]string{"fuse", "cgroup", "proc", "sys", "dev"}
 
+// isFileMount reports whether a mount point is a regular file rather than a
+// directory. Container runtimes bind-mount single files over the root
+// filesystem: Docker's /etc/hosts, /etc/hostname and /etc/resolv.conf, and the
+// NVIDIA Container Toolkit's nvidia-smi and driver libraries. They report the
+// host filesystem's type and size, so without this check each shows up as a
+// separate disk. A mount point that cannot be inspected is kept.
+func isFileMount(mountpoint string) bool {
+	fi, err := os.Stat(mountpoint)
+	return err == nil && fi.Mode().IsRegular()
+}
+
 // skipFilesystem returns true if the filesystem type should be skipped
 func skipFilesystem(fstype string) bool {
 	if _, exists := fsTypeCategories[fstype]; exists {
@@ -1241,6 +1263,10 @@ func (c *Handler) GetV2DatabaseStats(ctx echo.Context) error {
 const (
 	// backupDiskSpaceBuffer is the additional disk space required beyond the database size for backup.
 	backupDiskSpaceBuffer = 100 * 1024 * 1024 // 100 MB
+
+	// backupTempSuffixBytes is the number of random bytes in the temp file name
+	// suffix, so the name cannot be predicted.
+	backupTempSuffixBytes = 8
 )
 
 // DownloadDatabaseBackup handles POST /api/v2/system/database/backup
@@ -1346,10 +1372,8 @@ func (c *Handler) DownloadDatabaseBackup(ctx echo.Context) error {
 	// Create temp file path for VACUUM INTO with random suffix to prevent
 	// predictable filenames (symlink attacks on shared /tmp).
 	timestamp := time.Now().Format("20060102-150405")
-	randomBytes := make([]byte, 8)
-	if _, randErr := cryptorand.Read(randomBytes); randErr != nil {
-		return c.HandleError(ctx, randErr, "Failed to generate secure backup filename", http.StatusInternalServerError)
-	}
+	randomBytes := make([]byte, backupTempSuffixBytes)
+	cryptorand.Read(randomBytes)
 	randomSuffix := "-" + hex.EncodeToString(randomBytes)
 	tempPath := filepath.Join(os.TempDir(), fmt.Sprintf("birdnet-%s-backup-%s%s.db", dbType, timestamp, randomSuffix))
 	filename := fmt.Sprintf("birdnet-%s-backup-%s.db", dbType, timestamp)

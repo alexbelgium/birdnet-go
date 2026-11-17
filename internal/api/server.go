@@ -60,6 +60,7 @@ type Server struct {
 
 	// Dependencies
 	dataStore      datastore.Interface
+	detectionRepo  datastore.DetectionRepository
 	v2Manager      datastoreV2.Manager
 	birdImageCache *imageprovider.BirdImageCache
 	sunCalc        *suncalc.SunCalc
@@ -101,7 +102,7 @@ type Server struct {
 }
 
 // currentSettings returns the latest *conf.Settings snapshot published via
-// conf.StoreSettings, or the server's constructor-provided pointer when no
+// conf.UpdateSettings, or the server's constructor-provided pointer when no
 // snapshot has been published yet (test harnesses that skip the global
 // publish, or early startup before the first Load). Routing the hot-path
 // middleware through this helper keeps the basepath resolution race-free
@@ -192,6 +193,14 @@ type ServerOption func(*Server)
 func WithDataStore(ds datastore.Interface) ServerOption {
 	return func(s *Server) {
 		s.dataStore = ds
+	}
+}
+
+// WithDetectionRepository sets the detection repository the API v2 controller
+// uses instead of its default bridge over the datastore.
+func WithDetectionRepository(repo datastore.DetectionRepository) ServerOption {
+	return func(s *Server) {
+		s.detectionRepo = repo
 	}
 }
 
@@ -351,7 +360,7 @@ func (s *Server) initAuth() {
 
 // setupMiddleware configures the Echo middleware stack.
 func (s *Server) setupMiddleware() {
-	// HEAD→GET rewrite — runs before routing so HEAD requests match GET routes.
+	// HEAD→GET rewrite: runs before routing so HEAD requests match GET routes.
 	// Per RFC 9110 §9.3.2, HEAD must return the same status as GET.
 	// Go's net/http automatically suppresses the response body for HEAD.
 	s.echo.Pre(mw.NewHeadToGet())
@@ -369,7 +378,7 @@ func (s *Server) setupMiddleware() {
 	s.echo.Pre(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			// Read the current *conf.Settings through the atomic pointer so a
-			// settings hot-reload (CoW publish via conf.StoreSettings) takes
+			// settings hot-reload (CoW publish via conf.UpdateSettings) takes
 			// effect for the next request without restart, and so readers
 			// never observe a torn view of the basepath field. Fall back to
 			// the constructor-provided pointer if no snapshot has been
@@ -407,7 +416,7 @@ func (s *Server) setupMiddleware() {
 					// sees mismatched Path/RawPath and may route inconsistently.
 					// hasPercentEncodedPrefix treats %XX hex digits
 					// case-insensitively so lowercase-hex-forwarding proxies
-					// also match. Fixes Forgejo #447.
+					// also match.
 					if req.URL.RawPath != "" {
 						encodedBP := (&url.URL{Path: bp}).EscapedPath()
 						if n := hasPercentEncodedPrefix(req.URL.RawPath, encodedBP); n >= 0 {
@@ -433,7 +442,7 @@ func (s *Server) setupMiddleware() {
 	// Recovery middleware - should be first
 	s.echo.Use(echomw.Recover())
 
-	// Base path context — makes the effective base path available to all handlers
+	// Base path context: makes the effective base path available to all handlers
 	// via c.Get("basePath"). Computed per-request from ingressPath() which checks
 	// proxy headers and config in priority order.
 	s.echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -446,9 +455,11 @@ func (s *Server) setupMiddleware() {
 	// Request logging using custom middleware package (uses centralized logger)
 	s.echo.Use(mw.NewRequestLogger())
 
-	// Security middleware configuration — start from defaults, override server-specific values
+	// Security middleware configuration: start from defaults, override server-specific values
 	securityConfig := mw.DefaultSecurityConfig()
 	securityConfig.AllowedOrigins = s.config.AllowedOrigins
+	// Credentials apply only to a list of literal origins; the default wildcard
+	// list is answered without them.
 	securityConfig.AllowCredentials = true
 	securityConfig.AllowEmbedding = s.config.AllowEmbedding
 
@@ -517,11 +528,21 @@ func (s *Server) setupRoutes() error {
 		apiv2.WithMetricsStore(observability.NewMemoryStore(apiv2.MetricsHistoryMaxPoints)),
 		apiv2.WithAudioEngine(s.engine),
 	}
+	if s.detectionRepo != nil {
+		v2Opts = append(v2Opts, apiv2.WithDetectionRepository(s.detectionRepo))
+	}
 	if s.modelManager != nil {
 		v2Opts = append(v2Opts, apiv2.WithModelManager(s.modelManager))
 	}
 	if s.healthErrors != nil {
 		v2Opts = append(v2Opts, apiv2.WithHealthErrorBuffer(s.healthErrors))
+	}
+	// Share the orchestrator-owned species-name index with the facade so it reads
+	// the same snapshot the orchestrator rebuilds from the union of loaded labels,
+	// rather than a facade-owned copy seeded only from the primary's labels. Without
+	// a processor (and thus an orchestrator) the facade keeps its own fallback.
+	if s.processor != nil && s.processor.Bn != nil {
+		v2Opts = append(v2Opts, apiv2.WithSpeciesIndex(s.processor.Bn.SpeciesIndex()))
 	}
 
 	// Initialize API v2 controller with auth middleware and service injected
@@ -776,7 +797,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) error {
 		s.apiController.Shutdown()
 	}
 
-	// Shutdown Echo server — since the listener is already closed and SSE
+	// Shutdown Echo server: since the listener is already closed and SSE
 	// clients are disconnected, this should complete quickly.
 	if err := s.echo.Shutdown(ctx); err != nil {
 		// Ignore "use of closed network connection" since we closed the listener above
@@ -907,14 +928,14 @@ func (s *Server) IsDevMode() bool {
 
 // registerSPARoutes registers all frontend SPA routes.
 // These routes serve the HTML shell that loads the Svelte application.
-// All SPA routes are public so the SPA can bootstrap and render the login
+// Most SPA routes are public so the SPA can bootstrap and render the login
 // form when Security.PrivateMode is enabled. The data layer (v2 API
 // endpoints) is the actual security boundary: it is gated by
 // privateModeAuth in api/v2/api.go and returns 401 to unauthenticated
 // requests in private mode, prompting the SPA to render the login form.
-// Settings and system routes remain auth-gated at this layer too so deep
-// links to those pages still server-side redirect to /login for unauth
-// browser navigations.
+// Settings and system routes (including the /ui/settings/* and /ui/system/*
+// sub-paths) remain auth-gated at this layer too so deep links to those pages
+// still server-side redirect to /login for unauth browser navigations.
 func (s *Server) registerSPARoutes() {
 	// Redirect root path to dashboard
 	s.echo.GET("/", func(c echo.Context) error {
@@ -923,7 +944,7 @@ func (s *Server) registerSPARoutes() {
 
 	authMiddleware := s.getAuthMiddleware()
 
-	// Public SPA shell routes — the SPA itself decides what to render
+	// Public SPA shell routes: the SPA itself decides what to render
 	// based on Security.PrivateMode and the authenticated/guest state
 	// returned by /api/v2/app/config.
 	publicRoutes := []string{
@@ -967,6 +988,12 @@ func (s *Server) registerSPARoutes() {
 		"/ui/settings/species",
 		"/ui/settings/support",
 		"/ui/settings/userinterface",
+		// Catch-alls for the sub-paths, so deep links such as
+		// /ui/system/database or /ui/system/health redirect unauthenticated
+		// browsers to /login. Echo prefers them over the public /ui/*
+		// catch-all because they are more specific.
+		"/ui/settings/*",
+		"/ui/system/*",
 	}
 	for _, route := range protectedRoutes {
 		if authMiddleware != nil {
@@ -974,13 +1001,6 @@ func (s *Server) registerSPARoutes() {
 		} else {
 			s.echo.GET(route, s.spaHandler.ServeApp)
 		}
-	}
-
-	// Protected catch-all for settings routes
-	if authMiddleware != nil {
-		s.echo.GET("/ui/settings/*", s.spaHandler.ServeApp, authMiddleware)
-	} else {
-		s.echo.GET("/ui/settings/*", s.spaHandler.ServeApp)
 	}
 
 	// Public catch-all for any other unmatched /ui/* paths so the SPA can
@@ -1028,31 +1048,33 @@ func (s *Server) registerOAuthRoutes() {
 	)
 }
 
-// handleOAuthBegin initiates the OAuth flow with the requested provider.
+// oauthProviderUnavailableMessage is the only text a visitor gets when an
+// enabled provider is not registered. The cause stays in the security log.
+const oauthProviderUnavailableMessage = "Sign-in with this provider is not available right now. The administrator can find the reason in the BirdNET-Go log."
+
+// handleOAuthBegin initiates the OAuth flow with the requested provider, once
+// it is enabled and registered.
 // GET /auth/:provider
 func (s *Server) handleOAuthBegin(c echo.Context) error {
-	provider := c.Param("provider")
+	pathProvider := c.Param("provider")
 	log := s.securityLog().With(
-		logger.String("provider", provider),
+		logger.String("provider", pathProvider),
 		logger.String("ip", c.RealIP()),
 	)
 
 	log.Info("OAuth login begin request")
 
-	// Validate provider is one we support
-	if !s.isValidOAuthProvider(provider) {
+	// Resolve the path name once. The path may differ in case from the goth
+	// name, which gothic and the session compare exactly, so everything below
+	// uses the canonical names.
+	configProvider, provider, ok := s.canonicalOAuthProvider(pathProvider)
+	if !ok {
 		log.Warn("OAuth login rejected: unsupported or unrecognized provider requested")
 		return c.String(http.StatusBadRequest, "Invalid OAuth provider")
 	}
 
-	// Reject providers that are not currently enabled and fully configured before
-	// sending the user on the provider round-trip, so a disabled or half-configured
-	// provider fails fast with a clear security.log entry here instead of an opaque
-	// error after the redirect (issue #3381). The visitor only sees a generic message.
-	configProvider := s.configProviderFor(provider)
-	if settings := s.currentSettings(); settings == nil || configProvider == "" || !settings.IsOAuthProviderEnabled(configProvider) {
-		log.Warn("OAuth login rejected: provider is disabled or not fully configured")
-		return c.String(http.StatusBadRequest, "OAuth provider not available")
+	if handled, err := s.rejectUnusableOAuthProvider(c, log, "OAuth login", configProvider, provider); handled {
+		return err
 	}
 
 	// Add provider to request context for gothic
@@ -1073,16 +1095,56 @@ func (s *Server) handleOAuthBegin(c echo.Context) error {
 	return nil
 }
 
-// handleOAuthCallback handles the OAuth callback from the provider.
+// rejectUnusableOAuthProvider answers the request and reports true when the
+// provider cannot be used right now. Begin and callback share it so the two
+// cannot drift. stage names the step in the log lines.
+func (s *Server) rejectUnusableOAuthProvider(c echo.Context, log logger.Logger, stage, configProvider, provider string) (handled bool, err error) {
+	// Reject a provider that is not currently enabled and fully configured, so a
+	// disabled or half-configured provider fails fast with a clear security.log
+	// entry here instead of an opaque error from gothic (issue #3381). The visitor
+	// only sees a generic message.
+	if settings := s.currentSettings(); settings == nil || !settings.IsOAuthProviderEnabled(configProvider) {
+		log.Warn(stage + " rejected: provider is disabled or not fully configured")
+		return true, c.String(http.StatusBadRequest, "OAuth provider not available")
+	}
+
+	// Reject an enabled provider that goth does not know (OIDC discovery failed
+	// or has not finished) instead of letting gothic answer
+	// with its raw error. The cause is for the security log only; the visitor
+	// gets one fixed sentence.
+	// The registry matches goth names exactly, so look the provider up by its
+	// canonical name.
+	if regErr := security.ProviderRegistrationError(provider); regErr != nil {
+		log.Warn(stage+" rejected: provider is not registered", logger.Error(regErr))
+		return true, c.String(http.StatusServiceUnavailable, oauthProviderUnavailableMessage)
+	}
+	return false, nil
+}
+
+// handleOAuthCallback handles the OAuth callback from the provider. Like the
+// begin step it rejects a provider that is disabled or not registered, and it
+// completes authentication only with the provider named in the path.
 // GET /auth/:provider/callback
 func (s *Server) handleOAuthCallback(c echo.Context) error {
-	provider := c.Param("provider")
+	pathProvider := c.Param("provider")
 	log := s.securityLog().With(
-		logger.String("provider", provider),
+		logger.String("provider", pathProvider),
 		logger.String("ip", c.RealIP()),
 	)
 
 	log.Info("OAuth login callback received")
+
+	// Resolve the path name once so gothic and the session get the canonical
+	// goth name whatever casing the request used.
+	configProvider, provider, ok := s.canonicalOAuthProvider(pathProvider)
+	if !ok {
+		log.Warn("OAuth login callback rejected: unsupported or unrecognized provider requested")
+		return c.String(http.StatusBadRequest, "Invalid OAuth provider")
+	}
+
+	if handled, err := s.rejectUnusableOAuthProvider(c, log, "OAuth login callback", configProvider, provider); handled {
+		return err
+	}
 
 	// Add provider to request context for gothic
 	req := gothic.GetContextWithProvider(c.Request(), provider)
@@ -1167,15 +1229,15 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	return c.Redirect(http.StatusFound, ingressPath(c, s.currentSettings())+"/ui/dashboard")
 }
 
-// isValidOAuthProvider checks if the provider name is a valid goth provider name.
-// Uses the ConfigToGothProvider map to derive valid providers dynamically.
-func (s *Server) isValidOAuthProvider(provider string) bool {
-	for _, gothName := range security.ConfigToGothProvider {
-		if strings.EqualFold(provider, gothName) {
-			return true
-		}
+// canonicalOAuthProvider resolves the provider name from a URL path, matched
+// case-insensitively, to its config provider ID and its canonical goth name.
+// ok is false when the name is not a supported provider.
+func (s *Server) canonicalOAuthProvider(pathName string) (configProvider, gothProvider string, ok bool) {
+	configProvider = s.configProviderFor(pathName)
+	if configProvider == "" {
+		return "", "", false
 	}
-	return false
+	return configProvider, security.ConfigToGothProvider[configProvider], true
 }
 
 // configProviderFor maps a goth provider name back to its config provider ID

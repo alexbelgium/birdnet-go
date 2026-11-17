@@ -25,7 +25,6 @@ var (
 	ErrSessionNotFound    = errors.NewStd("session not found or expired")
 	ErrLogoutFailed       = errors.NewStd("logout operation failed")
 	ErrBasicAuthDisabled  = errors.NewStd("basic authentication is disabled")
-	ErrAuthCodeGeneration = errors.NewStd("failed to generate authorization code")
 )
 
 //go:generate go run golang.org/x/tools/cmd/stringer -type=AuthMethod
@@ -87,5 +86,5 @@ type Service interface {
 
 	// GetProviderLogoutURL returns the provider's end-session URL for RP-Initiated Logout.
 	// Returns empty string if the provider doesn't support it or no OIDC session exists.
-	GetProviderLogoutURL(c echo.Context, postLogoutRedirectURI string) string
+	GetProviderLogoutURL(c echo.Context) string
 }

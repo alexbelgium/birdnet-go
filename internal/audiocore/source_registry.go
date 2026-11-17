@@ -129,22 +129,23 @@ func (r *SourceRegistry) Register(cfg *SourceConfig) (*AudioSource, error) {
 	}
 
 	src := &AudioSource{
-		ID:               id,
-		DisplayName:      displayName,
-		Type:             cfg.Type,
-		SafeString:       safeStr,
-		SampleRate:       cfg.SampleRate,
-		SourceSampleRate: cfg.SourceSampleRate,
-		BitDepth:         cfg.BitDepth,
-		Channels:         cfg.Channels,
-		SourceChannels:   cfg.SourceChannels,
-		ChannelMode:      cfg.ChannelMode,
-		MediaMode:        cfg.MediaMode,
-		Transport:        cfg.Transport,
-		Gain:             cfg.Gain,
-		State:            SourceInactive,
-		RegisteredAt:     time.Now(),
-		LastSeen:         time.Now(),
+		ID:                        id,
+		DisplayName:               displayName,
+		Type:                      cfg.Type,
+		SafeString:                safeStr,
+		SampleRate:                cfg.SampleRate,
+		SourceSampleRate:          cfg.SourceSampleRate,
+		SourceSampleRateEstimated: cfg.SourceSampleRateEstimated,
+		BitDepth:                  cfg.BitDepth,
+		Channels:                  cfg.Channels,
+		SourceChannels:            cfg.SourceChannels,
+		ChannelMode:               cfg.ChannelMode,
+		MediaMode:                 cfg.MediaMode,
+		Transport:                 cfg.Transport,
+		Gain:                      cfg.Gain,
+		State:                     SourceInactive,
+		RegisteredAt:              time.Now(),
+		LastSeen:                  time.Now(),
 	}
 	src.SetConnectionString(connStr)
 
@@ -268,6 +269,26 @@ func (r *SourceRegistry) UpdateState(sourceID string, state SourceState) error {
 	return nil
 }
 
+// TransitionState atomically sets the state to `to` only when the current
+// state equals `from`, and fires SourceStateChanged when it does. It returns
+// false, without an event, when the source does not exist or is in another
+// state. It lets a start path finish without overwriting a concurrent stop.
+func (r *SourceRegistry) TransitionState(sourceID string, from, to SourceState) bool {
+	r.mu.Lock()
+
+	src, ok := r.sources[sourceID]
+	if !ok || src.State != from {
+		r.mu.Unlock()
+		return false
+	}
+	src.State = to
+	snapshot := r.copySource(src)
+	r.mu.Unlock()
+
+	r.notify(SourceEvent{Type: SourceStateChanged, SourceID: sourceID, Source: snapshot})
+	return true
+}
+
 // UpdateDisplayName changes the display name of a source and fires
 // SourceReconfigured. Returns false if the source does not exist or
 // the name is unchanged.
@@ -333,7 +354,7 @@ func (r *SourceRegistry) UpdateAudioParams(sourceID string, sampleRate, bitDepth
 // "desired != 0" guard in sourceNeedsReconfigure. It does not notify; the caller's following
 // UpdateAudioParams emits the SourceReconfigured event with the fully updated
 // snapshot.
-func (r *SourceRegistry) SyncReconfiguredParams(sourceID, channelMode, mediaMode, transport string, sourceSampleRate, sourceChannels int) bool {
+func (r *SourceRegistry) SyncReconfiguredParams(sourceID, channelMode, mediaMode, transport string, sourceSampleRate, sourceChannels int, sourceSampleRateEstimated bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	src, ok := r.sources[sourceID]
@@ -345,6 +366,10 @@ func (r *SourceRegistry) SyncReconfiguredParams(sourceID, channelMode, mediaMode
 	src.Transport = transport
 	if sourceSampleRate != 0 {
 		src.SourceSampleRate = sourceSampleRate
+		// Keep the estimated marker in step with the rate it describes, so a later
+		// stop/resume that rebuilds the stream from the registry still forces
+		// resampling for a fallback estimate (#4350).
+		src.SourceSampleRateEstimated = sourceSampleRateEstimated
 	}
 	if sourceChannels != 0 {
 		src.SourceChannels = sourceChannels

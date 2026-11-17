@@ -39,12 +39,32 @@
  * - Automatic persistence to server
  * - Error handling and user feedback
  */
+import type {
+  ExportFormat,
+  LosslessExportFormat,
+} from '$lib/desktop/features/settings/pages/audioExportFormat';
 import { t } from '$lib/i18n';
 import { getLogger } from '$lib/utils/logger';
-import { safeGet, safeSpread } from '$lib/utils/security';
+import { pruneRemovedModelAliases } from '$lib/utils/modelAliases';
+import { isPlainObject, safeGet, safeSpread } from '$lib/utils/security';
 import { settingsAPI } from '$lib/utils/settingsApi.js';
+import type {
+  SettingsSectionName,
+  SettingsSectionPatchResponse,
+  SettingsSectionPayloads,
+} from '$lib/utils/settingsApi.js';
+import { withoutServerOwnedKeys } from '$lib/utils/settingsSections';
 import { coerceSettings } from '$lib/utils/settingsCoercion';
+import {
+  leafPaths,
+  valueAt,
+  withValueAt,
+  mergeSettingsPatch,
+  mergeSettingsPatchKeepingEdits,
+  rebaseSettingsKeepingEdits,
+} from '$lib/utils/settingsMerge';
 import { DEFAULT_REGION_MODE } from '$lib/utils/variantSelection';
+import { DEFAULT_DENOISE_PRESET } from '$lib/utils/denoisePresets';
 import { weatherDefaults } from '$lib/utils/weatherDefaults';
 import { derived, get, writable } from 'svelte/store';
 import { toastActions } from './toast.js';
@@ -133,10 +153,25 @@ export interface BatSettings {
   };
   ultrasonicFilter?: {
     enabled: boolean;
+    discardUnlikely?: boolean;
   };
 }
 
-// Secondary acoustic classifiers (Perch v2, BirdNET v3.0). Their detections
+// BSG-BAT bat classifier. It has its own confidence threshold; the schedule, false positive
+// filter and ultrasonic filter come from the bat section. modelPath and labelPath are managed by
+// the model gallery, not the detection-settings form.
+export interface BSGBatSettings {
+  modelPath?: string | null;
+  labelPath?: string | null;
+  threshold: number;
+  /**
+   * Analysis step in mel frames (2 ms each); 0 or absent means the default. Range and default
+   * are in fpCadence.ts (BSG_BAT_STEP_*), which mirrors the backend constants.
+   */
+  stepFrames?: number;
+}
+
+// Secondary acoustic classifiers (Perch v2, BirdNET v3.0, BirdNET+ V3.0). Their detections
 // follow the primary BirdNET threshold unless overrideThreshold is enabled, in
 // which case `threshold` gates them instead. modelPath/labelPath/locale are
 // managed by the model gallery, not the detection-settings form.
@@ -149,6 +184,14 @@ export interface PerchSettings {
 }
 
 export interface BirdNetV3Settings {
+  modelPath?: string | null;
+  labelPath?: string | null;
+  overrideThreshold: boolean;
+  threshold: number;
+  locale?: string;
+}
+
+export interface BirdNetPlusSettings {
   modelPath?: string | null;
   labelPath?: string | null;
   overrideThreshold: boolean;
@@ -190,7 +233,6 @@ export interface AudioSettings {
   sources: AudioSourceConfig[];
   source: string; // legacy single source, kept for backward compat
   ffmpegPath?: string;
-  soxPath?: string;
   streamTransport?: string;
   export: ExportSettings;
   soundLevel: SoundLevelSettings;
@@ -306,17 +348,17 @@ export interface EqualizerSettings {
 export type EqualizerFilterType = 'HighPass' | 'LowPass' | 'BandReject';
 
 export interface EqualizerFilter {
-  id: string;
   type: EqualizerFilterType;
   frequency: number;
   q?: number;
   width?: number; // Bandwidth in Hz (for BandReject)
   gain?: number;
-  passes?: number; // Number of filter passes (1=12dB, 2=24dB, 3=36dB, 4=48dB)
+  passes?: number; // Number of filter passes: 0 = off; 1 or more applies it that many times; the backend skips a negative value or one above its limit (the editor offers 0 to 4)
 }
 
 export interface ExportSettings {
-  type: 'wav' | 'mp3' | 'flac' | 'aac' | 'opus';
+  type: ExportFormat;
+  ultrasonicType: LosslessExportFormat; // bat/ultrasonic captures above 48 kHz; WAV or FLAC only
   bitrate: string;
   enabled: boolean;
   debug?: boolean;
@@ -326,6 +368,12 @@ export interface ExportSettings {
   preCapture: number; // pre-capture in seconds
   gain: number; // gain in dB for audio capture
   normalization: NormalizationSettings; // audio normalization settings (EBU R128)
+  denoise: DenoiseSettings; // denoise the captured audio before it is saved
+}
+
+export interface DenoiseSettings {
+  enabled: boolean; // true to denoise
+  strength: string; // preset id, see $lib/utils/denoisePresets
 }
 
 export interface NormalizationSettings {
@@ -459,12 +507,18 @@ export interface WundergroundSettings {
   units: 'm' | 'e' | 'h'; // m=metric, e=imperial/english, h=UK hybrid
 }
 
+export interface PirateWeatherSettings {
+  apiKey: string;
+  endpoint: string;
+}
+
 export interface WeatherSettings {
-  provider: 'none' | 'yrno' | 'openweather' | 'wunderground';
+  provider: 'none' | 'yrno' | 'openweather' | 'wunderground' | 'pirateweather';
   pollInterval: number;
   debug: boolean;
   openWeather: OpenWeatherSettings;
   wunderground: WundergroundSettings;
+  pirateWeather: PirateWeatherSettings;
 }
 
 // New array-based OAuth provider configuration
@@ -477,6 +531,7 @@ export interface OAuthProviderConfig {
   userId?: string;
   issuerUrl?: string; // OIDC only: IdP discovery URL
   scopes?: string[]; // OIDC only: custom scopes (defaults: openid, profile, email)
+  postLogoutRedirect?: boolean; // OIDC only: return to the instance after provider sign-out
 }
 
 export interface SecuritySettings {
@@ -506,6 +561,13 @@ export interface SecuritySettings {
     liveAudio: boolean;
   };
   privateMode?: boolean;
+  /**
+   * Reverse proxies whose forwarded client-IP headers are honored for
+   * authentication decisions such as the subnet bypass (security.trustedProxies).
+   * Each entry is an IPv4 or IPv6 address, a CIDR, or the reserved `cloudflare`
+   * preset token. Coercion turns a missing or null value into `[]`.
+   */
+  trustedProxies?: string[];
 }
 
 // Legacy OAuth settings interface (deprecated)
@@ -638,6 +700,7 @@ export interface Dashboard {
   logoStyle?: string; // Logo display style: "gradient" or "solid"
   layout?: DashboardLayout; // Configurable dashboard element layout
   defaultAudioGain?: number; // Default playback gain in dB (0-24)
+  playbackDenoise?: DenoiseSettings; // Denoise clips when they are played or downloaded
 }
 
 // Dashboard layout configuration
@@ -712,7 +775,7 @@ export type SpectrogramMode = 'auto' | 'prerender' | 'user-requested';
 // Spectrogram style preset options
 export type SpectrogramStyle = 'default' | 'scientific_dark' | 'high_contrast_dark' | 'scientific';
 
-// Spectrogram dynamic range preset options (dB values for Sox -z parameter)
+// Spectrogram dynamic range preset options (dynamic range in dB)
 // Lower values = higher contrast (weak signals visible), higher values = more detail
 export type SpectrogramDynamicRange = '80' | '100' | '120';
 
@@ -869,8 +932,10 @@ export interface SettingsFormData {
   main: MainSettings;
   birdnet: BirdNetSettings;
   bat?: BatSettings;
+  bsgbat?: BSGBatSettings;
   perch?: PerchSettings;
   birdnetv3?: BirdNetV3Settings;
+  birdnetplus?: BirdNetPlusSettings;
   input?: unknown; // Not exposed via JSON
   realtime?: RealtimeSettings;
   webServer?: WebServerSettings;
@@ -890,7 +955,19 @@ export interface GlobalSettingsState {
   isSaving: boolean;
   activeSection: string;
   error: string | null;
+  /**
+   * True when the failure in `error` was also shown as a toast, so the Settings page
+   * banner does not announce it a second time. Written with every non-null `error`;
+   * absent means no toast.
+   */
+  errorToasted?: boolean;
   dataLoaded: boolean;
+}
+
+/** Options for {@link settingsActions.saveSettings}. */
+export interface SaveSettingsOptions {
+  /** Show the success and failure toasts. Defaults to true. */
+  notify?: boolean;
 }
 
 // API response types
@@ -908,7 +985,7 @@ export interface TestResult {
 }
 
 // Initialize empty settings data
-function createEmptySettings(): SettingsFormData {
+function createEmptySettings(): SettingsFormData & { security: SecuritySettings } {
   return {
     main: {
       name: '',
@@ -940,13 +1017,22 @@ function createEmptySettings(): SettingsFormData {
       nighttimeOnly: true,
       ultrasonicFilter: {
         enabled: true,
+        discardUnlikely: false,
       },
+    },
+    bsgbat: {
+      threshold: 0.5,
+      stepFrames: 0,
     },
     perch: {
       overrideThreshold: false,
       threshold: 0.5,
     },
     birdnetv3: {
+      overrideThreshold: false,
+      threshold: 0.5,
+    },
+    birdnetplus: {
       overrideThreshold: false,
       threshold: 0.5,
     },
@@ -967,10 +1053,10 @@ function createEmptySettings(): SettingsFormData {
         sources: [],
         source: '',
         ffmpegPath: '',
-        soxPath: '',
         streamTransport: 'auto',
         export: {
           type: 'wav',
+          ultrasonicType: 'flac',
           bitrate: '96k',
           enabled: false,
           debug: false,
@@ -991,6 +1077,10 @@ function createEmptySettings(): SettingsFormData {
             loudnessRange: 7.0, // Typical range for broadcast
             truePeak: -2.0, // Headroom to prevent clipping
           },
+          denoise: {
+            enabled: false, // Off by default
+            strength: DEFAULT_DENOISE_PRESET,
+          },
         },
         soundLevel: {
           enabled: false,
@@ -1007,7 +1097,7 @@ function createEmptySettings(): SettingsFormData {
         debug: false,
         vad: {
           enabled: false,
-          threshold: 0.35,
+          threshold: 0.6,
           modelPath: '',
         },
       },
@@ -1091,6 +1181,10 @@ function createEmptySettings(): SettingsFormData {
           ],
         },
         defaultAudioGain: 0,
+        playbackDenoise: {
+          enabled: false, // Off by default
+          strength: DEFAULT_DENOISE_PRESET,
+        },
       },
     },
     webServer: {},
@@ -1113,6 +1207,7 @@ function createEmptySettings(): SettingsFormData {
         enabled: false,
         subnet: '',
       },
+      trustedProxies: [],
     },
     sentry: {
       enabled: false,
@@ -1172,6 +1267,47 @@ export const hasUnsavedChanges = derived(
 // Validation errors store - pages can add errors to prevent saving
 export const settingsValidationErrors = writable<string[]>([]);
 
+/**
+ * Optional translated, human-readable reasons for entries of settingsValidationErrors,
+ * keyed by the entry. The save bar lists the reason of every active entry that has
+ * one, so a page can say which tab and field blocks saving. Pages that set a reason
+ * remove it together with the entry.
+ */
+export const settingsValidationReasons = writable<ReadonlyMap<string, string>>(new Map());
+
+/**
+ * Replaces the validation entries a page owns. `ownedKeys` are all the keys the page
+ * may set; `active` maps the ones that apply now to their reason (entries of `active`
+ * outside `ownedKeys` are ignored). Both stores are
+ * written together, and neither is written when it would not change, so a page can
+ * call this from an effect without waking the save bar. Pass an empty map to clear.
+ */
+export function setValidationIssues(
+  ownedKeys: readonly string[],
+  active: ReadonlyMap<string, string>
+): void {
+  // Keys the caller does not own are ignored, so they can neither leak into the
+  // stores nor be listed twice.
+  const owned = [...active].filter(([key]) => ownedKeys.includes(key));
+  const errors = get(settingsValidationErrors);
+  const nextErrors = [
+    ...errors.filter(key => !ownedKeys.includes(key)),
+    ...owned.map(([key]) => key),
+  ];
+  if (nextErrors.length !== errors.length || !nextErrors.every(key => errors.includes(key))) {
+    settingsValidationErrors.set(nextErrors);
+  }
+
+  const reasons = get(settingsValidationReasons);
+  const nextReasons = new Map(reasons);
+  for (const key of ownedKeys) nextReasons.delete(key);
+  for (const [key, reason] of owned) nextReasons.set(key, reason);
+  const reasonsUnchanged =
+    nextReasons.size === reasons.size &&
+    [...nextReasons].every(([key, reason]) => reasons.get(key) === reason);
+  if (!reasonsUnchanged) settingsValidationReasons.set(nextReasons);
+}
+
 export const currentSection = derived(settingsStore, $store => $store.activeSection);
 
 export const isLoading = derived(settingsStore, $store => $store.isLoading);
@@ -1187,9 +1323,12 @@ export const birdnetSettings = derived(settingsStore, $store => $store.formData.
 
 export const batSettings = derived(settingsStore, $store => $store.formData.bat);
 
+export const bsgBatSettings = derived(settingsStore, $store => $store.formData.bsgbat);
+
 export const perchSettings = derived(settingsStore, $store => $store.formData.perch);
 
 export const birdNetV3Settings = derived(settingsStore, $store => $store.formData.birdnetv3);
+export const birdNetPlusSettings = derived(settingsStore, $store => $store.formData.birdnetplus);
 
 export const realtimeSettings = derived(settingsStore, $store => $store.formData.realtime);
 
@@ -1287,55 +1426,977 @@ export const extendedCaptureSettings = derived(
   $store => $store.formData.realtime?.extendedCapture
 );
 
+/** A top-level store key, or a key of the realtime object. */
+type SectionStorePath =
+  readonly [keyof SettingsFormData] | readonly ['realtime', keyof RealtimeSettings];
+
+/**
+ * Where each backend section handled by settingsActions.saveSection lives in
+ * the store: a top-level key, or a key of the realtime object.
+ */
+export const SECTION_STORE_PATHS = {
+  birdnet: ['birdnet'],
+  sentry: ['sentry'],
+  dashboard: ['realtime', 'dashboard'],
+  audio: ['realtime', 'audio'],
+  rtsp: ['realtime', 'rtsp'],
+  privacyfilter: ['realtime', 'privacyFilter'],
+  birdweather: ['realtime', 'birdweather'],
+} as const satisfies Record<SettingsSectionName, SectionStorePath>;
+
+/**
+ * Section saves whose request or store merge has not finished. saveSettings
+ * waits for them so its snapshot of formData never predates a merge.
+ */
+const inFlightSectionSaves = new Set<Promise<void>>();
+
+/** A key path inside a backend section, as handed to stageSectionEdit. */
+export type StagedPath = string[];
+
+/** A staged edit that was given up because the server changed the same path. */
+export interface DroppedStagedEdit {
+  section: SettingsSectionName;
+  path: StagedPath;
+}
+
+/** What saveStagedSection did with the staged paths of one section. Never thrown. */
+export interface StagedSaveResult {
+  /** Paths the server accepted, plus paths found equal to the stored value. */
+  saved: StagedPath[];
+  /** Paths given up because the server changed them since the client last saw them. */
+  dropped: StagedPath[];
+  /** Paths whose save failed, or failed before a request was sent, and whose form value was taken back to the stored one unless edited again. */
+  failed: StagedPath[];
+  /**
+   * The error the save ran into. With paths in failed it is the failed request's
+   * error; with failed empty the request succeeded and a step after it threw.
+   */
+  error?: unknown;
+  /** True when a staged path is still waiting, because it was edited again during the request. */
+  remaining: boolean;
+}
+
+/** Staged leaf paths per section, keyed by JSON.stringify(path): map keys can hold any character. */
+const stagedPaths = new Map<SettingsSectionName, Map<string, StagedPath>>();
+
+/**
+ * The edit generation of each staged path, keyed by section and path. A request
+ * records the generations it sent; a path whose generation moved on since was
+ * edited or reset during the request, so the request's outcome does not apply to it.
+ */
+const pathGenerations = new Map<string, number>();
+let lastGeneration = 0;
+
+/**
+ * Paths a reset unstaged, by generation key, with the stored value the reset
+ * took the form back to. A reset discards unsaved edits, so when a request that
+ * was already sending such a path succeeds, the form follows the newly stored
+ * value, but only while it still shows the reset value: a later edit through
+ * any path (staged or updateSection) is kept. A new staged edit clears the mark.
+ */
+const resetPaths = new Map<string, unknown>();
+
+/** Listeners told about staged edits the store gave up because the server changed them. */
+const droppedListeners = new Set<(edits: DroppedStagedEdit[]) => void>();
+
+/**
+ * The ETag of the settings as the client last saw them, from a load, a snapshot
+ * or a successful conditional write. Null when unknown, absent or stale.
+ */
+let lastETag: string | null = null;
+
+/** Test-only: forget staged edits, their listeners and the remembered ETag. */
+export function resetStagedEditsForTest(): void {
+  stagedPaths.clear();
+  pathGenerations.clear();
+  resetPaths.clear();
+  droppedListeners.clear();
+  lastETag = null;
+}
+
+/**
+ * The full save that is waiting for section saves to finish, if any. A saveSettings
+ * call made in that window joins it. It is cleared right before the snapshot is taken,
+ * so a call made after that starts its own save.
+ */
+let pendingFullSave: { done: Promise<void>; notify: boolean } | null = null;
+
+let serverSyncTail: Promise<void> = Promise.resolve();
+const ignoreOutcome = () => undefined;
+
+/**
+ * Runs task after every earlier queued task has settled, so a refresh or a load
+ * applies wholly before or wholly after a full save and a GET issued before a
+ * PUT can never land after it. Orders loads, rebases, full saves and staged section saves (saveStagedSection);
+ * saveSection is not queued.
+ */
+function runSerialized<T>(task: () => Promise<T>): Promise<T> {
+  const result = serverSyncTail.then(task);
+  serverSyncTail = result.then(ignoreOutcome, ignoreOutcome);
+  return result;
+}
+
+/** Applies the per-section coercion to every object section. Keys without a coercion rule pass through. */
+function coerceAllSections(data: SettingsFormData): SettingsFormData {
+  const coerced = { ...data };
+  for (const [section, sectionData] of Object.entries(data)) {
+    if (sectionData && typeof sectionData === 'object') {
+      // eslint-disable-next-line security/detect-object-injection -- Safe: section from Object.entries of known object
+      (coerced as unknown as Record<string, unknown>)[section] = coerceSettings(
+        section,
+        sectionData as Record<string, unknown>
+      );
+    }
+  }
+  return coerced;
+}
+
+/**
+ * Spreads a settings response over the defaults and coerces each object section.
+ * Keys the interfaces do not declare (for example models) are kept as received.
+ */
+function normalizeLoadedSettings(data: SettingsFormData): SettingsFormData {
+  return coerceAllSections({ ...createEmptySettings(), ...data });
+}
+
+/** HTTP status the backend answers a stale If-Match with. */
+const HTTP_PRECONDITION_FAILED = 412;
+
+/** Tries a full save makes with If-Match: one send plus one resend after a 412 and a rebase. */
+const MAX_SETTINGS_SAVE_ATTEMPTS = 2;
+
+/** Prefix of a weak entity tag; the backend compares If-Match strongly, so a weak tag never matches. */
+const WEAK_ETAG_PREFIX = 'W/';
+
+/**
+ * Set once a save sees two 412s in a row name the same current ETag. That means the
+ * validator is rewritten between the browser and the server (a compressing reverse
+ * proxy such as Caddy or Apache mod_deflate appends "-gzip"), so no If-Match from a
+ * GET can ever match. From then on saves in this page load send no If-Match, which
+ * is how saves worked before conditional saves. Reset by a page reload.
+ */
+let ifMatchUnusable = false;
+
+/** Test-only: forget a detected ETag rewrite so each test starts as a fresh page. */
+export function resetIfMatchFallbackForTest(): void {
+  ifMatchUnusable = false;
+}
+
+/**
+ * Thrown when the save is still refused with a 412 after its attempts: the settings keep
+ * changing under the form. A save makes up to three sends, the third without If-Match
+ * once the validator is judged rewritten in transit. Callers identify the conflict with
+ * `instanceof`.
+ */
+export class SettingsChangedElsewhereError extends Error {
+  /** The status of the conflict it reports, so telemetry filters it like the 412 itself. */
+  readonly status = HTTP_PRECONDITION_FAILED;
+
+  constructor() {
+    super(t('settings.errors.changedElsewhere'));
+    this.name = 'SettingsChangedElsewhereError';
+  }
+}
+
+/**
+ * True for a 412 from the backend. Duck-typed on status: the store does not
+ * import the api module's ApiError, and tests mock settingsApi only.
+ */
+function isPreconditionFailed(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    error.status === HTTP_PRECONDITION_FAILED
+  );
+}
+
+/**
+ * The If-Match value to send for an ETag from the pre-save GET: only a strong
+ * ETag. Absent (an older backend) or weak (a proxy weakened it) means no
+ * protection, which is how saves worked before If-Match, rather than a save
+ * that can never match. Also absent once a rewritten ETag was detected.
+ */
+function usableIfMatch(etag: string | null): string | undefined {
+  if (ifMatchUnusable) return undefined;
+  return etag && !etag.startsWith(WEAK_ETAG_PREFIX) ? etag : undefined;
+}
+
+/**
+ * Fetches the current server settings, normalized like a load, with the ETag
+ * the response carried (null when absent). Remembers that ETag as the revision
+ * the client last saw. Throws on a malformed response.
+ */
+async function fetchServerSnapshot(): Promise<{
+  snapshot: SettingsFormData;
+  etag: string | null;
+}> {
+  let etag: string | null = null;
+  const data = await settingsAPI.load({
+    onETag: value => {
+      etag = value;
+    },
+  });
+  if (!isPlainObject(data)) {
+    throw new Error(t('settings.errors.loadFailed'));
+  }
+  lastETag = etag;
+  return { snapshot: normalizeLoadedSettings(data), etag };
+}
+
+/** True when two settings values are equal under the comparison the unsaved-changes check uses. */
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** The store path of a key path inside a backend section. */
+function storePathOf(section: SettingsSectionName, path: StagedPath): string[] {
+  // eslint-disable-next-line security/detect-object-injection -- section is a key of SECTION_STORE_PATHS by type
+  return [...SECTION_STORE_PATHS[section], ...path];
+}
+
+/** Returns data with value written at a store path; undefined removes the key. */
+function withStoreValue(
+  data: SettingsFormData,
+  storePath: string[],
+  value: unknown
+): SettingsFormData {
+  return withValueAt(
+    data as unknown as Record<string, unknown>,
+    storePath,
+    value
+  ) as unknown as SettingsFormData;
+}
+
+function stagedPathsOf(section: SettingsSectionName): StagedPath[] {
+  return [...(stagedPaths.get(section)?.values() ?? [])];
+}
+
+function generationKey(section: SettingsSectionName, path: StagedPath): string {
+  return JSON.stringify([section, path]);
+}
+
+function generationOf(section: SettingsSectionName, path: StagedPath): number {
+  return pathGenerations.get(generationKey(section, path)) ?? 0;
+}
+
+function bumpGeneration(section: SettingsSectionName, path: StagedPath): void {
+  pathGenerations.set(generationKey(section, path), ++lastGeneration);
+}
+
+function stagePath(section: SettingsSectionName, path: StagedPath): void {
+  bumpGeneration(section, path);
+  resetPaths.delete(generationKey(section, path));
+  const paths = stagedPaths.get(section) ?? new Map<string, StagedPath>();
+  paths.set(JSON.stringify(path), path);
+  stagedPaths.set(section, paths);
+}
+
+function unstagePath(section: SettingsSectionName, path: StagedPath): void {
+  const paths = stagedPaths.get(section);
+  paths?.delete(JSON.stringify(path));
+  if (paths?.size === 0) stagedPaths.delete(section);
+}
+
+/**
+ * Unstages every path of the sections stored under topKey (every section when
+ * topKey is omitted), and moves their generations on so a request in flight
+ * neither reverts nor confirms them. For a reset, which takes the form back to the stored values;
+ * the paths are marked, with the stored value the reset restores, so a request already sending
+ * them brings the form to the value it stored when it succeeds, unless the form was edited again.
+ */
+function invalidateStaged(topKey?: string): void {
+  for (const [section, paths] of [...stagedPaths]) {
+    // eslint-disable-next-line security/detect-object-injection -- section is a key of SECTION_STORE_PATHS by type
+    if (topKey !== undefined && SECTION_STORE_PATHS[section][0] !== topKey) continue;
+    for (const path of [...paths.values()]) {
+      bumpGeneration(section, path);
+      resetPaths.set(
+        generationKey(section, path),
+        valueAt(get(settingsStore).originalData, storePathOf(section, path))
+      );
+      unstagePath(section, path);
+    }
+  }
+}
+
+/** What the staged rule decided during one rebase or load, applied after the store update. */
+interface StagedOutcome {
+  /** Edits given up because the server changed the path and the user had a pending edit there. */
+  dropped: DroppedStagedEdit[];
+  /**
+   * Paths no longer staged: the dropped ones, and those where the server value now
+   * stands, with the edit generation they had then.
+   */
+  released: (DroppedStagedEdit & { generation: number })[];
+}
+
+function newStagedOutcome(): StagedOutcome {
+  return { dropped: [], released: [] };
+}
+
+/**
+ * The staged rule, applied to the form a rebase or a load produced. For each
+ * staged path: when the server value differs from what the client last saw
+ * (prev.originalData), the form takes the server value and the path is released,
+ * and it is reported as dropped when the user had a pending edit there that
+ * differs from the server value. Otherwise the staged form value stands; with
+ * reapply it is written back into form, for a load that replaced the whole form.
+ * No staged paths means nothing changes.
+ */
+function applyStagedRule(
+  prev: GlobalSettingsState,
+  fresh: SettingsFormData,
+  form: SettingsFormData,
+  outcome: StagedOutcome,
+  reapply: boolean
+): SettingsFormData {
+  let result = form;
+  for (const [section, paths] of stagedPaths) {
+    for (const path of paths.values()) {
+      const storePath = storePathOf(section, path);
+      const lastSeen = valueAt(prev.originalData, storePath);
+      const serverValue = valueAt(fresh, storePath);
+      const pending = valueAt(prev.formData, storePath);
+      if (sameValue(serverValue, lastSeen)) {
+        if (reapply) result = withStoreValue(result, storePath, pending);
+        continue;
+      }
+      result = withStoreValue(result, storePath, serverValue);
+      const ref = { section, path };
+      outcome.released.push({ ...ref, generation: generationOf(section, path) });
+      if (!sameValue(pending, lastSeen) && !sameValue(pending, serverValue)) {
+        outcome.dropped.push(ref);
+      }
+    }
+  }
+  return result;
+}
+
+/** Unstages what the rule released and tells the listeners what it dropped. */
+function settleStaged(outcome: StagedOutcome): void {
+  for (const { section, path, generation } of outcome.released) {
+    // A newer edit made while the store published the rebase stays staged.
+    if (generationOf(section, path) === generation) unstagePath(section, path);
+  }
+  if (outcome.dropped.length === 0) return;
+  for (const listener of [...droppedListeners]) {
+    try {
+      listener(outcome.dropped);
+    } catch (error) {
+      logger.error('A dropped staged edit listener threw:', error);
+    }
+  }
+}
+
+/** Unstages the paths whose form value now equals the stored one: nothing is left to send there. */
+function releaseConfirmedStaged(): void {
+  const { formData, originalData } = get(settingsStore);
+  for (const [section, paths] of [...stagedPaths]) {
+    for (const path of [...paths.values()]) {
+      const storePath = storePathOf(section, path);
+      if (sameValue(valueAt(formData, storePath), valueAt(originalData, storePath))) {
+        unstagePath(section, path);
+      }
+    }
+  }
+}
+
+/**
+ * Rebases the state on a fresh server snapshot: pending edits are kept, every
+ * other path takes the server value, and originalData becomes the snapshot. An
+ * edit wins over a server change to the same path (last writer wins, see
+ * rebaseSettingsKeepingEdits), except at staged paths, where the server wins
+ * (see applyStagedRule); the outcome collects what that rule decided.
+ */
+function rebaseState(
+  state: GlobalSettingsState,
+  fresh: SettingsFormData,
+  outcome: StagedOutcome
+): GlobalSettingsState {
+  const merged = rebaseSettingsKeepingEdits(
+    { ...state.formData },
+    { ...state.originalData },
+    { ...fresh }
+  );
+  const pruned = pruneRemovedModelAliases({ ...fresh, ...merged }, state.originalData, fresh);
+  const formData = applyStagedRule(state, fresh, pruned, outcome, false);
+  return { ...state, formData, originalData: JSON.parse(JSON.stringify(fresh)) };
+}
+
+/** Rebases the store on a fresh snapshot and settles the staged edits; returns the dropped ones. */
+function rebaseStoreOn(fresh: SettingsFormData): DroppedStagedEdit[] {
+  const outcome = newStagedOutcome();
+  settingsStore.update(state => rebaseState(state, fresh, outcome));
+  settleStaged(outcome);
+  return outcome.dropped;
+}
+
+/**
+ * Sends the whole form with PUT, with If-Match when ifMatch is set. Resolves
+ * { conflict: false, etag } when the server accepted it, with the ETag of the
+ * response (null when none was sent, or when no If-Match was sent), and, on a 412,
+ * { conflict: true } with the current ETag the rejection named (null when it named
+ * none, or when no If-Match was sent). Rethrows every other failure.
+ */
+async function sendSettings(
+  data: SettingsFormData,
+  ifMatch: string | undefined
+): Promise<
+  { conflict: false; etag: string | null } | { conflict: true; currentETag: string | null }
+> {
+  let currentETag: string | null = null;
+  try {
+    // Only pass options when there is an If-Match, so a bare save() call stays as before.
+    await (ifMatch
+      ? settingsAPI.save(data, {
+          ifMatch,
+          onETag: value => {
+            currentETag = value;
+          },
+        })
+      : settingsAPI.save(data));
+    // The response ETag is only reported for a conditional request; without one the
+    // revision is unknown, so the next staged save fetches a snapshot first.
+    return { conflict: false, etag: currentETag };
+  } catch (error) {
+    if (!isPreconditionFailed(error)) throw error;
+    return { conflict: true, currentETag };
+  }
+}
+
+/**
+ * Rebases the store on the current server state, then sends the whole form to
+ * the backend and marks exactly what was sent as saved. The PUT carries the
+ * snapshot's strong ETag as If-Match; on a 412 (the settings changed between the
+ * GET and the PUT) the rebase and send run once more on a fresh snapshot, and a
+ * second 412 fails the save with SettingsChangedElsewhereError, edits kept.
+ * Unless both 412s named the same non-empty current ETag: then nothing changed on the
+ * server and the ETag is rewritten on the way, so one more send without If-Match
+ * follows and later saves in this page load send none.
+ * The rebase applies the staged rule (the server wins at staged paths it changed),
+ * and an accepted save releases staged paths that now equal the stored value; the
+ * response ETag becomes the remembered one, or none when the PUT was not conditional.
+ * Resets isSaving and rethrows on every failure path, including the refusal
+ * before a load. A failed fetch of the server state fails the save before any
+ * request is sent.
+ */
+async function persistFormData(notify: boolean): Promise<void> {
+  try {
+    if (!get(settingsStore).dataLoaded) {
+      logger.warn('Refusing to save settings before they have been loaded');
+      throw new Error(t('settings.errors.loadFailed'));
+    }
+    settingsStore.update(state => ({ ...state, isSaving: true, error: null }));
+
+    await runSerialized(async () => {
+      // The current ETag the previous attempt's 412 named, to spot a rewritten validator.
+      let previousConflictETag: string | null = null;
+      for (let attempt = 1; ; attempt++) {
+        // Rebase first so a change made on the server since the load (a model
+        // gallery action) is not overwritten by load-time values.
+        const { snapshot, etag } = await fetchServerSnapshot();
+        rebaseStoreOn(snapshot);
+        const rebased = get(settingsStore);
+        const sent: SettingsFormData = JSON.parse(JSON.stringify(rebased.formData));
+        const loadedLocale = rebased.originalData.realtime?.dashboard?.locale;
+
+        const coercedFormData = coerceAllSections(sent);
+
+        // Convert empty strings to null for modelPath and labelPath to signal "revert to default"
+        // This ensures the config file is properly cleaned when users clear these fields
+        // Trim whitespace to handle cases like "   " which should also be treated as empty
+        if (coercedFormData.birdnet.modelPath?.trim() === '') {
+          coercedFormData.birdnet.modelPath = null;
+        }
+        if (coercedFormData.birdnet.labelPath?.trim() === '') {
+          coercedFormData.birdnet.labelPath = null;
+        }
+
+        const ifMatch = usableIfMatch(etag);
+        const outcome = await sendSettings(coercedFormData, ifMatch);
+        if (outcome.conflict) {
+          if (attempt < MAX_SETTINGS_SAVE_ATTEMPTS) {
+            previousConflictETag = outcome.currentETag;
+            continue;
+          }
+          // Both GET-issued ETags were refused while the server named the same current
+          // ETag twice: nothing changed between the two PUTs, so the validator is
+          // rewritten on the way. Save once more without If-Match and stop sending it.
+          if (outcome.currentETag && outcome.currentETag === previousConflictETag) {
+            ifMatchUnusable = true;
+            logger.warn(
+              'Settings If-Match is rewritten between the browser and the server; saving without it for this page load'
+            );
+            continue;
+          }
+          throw new SettingsChangedElsewhereError();
+        }
+
+        // Read newLocale from coercedFormData (the value we actually persisted)
+        // and compare to originalData (the snapshot rebased on the backend).
+        await afterSettingsPersisted(
+          coercedFormData.realtime?.dashboard?.locale,
+          loadedLocale,
+          coercedFormData.sentry?.enabled
+        );
+
+        // Mark what was sent as saved, not formData as it is now, so an edit typed
+        // while the request was in flight stays unsaved. Restart-required state is
+        // owned by the backend (refreshed in afterSettingsPersisted) and surfaced
+        // by the global RestartBanner, so it is not tracked client-side.
+        settingsStore.update(state => ({ ...state, originalData: sent, isSaving: false }));
+        lastETag = outcome.etag;
+        releaseConfirmedStaged();
+        return;
+      }
+    });
+
+    if (notify) {
+      toastActions.success(t('notifications.content.settings.savedSuccessfully'));
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : t('settings.errors.saveFailed');
+    settingsStore.update(state => ({
+      ...state,
+      isSaving: false,
+      error: errorMessage,
+      errorToasted: notify,
+    }));
+
+    if (notify) {
+      toastActions.error(
+        error instanceof SettingsChangedElsewhereError
+          ? error.message
+          : t('notifications.content.settings.saveFailed')
+      );
+    }
+
+    throw error;
+  }
+}
+
+/** Returns value when it is a plain object, otherwise undefined. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return isPlainObject(value) ? value : undefined;
+}
+
+/**
+ * Applies a section partial to both copies of the settings: a plain merge into
+ * originalData and a merge into formData that keeps pending edits. Both results
+ * go through the same coercion as updateSection. Inputs are not mutated.
+ */
+function applySectionPatch(
+  state: GlobalSettingsState,
+  section: SettingsSectionName,
+  partial: Record<string, unknown>
+): Pick<GlobalSettingsState, 'formData' | 'originalData'> {
+  const path: SectionStorePath =
+    // eslint-disable-next-line security/detect-object-injection -- section is a key of SECTION_STORE_PATHS by type
+    SECTION_STORE_PATHS[section];
+  const topKey = path[0];
+  const wrapped: Record<string, unknown> = path.length === 2 ? { [path[1]]: partial } : partial;
+
+  const savedSection = asRecord(safeGet(state.originalData, topKey));
+  const formSection = asRecord(safeGet(state.formData, topKey));
+
+  const mergedOriginal = coerceSettings(topKey, mergeSettingsPatch(savedSection, wrapped));
+  const mergedForm = coerceSettings(
+    topKey,
+    mergeSettingsPatchKeepingEdits(formSection, savedSection, wrapped)
+  );
+
+  return {
+    originalData: { ...state.originalData, [topKey]: mergedOriginal },
+    formData: { ...state.formData, [topKey]: mergedForm },
+  };
+}
+
+/**
+ * Side effects shared by saveSettings and saveSection once the server accepted
+ * a save. Refreshes restart-required status without awaiting it: the
+ * RestartBanner reacts to the store whenever it lands, and a failure here must
+ * not mask or delay a successful save (the banner may show stale state until
+ * the next page load). Applies the UI locale, logging rather than throwing on
+ * failure for the same reason, only when the saved locale differs
+ * from the one previously saved, so a locale chosen via the sidebar
+ * LanguageSelector (which updates localStorage but not the backend) is not
+ * clobbered by whatever stale value the backend still holds.
+ *
+ * When the save carried an Error Tracking value, the browser Sentry SDK is
+ * reconciled with it. Only the import of the already loaded appState module is
+ * awaited, so an opt-out has stopped sending before the save resolves; the
+ * reconcile itself (which may fetch the app config) is never awaited and its
+ * failure is logged, not thrown.
+ */
+async function afterSettingsPersisted(
+  newLocale: string | undefined,
+  origLocale: string | undefined,
+  savedSentryEnabled: boolean | undefined
+): Promise<void> {
+  void import('$lib/stores/restart.svelte')
+    .then(({ fetchRestartStatus }) => fetchRestartStatus())
+    .catch(e => {
+      logger.error('Failed to refresh restart status after settings save:', e);
+    });
+
+  if (typeof savedSentryEnabled === 'boolean') {
+    const logApplyFailure = (e: unknown) =>
+      logger.error('Failed to apply the Error Tracking setting in the browser after save:', e);
+    try {
+      const { applySavedSentrySetting } = await import('$lib/stores/appState.svelte');
+      void applySavedSentrySetting(savedSentryEnabled).catch(logApplyFailure);
+    } catch (e) {
+      logApplyFailure(e);
+    }
+  }
+
+  if (newLocale && newLocale !== origLocale) {
+    try {
+      // Dynamically import i18n functions to avoid circular dependencies
+      const { isValidLocale, setLocale } = await import('$lib/i18n/index.js');
+      if (isValidLocale(newLocale)) {
+        setLocale(newLocale);
+      }
+    } catch (e) {
+      // The save already succeeded; a failed locale switch must not report it as failed.
+      logger.error('Failed to apply the UI locale after settings save:', e);
+    }
+  }
+}
+
+/** One staged path with the value that was sent for it. */
+interface SentPath {
+  path: StagedPath;
+  value: unknown;
+  /** The path's edit generation when the value was read. */
+  generation: number;
+}
+
+function pushUnique(list: StagedPath[], path: StagedPath): void {
+  if (!list.some(entry => sameValue(entry, path))) list.push(path);
+}
+
+/**
+ * Builds the patch for a section from formData as it is now, at the staged
+ * paths only. A path whose form value equals the stored one has nothing to send:
+ * it is unstaged and reported as saved. Each sent path carries the edit
+ * generation it was read at.
+ */
+function buildStagedPatch(
+  section: SettingsSectionName,
+  result: StagedSaveResult
+): { patch: Record<string, unknown>; sent: SentPath[] } {
+  const { formData, originalData } = get(settingsStore);
+  let patch: Record<string, unknown> = {};
+  const sent: SentPath[] = [];
+  for (const path of stagedPathsOf(section)) {
+    const storePath = storePathOf(section, path);
+    const value = valueAt(formData, storePath);
+    if (sameValue(value, valueAt(originalData, storePath))) {
+      unstagePath(section, path);
+      pushUnique(result.saved, path);
+      continue;
+    }
+    sent.push({ path, value, generation: generationOf(section, path) });
+    patch = withValueAt(patch, path, value);
+  }
+  return { patch, sent };
+}
+
+/**
+ * Fetches a snapshot and rebases on it, so the patch is rebuilt from a current
+ * baseline. Reports the dropped paths of this section only; the listeners hear
+ * about every section.
+ */
+async function rebaseForStagedSave(
+  section: SettingsSectionName,
+  result: StagedSaveResult
+): Promise<void> {
+  const { snapshot } = await fetchServerSnapshot();
+  for (const dropped of rebaseStoreOn(snapshot)) {
+    if (dropped.section === section) pushUnique(result.dropped, dropped.path);
+  }
+}
+
+/**
+ * Records an accepted staged save. originalData takes the section the server
+ * returned (the patch when it returned none). formData takes it too wherever it
+ * still equals what was sent or was never edited, and at a path a reset unstaged
+ * during the request while the form still shows the reset value; a path edited
+ * during the request (its generation moved on,
+ * even back to the sent value) keeps the edit and stays staged. Every sent value is first
+ * written into the baseline, so the merge sees a form equal to it as unedited and any other as edited.
+ * The confirmed paths are unstaged and reported saved even when a store subscriber throws during
+ * the update, unless a subscriber edited the same path again meanwhile (its generation moved
+ * on), which keeps it staged; the error then propagates to the caller.
+ */
+async function recordStagedSave<S extends SettingsSectionName>(
+  section: S,
+  patch: Record<string, unknown>,
+  sent: SentPath[],
+  response: SettingsSectionPatchResponse | null,
+  result: StagedSaveResult
+): Promise<void> {
+  const origLocale = get(settingsStore).originalData.realtime?.dashboard?.locale;
+  const echo = asRecord(response?.settings);
+  const incoming = withoutServerOwnedKeys(section, echo ?? patch);
+  const confirmed: { path: StagedPath; generation: number }[] = [];
+  try {
+    settingsStore.update(state => {
+      let baseline = state.originalData;
+      let formData = state.formData;
+      for (const { path, value, generation } of sent) {
+        const storePath = storePathOf(section, path);
+        // The server holds the sent value now, so it is the baseline even where the
+        // form moved on: an edit back to the old value then still counts as an edit.
+        baseline = withStoreValue(baseline, storePath, value);
+        // A reset during the request discarded the unsaved edits, not this stored
+        // value, so the form follows it instead of keeping the pre-edit value,
+        // unless the form was edited again after the reset.
+        const resetKey = generationKey(section, path);
+        if (resetPaths.has(resetKey)) {
+          const resetValue = resetPaths.get(resetKey);
+          resetPaths.delete(resetKey);
+          if (sameValue(valueAt(formData, storePath), resetValue)) {
+            formData = withStoreValue(formData, storePath, value);
+          }
+        }
+        if (
+          generationOf(section, path) === generation &&
+          sameValue(valueAt(state.formData, storePath), value)
+        ) {
+          confirmed.push({ path, generation });
+        }
+      }
+      return {
+        ...state,
+        ...applySectionPatch({ ...state, originalData: baseline, formData }, section, incoming),
+      };
+    });
+  } finally {
+    // The update has run once the store holds the value; a throwing subscriber must not leave the paths staged.
+    for (const { path, generation } of confirmed) {
+      // A newer edit made while the store published the save stays staged.
+      if (generationOf(section, path) !== generation) continue;
+      unstagePath(section, path);
+      pushUnique(result.saved, path);
+    }
+  }
+
+  const newLocale = section === 'dashboard' ? valueAt(patch, ['locale']) : undefined;
+  const sentryEnabled = section === 'sentry' ? valueAt(patch, ['enabled']) : undefined;
+  await afterSettingsPersisted(
+    typeof newLocale === 'string' ? newLocale : undefined,
+    origLocale,
+    typeof sentryEnabled === 'boolean' ? sentryEnabled : undefined
+  );
+}
+
+/** The staged paths of a section that differ from the stored value, with the form value each has now. */
+function pendingStagedValues(section: SettingsSectionName): SentPath[] {
+  const { formData, originalData } = get(settingsStore);
+  return stagedPathsOf(section)
+    .map(path => ({
+      path,
+      value: valueAt(formData, storePathOf(section, path)),
+      generation: generationOf(section, path),
+    }))
+    .filter(
+      ({ path, value }) => !sameValue(value, valueAt(originalData, storePathOf(section, path)))
+    );
+}
+
+/**
+ * Takes the form back to the stored value at every sent path that was not edited
+ * or reset since (same generation) and whose form value is still what was sent,
+ * and unstages it. A path edited again keeps the newer edit, which stays staged
+ * for the next send, also when a store subscriber edits it while the reverted
+ * values are published. The reverted paths are settled even when a subscriber
+ * throws; the error then propagates to the caller.
+ */
+function revertStagedPaths(
+  section: SettingsSectionName,
+  sent: SentPath[],
+  result: StagedSaveResult
+): void {
+  const reverted: SentPath[] = [];
+  try {
+    settingsStore.update(state => {
+      let formData = state.formData;
+      for (const entry of sent) {
+        const storePath = storePathOf(section, entry.path);
+        if (generationOf(section, entry.path) !== entry.generation) continue;
+        if (!sameValue(valueAt(formData, storePath), entry.value)) continue;
+        formData = withStoreValue(formData, storePath, valueAt(state.originalData, storePath));
+        reverted.push(entry);
+      }
+      return { ...state, formData };
+    });
+  } finally {
+    // The store holds the reverted values even when a subscriber threw; a newer
+    // edit made while it published them stays staged.
+    for (const { path, generation } of reverted) {
+      if (generationOf(section, path) !== generation) continue;
+      unstagePath(section, path);
+      pushUnique(result.failed, path);
+    }
+  }
+}
+
+/**
+ * The body of saveStagedSection, run inside the shared queue. Sends the staged
+ * paths of a section with If-Match; on a 412 it fetches, rebases with the staged
+ * rule and rebuilds the patch from formData, up to MAX_SETTINGS_SAVE_ATTEMPTS
+ * sends, plus one without If-Match when the validator is rewritten in transit.
+ * A failure before the first send (the baseline fetch) takes the edits captured before
+ * it back to the stored value. An error after the server accepted the patch (while
+ * recording it) is returned in result.error but reverts nothing and fails no path.
+ * Fills result; never throws.
+ */
+async function runStagedSave(
+  section: SettingsSectionName,
+  result: StagedSaveResult
+): Promise<void> {
+  let sent: SentPath[] = [];
+  // Set once the server accepted the patch: from then on an error is a side effect failing, not a failed save.
+  let accepted = false;
+  // The unsent edits as they were before the baseline fetch, which a failed fetch takes back.
+  let pending: SentPath[] = [];
+  try {
+    let previousConflictETag: string | null = null;
+    for (let attempt = 1; ; attempt++) {
+      if (stagedPathsOf(section).length === 0) break;
+      // Without a usable ETag the revision is unknown, so the baseline is refreshed first.
+      if (!usableIfMatch(lastETag)) {
+        pending = pendingStagedValues(section);
+        await rebaseForStagedSave(section, result);
+      }
+      const built = buildStagedPatch(section, result);
+      sent = built.sent;
+      if (sent.length === 0) break;
+
+      const ifMatch = usableIfMatch(lastETag);
+      const body = built.patch as SettingsSectionPayloads[SettingsSectionName];
+      const seen: { etag: string | null } = { etag: null };
+      try {
+        const response = await settingsAPI.patchSection(section, body, {
+          ifMatch,
+          onETag: value => {
+            seen.etag = value;
+          },
+        });
+        // Saved from here on: a later error must neither revert nor fail these paths.
+        accepted = true;
+        sent = [];
+        lastETag = ifMatch ? seen.etag : null;
+        const skipped = response?.skippedFields;
+        if (skipped && skipped.length > 0) {
+          logger.warn('Settings section save skipped fields:', section, skipped.join(', '));
+        }
+        await recordStagedSave(section, built.patch, built.sent, response, result);
+        break;
+      } catch (error) {
+        if (!isPreconditionFailed(error)) throw error;
+        const rewritten = seen.etag !== null && seen.etag === previousConflictETag;
+        previousConflictETag = seen.etag;
+        if (attempt >= MAX_SETTINGS_SAVE_ATTEMPTS && !rewritten) {
+          throw new SettingsChangedElsewhereError();
+        }
+        if (rewritten) {
+          ifMatchUnusable = true;
+          logger.warn(
+            'Settings If-Match is rewritten between the browser and the server; saving without it for this page load'
+          );
+        }
+        await rebaseForStagedSave(section, result);
+      }
+    }
+  } catch (error) {
+    result.error = error;
+    // A failure before anything was sent (the baseline fetch) leaves no sent list; the
+    // edits captured before that fetch go back to the stored value unless edited again.
+    if (!accepted) {
+      try {
+        revertStagedPaths(section, sent.length > 0 ? sent : pending, result);
+      } catch (rollbackError) {
+        // A store listener threw while the stored values were put back; the
+        // result still reports the failure and the paths it settled.
+        logger.error(
+          'A store listener threw while a failed staged save was taken back:',
+          rollbackError
+        );
+      }
+    }
+  }
+  result.remaining = stagedPathsOf(section).length > 0;
+}
+
 // Settings actions
 export const settingsActions = {
   async loadSettings() {
     settingsStore.update(state => ({ ...state, isLoading: true, error: null }));
     try {
-      const data = await settingsAPI.load();
-      const mergedData = { ...createEmptySettings(), ...data };
+      // Queued with full saves and refreshes, so a load never lands between a
+      // save's rebase and the originalData write that ends it.
+      await runSerialized(async () => {
+        let etag: string | null = null;
+        const data = await settingsAPI.load({
+          onETag: value => {
+            etag = value;
+          },
+        });
+        const coercedData = normalizeLoadedSettings(data);
+        lastETag = etag;
 
-      // Apply coercion to each section
-      const coercedData = { ...mergedData } as SettingsFormData;
-      for (const [section, sectionData] of Object.entries(mergedData)) {
-        if (sectionData && typeof sectionData === 'object') {
-          const coercedSection = coerceSettings(section, sectionData as Record<string, unknown>);
-          // eslint-disable-next-line security/detect-object-injection -- Safe: section from Object.entries of known object
-          (coercedData as unknown as Record<string, unknown>)[section] = coercedSection;
-        }
-      }
-
-      settingsStore.update(state => ({
-        ...state,
-        formData: coercedData,
-        originalData: JSON.parse(JSON.stringify(coercedData)),
-        isLoading: false,
-        dataLoaded: true,
-      }));
+        // A staged edit survives the load unless the server changed its path.
+        const outcome = newStagedOutcome();
+        settingsStore.update(state => ({
+          ...state,
+          formData: applyStagedRule(state, coercedData, coercedData, outcome, true),
+          originalData: JSON.parse(JSON.stringify(coercedData)),
+          isLoading: false,
+          dataLoaded: true,
+        }));
+        settleStaged(outcome);
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : t('settings.errors.loadFailed');
       settingsStore.update(state => ({
         ...state,
         isLoading: false,
         error: errorMessage,
+        errorToasted: false,
       }));
       throw error;
     }
   },
 
+  /**
+   * Rebases the store on the current server settings without losing unsaved
+   * edits. For actions the server persists outside the form (the model
+   * gallery): unedited paths take the server value, edited paths keep the form
+   * value. Returns at once before a load has succeeded. Does not touch
+   * isLoading, isSaving or error, and rejects on failure so the caller decides
+   * how to report it. Runs in order with full saves.
+   */
+  async refreshKeepingEdits(): Promise<void> {
+    if (!get(settingsStore).dataLoaded) return;
+    await runSerialized(async () => {
+      const { snapshot } = await fetchServerSnapshot();
+      rebaseStoreOn(snapshot);
+    });
+  },
+
   updateSection<K extends keyof SettingsFormData>(section: K, data: Partial<SettingsFormData[K]>) {
     settingsStore.update(state => {
-      const currentSectionData = safeGet(
-        state.formData,
-        section as string,
-        {} as SettingsFormData[K]
-      );
+      const currentSectionData = safeGet<SettingsFormData, K>(state.formData, section);
       const mergedData = safeSpread(currentSectionData, data) as SettingsFormData[K];
 
       // Apply coercion immediately to ensure values are always within valid ranges
       // This is especially important for NumberField components that need instant validation
       const coercedData = coerceSettings(
-        section as string,
+        section,
         mergedData as Record<string, unknown>
       ) as SettingsFormData[K];
 
@@ -1347,6 +2408,123 @@ export const settingsActions = {
         },
       };
     });
+  },
+
+  /**
+   * Persists one backend section with PATCH /api/v2/settings/:section and, only
+   * after the server accepted it, merges the same partial into the store at that
+   * section's path: a plain merge into originalData, and into formData a merge
+   * that keeps any pending edit to a key the partial also sets, so unrelated and
+   * conflicting unsaved edits survive and unsaved-changes tracking is unchanged.
+   * Objects merge key by key and arrays replace, as on the server. A failed
+   * request throws and leaves the store untouched. Shows no toast and does not
+   * touch isSaving or error: the caller owns busy and error UI. Refuses before
+   * settings have loaded, like saveSettings. A concurrent saveSettings waits for
+   * this save to finish before it snapshots formData.
+   */
+  async saveSection<S extends SettingsSectionName>(
+    section: S,
+    partial: SettingsSectionPayloads[S]
+  ): Promise<void> {
+    if (!get(settingsStore).dataLoaded) {
+      logger.warn('Refusing to save a settings section before settings have been loaded');
+      throw new Error(t('settings.errors.loadFailed'));
+    }
+
+    const op = (async () => {
+      const response = await settingsAPI.patchSection(section, partial);
+      const skipped = response?.skippedFields;
+      if (skipped && skipped.length > 0) {
+        logger.warn('Settings section save skipped fields:', section, skipped.join(', '));
+      }
+
+      const patch = withoutServerOwnedKeys(section, partial);
+      const origLocale = get(settingsStore).originalData.realtime?.dashboard?.locale;
+      settingsStore.update(state => ({ ...state, ...applySectionPatch(state, section, patch) }));
+
+      const newLocale = section === 'dashboard' ? patch.locale : undefined;
+      const savedSentryEnabled =
+        section === 'sentry' && typeof patch.enabled === 'boolean' ? patch.enabled : undefined;
+      // This write changed the revision without reporting it.
+      lastETag = null;
+      await afterSettingsPersisted(
+        typeof newLocale === 'string' ? newLocale : undefined,
+        origLocale,
+        savedSentryEnabled
+      );
+    })();
+
+    inFlightSectionSaves.add(op);
+    try {
+      await op;
+    } finally {
+      inFlightSectionSaves.delete(op);
+    }
+  },
+
+  /**
+   * Stages an edit for immediate save: writes the partial into formData at the
+   * section's store path (the same merge and coercion as a section save, the
+   * edit winning over a pending one) and records its leaf paths as staged.
+   * Nothing is sent; saveStagedSection sends what is staged. Send whole arrays
+   * and complete nested objects, since arrays are whole values on the server.
+   * An empty object stages nothing: the server merges objects key by key, so
+   * clearing one needs its keys named.
+   * Refuses before settings have loaded, like saveSection.
+   */
+  stageSectionEdit<S extends SettingsSectionName>(
+    section: S,
+    partial: SettingsSectionPayloads[S]
+  ): void {
+    if (!get(settingsStore).dataLoaded) {
+      logger.warn('Refusing to stage a settings edit before settings have been loaded');
+      throw new Error(t('settings.errors.loadFailed'));
+    }
+    const patch = withoutServerOwnedKeys(section, partial);
+    settingsStore.update(state => {
+      // eslint-disable-next-line security/detect-object-injection -- section is a key of SECTION_STORE_PATHS by type
+      const path: SectionStorePath = SECTION_STORE_PATHS[section];
+      const topKey = path[0];
+      const wrapped: Record<string, unknown> = path.length === 2 ? { [path[1]]: patch } : patch;
+      const formSection = asRecord(safeGet(state.formData, topKey));
+      const merged = coerceSettings(topKey, mergeSettingsPatch(formSection, wrapped));
+      return { ...state, formData: { ...state.formData, [topKey]: merged } };
+    });
+    for (const path of leafPaths(patch)) stagePath(section, path);
+  },
+
+  /**
+   * Sends the staged edits of one section with PATCH and If-Match, in the queue
+   * loads, refreshes and full saves share, so it runs after the writes queued before
+   * it and a full save waits for it. saveSection is not queued. The patch is read back from formData when
+   * it is sent, so a coerced or newly edited value is what goes out. A failed
+   * request, also one before the first send, takes each sent path back to the stored value unless it was edited
+   * again; a 412 refetches, rebases (the server wins at staged paths it changed)
+   * and resends. Resolves with what happened to each path; never rejects.
+   */
+  async saveStagedSection(section: SettingsSectionName): Promise<StagedSaveResult> {
+    const result: StagedSaveResult = { saved: [], dropped: [], failed: [], remaining: false };
+    const op = runSerialized(() => runStagedSave(section, result));
+    const tracked = op.then(ignoreOutcome);
+    inFlightSectionSaves.add(tracked);
+    try {
+      await op;
+    } finally {
+      inFlightSectionSaves.delete(tracked);
+    }
+    return result;
+  },
+
+  /**
+   * Registers a listener for staged edits the store gave up because the server
+   * changed the same path, found by a refresh, a load or a save's rebase. The form
+   * then shows the server value. Returns the function that removes the listener.
+   */
+  onStagedEditsDropped(listener: (edits: DroppedStagedEdit[]) => void): () => void {
+    droppedListeners.add(listener);
+    return () => {
+      droppedListeners.delete(listener);
+    };
   },
 
   /**
@@ -1367,7 +2545,7 @@ export const settingsActions = {
       // practice this never fires: the cert handlers that call this only run
       // after settings have loaded, so security is always populated.
       const sync = (security?: SecuritySettings): SecuritySettings => ({
-        ...(security ?? createEmptySettings().security ?? ({} as SecuritySettings)),
+        ...(security ?? createEmptySettings().security),
         tlsMode: mode,
         autoTls,
       });
@@ -1386,93 +2564,51 @@ export const settingsActions = {
     }));
   },
 
-  async saveSettings() {
-    settingsStore.update(state => ({ ...state, isSaving: true, error: null }));
-    try {
-      const currentState = get(settingsStore);
+  /**
+   * Saves the whole formData to the backend. Refuses (throws before any network
+   * call) while no settings load has succeeded, because formData would then hold
+   * empty defaults that the backend deep-merges over the real configuration.
+   * It first fetches the server settings and merges the unsaved edits onto them,
+   * so changes made on the server since the load (a model gallery install) are
+   * not reverted; a failed fetch fails the save with no PUT, and every full save
+   * costs one extra GET. Pass `{ notify: false }` to suppress the success and failure toasts.
+   *
+   * A call made while an earlier call still waits for section saves joins it:
+   * one request, one result, and the success or failure toast if any joined call
+   * asked for it.
+   */
+  async saveSettings(options: SaveSettingsOptions = {}) {
+    const { notify = true } = options;
 
-      // Apply coercion to all sections before saving
-      const coercedFormData = { ...currentState.formData };
-      for (const [section, data] of Object.entries(coercedFormData)) {
-        if (data && typeof data === 'object') {
-          const key = section as keyof SettingsFormData;
-          // Use a type assertion to handle the assignment
-          // eslint-disable-next-line security/detect-object-injection -- key is from controlled source
-          (coercedFormData as Record<string, unknown>)[key] = coerceSettings(
-            section,
-            data as Record<string, unknown>
-          );
-        }
-      }
-
-      // Convert empty strings to null for modelPath and labelPath to signal "revert to default"
-      // This ensures the config file is properly cleaned when users clear these fields
-      // Trim whitespace to handle cases like "   " which should also be treated as empty
-      if (coercedFormData.birdnet.modelPath?.trim() === '') {
-        coercedFormData.birdnet.modelPath = null;
-      }
-      if (coercedFormData.birdnet.labelPath?.trim() === '') {
-        coercedFormData.birdnet.labelPath = null;
-      }
-
-      await settingsAPI.save(coercedFormData);
-
-      // Refresh restart-required status from backend after save.
-      // Isolated try-catch: failure here must not mask a successful settings save.
-      try {
-        const { fetchRestartStatus } = await import('$lib/stores/restart.svelte');
-        await fetchRestartStatus();
-      } catch (e) {
-        // Non-critical: restart status refresh failed, but settings were saved.
-        // The banner may show stale state until next page load.
-        logger.error('Failed to refresh restart status after settings save:', e);
-      }
-
-      // Apply UI locale only when the user actually changed it in this save
-      // session. Read newLocale from coercedFormData (the value we actually
-      // persisted) and compare to originalData (the snapshot loaded from
-      // the backend). This avoids clobbering a locale chosen via the sidebar
-      // LanguageSelector (which updates localStorage but not the backend)
-      // with whatever stale value the backend still holds, and matches the
-      // coercedFormData-based comparison used by the TLS check below.
-      const newLocale = coercedFormData.realtime?.dashboard?.locale;
-      const origLocale = currentState.originalData.realtime?.dashboard?.locale;
-      if (newLocale && newLocale !== origLocale) {
-        // Dynamically import i18n functions to avoid circular dependencies
-        const { isValidLocale, setLocale } = await import('$lib/i18n/index.js');
-        if (isValidLocale(newLocale)) {
-          setLocale(newLocale);
-        }
-      }
-
-      // Update originalData to match the saved formData (no reload needed).
-      // Restart-required state is owned by the backend (refreshed via
-      // fetchRestartStatus above) and surfaced by the global RestartBanner, so
-      // it is no longer tracked client-side here.
-      settingsStore.update(state => ({
-        ...state,
-        originalData: JSON.parse(JSON.stringify(state.formData)),
-        isSaving: false,
-      }));
-
-      // Show success toast
-      toastActions.success(t('notifications.content.settings.savedSuccessfully'));
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : t('settings.errors.saveFailed');
-      settingsStore.update(state => ({
-        ...state,
-        isSaving: false,
-        error: errorMessage,
-      }));
-
-      // Show error toast
-      toastActions.error(t('notifications.content.settings.saveFailed'));
-
-      throw error;
+    if (pendingFullSave) {
+      pendingFullSave.notify ||= notify;
+      return pendingFullSave.done;
     }
+    if (inFlightSectionSaves.size === 0) return persistFormData(notify);
+
+    // Let section saves finish first (success or failure, request and store
+    // merge) so the snapshot taken in persistFormData carries what they patched.
+    // The pending save is published before anything else runs so that a call
+    // made from here on joins it instead of sending a second request.
+    const pending = { notify, done: Promise.resolve() };
+    pendingFullSave = pending;
+    settingsStore.update(state => ({ ...state, isSaving: true, error: null }));
+    pending.done = (async () => {
+      try {
+        // Loop, because a section save can start while an earlier one is awaited.
+        while (inFlightSectionSaves.size > 0) {
+          await Promise.allSettled([...inFlightSectionSaves]);
+        }
+      } finally {
+        pendingFullSave = null;
+      }
+      await persistFormData(pending.notify);
+    })();
+    return pending.done;
   },
 
   resetSection<K extends keyof SettingsFormData>(section: K) {
+    invalidateStaged(section);
     settingsStore.update(state => {
       const originalSectionData = safeGet(state.originalData, section as string);
       return {
@@ -1486,6 +2622,7 @@ export const settingsActions = {
   },
 
   resetAllSettings() {
+    invalidateStaged();
     settingsStore.update(state => ({
       ...state,
       formData: JSON.parse(JSON.stringify(state.originalData)),

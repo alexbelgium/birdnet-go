@@ -3,7 +3,6 @@ package logger
 import (
 	"context"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -33,6 +32,10 @@ const (
 	// traceLevelValue is slog.Level for TRACE level (below Debug which is -4)
 	traceLevelValue = slog.Level(-8)
 
+	// traceLevelName is the name rendered for traceLevelValue; slog would
+	// otherwise print it as "DEBUG-4".
+	traceLevelName = "TRACE"
+
 	// floatPrecisionRatio rounds floats to 3 decimal places in log output
 	floatPrecisionRatio = 1000.0
 
@@ -55,7 +58,8 @@ func SetGlobal(cl *CentralLogger) {
 }
 
 // Global returns the global CentralLogger instance.
-// If no logger has been set via SetGlobal, it returns a fallback console logger.
+// If no logger has been set via SetGlobal, it returns a fallback console logger
+// whose output goes through the shared non-blocking stdout writer.
 func Global() *CentralLogger {
 	globalLoggerMu.Lock()
 	defer globalLoggerMu.Unlock()
@@ -77,9 +81,10 @@ func Global() *CentralLogger {
 		timezone:      time.Local,
 		moduleWriters: make(map[string]*BufferedFileWriter),
 		moduleLevels:  make(map[string]slog.Level),
+		console:       stdoutConsole,
 	}
 	// Create console-only base handler
-	globalLogger.baseHandler = newTextHandler(os.Stdout, slog.LevelInfo, time.Local)
+	globalLogger.baseHandler = newTextHandler(stdoutConsole, slog.LevelInfo, time.Local)
 
 	return globalLogger
 }
@@ -131,13 +136,22 @@ type CentralLogger struct {
 	moduleWriters map[string]*BufferedFileWriter // Per-module buffered writers
 	moduleLevels  map[string]slog.Level          // Per-module log levels
 	extraHandlers []slog.Handler                 // Additional handlers injected at construction
+	console       *nonBlockingWriter             // Shared console sink, set at construction and read-only afterwards so Module() needs no extra locking
 	mu            sync.RWMutex                   // Protects concurrent access
 }
 
 // NewCentralLogger creates a centralized logger with module routing.
 // Optional extraHandlers are appended to the base handler chain so they
 // receive every log record (e.g. a health-check error buffer handler).
+// Console output goes through the shared non-blocking stdout writer, so a
+// stalled stdout reader never blocks a log call.
 func NewCentralLogger(cfg *LoggingConfig, extraHandlers ...slog.Handler) (*CentralLogger, error) {
+	return newCentralLogger(cfg, stdoutConsole, extraHandlers...)
+}
+
+// newCentralLogger is NewCentralLogger with an injectable console sink, so
+// tests can substitute their own writer for the process-wide stdout one.
+func newCentralLogger(cfg *LoggingConfig, console *nonBlockingWriter, extraHandlers ...slog.Handler) (*CentralLogger, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("logging config cannot be nil")
 	}
@@ -168,6 +182,7 @@ func NewCentralLogger(cfg *LoggingConfig, extraHandlers ...slog.Handler) (*Centr
 		moduleWriters: make(map[string]*BufferedFileWriter),
 		moduleLevels:  make(map[string]slog.Level),
 		extraHandlers: extraHandlers,
+		console:       console,
 	}
 
 	// Parse module levels
@@ -220,7 +235,7 @@ func (cl *CentralLogger) createBaseHandler() error {
 	// Console handler - USE TEXT FORMAT for human-readable output
 	if cl.config.Console != nil && cl.config.Console.Enabled {
 		consoleLevel := parseLogLevel(cl.config.Console.Level)
-		handlers = append(handlers, newTextHandler(os.Stdout, consoleLevel, cl.timezone))
+		handlers = append(handlers, newTextHandler(cl.console, consoleLevel, cl.timezone))
 	}
 
 	// Main file handler - USE JSON FORMAT for machine parsing
@@ -249,14 +264,14 @@ func (cl *CentralLogger) createBaseHandler() error {
 		fileLevel := parseLogLevel(cl.config.FileOutput.Level)
 		opts := &slog.HandlerOptions{
 			Level:       fileLevel,
-			ReplaceAttr: timeZoneReplaceAttr(cl.timezone),
+			ReplaceAttr: replaceAttrFunc(cl.timezone),
 		}
 		handlers = append(handlers, slog.NewJSONHandler(writer, opts))
 	}
 
 	if len(handlers) == 0 {
 		// Fallback to stdout text handler if nothing is configured
-		handlers = append(handlers, newTextHandler(os.Stdout, parseLogLevel(cl.config.DefaultLevel), cl.timezone))
+		handlers = append(handlers, newTextHandler(cl.console, parseLogLevel(cl.config.DefaultLevel), cl.timezone))
 	}
 
 	// Append any extra handlers injected at construction (e.g. health error buffer)
@@ -286,13 +301,10 @@ func (cl *CentralLogger) Module(name string) Logger {
 
 	// Get module-specific configuration
 	moduleConfig, hasModuleConfig := cl.config.ModuleOutputs[name]
+	// getModuleLevelLocked applies the precedence module_levels, then the module's
+	// output level, then the parent module, then default_level. The handler and the
+	// moduleLogger share this one level.
 	moduleLevel := cl.getModuleLevelLocked(name)
-
-	// Override module level if explicitly configured in ModuleOutputs
-	// This ensures both the handler and the moduleLogger use the same level
-	if hasModuleConfig && moduleConfig.Level != "" {
-		moduleLevel = parseLogLevel(moduleConfig.Level)
-	}
 
 	// Build handlers for this module
 	var handlers []slog.Handler
@@ -302,6 +314,8 @@ func (cl *CentralLogger) Module(name string) Logger {
 		if moduleWriter, ok := cl.moduleWriters[name]; ok {
 			opts := &slog.HandlerOptions{
 				Level: moduleLevel,
+				// nil time zone: module files keep their timestamps unconverted.
+				ReplaceAttr: replaceAttrFunc(nil),
 			}
 			handlers = append(handlers, slog.NewJSONHandler(moduleWriter, opts))
 		}
@@ -311,7 +325,7 @@ func (cl *CentralLogger) Module(name string) Logger {
 		// modules with debug-level file output don't flood stdout.
 		if moduleConfig.ConsoleAlso && cl.config.Console != nil && cl.config.Console.Enabled {
 			consoleLevel := parseLogLevel(cl.config.Console.Level)
-			handlers = append(handlers, newTextHandler(os.Stdout, consoleLevel, cl.timezone))
+			handlers = append(handlers, newTextHandler(cl.console, consoleLevel, cl.timezone))
 		}
 
 		// Include extra handlers (e.g. health error buffer) so modules with
@@ -399,10 +413,20 @@ func (cl *CentralLogger) GetDefaultOutputPath() string {
 	return ""
 }
 
-// Close closes all buffered writers and their underlying files
+// Close closes all buffered writers and their underlying files. It first waits
+// up to consoleFlushTimeout for queued console output to be written, then
+// records any console drop count that is still pending in the main log file.
 func (cl *CentralLogger) Close() error {
 	if cl == nil {
 		return nil
+	}
+
+	// Outside cl.mu: the drainer's report path takes cl.mu.RLock. Report into
+	// this logger's own file rather than the global one, which may be another
+	// logger.
+	if cl.console != nil {
+		cl.console.flush(consoleFlushTimeout)
+		cl.console.reportDrops(cl.writeConsoleDropSummary)
 	}
 
 	cl.mu.Lock()
@@ -443,6 +467,7 @@ func (cl *CentralLogger) closeAllWritersLocked() error {
 // Flush ensures all buffered logs are written to OS buffers.
 // Note: This flushes to OS buffers but does not fsync to disk.
 // For critical sync to disk, Close() will perform full sync.
+// Console output is flushed by Close and FlushConsole, not here.
 func (cl *CentralLogger) Flush() error {
 	if cl == nil {
 		return nil
@@ -780,7 +805,7 @@ func sanitizeAny(v any) any {
 	// both more informative and safe to format. Unsupported *types* (chan/func)
 	// are left untouched and render as before.
 	if _, err := json.Marshal(san); err != nil {
-		if _, ok := stderrors.AsType[*json.UnsupportedValueError](err); ok {
+		if _, ok := errors.AsType[*json.UnsupportedValueError](err); ok {
 			return fmt.Sprintf("%+v", san)
 		}
 	}
@@ -1125,14 +1150,34 @@ func isZeroValue(v reflect.Value) bool {
 	return v.IsZero()
 }
 
-func timeZoneReplaceAttr(tz *time.Location) func(groups []string, a slog.Attr) slog.Attr {
-	if tz == nil || tz == time.UTC {
-		return nil
+// levelName returns the display name of a log level. slog names only the four
+// standard levels, so the Trace level is mapped explicitly.
+func levelName(l slog.Level) string {
+	if l == traceLevelValue {
+		return traceLevelName
 	}
+	return l.String()
+}
+
+// replaceAttrFunc returns the ReplaceAttr function shared by every JSON
+// handler. It renders the top-level Trace level as traceLevelName and, when
+// tz is neither nil nor UTC, converts the top-level time attribute to tz.
+func replaceAttrFunc(tz *time.Location) func(groups []string, a slog.Attr) slog.Attr {
+	convertTime := tz != nil && tz != time.UTC
 	return func(groups []string, a slog.Attr) slog.Attr {
-		if a.Key == slog.TimeKey && len(groups) == 0 {
-			if t, ok := a.Value.Any().(time.Time); ok {
-				return slog.Time(a.Key, t.In(tz))
+		if len(groups) != 0 {
+			return a
+		}
+		switch a.Key {
+		case slog.LevelKey:
+			if l, ok := a.Value.Any().(slog.Level); ok && l == traceLevelValue {
+				return slog.String(a.Key, traceLevelName)
+			}
+		case slog.TimeKey:
+			if convertTime {
+				if t, ok := a.Value.Any().(time.Time); ok {
+					return slog.Time(a.Key, t.In(tz))
+				}
 			}
 		}
 		return a

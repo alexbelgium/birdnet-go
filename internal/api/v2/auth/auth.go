@@ -21,7 +21,6 @@ package authapi
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -34,9 +33,11 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/tphakala/birdnet-go/internal/api/auth"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/notification"
 	"github.com/tphakala/birdnet-go/internal/security"
+	"golang.org/x/time/rate"
 )
 
 // apiV2Prefix is the base path prefix for all v2 API routes (the Echo group the
@@ -48,14 +49,55 @@ const apiV2Prefix = "/api/v2"
 
 // Auth constants (file-local)
 const (
-	authExtendedTimeout = 15  // Extended timeout for slower operations
-	maxBasePathLength   = 128 // Maximum length for base path validation
-	authRateLimitRate   = 5   // Login attempts per rate limit window
-	authRateLimitBurst  = 5   // Burst allowance for rate limiting
-	authRateLimitWindow = 15  // Rate limit window in minutes
-	authDelayMinMs      = 50  // Minimum random delay in ms for timing attack mitigation
-	authDelayMaxMs      = 150 // Maximum random delay in ms for timing attack mitigation
+	authExtendedTimeout   = 15               // Extended timeout for slower operations
+	maxBasePathLength     = 128              // Maximum length for base path validation
+	authRateLimitRequests = 5                // Login attempts per rate limit window
+	authRateLimitBurst    = 5                // Attempts allowed in quick succession
+	authRateLimitWindow   = 15 * time.Minute // Rate limit window
+	// authRateLimitRefillTime is how long an exhausted bucket takes to fill
+	// again. Idle visitors are kept at least that long, so forgetting one never
+	// grants more attempts than the refill would have.
+	authRateLimitRefillTime = authRateLimitWindow * authRateLimitBurst / authRateLimitRequests
+	authDelayMinMs          = 50  // Minimum random delay in ms for timing attack mitigation
+	authDelayMaxMs          = 150 // Maximum random delay in ms for timing attack mitigation
 )
+
+// loginRateLimiterStoreConfig returns the per-client limiter settings for the login
+// endpoint: authRateLimitRequests attempts per authRateLimitWindow with a burst
+// of authRateLimitBurst. Echo reads Rate as requests per second, so the
+// per-window count is converted.
+func loginRateLimiterStoreConfig() middleware.RateLimiterMemoryStoreConfig {
+	return middleware.RateLimiterMemoryStoreConfig{
+		Rate:      rate.Limit(float64(authRateLimitRequests) / authRateLimitWindow.Seconds()),
+		Burst:     authRateLimitBurst,
+		ExpiresIn: authRateLimitRefillTime,
+	}
+}
+
+// authPeerRateLimitMultiplier is how many clients' login budgets the connection
+// peer as a whole may spend. A reverse proxy or tunnel serves many clients from
+// one address. The client limiter keys a client an unlisted proxy names under
+// that proxy and shares one bucket among the requests it cannot verify, but a
+// proxy can still name many such clients, so the peer's own budget bounds the
+// attempts a caller can make by naming a new client in every request. Ten leaves
+// a household or a small office behind one proxy each its own attempts. The
+// budget is shared by every client behind the peer, so once it is spent the peer
+// refuses all of them until it refills. It is skipped for the requests
+// Core.SkipPeerRateLimit names: a direct request, whose client limiter already
+// keys on the peer, and a client a proxy listed by its own address verified
+// without a Cloudflare edge in the chain, where the operator vouches for each
+// client and the clients must not lock one another out.
+const authPeerRateLimitMultiplier = 10
+
+// loginPeerRateLimiterStoreConfig returns the limiter settings for the login
+// endpoint keyed on the connection peer: the per-client attempts and burst
+// multiplied by authPeerRateLimitMultiplier, over the same window.
+func loginPeerRateLimiterStoreConfig() middleware.RateLimiterMemoryStoreConfig {
+	cfg := loginRateLimiterStoreConfig()
+	cfg.Rate *= authPeerRateLimitMultiplier
+	cfg.Burst *= authPeerRateLimitMultiplier
+	return cfg
+}
 
 // Compiled regex for path validation (moved outside function for performance)
 var validBasePathRegex = regexp.MustCompile(`^/[a-zA-Z0-9/_-]*/$`)
@@ -122,27 +164,45 @@ func New(core *apicore.Core, authService auth.Service) *Handler {
 }
 
 // RegisterRoutes registers all authentication-related API endpoints on the
-// supplied v2 API group, preserving the exact routes, order, and per-route
-// middleware from the original initAuthRoutes.
+// supplied v2 API group. The login route is rate limited per client and per
+// connection peer; the peer limit is skipped for the requests
+// Core.SkipPeerRateLimit names.
 func (c *Handler) RegisterRoutes(g *echo.Group) {
 	// Create auth API group
 	authGroup := g.Group(AuthGroupPath)
 
-	// Create rate limiter for login endpoint to prevent brute force attacks
-	// Allow 5 login attempts per 15 minutes per IP address
-	loginRateLimiter := middleware.RateLimiterWithConfig(middleware.RateLimiterConfig{
-		Skipper: middleware.DefaultSkipper,
-		Store: middleware.NewRateLimiterMemoryStoreWithConfig(
-			middleware.RateLimiterMemoryStoreConfig{
-				Rate:      authRateLimitRate,                 // 5 requests
-				Burst:     authRateLimitBurst,                // Allow burst up to the rate
-				ExpiresIn: authRateLimitWindow * time.Minute, // Per 15 minutes
-			},
-		),
-		IdentifierExtractor: func(ctx echo.Context) (string, error) {
-			// Use IP address as identifier for rate limiting
-			return ctx.RealIP(), nil
-		},
+	// Rate limit the login endpoint to prevent brute force attacks. Allow a burst
+	// of 5 login attempts per client (per /64 for IPv6; the client is the one a
+	// verified or agreeing proxy reported, see Core.RateLimitKey), refilled at 5
+	// per 15 minutes (see loginRateLimiterStoreConfig), and a multiple of that for
+	// the connection peer as a whole (see loginPeerRateLimiterStoreConfig), which
+	// Core.SkipPeerRateLimit lifts for direct requests and for clients a proxy
+	// listed by its own address verified.
+	loginRateLimiter := c.loginLimiter(loginRateLimiterStoreConfig(), c.RateLimitKey, middleware.DefaultSkipper)
+	loginPeerRateLimiter := c.loginLimiter(loginPeerRateLimiterStoreConfig(), apicore.PeerRateLimitKey, c.SkipPeerRateLimit)
+
+	// Routes that don't require authentication (but are rate limited)
+	authGroup.POST(AuthLoginPath, c.Login, loginRateLimiter, loginPeerRateLimiter)
+
+	// OAuth callback endpoint - public, completes the OAuth flow
+	// This is the V2 replacement for /api/v1/oauth2/callback
+	authGroup.GET(AuthCallbackPath, c.OAuthCallback)
+
+	// Routes that require authentication
+	protectedGroup := authGroup.Group("", c.AuthMiddleware)
+	protectedGroup.POST(AuthLogoutPath, c.Logout)
+	protectedGroup.GET(AuthStatusPath, c.GetAuthStatus)
+}
+
+// loginLimiter returns the rate limiting middleware for the login route: one
+// bucket per identifier, with the store settings storeConfig, for the requests
+// skipper does not skip. A refused attempt is answered and logged the same way
+// whichever limiter refuses it.
+func (c *Handler) loginLimiter(storeConfig middleware.RateLimiterMemoryStoreConfig, identifier middleware.Extractor, skipper middleware.Skipper) echo.MiddlewareFunc {
+	return middleware.RateLimiterWithConfig(middleware.RateLimiterConfig{
+		Skipper:             skipper,
+		Store:               apicore.NewRateLimiterStore(storeConfig),
+		IdentifierExtractor: identifier,
 		ErrorHandler: func(ctx echo.Context, err error) error {
 			// Return a user-friendly error message when rate limit is exceeded
 			c.LogSecurityWarnIfEnabled("Login rate limit exceeded",
@@ -162,18 +222,6 @@ func (c *Handler) RegisterRoutes(g *echo.Group) {
 			return c.HandleErrorWithKey(ctx, err, "Too many login attempts. Please try again in 15 minutes.", http.StatusTooManyRequests, notification.MsgErrAuthTooManyAttempts, nil)
 		},
 	})
-
-	// Routes that don't require authentication (but are rate limited)
-	authGroup.POST(AuthLoginPath, c.Login, loginRateLimiter)
-
-	// OAuth callback endpoint - public, completes the OAuth flow
-	// This is the V2 replacement for /api/v1/oauth2/callback
-	authGroup.GET(AuthCallbackPath, c.OAuthCallback)
-
-	// Routes that require authentication
-	protectedGroup := authGroup.Group("", c.AuthMiddleware)
-	protectedGroup.POST(AuthLogoutPath, c.Logout)
-	protectedGroup.GET(AuthStatusPath, c.GetAuthStatus)
 }
 
 // Login handles POST /api/v2/auth/login
@@ -198,7 +246,7 @@ func (c *Handler) Login(ctx echo.Context) error {
 			logger.String("path", ctx.Request().URL.Path),
 		)
 		// Return a generic error, perhaps indicating auth isn't enabled
-		return c.HandleErrorWithKey(ctx, errors.New("authentication not configured"),
+		return c.HandleErrorWithKey(ctx, errors.NewStd("authentication not configured"),
 			"Authentication service unavailable", http.StatusInternalServerError, notification.MsgErrAuthServiceUnavailable, nil)
 	}
 
@@ -353,7 +401,7 @@ func (c *Handler) Logout(ctx echo.Context) error {
 
 	// IMPORTANT: Get provider logout URL BEFORE clearing the session.
 	// Logout() destroys the session data needed to build the end-session URL.
-	providerLogoutURL := authService.GetProviderLogoutURL(ctx, "")
+	providerLogoutURL := authService.GetProviderLogoutURL(ctx)
 
 	// Try to perform logout via auth service
 	if err := authService.Logout(ctx); err != nil {
@@ -736,22 +784,13 @@ func ValidateAndSanitizeRedirect(redirect string) string {
 // It accepts a context to allow cancellation of the delay.
 func randomDelay(ctx context.Context, minMs, maxMs int64) {
 	if maxMs <= minMs {
-		minMs = 50  // Default min
-		maxMs = 150 // Default max
+		minMs = authDelayMinMs
+		maxMs = authDelayMaxMs
 	}
 	rangeSize := big.NewInt(maxMs - minMs)
-	n, err := rand.Int(rand.Reader, rangeSize)
-	var delayMs int64
-	if err != nil {
-		// Fallback to min delay if random generation fails
-		delayMs = minMs
-		// Optionally log the error
-		// log.Printf("Error generating random delay: %v, using fallback %dms", err, delayMs)
-	} else {
-		delayMs = n.Int64() + minMs
-	}
-
-	delayDuration := time.Duration(delayMs) * time.Millisecond
+	// rand.Int fails only when its reader does, and the default rand.Reader never returns an error.
+	n, _ := rand.Int(rand.Reader, rangeSize)
+	delayDuration := time.Duration(n.Int64()+minMs) * time.Millisecond
 
 	// Create a timer for the delay
 	timer := time.NewTimer(delayDuration)

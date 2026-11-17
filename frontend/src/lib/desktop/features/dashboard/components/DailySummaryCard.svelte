@@ -77,7 +77,7 @@ Responsive Breakpoints:
   import { dashboardSettings, speciesTrackingSettings } from '$lib/stores/settings';
   import {
     resolveNoveltyCategory,
-    noveltyCategoryColorVar,
+    noveltyCategoryTextColor,
   } from '$lib/desktop/features/dashboard/utils/noveltyCategory';
   import { ChevronDown, ChevronLeft, ChevronRight, History, Star, XCircle } from '@lucide/svelte';
   import { untrack } from 'svelte';
@@ -624,6 +624,16 @@ Responsive Breakpoints:
     hourly: () => '#',
   });
 
+  // Returns the cached URL for a key, building and storing it on first use
+  function cachedUrl(cacheKey: string, build: () => string): string {
+    let url = urlCache.get(cacheKey);
+    if (url === undefined) {
+      url = build();
+      urlCache.set(cacheKey, url);
+    }
+    return url;
+  }
+
   // Reactive URL builder factory - clears cache when selectedDate changes
   $effect(() => {
     // Clear cache when selectedDate changes to prevent stale URLs
@@ -632,18 +642,14 @@ Responsive Breakpoints:
     // Create optimized, memoized URL builders
     urlBuilders.species = (species: DailySpeciesSummary) => {
       const cacheKey = `species:${species.scientific_name}:${selectedDate}`;
-      if (!urlCache.has(cacheKey)) {
-        urlCache.set(
-          cacheKey,
-          buildSpeciesDetectionUrl(
-            species.scientific_name,
-            selectedDate,
-            CONFIG.QUERY.DEFAULT_NUM_RESULTS,
-            0
-          )
-        );
-      }
-      return urlCache.get(cacheKey)!;
+      return cachedUrl(cacheKey, () =>
+        buildSpeciesDetectionUrl(
+          species.scientific_name,
+          selectedDate,
+          CONFIG.QUERY.DEFAULT_NUM_RESULTS,
+          0
+        )
+      );
     };
 
     urlBuilders.speciesHour = (
@@ -652,31 +658,23 @@ Responsive Breakpoints:
       duration: number = 1
     ) => {
       const cacheKey = `species-hour:${species.scientific_name}:${selectedDate}:${hour}:${duration}`;
-      if (!urlCache.has(cacheKey)) {
-        urlCache.set(
-          cacheKey,
-          buildSpeciesHourUrl(
-            species.scientific_name,
-            selectedDate,
-            hour,
-            duration,
-            CONFIG.QUERY.DEFAULT_NUM_RESULTS,
-            0
-          )
-        );
-      }
-      return urlCache.get(cacheKey)!;
+      return cachedUrl(cacheKey, () =>
+        buildSpeciesHourUrl(
+          species.scientific_name,
+          selectedDate,
+          hour,
+          duration,
+          CONFIG.QUERY.DEFAULT_NUM_RESULTS,
+          0
+        )
+      );
     };
 
     urlBuilders.hourly = (hour: number, duration: number = 1) => {
       const cacheKey = `hourly:${selectedDate}:${hour}:${duration}`;
-      if (!urlCache.has(cacheKey)) {
-        urlCache.set(
-          cacheKey,
-          buildHourlyDetectionUrl(selectedDate, hour, duration, CONFIG.QUERY.DEFAULT_NUM_RESULTS, 0)
-        );
-      }
-      return urlCache.get(cacheKey)!;
+      return cachedUrl(cacheKey, () =>
+        buildHourlyDetectionUrl(selectedDate, hour, duration, CONFIG.QUERY.DEFAULT_NUM_RESULTS, 0)
+      );
     };
   });
 
@@ -1235,8 +1233,7 @@ Responsive Breakpoints:
                 {#each Array(24) as _, hour (hour)}
                   <a
                     href={urlBuilders.hourly(hour, 1)}
-                    class="text-center hover:text-[var(--color-primary)] cursor-pointer"
-                    style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
+                    class="text-center text-[var(--color-base-content)]/50 hover:text-[var(--text-primary)] cursor-pointer"
                     title={t('dashboard.dailySummary.tooltips.viewHourly', {
                       hour: hour.toString().padStart(2, '0'),
                     })}
@@ -1251,8 +1248,7 @@ Responsive Breakpoints:
                   {@const hour = i * 2}
                   <a
                     href={urlBuilders.hourly(hour, 2)}
-                    class="text-center hover:text-[var(--color-primary)] cursor-pointer"
-                    style:color="color-mix(in srgb, var(--color-base-content) 50%, transparent)"
+                    class="text-center text-[var(--color-base-content)]/50 hover:text-[var(--text-primary)] cursor-pointer"
                     title={t('dashboard.dailySummary.tooltips.viewBiHourly', {
                       startHour: hour.toString().padStart(2, '0'),
                       endHour: (hour + 2).toString().padStart(2, '0'),
@@ -1312,14 +1308,14 @@ Responsive Breakpoints:
                     <div class="flex flex-col min-w-0 flex-1">
                       <a
                         href={urlBuilders.species(item)}
-                        class="text-sm hover:text-[var(--color-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
+                        class="text-sm hover:text-[var(--text-primary)] cursor-pointer font-medium leading-tight flex items-center gap-1 overflow-hidden"
                         title={displayName}
                       >
                         <span class="truncate flex-1">{displayName}</span>
                         {#if noveltyCat === 'lifetime'}
                           <span
                             class="inline-block shrink-0"
-                            style:color={noveltyCategoryColorVar('lifetime')}
+                            style:color={noveltyCategoryTextColor('lifetime')}
                             title={`New species (first seen ${item.days_since_first_seen ?? 0} day${(item.days_since_first_seen ?? 0) === 1 ? '' : 's'} ago)`}
                           >
                             <Star class="size-3 fill-current" />
@@ -1327,7 +1323,7 @@ Responsive Breakpoints:
                         {:else if noveltyCat === 'year'}
                           <span
                             class="shrink-0"
-                            style:color={noveltyCategoryColorVar('year')}
+                            style:color={noveltyCategoryTextColor('year')}
                             title={`First time this year (${item.days_this_year ?? 0} day${(item.days_this_year ?? 0) === 1 ? '' : 's'} ago)`}
                           >
                             📅
@@ -1335,7 +1331,7 @@ Responsive Breakpoints:
                         {:else if noveltyCat === 'season'}
                           <span
                             class="shrink-0"
-                            style:color={noveltyCategoryColorVar('season')}
+                            style:color={noveltyCategoryTextColor('season')}
                             title={`First time this ${item.current_season || 'season'} (${item.days_this_season ?? 0} day${(item.days_this_season ?? 0) === 1 ? '' : 's'} ago)`}
                           >
                             🌿
@@ -1343,7 +1339,7 @@ Responsive Breakpoints:
                         {:else if noveltyCat === 'infrequent'}
                           <span
                             class="inline-block shrink-0"
-                            style:color={noveltyCategoryColorVar('infrequent')}
+                            style:color={noveltyCategoryTextColor('infrequent')}
                             title={t('dashboard.dailySummary.tooltips.infrequent', {
                               days: item.days_since_last_seen ?? 0,
                             })}

@@ -12,6 +12,8 @@
   import {
     type Notification,
     mergeAndDeduplicateNotifications,
+    NOTIFICATION_DELETED_WINDOW_EVENT,
+    withoutRecentlyDeleted,
     isExistingNotification,
     shouldShowNotification,
     sanitizeNotificationMessage,
@@ -103,15 +105,15 @@
   function getNotificationIconClass(notification: Notification): string {
     switch (notification.type) {
       case 'error':
-        return 'bg-[var(--color-error)]/20 text-[var(--color-error)]';
+        return 'bg-[var(--color-error)]/20 text-[var(--text-error)]';
       case 'warning':
-        return 'bg-[var(--color-warning)]/20 text-[var(--color-warning)]';
+        return 'bg-[var(--color-warning)]/20 text-[var(--text-warning)]';
       case 'detection':
-        return 'bg-[var(--color-success)]/20 text-[var(--color-success)]';
+        return 'bg-[var(--color-success)]/20 text-[var(--text-success)]';
       case 'system':
-        return 'bg-[var(--color-primary)]/20 text-[var(--color-primary)]';
+        return 'bg-[var(--color-primary)]/20 text-[var(--text-primary)]';
       case 'info':
-        return 'bg-[var(--color-info)]/20 text-[var(--color-info)]';
+        return 'bg-[var(--color-info)]/20 text-[var(--text-info)]';
       default:
         return 'bg-[var(--color-base-300)] text-[var(--color-base-content)]';
     }
@@ -138,7 +140,10 @@
         `/api/v2/notifications?limit=${NOTIFICATIONS_LIMIT}&status=unread`
       );
       // Map API notifications to frontend format (status -> read)
-      const apiNotifications = mapApiNotifications(data?.notifications ?? []);
+      // A notification deleted while this load was in flight must not come back.
+      const apiNotifications = withoutRecentlyDeleted(
+        mapApiNotifications(data?.notifications ?? [])
+      );
 
       // Apply deduplication to API-fetched notifications
       // This ensures consistent deduplication behavior between SSE and API
@@ -434,7 +439,7 @@
       // Add event listeners
       globalThis.document.addEventListener('click', handleClickOutside);
       globalThis.window.addEventListener(
-        'notification-deleted',
+        NOTIFICATION_DELETED_WINDOW_EVENT,
         handleNotificationDeleted as globalThis.EventListener
       );
 
@@ -450,7 +455,7 @@
       return () => {
         globalThis.document.removeEventListener('click', handleClickOutside);
         globalThis.window.removeEventListener(
-          'notification-deleted',
+          NOTIFICATION_DELETED_WINDOW_EVENT,
           handleNotificationDeleted as globalThis.EventListener
         );
         cleanup();
@@ -503,7 +508,7 @@
         {#if formattedNotifications.length > 0}
           <button
             onclick={markAllAsRead}
-            class="text-sm text-[var(--color-primary)] hover:text-[var(--color-primary-focus)] hover:underline transition-colors duration-150"
+            class="text-sm text-[var(--text-primary)] underline hover:decoration-2"
             aria-label={t('notifications.actions.markAllRead')}
           >
             {t('notifications.actions.markAllRead')}

@@ -40,12 +40,8 @@ func fakeFFmpegPath(t *testing.T) string {
 	return path
 }
 
-// The "missing ffmpeg forces wav" branch is not covered here because
-// validateAudioSettings calls ValidateToolPath, which falls back to
-// exec.LookPath("ffmpeg") when the configured FfmpegPath is empty.
-// In any CI environment with ffmpeg on PATH the branch is unreachable
-// without mocking exec.LookPath. Behaviour is exercised by the
-// existing integration test suite in internal/analysis.
+// TestValidateAudioSettings_NormalizesEmptyExportType checks that an empty export
+// type heals to WAV, an unknown type is rejected, and lossy bitrates are validated.
 func TestValidateAudioSettings_NormalizesEmptyExportType(t *testing.T) {
 	t.Parallel()
 	ffmpegPath := fakeFFmpegPath(t)
@@ -164,6 +160,79 @@ func TestValidateAudioSettings_NeverReturnsEmptyType(t *testing.T) {
 	}
 }
 
+// TestValidateAudioSettings_UltrasonicType verifies the dedicated ultrasonic
+// export format is restricted to WAV or FLAC, heals an empty value to FLAC, and
+// rejects lossy or unknown formats. It is used only for bat/ultrasonic captures
+// above the analysis rate, which must be stored losslessly.
+func TestValidateAudioSettings_UltrasonicType(t *testing.T) {
+	t.Parallel()
+	ffmpegPath := fakeFFmpegPath(t)
+
+	cases := []struct {
+		name    string
+		in      string
+		wantErr bool
+		want    string
+	}{
+		{"empty normalizes to flac", "", false, AudioExportTypeFLAC},
+		{"flac accepted", "flac", false, AudioExportTypeFLAC},
+		{"wav accepted", "wav", false, AudioExportTypeWAV},
+		{"mp3 rejected (lossy)", "mp3", true, ""},
+		{"opus rejected (lossy)", "opus", true, ""},
+		{"aac rejected (lossy)", "aac", true, ""},
+		{"gibberish rejected", "gibberish", true, ""},
+		{"whitespace-padded flac rejected", " flac", true, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := newMinimalAudioSettings()
+			settings.FfmpegPath = ffmpegPath
+			settings.Export.UltrasonicType = tc.in
+
+			err := validateAudioSettings(settings)
+
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, settings.Export.UltrasonicType,
+				"UltrasonicType should be normalized in-memory after validateAudioSettings")
+		})
+	}
+}
+
+// TestValidateAudioSettings_NeverReturnsEmptyUltrasonicType is the class-of-bug
+// invariant for the ultrasonic format: a successful validation must leave
+// UltrasonicType a non-empty lossless format so resolveExportFormat never returns
+// an empty container for a bat capture above the analysis rate.
+func TestValidateAudioSettings_NeverReturnsEmptyUltrasonicType(t *testing.T) {
+	t.Parallel()
+	ffmpegPath := fakeFFmpegPath(t)
+
+	for _, in := range []string{"", " ", "wav", "flac"} {
+		t.Run("input="+in, func(t *testing.T) {
+			t.Parallel()
+
+			settings := newMinimalAudioSettings()
+			settings.Export.Enabled = false // normalization must still run
+			settings.FfmpegPath = ffmpegPath
+			settings.Export.UltrasonicType = in
+
+			if err := validateAudioSettings(settings); err != nil {
+				return // an invalid input is allowed to error; empty must not
+			}
+			require.NotEmpty(t, strings.TrimSpace(settings.Export.UltrasonicType),
+				"UltrasonicType is empty after validation (input=%q)", in)
+			require.True(t, isLosslessExportFormat(settings.Export.UltrasonicType),
+				"UltrasonicType must be a lossless format after validation (input=%q)", in)
+		})
+	}
+}
+
 // newMinimalAudioSettings returns an AudioSettings instance populated with the
 // minimum fields needed to pass validateAudioSettings apart from the fields
 // the individual test cases override. Values mirror the Viper defaults from
@@ -181,4 +250,51 @@ func newMinimalAudioSettings() *AudioSettings {
 	s.Export.Path = "clips/"
 	s.Export.Retention.Policy = RetentionPolicyNone
 	return s
+}
+
+// TestValidateAudioSettings_ExportDenoiseStrength verifies the export denoise
+// strength heals an empty value to the default preset and rejects anything that
+// is not a preset, whether or not denoise is enabled (the toggle can be flipped
+// on later without re-triggering validation).
+func TestValidateAudioSettings_ExportDenoiseStrength(t *testing.T) {
+	t.Parallel()
+	ffmpegPath := fakeFFmpegPath(t)
+
+	cases := []struct {
+		name    string
+		enabled bool
+		in      string
+		wantErr bool
+		want    string
+	}{
+		{"empty heals when on", true, "", false, DefaultDenoisePreset},
+		{"empty heals when off", false, "", false, DefaultDenoisePreset},
+		{"light", true, DenoisePresetLight, false, DenoisePresetLight},
+		{"light-medium", true, DenoisePresetLightMedium, false, DenoisePresetLightMedium},
+		{"medium", false, DenoisePresetMedium, false, DenoisePresetMedium},
+		{"heavy", true, DenoisePresetHeavy, false, DenoisePresetHeavy},
+		{"unknown rejected when on", true, "extreme", true, ""},
+		{"unknown rejected when off", false, "extreme", true, ""},
+		{"whitespace-padded rejected", true, " light", true, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := newMinimalAudioSettings()
+			settings.FfmpegPath = ffmpegPath
+			settings.Export.Denoise = DenoiseSettings{Enabled: tc.enabled, Strength: tc.in}
+
+			err := validateAudioSettings(settings)
+
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, settings.Export.Denoise.Strength)
+			assert.Equal(t, tc.enabled, settings.Export.Denoise.Enabled)
+		})
+	}
 }

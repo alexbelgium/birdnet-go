@@ -9,27 +9,43 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
+	"github.com/tphakala/birdnet-go/internal/wallclock"
 )
 
-// InitFromDatabase populates the tracker from historical data.
+// InitFromDatabase populates the tracker from historical data, as of the
+// current time.
 // This should be called once during initialization. It uses a background
 // context (no cancellation); the startup path uses InitFromDatabaseAsync, which
 // supplies a cancellable context via initFromDatabaseContext.
 func (t *SpeciesTracker) InitFromDatabase() error {
-	return t.initFromDatabaseContext(context.Background())
+	return t.initFromDatabaseContext(context.Background(), time.Now())
 }
 
-// initFromDatabaseContext performs the historical load under the given context,
-// so a shutdown during a background warm-up can abort the in-flight DB scan.
-func (t *SpeciesTracker) initFromDatabaseContext(ctx context.Context) error {
+// InitFromDatabaseAt populates the tracker from historical data as if the load
+// ran at now. It is the load counterpart of newTrackerFromSettingsAt: tests use
+// it to load a fixed fixture year instead of whatever year the real clock is in.
+//
+// WARNING: this method is exported only so the speciestest subpackage can reach
+// it. It is not guarded by testing.Testing() because production code must not
+// import the testing package. Do not call it from production code; use
+// InitFromDatabase.
+//
+// It records now as the sync time, so a following SyncIfNeeded reloads at the
+// real clock on its next call. Do not mix the two in one test.
+func (t *SpeciesTracker) InitFromDatabaseAt(now time.Time) error {
+	return t.initFromDatabaseContext(context.Background(), now)
+}
+
+// initFromDatabaseContext performs the historical load as of now under the
+// given context, so a shutdown during a background warm-up can abort the
+// in-flight DB scan. Production callers pass time.Now().
+func (t *SpeciesTracker) initFromDatabaseContext(ctx context.Context, now time.Time) error {
 	if t.ds == nil {
 		return errors.Newf("datastore is nil").
 			Component("new-species-tracker").
 			Category(errors.CategoryConfiguration).
 			Build()
 	}
-
-	now := time.Now()
 
 	getLog().Debug("Initializing species tracker from database",
 		logger.String("current_time", now.Format(time.DateTime)),
@@ -77,6 +93,12 @@ func (t *SpeciesTracker) initFromDatabaseContext(ctx context.Context) error {
 				Context("operation", "load_seasonal_data").
 				Context("current_season", t.currentSeason).
 				Build()
+		}
+		if err := t.loadSeasonCarryoverFromDatabase(ctx, now); err != nil {
+			getLog().Error("Failed to load season carry-over species from database",
+				logger.Error(err),
+				logger.String("operation", "load_season_carryover"),
+				logger.String("impact", "Species present before the season began may show as new this season"))
 		}
 	}
 
@@ -139,6 +161,7 @@ func (t *SpeciesTracker) loadLifetimeDataFromDatabase(ctx context.Context, now t
 	case len(newSpeciesData) > 0:
 		// Clear and populate lifetime tracking map with new data
 		t.speciesFirstSeen = make(map[string]time.Time, len(newSpeciesData))
+		t.speciesFirstAudioDate = make(map[string]time.Time)
 		t.speciesLastSeen = make(map[string]time.Time, len(newSpeciesData))
 		for _, species := range newSpeciesData {
 			// Canonicalize so a detection later arriving under the canonical name
@@ -153,6 +176,16 @@ func (t *SpeciesTracker) loadLifetimeDataFromDatabase(ctx context.Context, now t
 						logger.String("date", species.FirstSeenDate),
 						logger.Error(err))
 					continue
+				}
+				// A recording can start before midnight and be saved with the next
+				// day's date. Restore its audio date for notification deadlines while
+				// preserving the saved date used by badges and novelty reconstruction.
+				if !species.FirstBeginTime.IsZero() {
+					year, month, day := species.FirstBeginTime.Date()
+					audioDate := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+					if audioDate.Before(firstSeen) {
+						keepEarliest(t.speciesFirstAudioDate, key, audioDate)
+					}
 				}
 				// Keep the earliest first-seen and latest last-seen when aliases collapse.
 				keepEarliest(t.speciesFirstSeen, key, firstSeen)
@@ -175,6 +208,7 @@ func (t *SpeciesTracker) loadLifetimeDataFromDatabase(ctx context.Context, now t
 	case len(t.speciesFirstSeen) == 0:
 		// No data from database and no existing data - initialize empty map
 		t.speciesFirstSeen = make(map[string]time.Time, initialSpeciesCapacity)
+		t.speciesFirstAudioDate = nil
 		t.speciesLastSeen = make(map[string]time.Time, initialSpeciesCapacity)
 		getLog().Debug("No species data from database, initialized empty tracking")
 	default:
@@ -193,17 +227,17 @@ func (t *SpeciesTracker) loadNoveltyEpisodesFromDatabase(ctx context.Context, no
 		return nil
 	}
 
-	endDate := trackerDateOnly(now)
-	startDate := endDate.AddDate(0, 0, -(t.windowDays + 1))
+	endDate := wallclock.DateOf(now)
+	startDate := endDate.AddDays(-(t.windowDays + 1))
 
-	detections, err := history.GetSpeciesDetectionDatesInPeriod(ctx, startDate.Format(time.DateOnly), endDate.Format(time.DateOnly), defaultDBQueryLimit, 0)
+	detections, err := history.GetSpeciesDetectionDatesInPeriod(ctx, startDate.String(), endDate.String(), defaultDBQueryLimit, 0)
 	if err != nil {
 		return errors.Newf("failed to load novelty detection dates from database: %w", err).
 			Component("new-species-tracker").
 			Category(errors.CategoryDatabase).
 			Context("operation", "load_novelty_detection_dates").
-			Context("start_date", startDate.Format(time.DateOnly)).
-			Context("end_date", endDate.Format(time.DateOnly)).
+			Context("start_date", startDate.String()).
+			Context("end_date", endDate.String()).
 			Build()
 	}
 
@@ -343,18 +377,14 @@ func normalizeNoveltyDetectionDates(dates []time.Time) []time.Time {
 	return unique
 }
 
-func trackerDateOnly(ts time.Time) time.Time {
-	year, month, day := ts.Date()
-	return time.Date(year, month, day, 0, 0, 0, 0, ts.Location())
-}
-
 func sameTrackerDate(a, b time.Time) bool {
 	ay, am, ad := a.Date()
 	by, bm, bd := b.Date()
 	return ay == by && am == bm && ad == bd
 }
 
-// loadYearlyDataFromDatabase loads first detection data for the current year
+// loadYearlyDataFromDatabase loads first detection data for the tracking year of
+// now, which it makes the current tracking year. Assumes lock is held.
 func (t *SpeciesTracker) loadYearlyDataFromDatabase(ctx context.Context, now time.Time) error {
 	startDate, endDate := t.getYearDateRange(now)
 
@@ -370,6 +400,18 @@ func (t *SpeciesTracker) loadYearlyDataFromDatabase(ctx context.Context, now tim
 			Context("year_end", endDate).
 			Context("current_year", t.currentYear).
 			Build()
+	}
+
+	// The rows loaded below belong to now's tracking year, so label the set with
+	// that year before they replace it. This runs only after the query succeeded,
+	// so a failed load leaves the tracker untouched. Unlike the live path
+	// (checkAndResetPeriods, forward-only), the load pins the year in both
+	// directions: it covers a load past the reset before any tracker call, and a
+	// load whose now predates a call that already advanced the year. Doing it
+	// before the switch keeps the "preserve existing data" branch within one
+	// tracking year.
+	if trackingYear := t.getTrackingYear(now); trackingYear != t.currentYear {
+		t.resetYearlyTrackingLocked(trackingYear, now)
 	}
 
 	// Only clear existing data if we have new data to replace it with
@@ -502,6 +544,59 @@ func (t *SpeciesTracker) loadSeasonalDataFromDatabase(ctx context.Context, now t
 	}
 
 	t.speciesBySeason = newSeasonData
+	return nil
+}
+
+// loadSeasonCarryoverFromDatabase records the species detected within the
+// seasonal window before the current season began, so they are not reported
+// as new this season after a restart. It needs only the set of species, so it
+// queries one row per species rather than one per species per day, which a
+// wide seasonal window on a busy station could truncate at the query limit.
+func (t *SpeciesTracker) loadSeasonCarryoverFromDatabase(ctx context.Context, now time.Time) error {
+	seasonStart, ok := t.seasonStartDate(t.getCurrentSeason(now), now)
+	if !ok {
+		return nil
+	}
+
+	startDate := t.seasonCarryoverLookbackStart(seasonStart).String()
+	endDate := seasonStart.AddDays(-1).String()
+	detections, err := t.ds.GetSpeciesFirstDetectionInPeriod(ctx, startDate, endDate, defaultDBQueryLimit, 0)
+	if err != nil {
+		return errors.Newf("failed to load season carry-over species from database: %w", err).
+			Component("new-species-tracker").
+			Category(errors.CategoryDatabase).
+			Context("operation", "load_season_carryover").
+			Context("start_date", startDate).
+			Context("end_date", endDate).
+			Build()
+	}
+
+	// An empty result for a season boundary we've already recorded carry-over
+	// data for is more likely a transient read (this runs on every periodic
+	// sync, not just startup) than a genuine "nothing was heard before this
+	// season" - keep the existing set rather than wiping it, matching the
+	// other loaders' empty-result handling.
+	hasExistingData := len(t.seasonCarryover) > 0 && t.seasonCarryoverStart == seasonStart
+	if len(detections) == 0 && hasExistingData {
+		getLog().Debug("No season carry-over detections returned, preserving existing tracking data",
+			logger.String("season_start", seasonStart.String()),
+			logger.Int("existing_species", len(t.seasonCarryover)))
+		return nil
+	}
+
+	carryover := make(map[string]struct{}, len(detections))
+	for _, detection := range detections {
+		if detection.ScientificName != "" {
+			carryover[canonicalSpeciesName(detection.ScientificName)] = struct{}{}
+		}
+	}
+	t.seasonCarryover = carryover
+	t.seasonCarryoverStart = seasonStart
+
+	getLog().Debug("Loaded season carry-over species from database",
+		logger.String("season_start", seasonStart.String()),
+		logger.Int("species", len(carryover)))
+
 	return nil
 }
 

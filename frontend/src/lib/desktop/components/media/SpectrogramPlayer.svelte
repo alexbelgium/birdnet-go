@@ -12,6 +12,8 @@
   - audioUrl: URL of the audio file to play
   - detectionId: Unique ID for the detection
   - spectrogramSize: Spectrogram display size - md/lg/xl (default: md)
+  - denoisePreset: Playback denoise default. The player loads audioUrl for metadata and
+    switches to the denoised clip on the first play (default: none)
   - onPlayStart: Callback when audio starts playing
   - onPlayEnd: Callback when audio stops playing
 -->
@@ -21,10 +23,18 @@
   import { useAudioPlayback } from '$lib/utils/useAudioPlayback.svelte';
   import { useDelayedLoading } from '$lib/utils/delayedLoading.svelte';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
+  import { audioUrlFor } from '$lib/utils/playbackDenoise';
   import { get } from 'svelte/store';
   import { dashboardSettings } from '$lib/stores/settings';
   import { t } from '$lib/i18n';
+  import { playButtonLabelKey } from '$lib/utils/audio';
   import { loggers } from '$lib/utils/logger';
+  import {
+    SPECTROGRAM_REASON,
+    fetchSpectrogramStatus,
+    isTerminalSpectrogramReason,
+    markSpectrogramSourceMissing,
+  } from '$lib/utils/spectrogramStatus';
 
   const logger = loggers.audio;
 
@@ -34,18 +44,31 @@
     audioUrl: string;
     detectionId: string;
     spectrogramSize?: SpectrogramSize;
+    denoisePreset?: string;
     onPlayStart?: () => void;
     onPlayEnd?: () => void;
   }
 
-  let { audioUrl, detectionId, spectrogramSize = 'md', onPlayStart, onPlayEnd }: Props = $props();
+  let {
+    audioUrl,
+    detectionId,
+    spectrogramSize = 'md',
+    denoisePreset = '',
+    onPlayStart,
+    onPlayEnd,
+  }: Props = $props();
+
+  // The clip the first play switches to; '' keeps the stored clip.
+  const playUrl = $derived(denoisePreset ? audioUrlFor(detectionId, denoisePreset) : '');
 
   // --- Audio engine (shared composable) ---
   // Initial values are intentionally captured here; audioUrl reactivity is
   // handled below via $effect calling audio.setAudioUrl(). The composable
-  // stores detectionId only for logging and callbacks are stable references.
+  // reads detectionId once, for logging and the known-missing check, and callbacks are stable references.
   // svelte-ignore state_referenced_locally
   const initialAudioUrl = audioUrl;
+  // svelte-ignore state_referenced_locally
+  const initialPlayUrl = playUrl;
   // svelte-ignore state_referenced_locally
   const initialDetectionId = detectionId;
   // svelte-ignore state_referenced_locally
@@ -55,6 +78,7 @@
   const defaultGainDb = get(dashboardSettings)?.defaultAudioGain ?? 0;
   const audio = useAudioPlayback({
     audioUrl: initialAudioUrl,
+    playUrl: initialPlayUrl,
     detectionId: initialDetectionId,
     defaultGainDb,
     onPlayStart: initialOnPlayStart,
@@ -63,7 +87,7 @@
 
   // React to prop changes
   $effect(() => {
-    audio.setAudioUrl(audioUrl);
+    audio.setAudioUrl(audioUrl, playUrl);
   });
 
   // --- Spectrogram loading ---
@@ -97,6 +121,50 @@
     )
   );
 
+  // The status is read once, at the first failure of an image: a terminal reason
+  // (the source clip is gone or cannot be rendered) ends the retries, which can
+  // only repeat the same answer.
+  let statusAbortController: AbortController | undefined;
+
+  function cancelStatusCheck() {
+    statusAbortController?.abort();
+    statusAbortController = undefined;
+  }
+
+  function clearRetryTimer() {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+    }
+  }
+
+  async function endRetriesOnTerminalReason() {
+    cancelStatusCheck();
+    const controller = new AbortController();
+    statusAbortController = controller;
+    const checkedId = detectionId;
+    const status = await fetchSpectrogramStatus(
+      buildAppUrl(
+        `/api/v2/spectrogram/${encodeURIComponent(checkedId)}/status?size=${spectrogramSize}&raw=true`
+      ),
+      controller.signal
+    );
+    if (controller.signal.aborted || !status || !isTerminalSpectrogramReason(status.reason)) return;
+
+    logger.debug('Spectrogram cannot be rendered, ending retries', {
+      detectionId: checkedId,
+      reason: status.reason,
+    });
+    if (status.reason === SPECTROGRAM_REASON.sourceMissing) {
+      markSpectrogramSourceMissing(checkedId);
+    }
+    clearRetryTimer();
+    spectrogramLoader.setError();
+  }
+
+  // Ends a status check still in flight when the player is destroyed.
+  $effect(() => cancelStatusCheck);
+
   // Track previous detection ID to detect changes and reset spectrogram state.
   // Uses a non-reactive variable since we only compare inside the $effect.
   // svelte-ignore state_referenced_locally
@@ -109,10 +177,8 @@
       retryCount = 0;
       cacheKey = 0;
       spectrogramLoader.setLoading(true);
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = undefined;
-      }
+      cancelStatusCheck();
+      clearRetryTimer();
     }
   });
 
@@ -121,20 +187,17 @@
     if (spectrogramUrl) {
       spectrogramLoader.setLoading(true);
     }
-    return () => {
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = undefined;
-      }
-    };
+    return clearRetryTimer;
   });
 
   function handleSpectrogramLoad() {
     spectrogramLoader.setLoading(false);
     retryCount = 0;
+    cancelStatusCheck();
   }
 
   function handleSpectrogramError() {
+    if (retryCount === 0) void endRetriesOnTerminalReason();
     if (retryCount < MAX_RETRIES) {
       const delay = RETRY_DELAYS[Math.min(retryCount, RETRY_DELAYS.length - 1)];
       retryCount++;
@@ -187,7 +250,7 @@
       class:is-playing={audio.isPlaying}
       onclick={handlePlayClick}
       disabled={audio.isLoading}
-      aria-label={audio.isPlaying ? t('media.audio.pause') : t('media.audio.play')}
+      aria-label={t(playButtonLabelKey(audio.isLoading, audio.isPlaying))}
     >
       {#if audio.isLoading}
         <div
@@ -211,7 +274,7 @@
   <!-- Audio error -->
   {#if audio.error}
     <div class="audio-error" role="alert" aria-live="assertive">
-      <span class="text-xs text-[var(--color-error)]">{audio.error}</span>
+      <span class="text-xs text-[var(--text-error)]">{audio.error}</span>
     </div>
   {/if}
 </div>

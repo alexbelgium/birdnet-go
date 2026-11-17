@@ -29,34 +29,25 @@ func setPathForContext(t *testing.T, c echo.Context, routeTemplate string) {
 	c.SetPath(routeTemplate)
 }
 
-func TestSSESkipper(t *testing.T) {
-	t.Parallel()
-
-	t.Run("skips text/event-stream", func(t *testing.T) {
-		t.Parallel()
-		c, _ := newTestContext(t, http.MethodGet, "/anything")
-		c.Request().Header.Set("Accept", "text/event-stream")
-		assert.True(t, SSESkipper(c))
-	})
-
-	t.Run("does not skip JSON accept", func(t *testing.T) {
-		t.Parallel()
-		c, _ := newTestContext(t, http.MethodGet, "/anything")
-		c.Request().Header.Set("Accept", "application/json")
-		assert.False(t, SSESkipper(c))
-	})
-
-	t.Run("does not skip missing accept", func(t *testing.T) {
-		t.Parallel()
-		c, _ := newTestContext(t, http.MethodGet, "/anything")
-		assert.False(t, SSESkipper(c))
-	})
-}
-
 func TestMediaPathSkipper_SkipsBinaryRoutes(t *testing.T) {
 	t.Parallel()
 
-	for route := range binaryMediaRoutes {
+	// Hardcoded route templates (NOT derived from binaryMediaRoutes) so that
+	// dropping or renaming an entry in the production map fails this test.
+	routes := []string{
+		"/api/v2/audio/:id",
+		"/api/v2/audio/:id/clip",
+		"/api/v2/audio/:id/process",
+		"/api/v2/media/audio/:filename",
+		"/api/v2/media/audio",
+		"/api/v2/spectrogram/:id",
+		"/api/v2/spectrogram/:id/process",
+		"/api/v2/media/spectrogram/:filename",
+		"/api/v2/media/species-image",
+		"/api/v2/media/image/:scientific_name",
+		"/api/v2/media/bird-image/:scientific_name",
+	}
+	for _, route := range routes {
 		t.Run(route, func(t *testing.T) {
 			t.Parallel()
 			c, _ := newTestContext(t, http.MethodGet, "/irrelevant")
@@ -147,6 +138,14 @@ func TestDefaultGzipSkipper(t *testing.T) {
 		assert.False(t, DefaultGzipSkipper(c))
 	})
 
+	t.Run("does not skip a JSON Accept header", func(t *testing.T) {
+		t.Parallel()
+		c, _ := newTestContext(t, http.MethodGet, "/api/v2/detections")
+		setPathForContext(t, c, "/api/v2/detections")
+		c.Request().Header.Set("Accept", "application/json")
+		assert.False(t, DefaultGzipSkipper(c))
+	})
+
 	t.Run("skips precompressed route", func(t *testing.T) {
 		t.Parallel()
 		c, _ := newTestContext(t, http.MethodGet, "/api/v2/species/dictionary/fi")
@@ -209,21 +208,6 @@ func TestDefaultGzipSkipper_SkipsStreamingJSONRoutes(t *testing.T) {
 		assert.False(t, DefaultGzipSkipper(c),
 			"the MQTT status route returns a normal JSON body and must still be gzip-compressed")
 	})
-
-	// Guard against the production map drifting from the hardcoded set: every known
-	// route must be present, and the map must contain nothing unexpected.
-	known := make(map[string]struct{}, len(streamingRoutes))
-	for _, r := range streamingRoutes {
-		known[r] = struct{}{}
-		if _, ok := streamingJSONRoutes[r]; !ok {
-			t.Errorf("streamingJSONRoutes is missing expected streaming route %q", r)
-		}
-	}
-	for r := range streamingJSONRoutes {
-		if _, ok := known[r]; !ok {
-			t.Errorf("streamingJSONRoutes has unexpected route %q not asserted by this test", r)
-		}
-	}
 }
 
 // TestNewGzip_EndToEnd_StreamingJSONRouteNotCompressed drives the real gzip

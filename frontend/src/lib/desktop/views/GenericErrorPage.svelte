@@ -2,6 +2,8 @@
   import { cn } from '$lib/utils/cn.js';
   import { t } from '$lib/i18n';
   import { appState } from '$lib/stores/appState.svelte';
+  import { navigation } from '$lib/stores/navigation.svelte';
+  import { buildLoginUrl } from '$lib/utils/loginRedirect';
 
   interface SecuritySettings {
     enabled: boolean;
@@ -27,12 +29,10 @@
   }: Props = $props();
 
   let showDetails = $derived(!security.enabled || security.accessAllowed);
+  // Back to this page after logging in; the link keeps any reverse-proxy prefix.
+  let loginUrl = $derived(buildLoginUrl(navigation.currentPath + navigation.currentSearch));
   let hasStackTrace = $derived(stackTrace && stackTrace.trim().length > 0);
 </script>
-
-<svelte:head>
-  <title>{code} - {title}</title>
-</svelte:head>
 
 <div class={cn('col-span-12 min-h-[60vh] flex items-center justify-center', className)}>
   <div class="text-center p-8 rounded-lg bg-[var(--color-base-100)] shadow-lg max-w-4xl w-full">
@@ -75,7 +75,7 @@
         </a>
       {:else}
         <a
-          href="/login"
+          href={loginUrl}
           class="btn btn-secondary normal-case text-base font-semibold transition duration-300"
         >
           {t('common.loginToViewDetails')}

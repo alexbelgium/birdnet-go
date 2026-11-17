@@ -1,7 +1,6 @@
 package species
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
+	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
 // TestWinterSeasonAdjustmentBug tests the critical winter season adjustment logic
@@ -226,7 +226,7 @@ func TestYearResetLogic(t *testing.T) {
 
 	tracker := NewTrackerFromSettings(ds, settings)
 	tracker.SetCurrentYearForTesting(2023)
-	err := tracker.InitFromDatabase()
+	err := tracker.initFromDatabaseContext(t.Context(), time.Date(2023, 12, 31, 23, 59, 59, 0, time.UTC))
 	require.NoError(t, err)
 
 	// Add species in 2023
@@ -546,7 +546,7 @@ func TestInitFromDatabaseError(t *testing.T) {
 
 	// Mock returns error
 	ds.On("GetNewSpeciesDetections", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("int"), mock.AnythingOfType("int")).
-		Return(nil, errors.New("database error"))
+		Return(nil, errors.NewStd("database error"))
 
 	settings := &conf.SpeciesTrackingSettings{
 		Enabled:              true,
@@ -754,7 +754,7 @@ func TestLoadYearlyDataError(t *testing.T) {
 	ds.On("DeleteExpiredNotificationHistory", mock.Anything, mock.AnythingOfType("time.Time")).
 		Return(int64(0), nil).Maybe()
 	ds.On("GetSpeciesFirstDetectionInPeriod", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("int"), mock.AnythingOfType("int")).
-		Return(nil, errors.New("yearly data error"))
+		Return(nil, errors.NewStd("yearly data error"))
 
 	settings := &conf.SpeciesTrackingSettings{
 		Enabled:              true,
@@ -794,7 +794,7 @@ func TestLoadSeasonalDataError(t *testing.T) {
 	ds.On("GetSpeciesFirstDetectionInPeriod", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("int"), mock.AnythingOfType("int")).
 		Return([]datastore.NewSpeciesData{}, nil).Once() // yearly succeeds
 	ds.On("GetSpeciesFirstDetectionInPeriod", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("int"), mock.AnythingOfType("int")).
-		Return(nil, errors.New("seasonal data error")) // seasonal fails
+		Return(nil, errors.NewStd("seasonal data error")) // seasonal fails
 
 	settings := &conf.SpeciesTrackingSettings{
 		Enabled:              true,
