@@ -1404,7 +1404,7 @@ Performance Optimizations:
             class={cn(
               'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
               bannerConfig.showImage
-                ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                 : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
             )}
             aria-pressed={bannerConfig.showImage}
@@ -1419,7 +1419,7 @@ Performance Optimizations:
               value={bannerConfig.imagePath}
               placeholder={t('dashboard.banner.imageUrlPlaceholder')}
               aria-label={t('dashboard.banner.imageUrlPlaceholder')}
-              class="w-full rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-100)] px-2 py-1 text-xs text-[var(--color-base-content)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
+              class="w-full rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-100)] px-2 py-1 text-xs text-[var(--color-base-content)] focus-ring"
               oninput={e =>
                 onUpdate({
                   ...element,
@@ -1439,7 +1439,7 @@ Performance Optimizations:
               class={cn(
                 'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
                 bannerConfig.showLocationMap
-                  ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                  ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                   : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
               )}
               aria-pressed={bannerConfig.showLocationMap}
@@ -1470,7 +1470,7 @@ Performance Optimizations:
                       });
                     }
                   }}
-                  class="ml-auto w-16 rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-100)] px-2 py-1 text-xs text-[var(--color-base-content)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
+                  class="ml-auto w-16 rounded-lg border border-[var(--color-base-300)] bg-[var(--color-base-100)] px-2 py-1 text-xs text-[var(--color-base-content)] focus-ring"
                 />
               </div>
 
@@ -1484,7 +1484,7 @@ Performance Optimizations:
                 class={cn(
                   'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
                   (bannerConfig.showPin ?? false)
-                    ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                    ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                     : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
                 )}
                 aria-pressed={bannerConfig.showPin ?? false}
@@ -1506,7 +1506,7 @@ Performance Optimizations:
                 class={cn(
                   'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
                   (bannerConfig.mapExpandable ?? true)
-                    ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                    ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                     : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
                 )}
                 aria-pressed={bannerConfig.mapExpandable ?? true}
@@ -1527,7 +1527,7 @@ Performance Optimizations:
             class={cn(
               'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
               bannerConfig.showWeather
-                ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--color-primary)]'
+                ? 'bg-[var(--color-primary)]/10 font-medium text-[var(--text-primary)]'
                 : 'text-[var(--color-base-content)]/60 hover:bg-[var(--color-base-200)]'
             )}
             aria-pressed={bannerConfig.showWeather}

@@ -33,6 +33,10 @@ const (
 const (
 	// mysqlComQuery is the MySQL protocol command byte of a text statement.
 	mysqlComQuery = 0x03
+	// mysqlComStmtClose is the command byte that closes a prepared statement.
+	mysqlComStmtClose = 0x19
+	// mysqlStmtIDLen is the length of the statement id that follows COM_STMT_CLOSE.
+	mysqlStmtIDLen = 4
 	// mysqlPacketHeaderLen is the length prefix plus sequence id before the command byte.
 	mysqlPacketHeaderLen = 4
 	// proxyReadBufferSize holds one client packet; the statements here are small.
@@ -107,10 +111,77 @@ func (p *faultProxy) track(c net.Conn) {
 	p.mu.Unlock()
 }
 
-// isCommitPacket reports whether pkt is a COM_QUERY packet carrying COMMIT.
-func isCommitPacket(pkt []byte) bool {
-	return len(pkt) > mysqlPacketHeaderLen+1 && pkt[mysqlPacketHeaderLen] == mysqlComQuery &&
-		strings.EqualFold(strings.TrimSpace(string(pkt[mysqlPacketHeaderLen+1:])), "COMMIT")
+// isCommitPacket reports whether buf holds a COM_QUERY packet carrying COMMIT.
+// The driver can write the close of a prepared statement right before the
+// COMMIT, so one TCP read can hold both packets and the COMMIT may follow
+// another packet; every packet in buf is checked.
+func isCommitPacket(buf []byte) bool {
+	for len(buf) > mysqlPacketHeaderLen {
+		payloadLen := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
+		end := mysqlPacketHeaderLen + payloadLen
+		if end > len(buf) {
+			return false // partial packet at the end of the read
+		}
+		pkt := buf[:end]
+		if payloadLen > 0 && pkt[mysqlPacketHeaderLen] == mysqlComQuery &&
+			strings.EqualFold(strings.TrimSpace(string(pkt[mysqlPacketHeaderLen+1:])), "COMMIT") {
+			return true
+		}
+		buf = buf[end:]
+	}
+	return false
+}
+
+// mysqlTestPacket frames payload as a MySQL packet with sequence id 0.
+func mysqlTestPacket(payload ...byte) []byte {
+	n := len(payload)
+	return append([]byte{byte(n), byte(n >> 8), byte(n >> 16), 0}, payload...)
+}
+
+func TestIsCommitPacket(t *testing.T) {
+	t.Parallel()
+	query := func(sql string) []byte { return mysqlTestPacket(append([]byte{mysqlComQuery}, sql...)...) }
+	stmtClose := mysqlTestPacket(append([]byte{mysqlComStmtClose}, make([]byte, mysqlStmtIDLen)...)...)
+	// Payloads past 255 and 65535 bytes need the second and third length bytes.
+	const (
+		twoByteLenPayload   = 300
+		threeByteLenPayload = 70000
+	)
+	longInsert := func(n int) []byte { return query("INSERT " + strings.Repeat("x", n)) }
+	cat := func(parts ...[]byte) []byte {
+		var out []byte
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	partialCommit := query("COMMIT")[:8]
+
+	tests := []struct {
+		name string
+		buf  []byte
+		want bool
+	}{
+		{"commit only", query("COMMIT"), true},
+		{"commit lower case", query("commit"), true},
+		{"commit after statement close", cat(stmtClose, query("COMMIT")), true},
+		{"commit after a payload needing two length bytes", cat(longInsert(twoByteLenPayload), query("COMMIT")), true},
+		{"commit after a payload needing three length bytes", cat(longInsert(threeByteLenPayload), query("COMMIT")), true},
+		{"commit after empty packet", cat(mysqlTestPacket(), query("COMMIT")), true},
+		{"non-commit query", query("SELECT 1"), false},
+		{"statement close only", stmtClose, false},
+		{"empty buffer", nil, false},
+		{"shorter than a header", []byte{1, 0}, false},
+		{"header only", mysqlTestPacket(), false},
+		{"partial commit packet", partialCommit, false},
+		{"close then partial commit", cat(stmtClose, partialCommit), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isCommitPacket(tt.buf))
+		})
+	}
 }
 
 func (p *faultProxy) handle(client net.Conn) {
@@ -169,12 +240,12 @@ func (p *faultProxy) handle(client net.Conn) {
 	}
 }
 
-// TestSaveDetection_RetrySafeMarkerMatchesCommitOutcome_MySQL proves the marker
-// the processor relies on: a failed save carries datastore.ErrDetectionSaveRetrySafe
-// only when it stored nothing, and a COMMIT whose outcome is unknown does not,
-// whether the server applied it or not. MYSQL_TEST_IMAGE selects the server.
-func TestSaveDetection_RetrySafeMarkerMatchesCommitOutcome_MySQL(t *testing.T) {
-	containers.SkipIfContainerRuntimeUnavailable(t)
+// newFaultProxyStore starts a MySQL container, puts a faultProxy in front of it
+// and opens a Datastore through the proxy. The returned direct connection goes
+// straight to the server, so rows can be counted without the proxy's faults.
+// MYSQL_TEST_IMAGE selects the server.
+func newFaultProxyStore(t *testing.T) (ds *Datastore, proxy *faultProxy, direct *sql.DB) {
+	t.Helper()
 	ctx := t.Context()
 
 	cfg := &containers.MySQLConfig{
@@ -195,7 +266,7 @@ func TestSaveDetection_RetrySafeMarkerMatchesCommitOutcome_MySQL(t *testing.T) {
 	require.NoError(t, err)
 	port, err := container.GetPort(ctx)
 	require.NoError(t, err)
-	proxy := newFaultProxy(t, net.JoinHostPort(host, strconv.Itoa(port)))
+	proxy = newFaultProxy(t, net.JoinHostPort(host, strconv.Itoa(port)))
 	proxyHost, proxyPort, err := net.SplitHostPort(proxy.addr)
 	require.NoError(t, err)
 
@@ -207,7 +278,7 @@ func TestSaveDetection_RetrySafeMarkerMatchesCommitOutcome_MySQL(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, manager.Initialize())
-	ds, err := New(buildConfigForManager(t, manager, testLogger, true, nil))
+	ds, err = New(buildConfigForManager(t, manager, testLogger, true, nil))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ds.Close() })
 	ds.timezone = time.UTC
@@ -218,9 +289,21 @@ func TestSaveDetection_RetrySafeMarkerMatchesCommitOutcome_MySQL(t *testing.T) {
 	sqlDB.SetMaxIdleConns(0)
 
 	// Rows are counted over a direct connection, never through the proxy.
-	direct, err := sql.Open("mysql", container.GetDSN())
+	direct, err = sql.Open("mysql", container.GetDSN())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = direct.Close() })
+	return ds, proxy, direct
+}
+
+// TestSaveDetection_RetrySafeMarkerMatchesCommitOutcome_MySQL proves the marker
+// the processor relies on: a failed save carries datastore.ErrDetectionSaveRetrySafe
+// only when it stored nothing, and a COMMIT whose outcome is unknown does not,
+// whether the server applied it or not. MYSQL_TEST_IMAGE selects the server.
+func TestSaveDetection_RetrySafeMarkerMatchesCommitOutcome_MySQL(t *testing.T) {
+	containers.SkipIfContainerRuntimeUnavailable(t)
+
+	ds, proxy, direct := newFaultProxyStore(t)
+	ctx := t.Context()
 	countRows := func(clip string) int {
 		var n int
 		require.NoError(t, direct.QueryRowContext(ctx, "SELECT COUNT(*) FROM detections WHERE clip_name = ?", clip).Scan(&n))
@@ -286,4 +369,93 @@ func TestSaveDetection_RetrySafeMarkerMatchesCommitOutcome_MySQL(t *testing.T) {
 				5*time.Second, 50*time.Millisecond, "rows stored for %s", tc.clip)
 		})
 	}
+}
+
+// TestBatchSaveDynamicThresholds_RepeatAfterLostCommit_MySQL proves what the
+// processor's threshold save retry relies on: a failed batch save is classified
+// as a connectivity error, and repeating it after a COMMIT whose outcome is
+// unknown leaves exactly one row per species with the snapshot's values.
+// MYSQL_TEST_IMAGE selects the server.
+func TestBatchSaveDynamicThresholds_RepeatAfterLostCommit_MySQL(t *testing.T) {
+	containers.SkipIfContainerRuntimeUnavailable(t)
+	ds, proxy, direct := newFaultProxyStore(t)
+	ctx := t.Context()
+
+	const (
+		thresholdLevel = 2
+		thresholdValue = 0.65
+		thresholdBase  = 0.8
+		thresholdHours = 48
+	)
+	snapshot := func(species ...string) []datastore.DynamicThreshold {
+		now := time.Now().UTC()
+		out := make([]datastore.DynamicThreshold, 0, len(species))
+		for _, name := range species {
+			out = append(out, datastore.DynamicThreshold{
+				SpeciesName:   name,
+				Level:         thresholdLevel,
+				CurrentValue:  thresholdValue,
+				BaseThreshold: thresholdBase,
+				ValidHours:    thresholdHours,
+				ExpiresAt:     now.Add(thresholdHours * time.Hour),
+				LastTriggered: now,
+				FirstCreated:  now,
+			})
+		}
+		return out
+	}
+	countRows := func(species ...string) int {
+		var n int
+		for _, name := range species {
+			var c int
+			require.NoError(t, direct.QueryRowContext(ctx, "SELECT COUNT(*) FROM dynamic_thresholds WHERE species_name = ?", name).Scan(&c))
+			n += c
+		}
+		return n
+	}
+
+	// Warm the connection setup so the faults below hit the transaction.
+	require.NoError(t, ds.BatchSaveDynamicThresholds(snapshot("warmup species")))
+
+	commitCases := []struct {
+		name     string
+		species  []string
+		fault    int32
+		wantRows int
+	}{
+		{"commit_dropped_before_server", []string{"dropped one", "dropped two"}, commitDropUnsent, 0},
+		{"commit_applied_reply_lost", []string{"applied one", "applied two"}, commitApplyLoseRply, 2},
+	}
+	for _, tc := range commitCases {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy.commit.Store(tc.fault)
+			err := ds.BatchSaveDynamicThresholds(snapshot(tc.species...))
+			require.Error(t, err)
+			assert.True(t, errors.IsConnectivityError(err), "the processor retries on this classification")
+			require.Eventually(t, func() bool { return countRows(tc.species...) == tc.wantRows },
+				5*time.Second, 50*time.Millisecond, "rows stored for %v", tc.species)
+
+			require.NoError(t, ds.BatchSaveDynamicThresholds(snapshot(tc.species...)), "a repeat once the fault is gone")
+			assert.Equal(t, len(tc.species), countRows(tc.species...), "one row per species after the repeat")
+
+			var level int
+			var current float64
+			require.NoError(t, direct.QueryRowContext(ctx,
+				"SELECT level, current_value FROM dynamic_thresholds WHERE species_name = ?", tc.species[0]).Scan(&level, &current))
+			assert.Equal(t, thresholdLevel, level)
+			assert.InDelta(t, thresholdValue, current, 0.001)
+		})
+	}
+
+	t.Run("refused_before_write", func(t *testing.T) {
+		species := []string{"refused one", "refused two"}
+		proxy.stop()
+		err := ds.BatchSaveDynamicThresholds(snapshot(species...))
+		require.Error(t, err)
+		assert.True(t, errors.IsConnectivityError(err), "a refused dial is a connectivity error")
+		proxy.restart(t)
+
+		require.NoError(t, ds.BatchSaveDynamicThresholds(snapshot(species...)), "a repeat once the server is back")
+		assert.Equal(t, len(species), countRows(species...))
+	})
 }

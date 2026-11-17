@@ -118,7 +118,7 @@ All audio infrastructure lives in `internal/audiocore`. (The older `myaudio` pac
 **From frames to analysis windows.**
 
 1. `analysis.BufferConsumer` is registered per source. It resamples to each enabled model's sample rate (one resampler per distinct target rate) and writes PCM16 to a per-source, per-model analysis buffer and to the source's capture buffer.
-2. The analysis buffer is a ring sized to one model clip, in overwrite mode. A monitor goroutine per source and model polls it and reads a full window when one is available. The window is 3 seconds for BirdNET v2.4, Bat and BSG, and 5 seconds for BirdNET v3 and Perch. The `birdnet.overlap` setting (default none) is scaled proportionally for 5 second models.
+2. The analysis buffer is a ring sized to one model clip, in overwrite mode. A monitor goroutine per source and model polls it and reads a full window when one is available. The window is 3 seconds for BirdNET v2.4, Bat and BSG, and 5 seconds for BirdNET v3, BirdNET+ V3.0 and Perch. The `birdnet.overlap` setting (default none) is scaled proportionally for 5 second models.
 3. The capture buffer holds recent audio (120 seconds by default, longer with extended capture) so that a clip can be cut with pre-roll when a detection is saved.
 
 **Other consumers on a route** include audio level metering (the live level meter in the UI), sound level monitoring (`internal/analysis/sound_level*.go`), and live listening, which is served as HLS (see the API section). Sound level series exposed to Prometheus are labelled with the source id, never the display name, because the metrics listener has no authentication.
@@ -135,13 +135,14 @@ All audio infrastructure lives in `internal/audiocore`. (The older `myaudio` pac
 
 **Models.** The registry knows these model families; which ones run is chosen by `models.enabled` and the per-model settings sections:
 
-| Model        | Format | Clip | Notes                                                          |
-| ------------ | ------ | ---- | -------------------------------------------------------------- |
-| BirdNET v2.4 | TFLite | 3 s  | Default. FP32 model and range filter models are embedded.      |
-| BirdNET v3   | ONNX   | 5 s  | Downloaded.                                                    |
-| Perch v2     | ONNX   | 5 s  | Downloaded.                                                    |
-| Bat          | ONNX   | 3 s  | Ultrasonic source; gated by a night-time schedule. Downloaded. |
-| BSG Finland  | ONNX   | 3 s  | Regional model. Downloaded.                                    |
+| Model         | Format | Clip | Notes                                                          |
+| ------------- | ------ | ---- | -------------------------------------------------------------- |
+| BirdNET v2.4  | TFLite | 3 s  | Default. FP32 model and range filter models are embedded.      |
+| BirdNET v3    | ONNX   | 5 s  | Downloaded.                                                    |
+| BirdNET+ V3.0 | ONNX   | 5 s  | Own settings section (`birdnetplus`).                          |
+| Perch v2      | ONNX   | 5 s  | Downloaded.                                                    |
+| Bat           | ONNX   | 3 s  | Ultrasonic source; gated by a night-time schedule. Downloaded. |
+| BSG Finland   | ONNX   | 3 s  | Regional model. Downloaded.                                    |
 
 Regional BirdNET v2.4 variants and geographic range models exist in the catalog. Non-embedded models are fetched from Hugging Face by the model manager. Building with the `noembed` tag leaves the embedded models out for smaller binaries and images; the Docker image ships them separately.
 
@@ -155,7 +156,7 @@ Regional BirdNET v2.4 variants and geographic range models exist in the catalog.
 
 **Species range filter.** A geographic and seasonal model (`classifier/range_filter*.go`, the `range` command) limits detections to species plausible for the configured location. It applies only when a location is configured and a participating model is in use; Bat and BSG never participate. It is refreshed daily by `UpdateRangeFilterAction` and reloaded on settings or model changes.
 
-**Species identity.** `internal/speciesindex` is the single owner of the process-wide species name lookup. `internal/openfauna` supplies embedded multilingual names and taxonomy, `internal/labels` the non-bird and vocalization label sets, and `internal/ebird` taxonomy and observation data.
+**Species identity.** `internal/speciesindex` is the single owner of the process-wide species name lookup. `internal/openfauna` supplies embedded multilingual names and taxonomy, `internal/labels` the sound-event and vocalization label sets, and `internal/ebird` taxonomy and observation data.
 
 **Voice activity detection.** An optional Silero VAD (`internal/inference/vad`, needs ONNX Runtime, off by default) acts as a second source of "speech present" for the privacy filter described below.
 
@@ -194,7 +195,7 @@ The datastore is in the middle of a long migration. Read [`internal/datastore/AG
 - **v2 schema** is the present and the future. Entities are in `datastore/v2/entities` (detections with predictions, model contributions, reviews, comments and locks; labels and taxonomic classes; AI models; audio sources; weather; dynamic thresholds; alert rules and history; notification history; app events and metadata; migration state). Persistence goes through repositories: `datastore.DetectionRepository` and the rest in `datastore/v2/repository`.
 - **Legacy schema** (the `notes` table, the `Note` model, `DataStore`, `SQLiteStore`, `MySQLStore` and the large `datastore.Interface`) is frozen and will be removed. `datastore/v2only` adapts a v2 database to the old `Interface` so existing callers keep working until they move to repositories.
 - **Startup decides the mode** (`datastore/v2/startup.go`): a fresh install starts directly in v2-only mode. An existing legacy database stays in legacy mode until the user starts a migration through the API. Migration runs as a state machine (initializing, dual write, migrating, validating, cutover, completed) in `datastore/v2/migration` and `state_manager.go`; afterwards data lives in `birdnet_v2.db` and may later be consolidated to the configured path.
-- **Engines.** SQLite (default, single open connection) and MySQL or MariaDB (pooled), for both schemas. Only MySQL and MariaDB releases that upstream still maintains are supported (MySQL 8.4 LTS; MariaDB 10.11, 11.4, 11.8, 12.3); the list and the policy are in `internal/datastore/AGENTS.md`.
+- **Engines.** SQLite (default, single open connection) and MySQL or MariaDB (pooled), for both schemas. Only the MySQL and MariaDB LTS releases BirdNET-Go is tested with are supported (MySQL 8.4 and 9.7; MariaDB 10.11, 11.4, 11.8, 12.3); the list and the policy are in `internal/datastore/AGENTS.md`.
 - **Mocks.** `datastore.Interface` and other interfaces are mocked with mockery (`.mockery.yaml`, `go generate ./internal/datastore`). Never edit generated mocks by hand.
 
 Related storage: `internal/diskmanager` enforces clip retention (age, usage and drain policies) and reconciles clips with the database; `internal/backup` provides scheduled, optionally encrypted backups to local, FTP, SFTP, rsync or Google Drive targets.

@@ -4,6 +4,7 @@
 package processor
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -129,10 +130,13 @@ const (
 	// stored (the next attempt then finds the state done). The job queue keeps
 	// retrying the job.
 	saveStatePending int32 = iota
-	// saveStateDone: the detection is stored, or the event tracker skipped it.
+	// saveStateDone: the detection is stored.
 	saveStateDone
 	// saveStateTerminal: the save failed in a way that must not be repeated.
 	saveStateTerminal
+	// saveStateSkipped: the event tracker skipped the detection. Nothing is stored
+	// and no later composite step runs.
+	saveStateSkipped
 )
 
 // errDetectionSaveInFlight is returned by an attempt that gave up waiting for an
@@ -146,10 +150,14 @@ var errDetectionSaveInFlight = errors.NewStd("detection save still running from 
 // The queue may call it again for the same detection while saveStatePending holds
 // (see retryPending). The event-tracker and new-species decisions are taken on the
 // first call and reused, so a retry is neither rate limited into a no-op nor sees
-// the species as already known. Only one attempt runs a save at a time: an attempt
+// the species as already known. A panic in the new-species update does not undo
+// the event-tracker decision: the retry saves the detection, but without the
+// new-species result. Only one attempt runs a save at a time: an attempt
 // that cannot get the slot before ctx ends returns errDetectionSaveInFlight.
 // A save that panics is not repeated, and neither is one whose follow-up steps
-// panic after the row is stored.
+// panic after the row is stored. A detection the event tracker skips is not saved:
+// the call returns nil and the composite ends there (see skipsLaterSteps), so the
+// event-tracker verdict of this step is the only one the detection gets.
 func (a *DatabaseAction) ExecuteContext(ctx context.Context, _ any) error {
 	attempt := int(a.attempts.Add(1))
 	if !a.acquireSaveSlot(ctx) {
@@ -164,12 +172,18 @@ func (a *DatabaseAction) ExecuteContext(ctx context.Context, _ any) error {
 		return nil
 	case saveStateTerminal:
 		return a.terminalErr
+	case saveStateSkipped:
+		return nil
 	}
 
 	if !a.gated {
+		// Set before the tracker calls: they update shared state, so a retry after a
+		// panic in them must not ask them again, or the event tracker would rate
+		// limit the retry into a skip and the detection would never be saved.
+		a.gated = true
 		// Check event frequency (supports scientific name lookup)
 		if !a.EventTracker.TrackEventWithNames(a.Result.Species.CommonName, a.Result.Species.ScientificName, DatabaseSave) {
-			a.saveState.Store(saveStateDone)
+			a.saveState.Store(saveStateSkipped)
 			return nil
 		}
 		// Check if this is a new species and update atomically to prevent race conditions
@@ -178,7 +192,6 @@ func (a *DatabaseAction) ExecuteContext(ctx context.Context, _ any) error {
 			// when multiple detections of the same species arrive concurrently
 			a.isNewSpecies, a.daysSinceFirstSeen, a.novelty = a.NewSpeciesTracker.CheckAndUpdateSpeciesWithNovelty(a.Result.Species.ScientificName, a.Result.BeginTime)
 		}
-		a.gated = true
 	}
 
 	if err := a.saveGuarded(ctx); err != nil {
@@ -190,6 +203,12 @@ func (a *DatabaseAction) ExecuteContext(ctx context.Context, _ any) error {
 	defer a.saveState.Store(saveStateDone)
 	a.recordSaveSuccess(ctx, attempt)
 	return nil
+}
+
+// skipsLaterSteps reports whether the event tracker skipped the detection, so that
+// the composite stops instead of running steps that need a stored row.
+func (a *DatabaseAction) skipsLaterSteps() bool {
+	return a.saveState.Load() == saveStateSkipped
 }
 
 // acquireSaveSlot takes the save slot, or reports false when ctx ends first. A
@@ -247,13 +266,21 @@ func (a *DatabaseAction) saveGuarded(ctx context.Context) error {
 // saveDetection runs one save attempt through the repository, or through the
 // legacy datastore when no repository is set.
 func (a *DatabaseAction) saveDetection(ctx context.Context) error {
+	// Trim here so every repository stores the same rows. The filter returns a new
+	// slice, so a retry starts from the same a.Results.
+	// An action without a settings snapshot applies no cutoff.
+	var cutoff float64
+	if a.Settings != nil {
+		cutoff = a.Settings.BirdNET.AlternateMinConfidence
+	}
+	alternates := storedAlternates(a.Results, cutoff)
 	if a.Repo != nil {
 		// New path: Use DetectionRepository (handles conversion internally).
 		// The CompositeAction gives each step 10 s, so a save that honoured that
 		// deadline would roll back and lose a detection that commits late; the
 		// repository keeps its own transaction timeout. A queue retry only follows
 		// a failure the repository reports as having stored nothing.
-		return a.Repo.Save(context.WithoutCancel(ctx), &a.Result, a.Results)
+		return a.Repo.Save(context.WithoutCancel(ctx), &a.Result, alternates)
 	}
 
 	// Legacy path: Use datastore.Interface directly
@@ -263,7 +290,7 @@ func (a *DatabaseAction) saveDetection(ctx context.Context) error {
 	// Convert domain AdditionalResults to legacy datastore.Results format for GORM.
 	// Results are passed separately to Save() - not assigned to note.Results because
 	// saveNoteInTransaction uses Omit("Results") to prevent GORM auto-save.
-	legacyResults := datastore.AdditionalResultsToDatastoreResults(a.Results)
+	legacyResults := datastore.AdditionalResultsToDatastoreResults(alternates)
 
 	if err := a.Ds.Save(&note, legacyResults); err != nil {
 		return err
@@ -271,6 +298,25 @@ func (a *DatabaseAction) saveDetection(ctx context.Context) error {
 	// Sync database-assigned ID back to Result
 	a.Result.ID = note.ID
 	return nil
+}
+
+// storedAlternates returns the alternate predictions to persist with a detection:
+// rows tagged OutOfRange are dropped, and so are rows below minConfidence. The
+// cutoff is inclusive and compared in float32 like the detection threshold, so a
+// row exactly at it is kept; a minConfidence not above 0 disables it. The result
+// is a new slice, the input is never modified.
+func storedAlternates(results []detection.AdditionalResult, minConfidence float64) []detection.AdditionalResult {
+	stored := make([]detection.AdditionalResult, 0, len(results))
+	for _, r := range results {
+		if r.OutOfRange {
+			continue
+		}
+		if minConfidence > 0 && float32(r.Confidence) < float32(minConfidence) {
+			continue
+		}
+		stored = append(stored, r)
+	}
+	return stored
 }
 
 // recordSaveFailure classifies a failed save, logs it and moves the state. The
@@ -374,12 +420,15 @@ func (a *DatabaseAction) recordSaveSuccess(ctx context.Context, attempt int) {
 	// Share the database ID with downstream actions (MQTT, SSE) immediately.
 	if a.DetectionCtx != nil {
 		a.DetectionCtx.NoteID.Store(uint64(a.Result.ID))
+		// The clip can be encoded before this row exists; when it was, the marker
+		// is still unwritten and this is the call that writes it.
+		a.DetectionCtx.recordClipDenoise(ctx, a.clipMarks, a.Result.ClipName)
 	}
 
-	// Add an explanatory comment when the ultrasonic validation filter tagged this detection as unlikely.
+	// Add an explanatory comment when a validator tagged this detection as unlikely.
 	if a.Result.Unlikely && a.Result.ID != 0 && a.Repo != nil {
 		locale := a.Settings.Realtime.Dashboard.Locale
-		comment := formatUnlikelyComment(locale, a.Result.UltrasonicCV, a.Result.UltrasonicCVThreshold)
+		comment := formatUnlikelyComment(locale, &a.Result)
 		noteID := strconv.FormatUint(uint64(a.Result.ID), 10)
 		if err := a.Repo.AddComment(ctx, noteID, comment); err != nil {
 			GetLogger().Warn("failed to add unlikely comment to detection",
@@ -762,12 +811,17 @@ func (a *SaveAudioAction) Execute(ctx context.Context, _ any) error {
 
 	exportRate, exportFormat, outputPath := a.resolveExportParams(outputPath)
 
+	// Denoise the captured PCM, after the container and rate are settled and
+	// before any encoder sees it. The clip file is written once, from this PCM.
+	a.applyExportDenoise(ctx, exportRate)
+
 	enc, err := a.encodeClip(ctx, exportRate, exportFormat, outputPath)
 	if err != nil {
 		a.logExportFailure(&enc, exportFormat, exportRate, outputPath, err)
 		return err
 	}
 	a.correctClipSampleRate(ctx, exportRate)
+	a.recordClipDenoised(ctx)
 
 	// Get file size for logging
 	fileInfo, err := os.Stat(outputPath)
@@ -798,9 +852,9 @@ func (a *SaveAudioAction) Execute(ctx context.Context, _ any) error {
 	// back off this line (the audio_export_success case in
 	// internal/api/v2/system/events_aggregation.go). It consumes only this line, so
 	// dropping the field empties every ClipPaths the endpoint returns.
-	// 15 = the 13 unconditional fields below, plus bitrate_kbps on the lossy
+	// 16 = the 14 unconditional fields below, plus bitrate_kbps on the lossy
 	// formats, plus operation.
-	fields := make([]logger.Field, 0, 15)
+	fields := make([]logger.Field, 0, 16)
 	fields = append(fields,
 		logger.String("component", "analysis.processor.actions"),
 		logger.String("detection_id", a.CorrelationID),
@@ -815,6 +869,7 @@ func (a *SaveAudioAction) Execute(ctx context.Context, _ any) error {
 		logger.Int64("duration_ms", clipDurationMs(len(a.pcmData), exportRate)),
 		logger.Int64("measure_ms", enc.MeasureMs),
 		logger.Int64("encode_ms", enc.EncodeMs),
+		logger.String("denoise", cmp.Or(a.denoisePreset, exportDenoiseOff)),
 	)
 	if enc.BitrateKbps > 0 {
 		fields = append(fields, logger.Int("bitrate_kbps", enc.BitrateKbps))
@@ -1088,7 +1143,11 @@ func (a *SaveAudioAction) encodeClip(ctx context.Context, exportRate int, export
 	enc.Normalized = normalized
 
 	encodeStart := time.Now()
-	err = a.runEncoder(ctx, enc.Encoder, exportRate, enc.BitrateKbps, exportFormat, outputPath, gainDB)
+	encode := a.encode
+	if encode == nil {
+		encode = a.runEncoder
+	}
+	err = encode(ctx, enc.Encoder, exportRate, enc.BitrateKbps, exportFormat, outputPath, gainDB)
 	enc.EncodeMs = time.Since(encodeStart).Milliseconds()
 	return enc, err
 }
@@ -1592,6 +1651,23 @@ func (a *SaveAudioAction) correctClipSampleRate(ctx context.Context, exportRate 
 			logger.Error(err),
 			logger.String("operation", "clip_sample_rate_correct"))
 	}
+}
+
+// recordClipDenoised stores on the shared detection context whether the clip just
+// written was denoised, then writes the marker if the detection's row is already
+// saved; otherwise DatabaseAction writes it once the save lands. denoisePreset is
+// set only by a successful denoise, so a skipped, failed or timed-out denoise
+// reads as written as captured. Without a shared context there is no row to mark.
+func (a *SaveAudioAction) recordClipDenoised(ctx context.Context) {
+	if a.DetectionCtx == nil {
+		return
+	}
+	state := clipDenoiseRaw
+	if a.denoisePreset != "" {
+		state = clipDenoiseDenoised
+	}
+	a.DetectionCtx.clipDenoise.Store(state)
+	a.DetectionCtx.recordClipDenoise(ctx, a.clipMarks, a.ClipName)
 }
 
 // resampleExportTo converts the captured PCM from srcRate to dstRate for export,

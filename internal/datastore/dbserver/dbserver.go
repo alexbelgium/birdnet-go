@@ -1,12 +1,12 @@
 // Package dbserver identifies the MySQL or MariaDB server behind a connection,
-// classifies its release against the upstream lifecycle, and reads the
-// character sets of the schema the application uses.
+// classifies its release against the supported list, and reads the
+// character sets and the size of the schema the application uses.
 //
 // The release table in this package and the supported list in
-// internal/datastore/AGENTS.md ("HARD RULE: support only MySQL and MariaDB
-// releases under upstream support") change together: when a release joins or
-// leaves the list, update both. The package never blocks anything by itself;
-// callers decide what to do with an Assessment.
+// internal/datastore/AGENTS.md ("HARD RULE: support only the MySQL and MariaDB
+// LTS releases we test") change together: when a release joins or leaves the
+// list, update both. The package never blocks anything by itself; callers
+// decide what to do with an Assessment.
 //
 // It is a leaf package (standard library, gorm and internal/errors only) so
 // the health checks, the API handlers, the startup code and the support dump
@@ -15,12 +15,12 @@ package dbserver
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -56,10 +56,6 @@ const (
 	// sends in the protocol handshake. SELECT VERSION() does not return it; it
 	// is stripped as insurance for a string that came from the driver.
 	mariaDBHandshakePrefix = "5.5.5-"
-
-	// endingSoonDays is how many days before a release's end of life it is
-	// reported as ending soon.
-	endingSoonDays = 90
 
 	// versionMatchMinParts is the least FindStringSubmatch returns for a match
 	// of versionPattern (the full match, major and minor); versionMatchPatchIdx
@@ -137,15 +133,15 @@ func ParseVersion(raw string) (Version, error) {
 	return v, nil
 }
 
-// Release is one entry of the lifecycle table.
+// Release is one entry of the release table.
 type Release struct {
 	Vendor Vendor
 	Major  int
 	Minor  int
-	// EOL is the upstream end-of-life date (UTC calendar date).
-	EOL time.Time
 	// Supported reports that BirdNET-Go supports the series. An unsupported
-	// entry is tabled only to name a known end-of-life release.
+	// entry names a known series above the vendor floor that is not supported
+	// (the MySQL 9.0 to 9.6 Innovation releases); series below the floor need
+	// no entry.
 	Supported bool
 }
 
@@ -154,42 +150,39 @@ func (r Release) Series() string {
 	return fmt.Sprintf("%d.%d", r.Major, r.Minor)
 }
 
-// eolDate builds a UTC calendar date for the release table.
-func eolDate(year int, month time.Month, day int) time.Time {
-	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
-}
-
-// releases is the lifecycle table, ascending per vendor. Supported entries come
-// from the list in internal/datastore/AGENTS.md; the end-of-life dates come
-// from the upstream lifecycle pages (the MySQL release policy and the
-// mariadb.org maintenance policy). Re-check both when the list is re-checked.
+// releases is the release table, ascending per vendor, with no dates.
+// Supported entries are the tested list in internal/datastore/AGENTS.md. The
+// vendor floor (the first supported entry of a vendor) makes every older series
+// unsupported, so only unsupported series above the floor are listed.
 var releases = []Release{
-	{Vendor: VendorMySQL, Major: 5, Minor: 7, EOL: eolDate(2023, time.October, 31)},
-	{Vendor: VendorMySQL, Major: 8, Minor: 0, EOL: eolDate(2026, time.April, 30)},
-	{Vendor: VendorMySQL, Major: 8, Minor: 4, EOL: eolDate(2032, time.April, 30), Supported: true},
+	{Vendor: VendorMySQL, Major: 8, Minor: 4, Supported: true},
+	{Vendor: VendorMySQL, Major: 9, Minor: 0},
+	{Vendor: VendorMySQL, Major: 9, Minor: 1},
+	{Vendor: VendorMySQL, Major: 9, Minor: 2},
+	{Vendor: VendorMySQL, Major: 9, Minor: 3},
+	{Vendor: VendorMySQL, Major: 9, Minor: 4},
+	{Vendor: VendorMySQL, Major: 9, Minor: 5},
+	{Vendor: VendorMySQL, Major: 9, Minor: 6},
+	{Vendor: VendorMySQL, Major: 9, Minor: 7, Supported: true},
 
-	{Vendor: VendorMariaDB, Major: 10, Minor: 6, EOL: eolDate(2026, time.July, 6)},
-	{Vendor: VendorMariaDB, Major: 10, Minor: 11, EOL: eolDate(2028, time.February, 16), Supported: true},
-	{Vendor: VendorMariaDB, Major: 11, Minor: 4, EOL: eolDate(2029, time.May, 29), Supported: true},
-	{Vendor: VendorMariaDB, Major: 11, Minor: 8, EOL: eolDate(2028, time.June, 4), Supported: true},
-	{Vendor: VendorMariaDB, Major: 12, Minor: 3, EOL: eolDate(2029, time.June, 12), Supported: true},
+	{Vendor: VendorMariaDB, Major: 10, Minor: 11, Supported: true},
+	{Vendor: VendorMariaDB, Major: 11, Minor: 4, Supported: true},
+	{Vendor: VendorMariaDB, Major: 11, Minor: 8, Supported: true},
+	{Vendor: VendorMariaDB, Major: 12, Minor: 3, Supported: true},
 }
 
 // SupportLevel is the outcome of assessing a server version.
 type SupportLevel string
 
 const (
-	// SupportSupported is a tabled release under upstream support.
+	// SupportSupported is a tabled release that BirdNET-Go supports.
 	SupportSupported SupportLevel = "supported"
-	// SupportEndingSoon is a supported release within endingSoonDays of its end of life.
-	SupportEndingSoon SupportLevel = "ending_soon"
-	// SupportEndOfLife is a tabled release past or marked as end of life, or an
+	// SupportUnsupported is a tabled release marked as not supported, or an
 	// untabled release older than the oldest supported one.
-	SupportEndOfLife SupportLevel = "end_of_life"
+	SupportUnsupported SupportLevel = "unsupported"
 	// SupportUntracked is an untabled release at or above the oldest supported
-	// one. The table does not say whether upstream still maintains it (a newer
-	// LTS or Innovation release, or a short-lived rolling series that may
-	// already have ended), so it only produces a note.
+	// one: a newer series the table does not list yet (a new LTS or Innovation
+	// release, or a MariaDB rolling release). It only produces a note.
 	SupportUntracked SupportLevel = "untracked"
 	// SupportUnknown is a version string that could not be parsed.
 	SupportUnknown SupportLevel = "unknown"
@@ -203,28 +196,22 @@ type Assessment struct {
 	Release *Release
 }
 
-// Supported reports that the release is under upstream support, now or for
-// the next endingSoonDays days.
+// Supported reports that BirdNET-Go supports the release.
 func (a *Assessment) Supported() bool {
-	return a.Level == SupportSupported || a.Level == SupportEndingSoon
+	return a.Level == SupportSupported
 }
 
-// Assess classifies v at time now. The order is: a tabled series is judged by
-// its entry; an untabled series below the vendor floor (the lowest supported
-// entry) is end of life; an untabled series at or above the floor is untracked.
-func Assess(v Version, now time.Time) Assessment {
+// Assess classifies v. A tabled series is supported or not as its entry says;
+// an untabled series below the vendor floor (the lowest supported entry) is
+// unsupported; an untabled series at or above the floor is untracked.
+func Assess(v Version) Assessment {
 	for i := range releases {
 		r := &releases[i]
 		if r.Vendor != v.Vendor || r.Major != v.Major || r.Minor != v.Minor {
 			continue
 		}
-		a := Assessment{Version: v, Release: r}
-		switch {
-		case !r.Supported || !now.Before(r.EOL):
-			a.Level = SupportEndOfLife
-		case !now.Before(r.EOL.AddDate(0, 0, -endingSoonDays)):
-			a.Level = SupportEndingSoon
-		default:
+		a := Assessment{Version: v, Release: r, Level: SupportUnsupported}
+		if r.Supported {
 			a.Level = SupportSupported
 		}
 		return a
@@ -232,19 +219,19 @@ func Assess(v Version, now time.Time) Assessment {
 
 	floor, ok := vendorFloor(v.Vendor)
 	if ok && (v.Major < floor.Major || (v.Major == floor.Major && v.Minor < floor.Minor)) {
-		return Assessment{Level: SupportEndOfLife, Version: v}
+		return Assessment{Level: SupportUnsupported, Version: v}
 	}
 	return Assessment{Level: SupportUntracked, Version: v}
 }
 
 // AssessRaw parses raw and assesses it. An unparseable string yields
 // SupportUnknown with only Version.Raw set.
-func AssessRaw(raw string, now time.Time) Assessment {
+func AssessRaw(raw string) Assessment {
 	v, err := ParseVersion(raw)
 	if err != nil {
 		return Assessment{Level: SupportUnknown, Version: Version{Raw: strings.TrimSpace(raw)}}
 	}
-	return Assess(v, now)
+	return Assess(v)
 }
 
 // vendorFloor returns the lowest supported release of a vendor.
@@ -258,7 +245,7 @@ func vendorFloor(vendor Vendor) (Release, bool) {
 }
 
 // SupportedReleases returns the supported list built from the table, for
-// example "MySQL 8.4; MariaDB 10.11, 11.4, 11.8, 12.3".
+// example "MySQL 8.4, 9.7; MariaDB 10.11, 11.4, 11.8, 12.3".
 func SupportedReleases() string {
 	vendors := []Vendor{VendorMySQL, VendorMariaDB}
 	parts := make([]string, 0, len(vendors))
@@ -279,17 +266,19 @@ func SupportedReleases() string {
 // Tag values that are not derived from the table.
 const (
 	tagUnknown     = "unknown"
-	tagEndOfLife   = "end_of_life"
+	tagUnsupported = "unsupported"
 	tagUntracked   = "untracked"
 	tagOther       = "other"
 	tagMixed       = "mixed"
+	tagUTF8MB4Tbls = "utf8mb4_tables"
 	tagSeparator   = "-"
+	charsetASCII   = "ascii"
 	charsetLatin1  = "latin1"
 	charsetUTF8MB3 = "utf8mb3"
 )
 
 // ServerTag returns a bounded telemetry value for a: "<vendor>-<series>" for a
-// tabled release, "<vendor>-end_of_life" or "<vendor>-untracked" otherwise,
+// tabled release, "<vendor>-unsupported" or "<vendor>-untracked" otherwise,
 // and "unknown" when the version could not be parsed. The raw version string
 // never appears in it.
 func ServerTag(a *Assessment) string {
@@ -300,8 +289,8 @@ func ServerTag(a *Assessment) string {
 	if a.Release != nil {
 		return vendor + tagSeparator + a.Release.Series()
 	}
-	if a.Level == SupportEndOfLife {
-		return vendor + tagSeparator + tagEndOfLife
+	if a.Level == SupportUnsupported {
+		return vendor + tagSeparator + tagUnsupported
 	}
 	return vendor + tagSeparator + tagUntracked
 }
@@ -311,8 +300,8 @@ const CharsetUTF8MB4 = "utf8mb4"
 
 // CharsetReport holds the character sets of the current schema.
 type CharsetReport struct {
-	// SchemaCharset and SchemaCollation are the schema defaults, which new
-	// tables inherit.
+	// SchemaCharset and SchemaCollation are the schema defaults, which tables
+	// created without an explicit character set inherit.
 	SchemaCharset   string
 	SchemaCollation string
 	// Tables lists base tables that have text columns, in name order.
@@ -341,17 +330,28 @@ func (r CharsetReport) AllUTF8MB4() bool {
 	return r.SchemaCharset == CharsetUTF8MB4 && len(r.NonUTF8MB4Tables()) == 0
 }
 
+// EveryTableUTF8MB4 reports that the schema has at least one table with text
+// columns and every such table is utf8mb4, whatever the schema default is. The
+// check covers existing character columns only; the schema default can still
+// be inherited by tables created later without an explicit character set.
+func (r CharsetReport) EveryTableUTF8MB4() bool {
+	return len(r.Tables) > 0 && len(r.NonUTF8MB4Tables()) == 0
+}
+
 // CharsetTag returns a bounded telemetry value for r: "utf8mb4" when
-// everything is utf8mb4, "mixed" when the schema default is utf8mb4 but a table
-// is not, otherwise the schema default when it is "utf8mb3" or "latin1",
-// "other" for any other schema default, and "unknown" when no schema default
-// was read.
+// everything is utf8mb4, "utf8mb4_tables" when every table is utf8mb4 but the
+// schema default is not, "mixed" when the schema default is utf8mb4 but a table
+// is not, otherwise the schema default when it is "utf8mb3" or "latin1" (some
+// table is not utf8mb4 or no table has text columns), "other" for any other
+// schema default, and "unknown" when no schema default was read.
 func CharsetTag(r CharsetReport) string {
 	switch {
 	case r.SchemaCharset == "":
 		return tagUnknown
 	case r.AllUTF8MB4():
 		return CharsetUTF8MB4
+	case r.EveryTableUTF8MB4():
+		return tagUTF8MB4Tbls
 	case r.SchemaCharset == CharsetUTF8MB4:
 		// The schema default is fine; some existing table is not.
 		return tagMixed
@@ -360,6 +360,29 @@ func CharsetTag(r CharsetReport) string {
 	default:
 		return tagOther
 	}
+}
+
+// charsetRank orders the character sets whose repertoires nest: every ascii
+// character is in latin1, and every latin1 character is in utf8mb3.
+var charsetRank = map[string]int{
+	charsetASCII:   1,
+	charsetLatin1:  2,
+	charsetUTF8MB3: 3,
+}
+
+// CharsetCanHold reports whether a column in character set target can store
+// every character of a column in character set source. It is true when the two
+// are equal, when target is utf8mb4, or when both are in the nested order
+// ascii < latin1 < utf8mb3 and source ranks at or below target. Any other pair
+// is false, including a pair with a character set outside that order.
+// Collations are not considered.
+func CharsetCanHold(target, source string) bool {
+	if target == source || target == CharsetUTF8MB4 {
+		return true
+	}
+	t, tok := charsetRank[target]
+	s, sok := charsetRank[source]
+	return tok && sok && s <= t
 }
 
 // TagUnknown is the telemetry value for a probe that failed.
@@ -371,6 +394,9 @@ const TagUnknown = tagUnknown
 // on the table collation hides utf8mb4_uca1400 tables on MariaDB 11.4 and later.
 const (
 	queryVersion = `SELECT VERSION()`
+
+	querySchemaSize = `SELECT SUM(DATA_LENGTH + INDEX_LENGTH) AS schema_size ` +
+		`FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`
 
 	querySchemaCharset = `SELECT DEFAULT_CHARACTER_SET_NAME AS schema_charset, ` +
 		`DEFAULT_COLLATION_NAME AS schema_collation ` +
@@ -396,21 +422,53 @@ func QueryVersion(ctx context.Context, db *gorm.DB) (string, error) {
 	return version, nil
 }
 
-// QueryCharset reads the default character set of the current schema and the
-// character sets of the text columns of its base tables. It only reads.
-func QueryCharset(ctx context.Context, db *gorm.DB) (CharsetReport, error) {
-	conn := db.WithContext(ctx)
+// QuerySchemaSize returns the size in bytes of the current schema: the data
+// plus the indexes of every table in it. A schema with no tables returns 0.
+// The figures come from InnoDB table statistics, which both MySQL and MariaDB
+// refresh lazily (MySQL also caches them per information_schema_stats_expiry,
+// 24 hours by default), so the value can lag recent writes until the next
+// ANALYZE TABLE.
+func QuerySchemaSize(ctx context.Context, db *gorm.DB) (int64, error) {
+	var size sql.NullInt64
+	if err := db.WithContext(ctx).Raw(querySchemaSize).Row().Scan(&size); err != nil {
+		return 0, errors.New(err).
+			Component(componentName).
+			Category(errors.CategoryDatabase).
+			Context("operation", "query_schema_size").
+			Build()
+	}
+	return size.Int64, nil
+}
 
+// QuerySchemaCharset reads the default character set and collation of the
+// current schema. Both are empty when the server returns no schema row.
+func QuerySchemaCharset(ctx context.Context, db *gorm.DB) (charset, collation string, err error) {
 	var schema []struct {
 		SchemaCharset   string `gorm:"column:schema_charset"`
 		SchemaCollation string `gorm:"column:schema_collation"`
 	}
-	if err := conn.Raw(querySchemaCharset).Scan(&schema).Error; err != nil {
-		return CharsetReport{}, errors.New(err).
+	if err := db.WithContext(ctx).Raw(querySchemaCharset).Scan(&schema).Error; err != nil {
+		return "", "", errors.New(err).
 			Component(componentName).
 			Category(errors.CategoryDatabase).
 			Context("operation", "query_schema_charset").
 			Build()
+	}
+	if len(schema) == 0 {
+		return "", "", nil
+	}
+	return schema[0].SchemaCharset, schema[0].SchemaCollation, nil
+}
+
+// QueryCharset reads the default character set of the current schema and the
+// character sets of the text columns of its base tables. It only reads, and it
+// returns the error of either read.
+func QueryCharset(ctx context.Context, db *gorm.DB) (CharsetReport, error) {
+	conn := db.WithContext(ctx)
+
+	schemaCharset, schemaCollation, err := QuerySchemaCharset(ctx, db)
+	if err != nil {
+		return CharsetReport{}, err
 	}
 
 	var cols []struct {
@@ -425,11 +483,7 @@ func QueryCharset(ctx context.Context, db *gorm.DB) (CharsetReport, error) {
 			Build()
 	}
 
-	var report CharsetReport
-	if len(schema) > 0 {
-		report.SchemaCharset = schema[0].SchemaCharset
-		report.SchemaCollation = schema[0].SchemaCollation
-	}
+	report := CharsetReport{SchemaCharset: schemaCharset, SchemaCollation: schemaCollation}
 	for _, c := range cols {
 		if n := len(report.Tables); n > 0 && report.Tables[n-1].Name == c.TableName {
 			report.Tables[n-1].Charsets = append(report.Tables[n-1].Charsets, c.CharsetName)

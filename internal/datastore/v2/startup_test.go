@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/telemetry"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -467,6 +469,28 @@ func createBareDetectionsTable(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.Exec("CREATE TABLE detections (id INTEGER PRIMARY KEY)").Error)
 }
 
+// sqliteTableSet lists the tables of db as a lower-cased set, the shape
+// hasCompleteFreshV2Schema takes.
+func sqliteTableSet(t *testing.T, db *gorm.DB) map[string]struct{} {
+	t.Helper()
+	tables, err := db.Migrator().GetTables()
+	require.NoError(t, err)
+	set := make(map[string]struct{}, len(tables))
+	for _, name := range tables {
+		set[strings.ToLower(name)] = struct{}{}
+	}
+	return set
+}
+
+// freshSchemaAnswer runs hasCompleteFreshV2Schema over the current tables of db and
+// requires that it could tell: every row of the table test answers without an error.
+func freshSchemaAnswer(t *testing.T, db *gorm.DB) bool {
+	t.Helper()
+	fresh, err := hasCompleteFreshV2Schema(db, sqliteTableSet(t, db))
+	require.NoError(t, err, "a readable database must give a definite answer")
+	return fresh
+}
+
 // TestHasCompleteFreshV2Schema covers the GitHub #3575 guard: a "completed"
 // migration_states marker is treated as a usable fresh v2 schema only when the real
 // detections data table also exists.
@@ -476,7 +500,7 @@ func TestHasCompleteFreshV2Schema(t *testing.T) {
 		seedMigrationStatesTable(t, db, entities.MigrationStatusCompleted)
 		createBareDetectionsTable(t, db)
 
-		assert.True(t, hasCompleteFreshV2Schema(db),
+		assert.True(t, freshSchemaAnswer(t, db),
 			"completed marker plus detections table is a usable fresh v2 schema")
 	})
 
@@ -486,7 +510,7 @@ func TestHasCompleteFreshV2Schema(t *testing.T) {
 		db := newSchemaCheckDB(t)
 		seedMigrationStatesTable(t, db, entities.MigrationStatusCompleted)
 
-		assert.False(t, hasCompleteFreshV2Schema(db),
+		assert.False(t, freshSchemaAnswer(t, db),
 			"completed marker without a detections table must not be treated as fresh v2")
 	})
 
@@ -495,7 +519,7 @@ func TestHasCompleteFreshV2Schema(t *testing.T) {
 		seedMigrationStatesTable(t, db, entities.MigrationStatusIdle)
 		createBareDetectionsTable(t, db)
 
-		assert.False(t, hasCompleteFreshV2Schema(db),
+		assert.False(t, freshSchemaAnswer(t, db),
 			"a non-completed migration state is not a finished v2 install")
 	})
 
@@ -503,7 +527,7 @@ func TestHasCompleteFreshV2Schema(t *testing.T) {
 		db := newSchemaCheckDB(t)
 		createBareDetectionsTable(t, db)
 
-		assert.False(t, hasCompleteFreshV2Schema(db),
+		assert.False(t, freshSchemaAnswer(t, db),
 			"missing migration state table means no v2 schema")
 	})
 
@@ -514,8 +538,37 @@ func TestHasCompleteFreshV2Schema(t *testing.T) {
 		require.NoError(t, db.AutoMigrate(&entities.MigrationState{}))
 		createBareDetectionsTable(t, db)
 
-		assert.False(t, hasCompleteFreshV2Schema(db),
+		assert.False(t, freshSchemaAnswer(t, db),
 			"an empty migration_states table (no state row) is not a finished v2 install")
+	})
+
+	t.Run("marker read fails", func(t *testing.T) {
+		// A failed marker read is "could not tell", not "not fresh": reading it as
+		// false picks the v2_ prefix over a bare install (the table prefix wedge).
+		db := newSchemaCheckDB(t)
+		seedMigrationStatesTable(t, db, entities.MigrationStatusCompleted)
+		createBareDetectionsTable(t, db)
+		existing := sqliteTableSet(t, db)
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
+
+		fresh, err := hasCompleteFreshV2Schema(db, existing)
+		require.Error(t, err)
+		assert.False(t, fresh)
+	})
+
+	t.Run("legacy data check fails", func(t *testing.T) {
+		// The set lists a notes table that does not exist, so the row probe fails.
+		db := newSchemaCheckDB(t)
+		seedMigrationStatesTable(t, db, entities.MigrationStatusCompleted)
+		createBareDetectionsTable(t, db)
+		existing := sqliteTableSet(t, db)
+		existing["notes"] = struct{}{}
+
+		fresh, err := hasCompleteFreshV2Schema(db, existing)
+		require.Error(t, err)
+		assert.False(t, fresh)
 	})
 
 	t.Run("legacy singular migration_state table name", func(t *testing.T) {
@@ -526,7 +579,7 @@ func TestHasCompleteFreshV2Schema(t *testing.T) {
 			string(entities.MigrationStatusCompleted)).Error)
 		createBareDetectionsTable(t, db)
 
-		assert.True(t, hasCompleteFreshV2Schema(db),
+		assert.True(t, freshSchemaAnswer(t, db),
 			"legacy singular table name must still resolve")
 	})
 
@@ -547,7 +600,7 @@ func TestHasCompleteFreshV2Schema(t *testing.T) {
 			require.NoError(t, db.Exec(lt.ddl).Error)
 			require.NoError(t, db.Exec(lt.insert).Error)
 
-			assert.False(t, hasCompleteFreshV2Schema(db),
+			assert.False(t, freshSchemaAnswer(t, db),
 				"should return false when legacy %s table holds unmigrated rows", lt.name)
 		})
 	}
@@ -566,7 +619,7 @@ func TestHasCompleteFreshV2Schema(t *testing.T) {
 			// Empty legacy table: residue of a completed migration, not contamination.
 			require.NoError(t, db.Exec(lt.ddl).Error)
 
-			assert.True(t, hasCompleteFreshV2Schema(db),
+			assert.True(t, freshSchemaAnswer(t, db),
 				"an empty leftover legacy %s table must not disqualify a fresh v2 schema", lt.name)
 		})
 	}
@@ -991,6 +1044,48 @@ func bindCaptureTransport(t *testing.T) *captureTransport {
 	return transport
 }
 
+// closedPortSettings returns MySQL settings that point at a port nobody listens on.
+func closedPortSettings(t *testing.T) *conf.Settings {
+	t.Helper()
+	// A port that was just released refuses the connection.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := listener.Addr().(*net.TCPAddr).Port
+	require.NoError(t, listener.Close())
+	return mysqlTestSettings(&MySQLConfig{
+		Host: "127.0.0.1", Port: strconv.Itoa(port), Username: "u", Password: "p", Database: "d",
+	})
+}
+
+// TestMySQLStartupChecks_UnreachableServerIsUnknown pins that an unreachable server is
+// "state unknown" for both boot decision reads, never "use the legacy database"
+// or "no bare schema".
+func TestMySQLStartupChecks_UnreachableServerIsUnknown(t *testing.T) {
+	t.Parallel()
+
+	t.Run("checkMySQLMigrationState", func(t *testing.T) {
+		t.Parallel()
+		state := checkMySQLMigrationState(closedPortSettings(t))
+		require.Error(t, state.Error)
+		require.ErrorIs(t, state.Error, ErrStartupStateUnknown)
+		require.NotErrorIs(t, state.Error, ErrV2DatabaseCorrupted)
+		assert.Equal(t, DecisionStateUnknown, state.Decision)
+		assert.False(t, state.LegacyRequired)
+		assert.False(t, state.FreshInstall)
+		assert.False(t, state.V2Available)
+		assert.True(t, errors.IsConnectivityError(state.Error), "the connectivity chain must survive for the retry")
+	})
+
+	t.Run("CheckMySQLHasFreshV2Schema", func(t *testing.T) {
+		t.Parallel()
+		fresh, err := CheckMySQLHasFreshV2Schema(closedPortSettings(t))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrStartupStateUnknown)
+		assert.True(t, errors.IsConnectivityError(err))
+		assert.False(t, fresh)
+	})
+}
+
 // TestReportStartupError_SkipsConnectivityFailures pins that an unreachable
 // MySQL server is not reported from the startup check (the runtime open
 // attempt reports it once), while other startup failures still are.
@@ -998,17 +1093,13 @@ func bindCaptureTransport(t *testing.T) *captureTransport {
 func TestReportStartupError_SkipsConnectivityFailures(t *testing.T) {
 	transport := bindCaptureTransport(t)
 
-	// A port that was just released refuses the connection.
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := listener.Addr().(*net.TCPAddr).Port
-	require.NoError(t, listener.Close())
-
-	state := checkMySQLMigrationState(mysqlTestSettings(&MySQLConfig{
-		Host: "127.0.0.1", Port: strconv.Itoa(port), Username: "u", Password: "p", Database: "d",
-	}))
-	require.Error(t, state.Error)
-	require.ErrorIs(t, state.Error, ErrV2DatabaseCorrupted)
+	// The error of an open against a port that was just released.
+	_, connErr := gorm.Open(gormmysql.Open(buildMySQLStartupDSN(closedPortSettings(t))), &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+	})
+	require.Error(t, connErr)
+	require.True(t, errors.IsConnectivityError(connErr))
+	reportStartupError("mysql", "openDatabase", connErr)
 	sentry.Flush(time.Second)
 	assert.Empty(t, transport.captured(), "an unreachable server is not a startup defect")
 
@@ -1018,6 +1109,33 @@ func TestReportStartupError_SkipsConnectivityFailures(t *testing.T) {
 	require.Len(t, events, 1)
 	assert.Equal(t, []string{"datastore-startup", "mysql", "openDatabase"}, events[0].Fingerprint)
 	assert.Equal(t, sentry.LevelWarning, events[0].Level)
+}
+
+// TestDirectReports_SkipConnectivityFailures pins that the schema init and
+// state transition reports skip a lost database connection and still report
+// a server error.
+// Not parallel: it binds a client on the process-wide Sentry hub.
+func TestDirectReports_SkipConnectivityFailures(t *testing.T) {
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+	serverErr := &mysql.MySQLError{Number: 1049, Message: "Unknown database 'birdnet'"}
+
+	reports := map[string]func(err error){
+		"reportInitFailure":          func(err error) { reportInitFailure("mysql", "AutoMigrate", err) },
+		"reportStateTransitionError": func(err error) { reportStateTransitionError("idle", "initializing", err) },
+	}
+	for name, report := range reports {
+		t.Run(name, func(t *testing.T) {
+			transport := bindCaptureTransport(t)
+
+			report(refused)
+			sentry.Flush(time.Second)
+			assert.Empty(t, transport.captured(), "a lost connection is not a schema or state defect")
+
+			report(serverErr)
+			sentry.Flush(time.Second)
+			assert.Len(t, transport.captured(), 1, "a server error is still reported")
+		})
+	}
 }
 
 // TestMigrationTableResolveErrors pins the errors of the migration state table
@@ -1076,9 +1194,8 @@ func TestCheckMySQLMigrationState_NativePasswordAuth(t *testing.T) {
 func TestCheckMySQLHasFreshV2Schema_NativePasswordAuth(t *testing.T) {
 	settings := mysqlTestSettings(skipIfNoMySQL(t))
 
-	assert.NotPanics(t, func() {
-		_ = CheckMySQLHasFreshV2Schema(settings)
-	})
+	_, err := CheckMySQLHasFreshV2Schema(settings)
+	require.NoError(t, err)
 }
 
 // TestCheckMySQLHasFreshV2Schema_RequiresDetectionsTable reproduces the GitHub #3575
@@ -1104,13 +1221,15 @@ func TestCheckMySQLHasFreshV2Schema_RequiresDetectionsTable(t *testing.T) {
 		Update("state", entities.MigrationStatusCompleted).Error)
 
 	// Healthy: completed marker AND detections table present.
-	assert.True(t, CheckMySQLHasFreshV2Schema(settings),
-		"a completed marker with a detections table is a usable fresh v2 schema")
+	fresh, err := CheckMySQLHasFreshV2Schema(settings)
+	require.NoError(t, err)
+	assert.True(t, fresh, "a completed marker with a detections table is a usable fresh v2 schema")
 
 	// #3575: drop the detections data table but leave the completed marker behind.
 	require.NoError(t, mgr.DB().Migrator().DropTable("detections"))
-	assert.False(t, CheckMySQLHasFreshV2Schema(settings),
-		"a stale completed marker without a detections table must not be treated as fresh v2")
+	fresh, err = CheckMySQLHasFreshV2Schema(settings)
+	require.NoError(t, err)
+	assert.False(t, fresh, "a stale completed marker without a detections table must not be treated as fresh v2")
 }
 
 func TestCheckSQLiteMigrationStateSetsDecision(t *testing.T) {
@@ -1295,6 +1414,75 @@ func TestProbeMixedSchema_ExistsFailure_FailsClosed(t *testing.T) {
 
 	assert.True(t, p.unknown)
 	assert.Equal(t, verdictRefuseUnknown, classifyMixedSchema(p))
+}
+
+// TestResolveMixedSchema_ProbeFailure_RetriesOnlyConnectivity injects a read failure at
+// each probe site of a mixed schema database. A lost connection must give the unknown
+// state, which the caller retries, without a Sentry event; any other failure must still
+// refuse the boot and report it.
+// Not parallel: it binds a client on the process-wide Sentry hub.
+func TestResolveMixedSchema_ProbeFailure_RetriesOnlyConnectivity(t *testing.T) {
+	transport := bindCaptureTransport(t)
+
+	const database = "birdnet"
+	tests := []struct {
+		name      string
+		match     string
+		err       error
+		wantRetry bool
+	}{
+		{"connection lost while listing tables", "information_schema.tables WHERE table_schema", mysql.ErrInvalidConn, true},
+		{"connection lost on a row probe", "EXISTS(SELECT 1 FROM `notes`)", mysql.ErrInvalidConn, true},
+		{"connection lost on the label_id columns", "information_schema.columns", mysql.ErrInvalidConn, true},
+		{"connection lost on the marker read", "FROM `migration_states` LIMIT 1", mysql.ErrInvalidConn, true},
+		{"other row probe failure", "EXISTS(SELECT 1 FROM `notes`)", errors.NewStd("read failed"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: gormlogger.Discard})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			// The attached schema lives on one connection.
+			sqlDB.SetMaxOpenConns(1)
+			t.Cleanup(func() { _ = sqlDB.Close() })
+			require.NoError(t, db.Exec("ATTACH DATABASE ':memory:' AS information_schema").Error)
+			require.NoError(t, db.Exec("CREATE TABLE information_schema.tables (table_name TEXT, table_schema TEXT)").Error)
+			require.NoError(t, db.Exec("CREATE TABLE information_schema.columns (table_name TEXT, table_schema TEXT, column_name TEXT, is_nullable TEXT)").Error)
+			for _, name := range []string{"detections", "notes", "migration_states"} {
+				require.NoError(t, db.Exec("INSERT INTO information_schema.tables VALUES (?, ?)", name, database).Error)
+				require.NoError(t, db.Exec("CREATE TABLE `"+name+"` (id INTEGER, state TEXT)").Error)
+			}
+			require.NoError(t, db.Exec("INSERT INTO `migration_states` VALUES (1, ?)", string(entities.MigrationStatusIdle)).Error)
+			require.NoError(t, db.Callback().Row().Before("gorm:row").Register("test:fail_probe", func(tx *gorm.DB) {
+				if strings.Contains(tx.Statement.SQL.String(), tt.match) {
+					_ = tx.AddError(tt.err)
+				}
+			}))
+
+			settings := &conf.Settings{}
+			settings.Output.MySQL.Database = database
+			eventsBefore := len(transport.captured())
+			state := resolveMixedSchema(db, settings)
+			sentry.Flush(time.Second)
+			newEvents := len(transport.captured()) - eventsBefore
+
+			if !tt.wantRetry {
+				assert.Positive(t, newEvents, "a refusal is reported")
+				assert.Equal(t, DecisionMixedSchemaRefused, state.Decision)
+				require.ErrorIs(t, state.Error, ErrMixedSchemaDatabase)
+				require.NotErrorIs(t, state.Error, ErrStartupStateUnknown)
+				return
+			}
+			assert.Zero(t, newEvents, "a lost connection is retried, not reported as a refusal")
+			assert.Equal(t, DecisionStateUnknown, state.Decision)
+			require.ErrorIs(t, state.Error, ErrStartupStateUnknown)
+			require.ErrorIs(t, state.Error, mysql.ErrInvalidConn)
+			require.NotErrorIs(t, state.Error, ErrMixedSchemaDatabase)
+			assert.True(t, errors.IsConnectivityError(state.Error))
+			assert.False(t, state.V2Available || state.LegacyRequired || state.FreshInstall, "no side or mode is chosen")
+		})
+	}
 }
 
 // TestDescribeStepFailure pins the cause named in a drop-failure refusal: the driver
