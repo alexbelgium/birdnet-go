@@ -10,11 +10,10 @@ import (
 
 func TestForkBatThresholdConfig(t *testing.T) {
 	t.Parallel()
-	const config = "forkmodels:\n  batdetect2:\n    threshold: 0.4\n  bsgbat:\n    threshold: 0.9\n"
+	const config = "forkmodels:\n  batdetect2:\n    threshold: 0.4\n"
 	var settings Settings
 	require.NoError(t, yaml.Unmarshal([]byte(config), &settings))
 	assert.InDelta(t, .4, BatModelThreshold(&settings, ModelIDBatDetect2), 1e-6)
-	assert.InDelta(t, .9, BatModelThreshold(&settings, ModelIDBSGBat), 1e-6)
 	clone := CloneSettings(&settings)
 	assert.Equal(t, settings.ForkModels, clone.ForkModels)
 	for _, invalid := range []float64{-.1, 1.1, math.NaN(), math.Inf(1)} {

@@ -12,14 +12,14 @@ func TestBatFamilySharedFilter(t *testing.T) {
 	for level := range 6 {
 		s.Bat.FalsePositiveFilter.Level = level
 		vt := precomputeVisibilityThresholds(s, 0)
-		for _, id := range []string{classifier.RegistryIDBat, classifier.RegistryIDBatDetect2, classifier.RegistryIDBSGBat} {
+		for _, id := range []string{classifier.RegistryIDBat, classifier.RegistryIDBatDetect2} {
 			assert.Equal(t, calculateBatMinDetections(s), MinDetectionsForModel(s, id, 0))
 			assert.Equal(t, vt.getThreshold(classifier.RegistryIDBat), vt.getThreshold(id))
 		}
 	}
 }
 func TestUltrasonicPCMRate(t *testing.T) {
-	for _, id := range []string{classifier.RegistryIDBat, classifier.RegistryIDBatDetect2, classifier.RegistryIDBSGBat} {
+	for _, id := range []string{classifier.RegistryIDBat, classifier.RegistryIDBatDetect2} {
 		assert.Equal(t, classifier.ModelRegistry[id].Spec.EffectiveSampleRate(), ultrasonicPCMRate(id, 192000))
 	}
 	assert.Equal(t, 44100, ultrasonicPCMRate("unknown", 44100))

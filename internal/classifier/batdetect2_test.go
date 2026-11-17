@@ -48,7 +48,7 @@ func TestBatDetect2LabelsAndWiring(t *testing.T) {
 		assert.False(t, seen[scientificName])
 		seen[scientificName] = true
 	}
-	assert.True(t, isBatFamily(RegistryIDBatDetect2))
+	assert.Equal(t, TaxonGroupBat, TaxonGroupFor(RegistryIDBatDetect2))
 	info, ok := ModelRegistry[RegistryIDBatDetect2]
 	require.True(t, ok)
 	assert.Equal(t, "BatDetect2", info.DetectionName)
