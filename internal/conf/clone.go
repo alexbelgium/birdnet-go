@@ -73,6 +73,9 @@ func CloneSettings(src *Settings) *Settings {
 	// Realtime.DaylightFilter.
 	dst.Realtime.DaylightFilter.Species = slices.Clone(src.Realtime.DaylightFilter.Species)
 
+	// Realtime.FirstDailyConsensus.
+	dst.Realtime.FirstDailyConsensus.Whitelist = slices.Clone(src.Realtime.FirstDailyConsensus.Whitelist)
+	dst.Realtime.FirstDailyConsensus.BatWhitelist = slices.Clone(src.Realtime.FirstDailyConsensus.BatWhitelist)
 	// Realtime.ModelConsensus.
 	dst.Realtime.ModelConsensus.Species = slices.Clone(src.Realtime.ModelConsensus.Species)
 
