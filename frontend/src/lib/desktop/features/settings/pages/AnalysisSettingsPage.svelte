@@ -201,6 +201,9 @@
   const DEFAULT_HUGGINGFACE_ENDPOINT = 'https://huggingface.co';
   /** Catalog ID of the BSG-BAT model (the other bat catalog entries are BattyBirdNET models). */
   const BSG_BAT_CATALOG_ID = 'bsg-bat';
+  /** Backend default of bsgbat.backgroundmax (DefaultBSGBatBackgroundMax), used until saved. */
+  const BSG_BAT_DEFAULT_BACKGROUND_MAX = 0.9;
+  const BSG_BAT_BACKGROUND_MAX_STEP = 0.01;
   /** Frames are whole numbers. */
   const BSG_BAT_STEP_INCREMENT = 1;
   /** Decimals of the step shown in seconds (one frame is 2 ms, so 0.01 s is five frames). */
@@ -586,6 +589,9 @@
       batDiscardUnlikely: store.originalData.bat?.ultrasonicFilter?.discardUnlikely ?? false,
       batFPFilter: store.originalData.bat?.falsePositiveFilter?.level ?? 0,
       bsgBatStepFrames: hasBsgBatModel ? savedBsgBatStepFrames : undefined,
+      bsgBatBackgroundMax: hasBsgBatModel
+        ? (store.originalData.bsgbat?.backgroundMax ?? BSG_BAT_DEFAULT_BACKGROUND_MAX)
+        : undefined,
     },
     current: {
       batNighttimeOnly: bat.nighttimeOnly,
@@ -593,6 +599,9 @@
       batDiscardUnlikely: bat.ultrasonicFilter?.discardUnlikely ?? false,
       batFPFilter: batFPLevel,
       bsgBatStepFrames: hasBsgBatModel ? bsgBatStepFrames : undefined,
+      bsgBatBackgroundMax: hasBsgBatModel
+        ? (bsgBat.backgroundMax ?? BSG_BAT_DEFAULT_BACKGROUND_MAX)
+        : undefined,
     },
   });
   const rangeFilterChange: ChangePair = $derived({
@@ -1502,6 +1511,10 @@
     const snapped = snapToStep(value, bounds);
     updateDynamicThreshold(key, snapped);
     return snapped;
+  }
+
+  function updateBsgBatBackgroundMax(value: number) {
+    settingsActions.updateSection('bsgbat', { backgroundMax: value });
   }
 
   // The field clamps to the range; a fractional entry becomes a whole frame. A step equal to the
@@ -3066,6 +3079,16 @@
               {t('analysis.detection.bsgBatStep.restartNote')}
             </p>
           </div>
+          <NumberField
+            label={t('analysis.detection.bsgBatBackgroundMax.label')}
+            value={bsgBat.backgroundMax ?? BSG_BAT_DEFAULT_BACKGROUND_MAX}
+            onUpdate={updateBsgBatBackgroundMax}
+            min={0}
+            max={1}
+            step={BSG_BAT_BACKGROUND_MAX_STEP}
+            disabled={store.isLoading || store.isSaving}
+            helpText={t('analysis.detection.bsgBatBackgroundMax.helpText')}
+          />
         </div>
       {/if}
     </SettingsSection>

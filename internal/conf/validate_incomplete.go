@@ -201,6 +201,10 @@ func (s *Settings) normalizeModelThresholds() {
 	reset("birdnetv3", &s.BirdNETV3.Threshold)
 	reset("birdnetplus", &s.BirdNETPlus.Threshold)
 	reset("bsgbat", &s.BSGBat.Threshold)
+	if err := validateBSGBatBackgroundMax(s.BSGBat.BackgroundMax); err != nil {
+		s.recordValidationWarning(warnComponentModels, "%v; using the default %.2f", err, DefaultBSGBatBackgroundMax)
+		s.BSGBat.BackgroundMax = DefaultBSGBatBackgroundMax
+	}
 }
 
 // normalizeBSGBatStep resolves an unset bsgbat.stepframes (0) to the default and

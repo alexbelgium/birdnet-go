@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore"
 	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/inference"
@@ -204,6 +205,13 @@ func (b *BSGBat) Predict(ctx context.Context, samples [][]float32) ([]datastore.
 		err = newNonFiniteScoreError(nonFiniteScore{modelID: RegistryIDBSGBat, index: idx, count: len(logits)}, b.RuntimeInfo)
 		recordPredictionFailure(span, RegistryIDBSGBat, errTypeNonFiniteLogits, start, err)
 		return nil, err
+	}
+
+	// Background gate: read per prediction so UI changes apply without a restart.
+	if s := conf.Setting(); s != nil && s.BSGBat.BackgroundMax > 0 && b.backgroundIndex >= 0 && b.backgroundIndex < len(logits) &&
+		customSigmoid(float64(logits[b.backgroundIndex]), bsgBatSigmoidSensitivity) > s.BSGBat.BackgroundMax {
+		recordPredictionSuccess(span, 0, start)
+		return []datastore.Results{}, nil
 	}
 
 	// Multi-label sigmoid over the species logits; the Background logit is skipped.

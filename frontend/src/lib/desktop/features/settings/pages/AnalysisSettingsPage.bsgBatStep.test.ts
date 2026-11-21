@@ -388,6 +388,29 @@ describe('AnalysisSettingsPage BSG-BAT analysis step', () => {
     );
   });
 
+  describe('background rejection limit', () => {
+    it('shows the default 0.9 when unset and saves an edit to the bsgbat section only', async () => {
+      seedSection('bsgbat', { threshold: 0.5, stepFrames: 250 });
+      await renderWithCatalog(BSG_BAT_CATALOG_ID);
+
+      const input = screen.getByRole('spinbutton', {
+        name: /analysis\.detection\.bsgBatBackgroundMax\.label/,
+      });
+      expect(input).toHaveValue(0.9);
+      expect(input).toHaveAttribute('min', '0');
+      expect(input).toHaveAttribute('max', '1');
+
+      const user = userEvent.setup();
+      await user.clear(input);
+      await user.type(input, '0.95');
+      await user.tab();
+
+      expect(settingsActions.updateSection).toHaveBeenLastCalledWith('bsgbat', {
+        backgroundMax: 0.95,
+      });
+    });
+  });
+
   describe('change tracking', () => {
     /** The global unsaved-changes test: the raw form copy against the raw saved copy. */
     function formDiffersFromSaved(): boolean {
@@ -422,6 +445,20 @@ describe('AnalysisSettingsPage BSG-BAT analysis step', () => {
       expect(descriptionOf(batsTab())).toBe(HAS_CHANGES);
 
       editSection('bsgbat', { stepFrames: 250 });
+      await tick();
+      expect(descriptionOf(batsTab())).toBe('');
+    });
+
+    it('lights the Bats tab for a Background limit edit and clears it when set back', async () => {
+      seedSection('bsgbat', { threshold: 0.5, stepFrames: 250, backgroundMax: 0.9 });
+      await renderWithCatalog(BSG_BAT_CATALOG_ID);
+      expect(descriptionOf(batsTab())).toBe('');
+
+      editSection('bsgbat', { backgroundMax: 0.8 });
+      await tick();
+      expect(descriptionOf(batsTab())).toBe(HAS_CHANGES);
+
+      editSection('bsgbat', { backgroundMax: 0.9 });
       await tick();
       expect(descriptionOf(batsTab())).toBe('');
     });
