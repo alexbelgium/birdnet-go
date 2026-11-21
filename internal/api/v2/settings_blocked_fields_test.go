@@ -268,6 +268,28 @@ func TestPatchCannotChangeBlockedFields(t *testing.T) {
 			seed:    func(s *conf.Settings) { s.Realtime.Audio.FfmpegPath = "/usr/bin/ffmpeg" },
 			body:    map[string]any{"ffmpegPath": "/tmp/attacker/ffmpeg"},
 		},
+		{
+			leaf:    "Realtime.Species.Confirmed",
+			section: "species",
+			seed:    func(s *conf.Settings) { s.Realtime.Species.Confirmed = []string{"Turdus merula"} },
+			body:    map[string]any{"confirmed": []string{}},
+			verify: func(t *testing.T, s *conf.Settings) {
+				t.Helper()
+				assert.Equal(t, []string{"Turdus merula"}, s.Realtime.Species.Confirmed)
+			},
+		},
+		{
+			leaf:    "Realtime.Species.SpeciesWorkspace",
+			section: "species",
+			seed: func(s *conf.Settings) {
+				s.Realtime.Species.SpeciesWorkspace.Sort = conf.SpeciesWorkspaceSort{Column: "count", Direction: "desc"}
+			},
+			body: map[string]any{"speciesWorkspace": map[string]any{"sort": map[string]any{"column": "lastSeen", "direction": "asc"}}},
+			verify: func(t *testing.T, s *conf.Settings) {
+				t.Helper()
+				assert.Equal(t, "count", s.Realtime.Species.SpeciesWorkspace.Sort.Column)
+			},
+		},
 	}
 
 	// The table must cover exactly the client-reachable leaves, no more and no
@@ -589,6 +611,22 @@ func TestRestoreBlockedFieldsCoversEveryLeaf(t *testing.T) {
 			seed:    func(s *conf.Settings) { s.Realtime.Audio.FfmpegPath = "/usr/bin/ffmpeg" },
 			tamper:  func(s *conf.Settings) { s.Realtime.Audio.FfmpegPath = "/tmp/attacker/ffmpeg" },
 			current: func(s *conf.Settings) any { return s.Realtime.Audio.FfmpegPath },
+		},
+		{
+			name:    "Realtime.Species.Confirmed",
+			path:    "Realtime.Species.Confirmed",
+			seed:    func(s *conf.Settings) { s.Realtime.Species.Confirmed = []string{"Turdus merula"} },
+			tamper:  func(s *conf.Settings) { s.Realtime.Species.Confirmed = nil },
+			current: func(s *conf.Settings) any { return s.Realtime.Species.Confirmed },
+		},
+		{
+			name: "Realtime.Species.SpeciesWorkspace",
+			path: "Realtime.Species.SpeciesWorkspace",
+			seed: func(s *conf.Settings) { s.Realtime.Species.SpeciesWorkspace = conf.DefaultSpeciesWorkspaceLayout() },
+			tamper: func(s *conf.Settings) {
+				s.Realtime.Species.SpeciesWorkspace = conf.SpeciesWorkspaceLayout{}
+			},
+			current: func(s *conf.Settings) any { return s.Realtime.Species.SpeciesWorkspace },
 		},
 	}
 
