@@ -66,6 +66,7 @@
     selected?: boolean;
     onToggleSelect?: (_id: string, _shiftKey: boolean) => void;
     onReview?: () => void;
+    onReanalyze?: () => void;
     onMarkCorrect?: () => void;
     onMarkFalsePositive?: () => void;
     onToggleSpecies?: () => void;
@@ -82,6 +83,7 @@
     selected = false,
     onToggleSelect,
     onReview,
+    onReanalyze,
     onMarkCorrect,
     onMarkFalsePositive,
     onToggleSpecies,
@@ -326,6 +328,7 @@
     {onMarkCorrect}
     {onMarkFalsePositive}
     {onReview}
+    {onReanalyze}
     {onToggleSpecies}
     {onToggleLock}
     {onDelete}
