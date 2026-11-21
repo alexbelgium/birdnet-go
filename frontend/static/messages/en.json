@@ -493,6 +493,12 @@
         "loadFailedTitle": "Acoustic model failed to load",
         "loadFailedMessage": "An enabled acoustic model failed to load, so audio is captured but not analyzed. Check the model on the System > AI Models page."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel not installed",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 is needed to filter detections by location for: {models}. Install BirdNET Geomodel v3.0 from the model gallery in Settings > Analysis > Models.",
+        "loadFailedTitle": "Geomodel failed to load",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 could not be loaded, so location filtering is off for: {models}. Check the application log, then install or reinstall BirdNET Geomodel v3.0 from the model gallery in Settings > Analysis > Models."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# model has a better build for this system} other {# models have better builds for this system}}",
         "message": "A build better matched to this system's hardware or location is available for: {models}. Open Settings > Analysis > Models and choose Optimize to switch."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {An installed model has a newer release} other {# installed models have newer releases}}",
         "message": "An installed model is a preview version, and its final release is now available: {models}. Open Settings > Analysis > Models, install the final release and remove the preview."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {An installed model has a newer build} other {# installed models have newer builds}}",
+        "message": "A newer build replaces the installed one for: {models}. The installed build keeps working until you switch. Open Settings > Analysis > Models and choose Update."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Failed to load settings",
       "saveFailed": "Failed to save settings",
       "changedElsewhere": "Settings were changed elsewhere. Review them and save again.",
-      "databaseStatsFailed": "Failed to load database statistics",
       "csvDownloadFailed": "Failed to download CSV"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "MySQL database name"
             }
           },
-          "stats": {
-            "title": "Database Statistics",
-            "description": "Runtime information about your database",
-            "loading": "Loading database statistics...",
-            "retry": "Retry",
-            "refresh": "Refresh",
-            "noData": "No database statistics available.",
-            "type": "Type",
-            "status": "Status",
-            "size": "Size",
-            "totalDetections": "Total Detections",
-            "location": "Location",
-            "connected": "Connected",
-            "disconnected": "Disconnected"
-          },
           "errors": {
             "backupStartFailed": "Failed to start backup",
             "backupStatusFailed": "Failed to get backup status",
             "backupFailed": "Backup failed",
             "backupDownloadFailed": "Failed to download backup"
+          },
+          "statsMoved": {
+            "text": "Database statistics have moved to the System section.",
+            "link": "Open System > Database"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Superseded by {name}. Use the newer model instead.",
         "dialogNotice": "This model has been superseded by {name}. Consider installing {name} instead."
       },
+      "update": {
+        "cardNotice": "A newer build ({to}) replaces the installed {from} build.",
+        "action": "Update",
+        "applying": "Updating..."
+      },
       "entryIncompatible": "This model is not available on this system.",
       "regionGlobal": "Global",
       "hardwareLabel": "Hardware",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "OpenVINO device",
         "helpText": "Used for models that run on OpenVINO.",
+        "helpTextMultipleGpus": "Used for models that run on OpenVINO. This device has more than one GPU, so pick the one the models run on.",
+        "notDetectedHint": "The selected GPU is not detected. Models run on ONNX Runtime until another device is chosen.",
         "options": {
           "auto": "Auto",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO default: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (not detected)"
+        },
+        "gpuTypes": {
+          "integrated": "integrated",
+          "discrete": "discrete"
         }
       },
       "reloadNote": "Changing the backend or device reloads the models, so detection pauses for a few seconds.",

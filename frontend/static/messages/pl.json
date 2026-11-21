@@ -493,6 +493,12 @@
         "loadFailedTitle": "Nie udało się załadować modelu akustycznego",
         "loadFailedMessage": "Nie udało się załadować włączonego modelu akustycznego, więc dźwięk jest przechwytywany, ale nie jest analizowany. Sprawdź model na stronie System > Modele AI."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel niezainstalowany",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 jest potrzebny do filtrowania wykryć według lokalizacji dla: {models}. Zainstaluj BirdNET Geomodel v3.0 z galerii modeli w Ustawienia > Analiza > Modele.",
+        "loadFailedTitle": "Błąd wczytywania Geomodelu",
+        "loadFailedMessage": "Nie udało się wczytać BirdNET Geomodel v3.0, więc filtrowanie według lokalizacji jest wyłączone dla: {models}. Sprawdź dziennik aplikacji oraz zainstaluj lub zainstaluj ponownie BirdNET Geomodel v3.0 z galerii modeli w Ustawienia > Analiza > Modele."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# model ma lepszą wersję dla tego systemu} few {# modele mają lepsze wersje dla tego systemu} many {# modeli ma lepsze wersje dla tego systemu} other {# modeli ma lepsze wersje dla tego systemu}}",
         "message": "Wersja lepiej dopasowana do sprzętu lub lokalizacji tego systemu jest dostępna dla: {models}. Otwórz Ustawienia > Analiza > Modele i wybierz Optymalizuj, aby przełączyć."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Zainstalowany model ma nowsze wydanie} few {# zainstalowane modele mają nowsze wydania} many {# zainstalowanych modeli ma nowsze wydania} other {# zainstalowanych modeli ma nowsze wydania}}",
         "message": "Zainstalowany model jest wersją zapoznawczą, a jego ostateczne wydanie jest już dostępne: {models}. Otwórz Ustawienia > Analiza > Modele, zainstaluj ostateczne wydanie i usuń wersję zapoznawczą."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Zainstalowany model ma nowszą wersję} few {# zainstalowane modele mają nowsze wersje} many {# zainstalowanych modeli ma nowsze wersje} other {# zainstalowanych modeli ma nowsze wersje}}",
+        "message": "Nowsza wersja zastępuje zainstalowaną dla: {models}. Zainstalowana wersja działa do czasu przełączenia. Otwórz Ustawienia > Analiza > Modele i wybierz Zaktualizuj."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Nie udało się załadować ustawień",
       "saveFailed": "Nie udało się zapisać ustawień",
       "changedElsewhere": "Ustawienia zostały zmienione gdzie indziej. Sprawdź je i zapisz ponownie.",
-      "databaseStatsFailed": "Nie udało się załadować statystyk bazy danych",
       "csvDownloadFailed": "Nie udało się pobrać pliku CSV"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "Nazwa bazy danych MySQL"
             }
           },
-          "stats": {
-            "title": "Statystyki bazy danych",
-            "description": "Informacje o stanie bazy danych",
-            "loading": "Ładowanie statystyk bazy danych...",
-            "retry": "Ponów",
-            "refresh": "Odśwież",
-            "noData": "Brak dostępnych statystyk bazy danych.",
-            "type": "Typ",
-            "status": "Status",
-            "size": "Rozmiar",
-            "totalDetections": "Wykrycia łącznie",
-            "location": "Lokalizacja",
-            "connected": "Połączono",
-            "disconnected": "Rozłączono"
-          },
           "errors": {
             "backupStartFailed": "Nie udało się rozpocząć kopii zapasowej",
             "backupStatusFailed": "Nie udało się pobrać statusu kopii zapasowej",
             "backupFailed": "Kopia zapasowa nie powiodła się",
             "backupDownloadFailed": "Nie udało się pobrać kopii zapasowej"
+          },
+          "statsMoved": {
+            "text": "Statystyki bazy danych zostały przeniesione do sekcji System.",
+            "link": "Otwórz System > Baza danych"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Zastąpiony przez {name}. Używaj zamiast niego nowszego modelu.",
         "dialogNotice": "Ten model został zastąpiony przez {name}. Rozważ zainstalowanie {name}."
       },
+      "update": {
+        "cardNotice": "Nowsza wersja ({to}) zastępuje zainstalowaną wersję {from}.",
+        "action": "Zaktualizuj",
+        "applying": "Aktualizowanie..."
+      },
       "entryIncompatible": "Ten model nie jest dostępny w tym systemie.",
       "regionGlobal": "Globalny",
       "hardwareLabel": "Sprzęt",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "Urządzenie OpenVINO",
         "helpText": "Używane dla modeli działających w OpenVINO.",
+        "helpTextMultipleGpus": "Używane dla modeli działających w OpenVINO. To urządzenie ma więcej niż jedno GPU, wybierz to, na którym mają działać modele.",
+        "notDetectedHint": "Nie wykryto wybranego GPU. Modele działają w ONNX Runtime, dopóki nie zostanie wybrane inne urządzenie.",
         "options": {
           "auto": "Automatyczny",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "Domyślne w OpenVINO: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (nie wykryto)"
+        },
+        "gpuTypes": {
+          "integrated": "zintegrowane",
+          "discrete": "dedykowane"
         }
       },
       "reloadNote": "Zmiana backendu lub urządzenia powoduje przeładowanie modeli, więc detekcja wstrzymuje się na kilka sekund.",

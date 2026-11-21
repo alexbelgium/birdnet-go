@@ -493,6 +493,12 @@
         "loadFailedTitle": "Akustisen mallin lataus epäonnistui",
         "loadFailedMessage": "Käytössä olevan akustisen mallin lataus epäonnistui, joten ääntä tallennetaan, mutta sitä ei analysoida. Tarkista malli sivulla Järjestelmä > Tekoälymallit."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel ei ole asennettu",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 -malli tarvitaan havaintojen suodattamiseen sijainnin mukaan seuraaville: {models}. Asenna BirdNET Geomodel v3.0 malligalleriasta kohdassa Asetukset > Analyysi > Mallit.",
+        "loadFailedTitle": "Geomodelia ei voitu ladata",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 -mallia ei voitu ladata, joten sijaintisuodatus on pois päältä seuraaville: {models}. Tarkista sovelluksen loki sekä asenna tai asenna uudelleen BirdNET Geomodel v3.0 malligalleriasta kohdassa Asetukset > Analyysi > Mallit."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# mallille on saatavilla parempi versio tälle järjestelmälle} other {# mallille on saatavilla parempia versioita tälle järjestelmälle}}",
         "message": "Tämän järjestelmän laitteistoon tai sijaintiin paremmin sopiva versio on saatavilla seuraaville malleille: {models}. Avaa Asetukset > Analyysi > Mallit ja vaihda valitsemalla Optimoi."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Asennetulla mallilla on uudempi julkaisu} other {# asennetulla mallilla on uudempi julkaisu}}",
         "message": "Asennettu malli on esiversio, ja sen lopullinen julkaisu on nyt saatavilla: {models}. Avaa Asetukset > Analyysi > Mallit, asenna lopullinen julkaisu ja poista esiversio."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Asennetulle mallille on saatavilla uudempi versio} other {# asennetulle mallille on saatavilla uudempia versioita}}",
+        "message": "Uudempi versio korvaa asennetun seuraaville malleille: {models}. Asennettu versio toimii, kunnes vaihdat. Avaa Asetukset > Analyysi > Mallit ja valitse Päivitä."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Asetusten lataaminen epäonnistui",
       "saveFailed": "Asetusten tallentaminen epäonnistui",
       "changedElsewhere": "Asetuksia muutettiin muualla. Tarkista ne ja tallenna uudelleen.",
-      "databaseStatsFailed": "Tietokantatilastojen lataaminen epäonnistui",
       "csvDownloadFailed": "CSV-tiedoston lataaminen epäonnistui"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "MySQL-tietokannan nimi"
             }
           },
-          "stats": {
-            "title": "Tietokantatilastot",
-            "description": "Ajonaikaiset tiedot tietokannastasi",
-            "loading": "Ladataan tietokantatilastoja...",
-            "retry": "Yritä uudelleen",
-            "refresh": "Päivitä",
-            "noData": "Tietokantatilastoja ei saatavilla.",
-            "type": "Tyyppi",
-            "status": "Tila",
-            "size": "Koko",
-            "totalDetections": "Havaintoja yhteensä",
-            "location": "Sijainti",
-            "connected": "Yhdistetty",
-            "disconnected": "Ei yhteyttä"
-          },
           "errors": {
             "backupStartFailed": "Varmuuskopioinnin käynnistäminen epäonnistui",
             "backupStatusFailed": "Varmuuskopioinnin tilan hakeminen epäonnistui",
             "backupFailed": "Varmuuskopiointi epäonnistui",
             "backupDownloadFailed": "Varmuuskopion lataaminen epäonnistui"
+          },
+          "statsMoved": {
+            "text": "Tietokantatilastot on siirretty Järjestelmä-osioon.",
+            "link": "Avaa Järjestelmä > Tietokanta"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Korvattu mallilla {name}. Käytä sen sijaan uudempaa mallia.",
         "dialogNotice": "Tämän mallin on korvannut {name}. Harkitse mallin {name} asentamista sen sijaan."
       },
+      "update": {
+        "cardNotice": "Uudempi versio ({to}) korvaa asennetun version {from}.",
+        "action": "Päivitä",
+        "applying": "Päivitetään..."
+      },
       "entryIncompatible": "Tämä malli ei ole saatavilla tässä järjestelmässä.",
       "regionGlobal": "Globaali",
       "hardwareLabel": "Laitteisto",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "OpenVINO-laite",
         "helpText": "Käytetään malleille, jotka suoritetaan OpenVINO:ssa.",
+        "helpTextMultipleGpus": "Käytetään malleille, jotka suoritetaan OpenVINO:ssa. Tässä laitteessa on useampi kuin yksi GPU, joten valitse se, jolla mallit suoritetaan.",
+        "notDetectedHint": "Valittua GPU:ta ei löydy. Mallit suoritetaan ONNX Runtimella, kunnes valitaan toinen laite.",
         "options": {
           "auto": "Automaattinen",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINOn oletus: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (ei löydy)"
+        },
+        "gpuTypes": {
+          "integrated": "integroitu",
+          "discrete": "erillinen"
         }
       },
       "reloadNote": "Taustajärjestelmän tai laitteen vaihtaminen lataa mallit uudelleen, joten tunnistus keskeytyy muutamaksi sekunniksi.",

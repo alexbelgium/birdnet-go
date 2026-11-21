@@ -493,6 +493,12 @@
         "loadFailedTitle": "No se pudo cargar el modelo acústico",
         "loadFailedMessage": "Un modelo acústico activado no se pudo cargar, por lo que el audio se captura pero no se analiza. Compruebe el modelo en la página Sistema > Modelos de IA."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel no está instalado",
+        "notInstalledMessage": "Se necesita BirdNET Geomodel v3.0 para filtrar las detecciones por ubicación en: {models}. Instale BirdNET Geomodel v3.0 desde la galería de modelos en Configuración > Análisis > Modelos.",
+        "loadFailedTitle": "No se pudo cargar Geomodel",
+        "loadFailedMessage": "No se pudo cargar BirdNET Geomodel v3.0, por lo que el filtrado por ubicación está desactivado para: {models}. Revise el registro de la aplicación e instale o reinstale BirdNET Geomodel v3.0 desde la galería de modelos en Configuración > Análisis > Modelos."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# modelo tiene una versión mejor para este sistema} other {# modelos tienen versiones mejores para este sistema}}",
         "message": "Hay disponible una versión mejor adaptada al hardware o a la ubicación de este sistema para: {models}. Abra Configuración > Análisis > Modelos y elija Optimizar para cambiar."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Un modelo instalado tiene una versión más reciente} other {# modelos instalados tienen versiones más recientes}}",
         "message": "Un modelo instalado es una versión preliminar y su versión final ya está disponible: {models}. Abra Configuración > Análisis > Modelos, instale la versión final y elimine la versión preliminar."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Un modelo instalado tiene una versión más reciente} other {# modelos instalados tienen versiones más recientes}}",
+        "message": "Una versión más reciente sustituye a la instalada para: {models}. La versión instalada sigue funcionando hasta que cambie. Abra Configuración > Análisis > Modelos y elija Actualizar."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Error al cargar la configuración",
       "saveFailed": "Error al guardar la configuración",
       "changedElsewhere": "La configuración se modificó en otro lugar. Revísala y vuelve a guardar.",
-      "databaseStatsFailed": "Error al cargar las estadísticas de la base de datos",
       "csvDownloadFailed": "Error al descargar el CSV"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "Nombre de la base de datos MySQL"
             }
           },
-          "stats": {
-            "title": "Estadísticas de base de datos",
-            "description": "Información de tiempo de ejecución sobre su base de datos",
-            "loading": "Cargando estadísticas de base de datos...",
-            "retry": "Reintentar",
-            "refresh": "Actualizar",
-            "noData": "No hay estadísticas de base de datos disponibles.",
-            "type": "Tipo",
-            "status": "Estado",
-            "size": "Tamaño",
-            "totalDetections": "Detecciones totales",
-            "location": "Ubicación",
-            "connected": "Conectado",
-            "disconnected": "Desconectado"
-          },
           "errors": {
             "backupStartFailed": "Error al iniciar la copia de seguridad",
             "backupStatusFailed": "Error al obtener el estado de la copia de seguridad",
             "backupFailed": "Copia de seguridad fallida",
             "backupDownloadFailed": "Error al descargar la copia de seguridad"
+          },
+          "statsMoved": {
+            "text": "Las estadísticas de la base de datos se han movido a la sección Sistema.",
+            "link": "Abrir Sistema > Base de datos"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Sustituido por {name}. Use en su lugar el modelo más reciente.",
         "dialogNotice": "Este modelo ha sido sustituido por {name}. Considere instalar {name} en su lugar."
       },
+      "update": {
+        "cardNotice": "Una versión más reciente ({to}) sustituye a la versión instalada {from}.",
+        "action": "Actualizar",
+        "applying": "Actualizando..."
+      },
       "entryIncompatible": "Este modelo no está disponible en este sistema.",
       "regionGlobal": "Global",
       "hardwareLabel": "Hardware",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "Dispositivo OpenVINO",
         "helpText": "Se usa para los modelos que se ejecutan en OpenVINO.",
+        "helpTextMultipleGpus": "Se usa para los modelos que se ejecutan en OpenVINO. Este dispositivo tiene más de una GPU, así que elige en cuál se ejecutan los modelos.",
+        "notDetectedHint": "No se detecta la GPU seleccionada. Los modelos se ejecutan en ONNX Runtime hasta que se elija otro dispositivo.",
         "options": {
           "auto": "Automático",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "Predeterminada de OpenVINO: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (no detectada)"
+        },
+        "gpuTypes": {
+          "integrated": "integrada",
+          "discrete": "dedicada"
         }
       },
       "reloadNote": "Cambiar el backend o el dispositivo recarga los modelos, por lo que la detección se pausa unos segundos.",

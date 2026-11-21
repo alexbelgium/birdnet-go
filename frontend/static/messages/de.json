@@ -493,6 +493,12 @@
         "loadFailedTitle": "Akustisches Modell konnte nicht geladen werden",
         "loadFailedMessage": "Ein aktiviertes akustisches Modell konnte nicht geladen werden, sodass Audio erfasst, aber nicht analysiert wird. Überprüfen Sie das Modell auf der Seite System > KI-Modelle."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel nicht installiert",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 wird für die Standortfilterung der Erkennungen benötigt: {models}. Installieren Sie BirdNET Geomodel v3.0 aus der Modellgalerie unter Einstellungen > Analyse > Modelle.",
+        "loadFailedTitle": "Geomodel: Laden fehlgeschlagen",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 konnte nicht geladen werden, daher ist die Standortfilterung ausgeschaltet für: {models}. Prüfen Sie das Anwendungsprotokoll und installieren oder reinstallieren Sie BirdNET Geomodel v3.0 aus der Modellgalerie unter Einstellungen > Analyse > Modelle."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# Modell hat einen besseren Build für dieses System} other {# Modelle haben bessere Builds für dieses System}}",
         "message": "Ein Build, der besser zur Hardware oder zum Standort dieses Systems passt, ist verfügbar für: {models}. Öffnen Sie Einstellungen > Analyse > Modelle und wählen Sie Optimieren, um zu wechseln."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Ein installiertes Modell hat eine neuere Version} other {# installierte Modelle haben neuere Versionen}}",
         "message": "Ein installiertes Modell ist eine Vorschauversion, und seine finale Version ist jetzt verfügbar: {models}. Öffnen Sie Einstellungen > Analyse > Modelle, installieren Sie die finale Version und entfernen Sie die Vorschauversion."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Ein installiertes Modell hat einen neueren Build} other {# installierte Modelle haben neuere Builds}}",
+        "message": "Ein neuerer Build ersetzt den installierten für: {models}. Der installierte Build funktioniert weiter, bis Sie wechseln. Öffnen Sie Einstellungen > Analyse > Modelle und wählen Sie Aktualisieren."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Einstellungen konnten nicht geladen werden",
       "saveFailed": "Einstellungen konnten nicht gespeichert werden",
       "changedElsewhere": "Die Einstellungen wurden an anderer Stelle geändert. Bitte prüfen Sie sie und speichern Sie erneut.",
-      "databaseStatsFailed": "Datenbankstatistiken konnten nicht geladen werden",
       "csvDownloadFailed": "CSV-Download fehlgeschlagen"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "MySQL-Datenbankname"
             }
           },
-          "stats": {
-            "title": "Datenbankstatistiken",
-            "description": "Laufzeitinformationen über Ihre Datenbank",
-            "loading": "Datenbankstatistiken werden geladen...",
-            "retry": "Wiederholen",
-            "refresh": "Aktualisieren",
-            "noData": "Keine Datenbankstatistiken verfügbar.",
-            "type": "Typ",
-            "status": "Status",
-            "size": "Größe",
-            "totalDetections": "Erkennungen gesamt",
-            "location": "Speicherort",
-            "connected": "Verbunden",
-            "disconnected": "Getrennt"
-          },
           "errors": {
             "backupStartFailed": "Sicherung konnte nicht gestartet werden",
             "backupStatusFailed": "Sicherungsstatus konnte nicht abgerufen werden",
             "backupFailed": "Sicherung fehlgeschlagen",
             "backupDownloadFailed": "Sicherung konnte nicht heruntergeladen werden"
+          },
+          "statsMoved": {
+            "text": "Die Datenbankstatistiken wurden in den Bereich System verschoben.",
+            "link": "System > Datenbank öffnen"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Abgelöst durch {name}. Verwenden Sie stattdessen das neuere Modell.",
         "dialogNotice": "Dieses Modell wurde durch {name} abgelöst. Erwägen Sie, stattdessen {name} zu installieren."
       },
+      "update": {
+        "cardNotice": "Ein neuerer Build ({to}) ersetzt den installierten Build {from}.",
+        "action": "Aktualisieren",
+        "applying": "Wird aktualisiert..."
+      },
       "entryIncompatible": "Dieses Modell ist auf diesem System nicht verfügbar.",
       "regionGlobal": "Global",
       "hardwareLabel": "Hardware",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "OpenVINO-Gerät",
         "helpText": "Wird für Modelle verwendet, die auf OpenVINO laufen.",
+        "helpTextMultipleGpus": "Wird für Modelle verwendet, die auf OpenVINO laufen. Dieses Gerät hat mehr als eine GPU, wähle die aus, auf der die Modelle laufen sollen.",
+        "notDetectedHint": "Die ausgewählte GPU wurde nicht erkannt. Die Modelle laufen mit ONNX Runtime, bis ein anderes Gerät gewählt wird.",
         "options": {
           "auto": "Automatisch",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO-Standard: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (nicht erkannt)"
+        },
+        "gpuTypes": {
+          "integrated": "integriert",
+          "discrete": "dediziert"
         }
       },
       "reloadNote": "Beim Ändern des Backends oder Geräts werden die Modelle neu geladen, sodass die Erkennung für einige Sekunden pausiert.",

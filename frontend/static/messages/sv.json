@@ -493,6 +493,12 @@
         "loadFailedTitle": "Akustisk modell kunde inte läsas in",
         "loadFailedMessage": "En aktiverad akustisk modell kunde inte läsas in, så ljud spelas in men analyseras inte. Kontrollera modellen på sidan System > AI-modeller."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel är inte installerad",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 behövs för att filtrera detekteringar efter plats för: {models}. Installera BirdNET Geomodel v3.0 från modellgalleriet i Inställningar > Analys > Modeller.",
+        "loadFailedTitle": "Geomodel kunde inte läsas in",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 kunde inte läsas in, så filtrering efter plats är avstängd för: {models}. Kontrollera programloggen och installera eller installera om BirdNET Geomodel v3.0 från modellgalleriet i Inställningar > Analys > Modeller."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# modell har en bättre version för det här systemet} other {# modeller har bättre versioner för det här systemet}}",
         "message": "En version som passar bättre för systemets hårdvara eller plats finns tillgänglig för: {models}. Öppna Inställningar > Analys > Modeller och välj Optimera för att byta."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {En installerad modell har en nyare utgåva} other {# installerade modeller har nyare utgåvor}}",
         "message": "En installerad modell är en förhandsversion, och dess slutliga utgåva finns nu tillgänglig: {models}. Öppna Inställningar > Analys > Modeller, installera den slutliga utgåvan och ta bort förhandsversionen."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {En installerad modell har en nyare version} other {# installerade modeller har nyare versioner}}",
+        "message": "En nyare version ersätter den installerade för: {models}. Den installerade versionen fungerar tills du byter. Öppna Inställningar > Analys > Modeller och välj Uppdatera."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Kunde inte ladda inställningar",
       "saveFailed": "Kunde inte spara inställningar",
       "changedElsewhere": "Inställningarna ändrades på annat håll. Granska dem och spara igen.",
-      "databaseStatsFailed": "Kunde inte ladda databasstatistik",
       "csvDownloadFailed": "Kunde inte ladda ner CSV"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "MySQL-databasnamn"
             }
           },
-          "stats": {
-            "title": "Databasstatistik",
-            "description": "Körningsinformation om din databas",
-            "loading": "Laddar databasstatistik...",
-            "retry": "Försök igen",
-            "refresh": "Uppdatera",
-            "noData": "Ingen databasstatistik tillgänglig.",
-            "type": "Typ",
-            "status": "Status",
-            "size": "Storlek",
-            "totalDetections": "Totalt antal detektioner",
-            "location": "Plats",
-            "connected": "Ansluten",
-            "disconnected": "Frånkopplad"
-          },
           "errors": {
             "backupStartFailed": "Kunde inte starta säkerhetskopiering",
             "backupStatusFailed": "Kunde inte hämta status för säkerhetskopiering",
             "backupFailed": "Säkerhetskopieringen misslyckades",
             "backupDownloadFailed": "Kunde inte ladda ner säkerhetskopia"
+          },
+          "statsMoved": {
+            "text": "Databasstatistiken har flyttats till sektionen System.",
+            "link": "Öppna System > Databas"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Ersatt av {name}. Använd den nyare modellen i stället.",
         "dialogNotice": "Den här modellen har ersatts av {name}. Överväg att installera {name} i stället."
       },
+      "update": {
+        "cardNotice": "En nyare version ({to}) ersätter den installerade versionen {from}.",
+        "action": "Uppdatera",
+        "applying": "Uppdaterar..."
+      },
       "entryIncompatible": "Den här modellen är inte tillgänglig på detta system.",
       "regionGlobal": "Global",
       "hardwareLabel": "Hårdvara",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "OpenVINO-enhet",
         "helpText": "Används för modeller som körs på OpenVINO.",
+        "helpTextMultipleGpus": "Används för modeller som körs på OpenVINO. Den här enheten har mer än en GPU, så välj den som modellerna ska köras på.",
+        "notDetectedHint": "Den valda GPU:n hittades inte. Modellerna körs på ONNX Runtime tills en annan enhet väljs.",
         "options": {
           "auto": "Automatiskt",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO-standard: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (hittades inte)"
+        },
+        "gpuTypes": {
+          "integrated": "integrerad",
+          "discrete": "dedikerad"
         }
       },
       "reloadNote": "Byte av backend eller enhet laddar om modellerna, så detekteringen pausar i några sekunder.",

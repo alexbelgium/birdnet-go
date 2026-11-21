@@ -130,29 +130,52 @@ Controls call `commitSetting(section, partial, { field, debounceMs? })` from
   the server changed elsewhere is replaced by the server value and the field says
   so. Keep the control controlled, so it follows the store.
 
-Boolean settings use `ToggleField`, not `Checkbox`.
-
 ## Form Controls
 
 Settings controls (in `$lib/desktop/components/forms/`) are used as controlled
 components: pass the current value one way and write changes back through the
 store in the callback. This is the pattern the existing pages use:
 
-| Component                 | Pattern                |
-| ------------------------- | ---------------------- |
-| `NumberField`             | `value` + `onUpdate`   |
-| `PasswordField`           | `value` + `onUpdate`   |
-| `NetworkAddressListInput` | `values` + `onUpdate`  |
-| `TextInput`               | `value` + `onchange`   |
-| `Checkbox`                | `checked` + `onchange` |
-| `SelectDropdown`          | `value` + `onChange`   |
+| Component                 | Pattern               |
+| ------------------------- | --------------------- |
+| `NumberField`             | `value` + `onUpdate`  |
+| `PasswordField`           | `value` + `onUpdate`  |
+| `NetworkAddressListInput` | `values` + `onUpdate` |
+| `TextInput`               | `value` + `onchange`  |
+| `ToggleField`             | `value` + `onUpdate`  |
+| `SelectDropdown`          | `value` + `onChange`  |
+
+Boolean settings use `ToggleField`, not `Checkbox`. `Checkbox` is for
+acknowledgements and multi-select lists (`ModelAgreementDialog` and the
+notification type filters). Lay the switches out as the bat card in
+`pages/AnalysisSettingsPage.svelte` does:
+
+- A single switch is a plain row in its stack: no wrapper, no `className`.
+- Two or more in a row go in a `divide-y divide-[var(--border-100)]` list; the first takes `className="pb-4"`, middle ones `py-4`, the last `pt-4` when the list sits in a `space-y-*` stack.
+- A switch that only applies while the one above it is on renders under `{#if}` in that list with `pl-6` added.
+- A switch is never a grid cell beside inputs; it takes a full row.
+
+`disabled` on a `ToggleField` sets `aria-disabled`, not the native attribute,
+so put the reason in `description`.
 
 Avoid combining `bind:value` with an update callback on the same control: the
 value is then written twice, and the store update in the callback is the one
 that counts.
 
 Wrap each group in `SettingsSection` (`components/SettingsSection.svelte`) and
-pass its `hasChanges` flag so the section shows an unsaved-changes badge.
+pass its `hasChanges` flag so the section shows an unsaved-changes badge. Give
+each section a Lucide `icon` that the card shows before the title. The one
+exception is the bat card, which uses `BatIcon` (`$lib/components/icons/`), a
+temporary stand-in until Lucide ships a bat icon; do not add other local icons.
+
+Label a subgroup of fields inside a card with `SettingsGroupLabel`
+(`components/SettingsGroupLabel.svelte`), not with hand-written heading classes.
+Choose the element with `as` so the heading level fits the page outline (default
+`h4`; `div` or `span` when the label is not a heading) and pass `divided` for a
+hairline above it. A `SettingsGroup` shows its title this way with
+`titleVariant="group"`, and a disclosure button in its `heading` snippet takes
+`SETTINGS_GROUP_DISCLOSURE_CLASSES` from the same file. The label of a single control
+stays a normal field label.
 
 ## Types
 

@@ -24,10 +24,12 @@
   import { onMount, tick } from 'svelte';
   import { downloadBlob } from '$lib/utils/fileHelpers';
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import TextInput from '$lib/desktop/components/forms/TextInput.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import SettingsButton from '$lib/desktop/features/settings/components/SettingsButton.svelte';
@@ -40,7 +42,6 @@
     Pencil,
     Trash2,
     ExternalLink,
-    History,
     Zap,
     Shield,
     Play,
@@ -54,6 +55,8 @@
     Globe,
     Clock,
     Wifi,
+    FileText,
+    RotateCcwClock,
   } from '@lucide/svelte';
   import StatusBanner from '$lib/desktop/components/ui/StatusBanner.svelte';
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
@@ -456,7 +459,7 @@
     {
       id: 'history',
       label: t('settings.notifications.tabs.history'),
-      icon: History,
+      icon: RotateCcwClock,
       content: historyContent,
       hasChanges: false,
     },
@@ -1439,6 +1442,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.notifications.tabs.channels')}
+      icon={Send}
       description={t('settings.notifications.push.description')}
       defaultOpen={true}
     >
@@ -1451,22 +1455,15 @@
       {:else}
         <div class="space-y-4">
           <!-- Master Enable Toggle -->
-          <Checkbox
-            checked={pushSettings.enabled}
+          <ToggleField
+            value={pushSettings.enabled}
             label={t('settings.notifications.push.enable')}
+            description={pushSettings.enabled
+              ? t('settings.notifications.push.enabledDescription')
+              : t('settings.notifications.push.disabled')}
             disabled={savingPush}
-            onchange={togglePushEnabled}
+            onUpdate={togglePushEnabled}
           />
-
-          {#if pushSettings.enabled}
-            <p class="text-sm text-[var(--color-base-content)]/70">
-              {t('settings.notifications.push.enabledDescription')}
-            </p>
-          {:else}
-            <p class="text-sm text-[var(--color-base-content)]/50">
-              {t('settings.notifications.push.disabled')}
-            </p>
-          {/if}
 
           <!-- Detection Filters Section: replaced by a pointer to the Rules tab
                while the alert engine is active, since the filters are unused then -->
@@ -2078,10 +2075,10 @@
                   </fieldset>
 
                   <!-- Enable Provider -->
-                  <Checkbox
-                    checked={providerFormData.enabled}
+                  <ToggleField
+                    value={providerFormData.enabled}
                     label={t('settings.notifications.push.providers.enableToggle')}
-                    onchange={checked => (providerFormData.enabled = checked)}
+                    onUpdate={checked => (providerFormData.enabled = checked)}
                   />
 
                   <!-- Form Actions -->
@@ -2116,9 +2113,9 @@
           <!-- Providers List -->
           <div class="space-y-3">
             <div class="flex items-center justify-between">
-              <h3 class="font-semibold text-sm">
+              <SettingsGroupLabel as="h3">
                 {t('settings.notifications.push.providers.title')}
-              </h3>
+              </SettingsGroupLabel>
               {#if !showProviderForm}
                 <button
                   type="button"
@@ -2247,6 +2244,7 @@
     <!-- Templates Section (collapsible) -->
     <SettingsSection
       title={t('settings.notifications.templates.title')}
+      icon={FileText}
       description={t('settings.notifications.templates.description')}
       defaultOpen={false}
     >
@@ -2631,6 +2629,7 @@
   {@render ruleStatusBanner()}
   <SettingsSection
     title={t('settings.alerts.sections.history.title')}
+    icon={RotateCcwClock}
     description={t('settings.alerts.sections.history.description')}
     defaultOpen={true}
   >

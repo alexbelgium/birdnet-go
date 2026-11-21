@@ -493,6 +493,12 @@
         "loadFailedTitle": "Neizdevās ielādēt akustisko modeli",
         "loadFailedMessage": "Iespējoto akustisko modeli neizdevās ielādēt, tāpēc audio tiek ierakstīts, bet netiek analizēts. Pārbaudiet modeli lapā Sistēma > MI Modeļi."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel nav instalēts",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 ir nepieciešams atpazīšanas rezultātu filtrēšanai pēc atrašanās vietas attiecībā uz: {models}. Instalējiet BirdNET Geomodel v3.0 no modeļu galerijas sadaļā Iestatījumi > Analīze > Modeļi.",
+        "loadFailedTitle": "Geomodel neizdevās ielādēt",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 neizdevās ielādēt, tāpēc filtrēšana pēc atrašanās vietas ir izslēgta attiecībā uz: {models}. Pārbaudiet lietotnes žurnālu un instalējiet vai pārinstalējiet BirdNET Geomodel v3.0 no modeļu galerijas sadaļā Iestatījumi > Analīze > Modeļi."
+      },
       "modelOptimize": {
         "title": "{count, plural, zero {# modeļiem ir labākas versijas šai sistēmai} one {# modelim ir labāka versija šai sistēmai} other {# modeļiem ir labākas versijas šai sistēmai}}",
         "message": "Šīs sistēmas aparatūrai vai atrašanās vietai labāk piemērota versija ir pieejama šādiem modeļiem: {models}. Atveriet Iestatījumi > Analīze > Modeļi un izvēlieties Optimizēt, lai pārslēgtos."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, zero {# instalētajiem modeļiem ir jaunākas versijas} one {Instalētajam modelim ir jaunāka versija} other {# instalētajiem modeļiem ir jaunākas versijas}}",
         "message": "Instalētais modelis ir priekšskatījuma versija, un tā galīgā versija tagad ir pieejama: {models}. Atveriet Iestatījumi > Analīze > Modeļi, instalējiet galīgo versiju un noņemiet priekšskatījuma versiju."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, zero {# instalētiem modeļiem ir jaunākas versijas} one {# instalētam modelim ir jaunāka versija} other {# instalētiem modeļiem ir jaunākas versijas}}",
+        "message": "Jaunāka versija aizstāj instalēto šādiem modeļiem: {models}. Instalētā versija darbojas, līdz pārslēdzaties. Atveriet Iestatījumi > Analīze > Modeļi un izvēlieties Atjaunināt."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Neizdevās ielādēt iestatījumus",
       "saveFailed": "Neizdevās saglabāt iestatījumus",
       "changedElsewhere": "Iestatījumi tika mainīti citur. Pārskatiet tos un saglabājiet vēlreiz.",
-      "databaseStatsFailed": "Neizdevās ielādēt datubāzes statistiku",
       "csvDownloadFailed": "Neizdevās lejupielādēt CSV"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "MySQL datubāzes nosaukums"
             }
           },
-          "stats": {
-            "title": "Datubāzes statistika",
-            "description": "Izpildlaika informācija par jūsu datubāzi",
-            "loading": "Ielādē datubāzes statistiku...",
-            "retry": "Mēģināt vēlreiz",
-            "refresh": "Atsvaidzināt",
-            "noData": "Datubāzes statistika nav pieejama.",
-            "type": "Tips",
-            "status": "Statuss",
-            "size": "Izmērs",
-            "totalDetections": "Kopējās noteikšanas",
-            "location": "Atrašanās vieta",
-            "connected": "Savienots",
-            "disconnected": "Atvienots"
-          },
           "errors": {
             "backupStartFailed": "Neizdevās sākt dublējumu",
             "backupStatusFailed": "Neizdevās iegūt dublējuma statusu",
             "backupFailed": "Dublēšana neizdevās",
             "backupDownloadFailed": "Neizdevās lejupielādēt dublējumu"
+          },
+          "statsMoved": {
+            "text": "Datubāzes statistika ir pārvietota uz sadaļu Sistēma.",
+            "link": "Atvērt Sistēma > Datubāze"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Aizstāts ar {name}. Izmantojiet tā vietā jaunāko modeli.",
         "dialogNotice": "Šo modeli ir aizstājis {name}. Apsveriet {name} instalēšanu tā vietā."
       },
+      "update": {
+        "cardNotice": "Jaunāka versija ({to}) aizstāj instalēto versiju {from}.",
+        "action": "Atjaunināt",
+        "applying": "Atjaunina..."
+      },
       "entryIncompatible": "Šis modelis nav pieejams šajā sistēmā.",
       "regionGlobal": "Globāls",
       "hardwareLabel": "Aparatūra",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "OpenVINO ierīce",
         "helpText": "Izmanto modeļiem, kas darbojas ar OpenVINO.",
+        "helpTextMultipleGpus": "Izmanto modeļiem, kas darbojas ar OpenVINO. Šajā ierīcē ir vairāk nekā viens GPU, tāpēc izvēlieties, uz kura darbināt modeļus.",
+        "notDetectedHint": "Izvēlētais GPU nav atrasts. Modeļi darbojas ar ONNX Runtime, līdz tiek izvēlēta cita ierīce.",
         "options": {
           "auto": "Automātiski",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO noklusējums: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (nav atrasts)"
+        },
+        "gpuTypes": {
+          "integrated": "integrēts",
+          "discrete": "atsevišķs"
         }
       },
       "reloadNote": "Aizmugursistēmas vai ierīces maiņa pārlādē modeļus, tāpēc noteikšana tiek apturēta uz dažām sekundēm.",

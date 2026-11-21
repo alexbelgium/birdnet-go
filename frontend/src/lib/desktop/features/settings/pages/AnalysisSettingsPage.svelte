@@ -71,6 +71,7 @@
     type ThresholdRow,
     type ThresholdSectionValues,
   } from './analysisThresholds';
+  import { openVinoDeviceField } from './openVinoDeviceOptions';
   import { wizardState } from '$lib/desktop/features/wizard/wizardState.svelte';
   import type { InstalledModelContext } from '$lib/desktop/features/wizard/types';
   import {
@@ -96,6 +97,7 @@
     type CadenceReadoutRow,
   } from '$lib/desktop/features/settings/utils/fpCadence';
   import ModelCardGrid from '$lib/desktop/features/settings/components/ModelCardGrid.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import type {
     ModelCardAction,
     ModelCardMode,
@@ -103,6 +105,7 @@
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
+  import BatIcon from '$lib/components/icons/BatIcon.svelte';
   import SettingsNote from '$lib/desktop/features/settings/components/SettingsNote.svelte';
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import SkeletonStatus from '$lib/desktop/components/ui/SkeletonStatus.svelte';
@@ -185,6 +188,14 @@
     Gauge,
     Moon,
     Settings as SettingsIcon,
+    Target,
+    TrendingUp,
+    Tag,
+    ShieldCheck,
+    Map as MapIcon,
+    AudioLines,
+    LayoutGrid,
+    Wrench,
   } from '@lucide/svelte';
 
   const logger = loggers.settings;
@@ -395,8 +406,6 @@
   const INFERENCE_AUTO = 'auto';
   const BACKEND_ONNX = 'onnx';
   const BACKEND_OPENVINO = 'openvino';
-  const DEVICE_CPU = 'cpu';
-  const DEVICE_GPU = 'gpu';
   const INFERENCE_STATUS_ENDPOINT = '/api/v2/system/inference';
   // The line that says why the runtime selects are disabled: loading, or the failure warning.
   const INFERENCE_STATUS_ID = generateId('inference-status');
@@ -696,11 +705,7 @@
   // A choice the host lacks stays offered while it is selected or saved, so picking another
   // one keeps the way back to the saved choice.
   const keptBackends = $derived(new Set([selectedBackend, savedBackend]));
-  const keptDevices = $derived(new Set([selectedDevice, savedDevice]));
   const openVinoSupported = $derived(inferenceBackends?.openvino.supported ?? false);
-  const hostHasGpu = $derived(
-    inferenceBackends?.openvino.devices?.some(d => d.toLowerCase().startsWith(DEVICE_GPU)) ?? false
-  );
 
   const backendOptions: SelectOption[] = $derived([
     { value: INFERENCE_AUTO, label: t('analysis.inference.backend.options.auto') },
@@ -711,13 +716,12 @@
       ? [{ value: BACKEND_OPENVINO, label: t('analysis.inference.backend.options.openvino') }]
       : []),
   ]);
-  const deviceOptions: SelectOption[] = $derived([
-    { value: INFERENCE_AUTO, label: t('analysis.inference.device.options.auto') },
-    { value: DEVICE_CPU, label: t('analysis.inference.device.options.cpu') },
-    ...(hostHasGpu || keptDevices.has(DEVICE_GPU)
-      ? [{ value: DEVICE_GPU, label: t('analysis.inference.device.options.gpu') }]
-      : []),
-  ]);
+  const deviceField = $derived(
+    openVinoDeviceField(
+      { status: inferenceBackends?.openvino, selected: selectedDevice, saved: savedDevice },
+      t
+    )
+  );
   // The device applies only to models that OpenVINO runs.
   const showDeviceField = $derived(
     (openVinoSupported || selectedDevice !== INFERENCE_AUTO || savedDevice !== INFERENCE_AUTO) &&
@@ -1981,9 +1985,11 @@
     }
   }
 
-  function openLicenseDialog(entry: CatalogEntry) {
+  // `variantId` preselects a variant (the Update action preselects the successor build); without
+  // it the dialog starts from the smart default.
+  function openLicenseDialog(entry: CatalogEntry, variantId: string | null = null) {
     licenseModel = entry;
-    chosenVariantId = null;
+    chosenVariantId = variantId;
     licenseViewedSha = null;
     licenseDialogRef?.showModal();
   }
@@ -2313,12 +2319,16 @@
     startReinstall(entry.id, entry.name);
   }
 
-  // A card's action button was used. Install and the Optimize swap both go through the
-  // license dialog, which picks the variant.
+  // A card's action button was used. Install, the Optimize swap and Update all go through the
+  // license dialog, which picks the variant; Update preselects the successor of the installed
+  // build.
   function handleCardAction(action: ModelCardAction, entry: CatalogEntry) {
     switch (action) {
       case 'install':
         openLicenseDialog(entry);
+        break;
+      case 'update':
+        openLicenseDialog(entry, entry.update?.variantId ?? null);
         break;
       case 'reinstall':
         handleReinstall(entry);
@@ -2517,6 +2527,7 @@
     <!-- Detection thresholds: one row per enabled classifier -->
     <SettingsSection
       title={t('analysis.thresholds.title')}
+      icon={Target}
       description={t('analysis.thresholds.description')}
       defaultOpen={true}
       originalData={thresholdsChange.original}
@@ -2613,6 +2624,7 @@
     <!-- Dynamic threshold -->
     <SettingsSection
       title={t('settings.main.sections.dynamicThreshold.title')}
+      icon={TrendingUp}
       description={t('settings.main.sections.dynamicThreshold.description')}
       originalData={dynamicThresholdChange.original}
       currentData={dynamicThresholdChange.current}
@@ -2677,6 +2689,7 @@
     <!-- Species names -->
     <SettingsSection
       title={t('analysis.speciesNames.title')}
+      icon={Tag}
       description={t('analysis.speciesNames.description')}
       originalData={speciesNamesChange.original}
       currentData={speciesNamesChange.current}
@@ -2738,6 +2751,7 @@
     <!-- False positive filter: every classifier except bats -->
     <SettingsSection
       title={t('settings.main.sections.falsePositiveFilter.title')}
+      icon={ShieldCheck}
       description={t('settings.main.sections.falsePositiveFilter.description')}
       defaultOpen={true}
       originalData={falsePositiveChange.original}
@@ -2930,6 +2944,7 @@
     <!-- Range filter -->
     <SettingsSection
       title={t('settings.main.sections.rangeFilter.title')}
+      icon={MapIcon}
       description={t('settings.main.sections.rangeFilter.description')}
       originalData={rangeFilterChange.original}
       currentData={rangeFilterChange.current}
@@ -3152,6 +3167,7 @@
     <!-- Bat detection -->
     <SettingsSection
       title={t('analysis.bat.title')}
+      icon={BatIcon}
       description={t('analysis.bat.description')}
       defaultOpen={true}
       originalData={batChange.original}
@@ -3253,6 +3269,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('analysis.inference.runtime.title')}
+      icon={Cpu}
       description={t('analysis.inference.runtime.description')}
       originalData={inferenceChange.original}
       currentData={inferenceChange.current}
@@ -3291,10 +3308,10 @@
         />
         {#if showDeviceField}
           <SelectDropdown
-            options={deviceOptions}
+            options={deviceField.options}
             value={selectedDevice}
             label={t('analysis.inference.device.label')}
-            helpText={t('analysis.inference.device.helpText')}
+            helpText={deviceField.helpText}
             disabled={store.isLoading || store.isSaving || !inferenceBackends}
             aria-describedby={inferenceBackends ? undefined : INFERENCE_STATUS_ID}
             variant="select"
@@ -3321,6 +3338,7 @@
 
     <SettingsSection
       title={t('analysis.inference.running.title')}
+      icon={AudioLines}
       description={t('analysis.inference.running.description')}
     >
       <ul class="divide-y divide-[var(--border-100)]" data-testid="inference-running-list">
@@ -3355,6 +3373,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('analysis.gallery.title')}
+      icon={LayoutGrid}
       description={t('analysis.gallery.description')}
       defaultOpen={true}
       originalData={modelRegionChange.original}
@@ -3507,6 +3526,7 @@
 
     <SettingsSection
       title={t('analysis.downloadSource.title')}
+      icon={Download}
       description={t('analysis.downloadSource.description')}
       originalData={downloadSourceChange.original}
       currentData={downloadSourceChange.current}
@@ -3555,6 +3575,7 @@
     <!-- Advanced -->
     <SettingsSection
       title={t('analysis.advanced.title')}
+      icon={Wrench}
       description={t('analysis.advanced.description')}
       defaultOpen={false}
       originalData={advancedChange.original}
@@ -3666,39 +3687,33 @@
       <!-- Acoustic Classifiers section -->
       {#if availableWildlife.length > 0 || availableBirds.length > 0 || availableBats.length > 0}
         <div class="space-y-4">
-          <h2 class="text-sm font-bold uppercase tracking-wider text-[var(--color-base-content)]">
+          <SettingsGroupLabel as="h2">
             {t('analysis.gallery.sections.acoustic')}
-          </h2>
+          </SettingsGroupLabel>
 
           {#if availableWildlife.length > 0}
             <div>
-              <h3
-                class="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--color-base-content)]/80"
-              >
+              <SettingsGroupLabel as="h3" class="mb-3">
                 {t('analysis.gallery.categories.wildlife')}
-              </h3>
+              </SettingsGroupLabel>
               {@render galleryGrid(availableWildlife, 'available')}
             </div>
           {/if}
 
           {#if availableBirds.length > 0}
             <div>
-              <h3
-                class="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--color-base-content)]/80"
-              >
+              <SettingsGroupLabel as="h3" class="mb-3">
                 {t('analysis.gallery.categories.bird')}
-              </h3>
+              </SettingsGroupLabel>
               {@render galleryGrid(availableBirds, 'available')}
             </div>
           {/if}
 
           {#if availableBats.length > 0}
             <div>
-              <h3
-                class="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--color-base-content)]/80"
-              >
+              <SettingsGroupLabel as="h3" class="mb-3">
                 {t('analysis.gallery.categories.bat')}
-              </h3>
+              </SettingsGroupLabel>
               {@render galleryGrid(availableBats, 'available')}
             </div>
           {/if}
@@ -3708,9 +3723,9 @@
       <!-- Geomodels section -->
       {#if availableGeomodels.length > 0}
         <div class="space-y-4">
-          <h2 class="text-sm font-bold uppercase tracking-wider text-[var(--color-base-content)]">
+          <SettingsGroupLabel as="h2">
             {t('analysis.gallery.sections.geomodel')}
-          </h2>
+          </SettingsGroupLabel>
           {@render galleryGrid(availableGeomodels, 'available')}
         </div>
       {/if}

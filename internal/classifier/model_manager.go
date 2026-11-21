@@ -246,7 +246,8 @@ func (mm *ModelManager) notifyTopologyChanged() {
 // each matching subdirectory, it checks whether the ONNX model file (the
 // CatalogFile with Role "model") exists on disk. If found, the model is
 // recorded as installed. It never takes the operation slot, so startup is never
-// refused, and it keeps in-flight entries as described below.
+// refused, and it keeps in-flight entries as described below. Once the scan is done
+// it evaluates the "no acoustic model" and "BirdNET Geomodel missing" bell notices.
 func (mm *ModelManager) ScanInstalled() {
 	log := GetLogger()
 
@@ -362,15 +363,17 @@ func (mm *ModelManager) ScanInstalled() {
 		// After loading models, check if any installed model has geomodel
 		// companion files on disk. If so, ensure the range filter config is
 		// up to date and reload the filter, unless the range filter is custom
-		// (see rangeFilterGalleryManaged). This handles the upgrade case
+		// (see rangeFilterReplaceableByGeomodel). This handles the upgrade case
 		// where a new binary adds geomodel support to existing models.
 		mm.ensureGeomodelConfig(log, installedIDs)
 
 		// Startup loading is complete and the notification service is up by now, so evaluate
-		// the persistent "no acoustic model" notice. NewOrchestrator's earlier sync latched
-		// nothing if the notification service was not yet initialized at construction.
+		// the persistent "no acoustic model" and "BirdNET Geomodel missing" notices.
+		// NewOrchestrator's earlier syncs latched nothing if the notification service was not
+		// yet initialized at construction.
 		if mm.orchestrator != nil {
 			mm.orchestrator.SyncAcousticModelsNotice()
+			mm.orchestrator.SyncGeomodelNotice()
 		}
 	}
 }
@@ -461,8 +464,8 @@ func modelAndLabelsFiles(files []CatalogFile) (modelFile, labelsFile string) {
 // variant whose model file matches it is preferred, so an ambiguous on-disk state
 // (e.g. both files present after a crashed replace) resolves to the variant the
 // loader will actually open. It then falls back to the default variant, then the
-// remaining variants in catalog order. ok is false when no variant's model file
-// is present on disk.
+// remaining live variants in catalog order, then the Legacy ones. ok is false
+// when no variant's model file is present on disk.
 func scanVariantEntry(entry *CatalogEntry, subdir, modelBasenameHint string) (InstalledModel, bool) {
 	// Permanent entry with a BuiltIn baseline (BirdNET v2.4): the model is ALWAYS
 	// installed, but which variant is active is decided by the settings hint alone,
@@ -505,8 +508,8 @@ func scanVariantEntry(entry *CatalogEntry, subdir, modelBasenameHint string) (In
 			return im, true
 		}
 	}
-	for i := range entry.Variants {
-		v := &entry.Variants[i]
+	// The remaining variants, live ones first (see liveFirstVariants).
+	for v := range liveFirstVariants(entry.Variants) {
 		if def != nil && v.ID == def.ID {
 			continue
 		}
@@ -662,8 +665,9 @@ func installedModelBasenameHint(settings *conf.Settings, registryID string, load
 }
 
 // installedFromVariant builds the InstalledModel for a specific variant if its
-// model file exists on disk under subdir. ok is false when the variant carries
-// no model role or its model file is absent.
+// model file exists on disk under subdir; its Version is the variant's release
+// (variantVersion). ok is false when the variant carries no model role or its
+// model file is absent.
 func installedFromVariant(entry *CatalogEntry, v *CatalogVariant, subdir string) (InstalledModel, bool) {
 	modelFile, labelsFile := modelAndLabelsFiles(v.Files)
 	if modelFile == "" {
@@ -683,7 +687,7 @@ func installedFromVariant(entry *CatalogEntry, v *CatalogVariant, subdir string)
 		ModelPath:   modelPath,
 		LabelsPath:  labelsPath,
 		InstalledAt: fileModTime(modelPath),
-		Version:     entry.Version,
+		Version:     variantRelease(entry, v),
 	}, true
 }
 
@@ -734,8 +738,8 @@ func decideGeomodelOrphanAction(rf *conf.RangeFilterSettings, expectedModelPath,
 
 // ensureGeomodelConfig checks if any installed model has geomodel companion
 // files on disk and, if the range filter config doesn't already reflect them,
-// updates the config and reloads the range filter; a custom range filter (see
-// rangeFilterGalleryManaged) is left as it is, without a reload. When NO installed
+// updates the config and reloads the range filter, unless
+// rangeFilterReplaceableByGeomodel keeps the range filter as it is (no reload then). When NO installed
 // geomodel-capable model is matched, it runs the orphan self-heal so a persisted
 // config that references the gallery shared geomodel paths stays consistent with
 // reality (promote when the shared files exist, clear when they are absent).
@@ -780,7 +784,7 @@ func (mm *ModelManager) ensureGeomodelConfig(log logger.Logger, installedIDs []s
 // applyInstalledGeomodelConfig promotes the range filter config to match an
 // installed geomodel-capable model whose shared files are present on disk. It is
 // a no-op when the config already matches the expected paths and version, and for
-// a custom range filter (see rangeFilterGalleryManaged).
+// a range filter that rangeFilterReplaceableByGeomodel keeps.
 func (mm *ModelManager) applyInstalledGeomodelConfig(log logger.Logger, entry *CatalogEntry, catalogID string) {
 	// Build expected paths from catalog entry.
 	expectedModelPath := ""
@@ -801,7 +805,7 @@ func (mm *ModelManager) applyInstalledGeomodelConfig(log logger.Logger, entry *C
 	customRangeFilter := false
 	_, _, err := conf.UpdateSettings(func(_, updated *conf.Settings) error {
 		urf := updated.RangeFilterConfig()
-		if !mm.rangeFilterGalleryManaged(urf) {
+		if !mm.rangeFilterReplaceableByGeomodel(urf) {
 			// A custom range filter is the user's choice; never replace it.
 			customRangeFilter = true
 			return conf.ErrSettingsUnchanged
@@ -816,7 +820,8 @@ func (mm *ModelManager) applyInstalledGeomodelConfig(log logger.Logger, entry *C
 		// Config is stale or missing; update it.
 		log.Info("Applying geomodel config for installed model",
 			logger.String("catalog_id", catalogID),
-			logger.String("geomodel_version", entry.GeomodelVersion))
+			logger.String("geomodel_version", entry.GeomodelVersion),
+			logger.String("previous_model_path", urf.ModelPath))
 
 		urf.Model = entry.GeomodelVersion
 		urf.ModelPath = expectedModelPath
@@ -1511,8 +1516,8 @@ func (mm *ModelManager) installOrReplace(ctx context.Context, entry *CatalogEntr
 
 // replaceVariant switches an installed model to newVariantID using a
 // download-before-delete strategy: the new variant's files are downloaded and
-// verified first (the old model keeps running), the install record and config are
-// swapped, and the new variant is activated. A LOADED family activates GAPLESSLY via
+// verified first (the old model keeps running), the install record (the new
+// variant and its release) and config are swapped, and the new variant is activated. A LOADED family activates GAPLESSLY via
 // reloadEntry (the old instance keeps serving until the new one is built and swapped
 // in under entry.mu, then closed); a not-loaded family is fresh-loaded via
 // hotLoadAfterInstall. Only after a successful activation are the old variant's
@@ -1561,7 +1566,7 @@ func (mm *ModelManager) replaceVariant(ctx context.Context, entry *CatalogEntry,
 		ModelPath:   modelPath,
 		LabelsPath:  labelsPath,
 		InstalledAt: time.Now(),
-		Version:     entry.Version,
+		Version:     variantVersion(entry, newVariantID),
 	}
 	mm.recordDependenciesLocked(entry)
 	mm.mu.Unlock()
@@ -1572,8 +1577,8 @@ func (mm *ModelManager) replaceVariant(ctx context.Context, entry *CatalogEntry,
 	//    resolves the new variant. Config writers stay per family: the permanent v2.4 entry
 	//    writes only its model field (a variant swap must never touch a user's custom
 	//    LabelPath, and its label set is embedded), while every other family writes
-	//    model/labels/embeddings, re-points a gallery-managed geomodel range-filter config
-	//    (a custom one is kept), and re-appends the Models.Enabled alias. A downloaded
+	//    model/labels/embeddings, re-points the range-filter config at the geomodel (see
+	//    rangeFilterReplaceableByGeomodel), and re-appends the Models.Enabled alias. A downloaded
 	//    variant's geomodel dependency also re-points the range filter, for the permanent
 	//    entry too.
 	mm.persistVariantConfig(entry, modelPath, labelsPath, embeddingsPath)
@@ -1587,9 +1592,9 @@ func (mm *ModelManager) replaceVariant(ctx context.Context, entry *CatalogEntry,
 		if reloadErr := mm.orchestrator.ReloadForVariantSwap(entry.RegistryID); reloadErr != nil {
 			return mm.rollbackVariant(log, entry, old, newVariantID, reloadErr, false, progress)
 		}
-		// A target that brings a geomodel (inline for Perch, BirdNET v3.0 and BirdNET+ v3.0, or through a
-		// dependency) had its gallery-managed range filter re-pointed in step 3 (a custom one
-		// is kept); reload it, exactly as hotLoadAfterInstall does after an install. The v2.4
+		// A target that brings a geomodel (through its birdnet-geomodel-v3 dependency, or inline
+		// in a hand-edited catalog) had its range filter re-pointed in step 3 (see
+		// rangeFilterReplaceableByGeomodel); reload it, exactly as hotLoadAfterInstall does after an install. The v2.4
 		// anchor reloads its own range filter inside reloadEntry; that is separate from the
 		// geomodel reload here, which only runs for a target that supplies a geomodel.
 		if ProvidesGeomodel(entry, newVariantID) {
@@ -1729,10 +1734,11 @@ func (mm *ModelManager) rollbackVariant(log logger.Logger, entry *CatalogEntry, 
 // writer by family: the permanent BirdNET v2.4 entry writes ONLY its model field (and
 // clears it for the embedded baseline), because a variant swap must never touch a user's
 // custom LabelPath and its label set is embedded; every other family writes
-// model/labels/embeddings, re-points a gallery-managed geomodel range-filter config (a
-// custom one is kept), and re-appends the Models.Enabled alias. A downloaded variant's
-// geomodel dependency re-points the range filter in both branches. Shared by the swap and both rollback paths so config is
-// persisted and restored identically.
+// model/labels/embeddings, re-points the range-filter config at the geomodel (see
+// rangeFilterReplaceableByGeomodel), and re-appends the Models.Enabled alias. A
+// downloaded variant's geomodel dependency re-points the range filter in both branches.
+// Shared by the swap and both rollback paths so config is persisted and restored
+// identically.
 func (mm *ModelManager) persistVariantConfig(entry *CatalogEntry, modelPath, labelsPath, embeddingsPath string) {
 	if IsPermanentEntry(entry) {
 		var rangeFilter *CatalogEntry
@@ -1783,11 +1789,12 @@ func ensureModelEnabled(s *conf.Settings, registryID string) bool {
 // variant swap. It writes ONLY the family's model field: a family's label set is
 // identical across its variants (embedded for BirdNET v2.4), so a swap must never
 // disturb a user-configured label path. An empty modelPath reverts to the family's
-// built-in/default source (for the primary, the embedded BuiltIn baseline). When
-// rangeFilter is non-nil (the geomodel dependency of the new variant) the gallery-managed
-// range-filter config is re-pointed at its files in the same clone and save; a custom
-// range filter is kept. It publishes through conf.UpdateSettings, then saves. A nil
-// settings receiver or an unknown registry ID is a no-op (nothing stored, nothing saved).
+// built-in/default source (for BirdNET v2.4, the embedded BuiltIn baseline). When
+// rangeFilter is non-nil (the geomodel dependency of the new variant) the range-filter
+// config is re-pointed at its files in the same clone and save, as
+// rangeFilterReplaceableByGeomodel allows. It publishes through conf.UpdateSettings,
+// then saves. A nil settings receiver or an unknown registry ID is a no-op (nothing
+// stored, nothing saved).
 func (mm *ModelManager) applyConfigForVariantSwap(registryID, modelPath string, rangeFilter *CatalogEntry) {
 	if mm.settings == nil {
 		return
@@ -2124,7 +2131,7 @@ func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *Catalog
 
 // downloadModelFiles installs a catalog entry's selected variant: it delegates
 // the file download and verification to downloadVariantFiles, then records the
-// install, applies config, and hot-loads the model. It is the install/reinstall
+// install (the variant and its release), applies config, and hot-loads the model. It is the install/reinstall
 // entry point; the variant-switch path (replaceVariant) uses downloadVariantFiles
 // directly so it can interpose an unload between download and load. The caller
 // must have registered the entry in mm.downloading. cleanupOnFailure is passed
@@ -2156,7 +2163,7 @@ func (mm *ModelManager) downloadModelFiles(ctx context.Context, entry *CatalogEn
 		ModelPath:   modelPath,
 		LabelsPath:  labelsPath,
 		InstalledAt: time.Now(),
-		Version:     entry.Version,
+		Version:     variantVersion(entry, recordedVariant),
 	}
 	mm.recordDependenciesLocked(entry)
 	delete(mm.downloading, entry.ID)
@@ -2282,9 +2289,9 @@ func (mm *ModelManager) removeDownloading(catalogID string) {
 // the gallery, so install, startup promote and uninstall may rewrite it: an empty
 // path, or a geomodel file name of the active catalog in a "shared" directory under a
 // directory named like the models directory (the same layout test, and rationale, as
-// Orchestrator.isGalleryManagedPath). Install, startup promote and uninstall leave
-// any other path untouched as a custom range filter. Reads only the catalog snapshot,
-// so it is safe inside a conf.UpdateSettings mutate function and under mm.mu.
+// Orchestrator.isGalleryManagedPath). Uninstall leaves any other path untouched.
+// Reads only the catalog snapshot, so it is safe inside a conf.UpdateSettings mutate
+// function and under mm.mu.
 func (mm *ModelManager) rangeFilterGalleryManaged(rf *conf.RangeFilterSettings) bool {
 	if rf.ModelPath == "" {
 		return true
@@ -2306,6 +2313,17 @@ func (mm *ModelManager) rangeFilterGalleryManaged(rf *conf.RangeFilterSettings) 
 	return isCatalogGeomodelName(filepath.Base(rf.ModelPath))
 }
 
+// rangeFilterReplaceableByGeomodel reports whether installing or promoting a geomodel
+// may rewrite the range filter config: a gallery-managed path (rangeFilterGalleryManaged)
+// or a stock MData model in any directory (isStockMDataRangeFilterPath), so an installed
+// geomodel always takes precedence over stock MData. It ignores rf.Model, so a legacy pin
+// is replaced too. Uninstall keeps the strict rangeFilterGalleryManaged test, so it never
+// clears a stock MData path it cannot replace. Safe inside a conf.UpdateSettings mutate
+// function and under mm.mu.
+func (mm *ModelManager) rangeFilterReplaceableByGeomodel(rf *conf.RangeFilterSettings) bool {
+	return mm.rangeFilterGalleryManaged(rf) || isStockMDataRangeFilterPath(rf.ModelPath)
+}
+
 // isCatalogGeomodelName reports whether name is the LocalName of a geomodel-role
 // file in any entry or variant of the active catalog.
 func isCatalogGeomodelName(name string) bool {
@@ -2324,8 +2342,8 @@ func isCatalogGeomodelName(name string) bool {
 // applyRangeFilterConfigForInstall points the range filter at entry's geomodel
 // companion files under {modelsDir}/shared when the entry carries them. It writes
 // into updated (a settings clone); the caller stores and saves. A no-op for an
-// entry without geomodel files and for a custom range filter (see
-// rangeFilterGalleryManaged). Both role paths are cleared before the entry's
+// entry without geomodel files and for a range filter that
+// rangeFilterReplaceableByGeomodel keeps. Both role paths are cleared before the entry's
 // files are written, so a half-tuple entry (only one geomodel role) leaves the
 // omitted role's path empty rather than at a stale earlier value.
 func (mm *ModelManager) applyRangeFilterConfigForInstall(updated *conf.Settings, entry *CatalogEntry) {
@@ -2333,7 +2351,7 @@ func (mm *ModelManager) applyRangeFilterConfigForInstall(updated *conf.Settings,
 		return
 	}
 	rf := updated.RangeFilterConfig()
-	if !mm.rangeFilterGalleryManaged(rf) {
+	if !mm.rangeFilterReplaceableByGeomodel(rf) {
 		return
 	}
 	rf.Model = entry.GeomodelVersion
@@ -2357,9 +2375,9 @@ func (mm *ModelManager) applyRangeFilterConfigForInstall(updated *conf.Settings,
 // applyRangeFilterConfigForUninstall keeps the shared geomodel range-filter config
 // pointing at files that exist after an uninstall. When another installed entry still
 // carries a full geomodel tuple it re-points the config at that survivor's files (via
-// applyRangeFilterConfigForInstall); otherwise it clears the config. A custom range
-// filter (see rangeFilterGalleryManaged) is neither re-pointed nor cleared, matching
-// applyRangeFilterConfigForInstall on the install side. mm.installed must no longer
+// applyRangeFilterConfigForInstall); otherwise it clears the config. A range filter
+// that is not gallery-managed (see rangeFilterGalleryManaged), custom or stock MData,
+// is neither re-pointed nor cleared. mm.installed must no longer
 // contain the uninstalled entry; caller holds mm.mu. It writes into updated (a settings
 // clone), and is a no-op for an entry without geomodel files.
 func (mm *ModelManager) applyRangeFilterConfigForUninstall(updated *conf.Settings, entry *CatalogEntry) {
@@ -2441,8 +2459,8 @@ func (mm *ModelManager) applyConfigForInstall(entry *CatalogEntry, modelPath, la
 			}
 		}
 
-		// Apply geomodel range filter config if this entry includes geomodel files and the
-		// range filter is not custom. An entry without inline geomodel files takes it from
+		// Apply geomodel range filter config if this entry includes geomodel files and
+		// rangeFilterReplaceableByGeomodel allows it. An entry without inline geomodel files takes it from
 		// its geomodel dependency, if the installed variant has one.
 		mm.applyRangeFilterConfigForInstall(updated, entry)
 		if !hasGeomodelTuple(entry) {
@@ -2546,8 +2564,8 @@ func (mm *ModelManager) applyConfigForUninstall(entry *CatalogEntry) {
 			}
 		}
 
-		// Re-point or reset a gallery-managed geomodel range filter config (a custom one is
-		// kept); it is reset only when no other geomodel-dependent model remains.
+		// Re-point or reset a gallery-managed geomodel range filter config (a custom or stock
+		// MData one is kept); it is reset only when no other geomodel-dependent model remains.
 		// mm.installed no longer contains the uninstalled entry (deleted by caller).
 		mm.applyRangeFilterConfigForUninstall(updated, entry)
 

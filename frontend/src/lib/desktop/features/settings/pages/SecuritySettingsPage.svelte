@@ -27,7 +27,7 @@
   @component
 -->
 <script lang="ts">
-  import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import TextInput from '$lib/desktop/components/forms/TextInput.svelte';
   import PasswordField from '$lib/desktop/components/forms/PasswordField.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
@@ -38,6 +38,7 @@
   import NetworkAddressListInput from '$lib/desktop/components/forms/NetworkAddressListInput.svelte';
   import ReverseProxySection from '$lib/desktop/features/settings/components/ReverseProxySection.svelte';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import SettingsNote from '$lib/desktop/features/settings/components/SettingsNote.svelte';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
@@ -63,7 +64,7 @@
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import { settingsAPI, type TLSCertificateInfo } from '$lib/utils/settingsApi';
   import { toastActions } from '$lib/stores/toast';
-  import { ExternalLink, Server, KeyRound, Users, Plus, Pencil, Trash2, Terminal, ShieldCheck, Upload, Globe, RefreshCw, TriangleAlert } from '@lucide/svelte';
+  import { ExternalLink, Server, KeyRound, Users, Plus, Pencil, Trash2, Terminal, ShieldCheck, Upload, Globe, RefreshCw, TriangleAlert, LogIn, ShieldOff, SquareTerminal } from '@lucide/svelte';
   import { t } from '$lib/i18n';
   import { GoogleIcon, AUTH_PROVIDERS } from '$lib/auth';
   import { onDestroy, type Component } from 'svelte';
@@ -814,6 +815,7 @@
     <!-- Server Configuration Card -->
     <SettingsSection
       title={t('settings.security.serverConfiguration.title')}
+      icon={Server}
       description={t('settings.security.serverConfiguration.description')}
       originalData={{
         baseUrl: store.originalData.security?.baseUrl,
@@ -861,7 +863,7 @@
       />
 
       <div class="border-t border-[var(--border-100)] pt-4 mt-4">
-        <h4 class="text-lg font-medium mb-2">{t('settings.security.tls.title')}</h4>
+        <SettingsGroupLabel class="mb-2">{t('settings.security.tls.title')}</SettingsGroupLabel>
         <p class="text-sm text-[var(--color-base-content)] opacity-70 mb-4">
           {t('settings.security.tls.description')}
         </p>
@@ -1071,14 +1073,14 @@
           </div>
         {/if}
 
-        <!-- Redirect to HTTPS checkbox -->
+        <!-- Redirect to HTTPS switch -->
         {#if settings.tlsMode !== ''}
           <div class="mt-4">
-            <Checkbox
-              checked={settings.redirectToHttps}
+            <ToggleField
+              value={settings.redirectToHttps}
               label={t('settings.security.tls.redirectToHttps')}
               disabled={store.isLoading || store.isSaving}
-              onchange={updateRedirectToHttps}
+              onUpdate={updateRedirectToHttps}
             />
           </div>
         {/if}
@@ -1112,16 +1114,17 @@
     <!-- Basic Authentication Card -->
     <SettingsSection
       title={t('settings.security.basicAuthentication.title')}
+      icon={KeyRound}
       description={t('settings.security.basicAuthentication.description')}
       originalData={store.originalData.security?.basicAuth}
       currentData={store.formData.security?.basicAuth}
     >
       <form class="space-y-4" onsubmit={(e) => e.preventDefault()} autocomplete="off">
-        <Checkbox
-          checked={settings.basicAuth.enabled}
+        <ToggleField
+          value={settings.basicAuth.enabled}
           label={t('settings.security.basicAuthentication.enableLabel')}
           disabled={store.isLoading || store.isSaving}
-          onchange={updateBasicAuthEnabled}
+          onUpdate={updateBasicAuthEnabled}
         />
 
         <!-- Fieldset for accessible disabled state - all inputs greyed out when feature disabled -->
@@ -1162,6 +1165,7 @@
     <!-- OAuth2 Social Authentication Card -->
     <SettingsSection
       title={t('settings.security.oauth.title')}
+      icon={LogIn}
       description={t('settings.security.oauth.description')}
       originalData={store.originalData.security?.oauthProviders}
       currentData={store.formData.security?.oauthProviders}
@@ -1308,16 +1312,16 @@
                     onchange={(value) => (providerFormData.scopesText = value)}
                   />
 
-                  <Checkbox
-                    checked={providerFormData.postLogoutRedirect}
+                  <ToggleField
+                    value={providerFormData.postLogoutRedirect}
                     label={t('settings.security.oauth.oidc.postLogoutRedirectLabel')}
-                    helpText={configuredBaseUrl
+                    description={configuredBaseUrl
                       ? t('settings.security.oauth.oidc.postLogoutRedirectHelpText', {
                           url: `${configuredBaseUrl}${POST_LOGOUT_RETURN_PATH}`,
                         })
                       : t('settings.security.oauth.oidc.postLogoutRedirectNoBaseUrl')}
                     disabled={store.isLoading || store.isSaving}
-                    onchange={(enabled) => (providerFormData.postLogoutRedirect = enabled)}
+                    onUpdate={(enabled) => (providerFormData.postLogoutRedirect = enabled)}
                   />
                 {/if}
 
@@ -1344,11 +1348,11 @@
                   </p>
                 {/if}
 
-                <Checkbox
-                  checked={providerFormData.enabled}
+                <ToggleField
+                  value={providerFormData.enabled}
                   label={t('settings.security.oauth.enableProviderLabel')}
                   disabled={store.isLoading || store.isSaving}
-                  onchange={(enabled) => (providerFormData.enabled = enabled)}
+                  onUpdate={(enabled) => (providerFormData.enabled = enabled)}
                 />
 
                 <!-- Form Actions -->
@@ -1482,16 +1486,17 @@
     <!-- Bypass Authentication Card -->
     <SettingsSection
       title={t('settings.security.bypassAuthentication.title')}
+      icon={ShieldOff}
       description={t('settings.security.bypassAuthentication.description')}
       originalData={store.originalData.security?.allowSubnetBypass}
       currentData={store.formData.security?.allowSubnetBypass}
     >
       <div class="space-y-4">
-        <Checkbox
-          checked={settings.allowSubnetBypass.enabled}
+        <ToggleField
+          value={settings.allowSubnetBypass.enabled}
           label={t('settings.security.allowSubnetBypassLabel')}
           disabled={store.isLoading || store.isSaving}
-          onchange={updateSubnetBypassEnabled}
+          onUpdate={updateSubnetBypassEnabled}
         />
 
         <!-- Outside the fieldset so the link stays usable while the bypass is off -->
@@ -1556,26 +1561,31 @@
     <!-- Public Access section -->
     <SettingsSection
       title={t('settings.security.publicAccess.title')}
+      icon={Globe}
       description={t('settings.security.publicAccess.description')}
       originalData={store.originalData.security?.publicAccess}
       currentData={store.formData.security?.publicAccess}
     >
       <div class="space-y-4">
-        <Checkbox
-          checked={settings.privateMode ?? false}
-          label={t('settings.security.privateMode.label')}
-          helpText={t('settings.security.privateMode.help')}
-          disabled={store.isLoading || store.isSaving}
-          onchange={updatePrivateMode}
-        />
+        <div class="divide-y divide-[var(--border-100)]">
+          <ToggleField
+            className="pb-4"
+            value={settings.privateMode ?? false}
+            label={t('settings.security.privateMode.label')}
+            description={t('settings.security.privateMode.help')}
+            disabled={store.isLoading || store.isSaving}
+            onUpdate={updatePrivateMode}
+          />
 
-        <Checkbox
-          checked={settings.publicAccess?.liveAudio ?? false}
-          label={t('settings.security.publicAccess.liveAudioLabel')}
-          helpText={t('settings.security.publicAccess.liveAudioHelp')}
-          disabled={store.isLoading || store.isSaving}
-          onchange={updatePublicLiveAudio}
-        />
+          <ToggleField
+            className="pt-4"
+            value={settings.publicAccess?.liveAudio ?? false}
+            label={t('settings.security.publicAccess.liveAudioLabel')}
+            description={t('settings.security.publicAccess.liveAudioHelp')}
+            disabled={store.isLoading || store.isSaving}
+            onUpdate={updatePublicLiveAudio}
+          />
+        </div>
 
         <ErrorAlert type="warning">
           {#snippet children()}
@@ -1592,17 +1602,17 @@
 
 {#snippet terminalTabContent()}
   <div class="space-y-6">
-    <SettingsSection title={t('settings.security.terminal.title')}>
+    <SettingsSection title={t('settings.security.terminal.title')} icon={SquareTerminal}>
       <ErrorAlert type="warning" className="mb-4">
         {#snippet children()}
           {t('settings.security.terminal.securityWarning')}
         {/snippet}
       </ErrorAlert>
-      <Checkbox
+      <ToggleField
         label={t('settings.security.terminal.enableLabel')}
-        helpText={t('settings.security.terminal.enableHelpText')}
-        checked={enableTerminal}
-        onchange={handleTerminalToggle}
+        description={t('settings.security.terminal.enableHelpText')}
+        value={enableTerminal}
+        onUpdate={handleTerminalToggle}
         disabled={store.isLoading || store.isSaving}
       />
     </SettingsSection>

@@ -493,6 +493,12 @@
         "loadFailedTitle": "Akoestisch model kon niet worden geladen",
         "loadFailedMessage": "Een ingeschakeld akoestisch model kon niet worden geladen, dus audio wordt opgenomen maar niet geanalyseerd. Controleer het model op de pagina Systeem > AI-modellen."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel niet geïnstalleerd",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 is nodig om detecties op locatie te filteren voor: {models}. Installeer BirdNET Geomodel v3.0 vanuit de modellengalerij via Instellingen > Analyse > Modellen.",
+        "loadFailedTitle": "Geomodel kon niet laden",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 kon niet worden geladen, dus filteren op locatie staat uit voor: {models}. Controleer het applicatielogboek en installeer of herinstalleer BirdNET Geomodel v3.0 vanuit de modellengalerij via Instellingen > Analyse > Modellen."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# model heeft een betere versie voor dit systeem} other {# modellen hebben betere versies voor dit systeem}}",
         "message": "Er is een versie beschikbaar die beter past bij de hardware of locatie van dit systeem, voor: {models}. Open Instellingen > Analyse > Modellen en kies Optimaliseren om over te schakelen."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Een geïnstalleerd model heeft een nieuwere uitgave} other {# geïnstalleerde modellen hebben nieuwere uitgaven}}",
         "message": "Een geïnstalleerd model is een voorvertoningsversie en de definitieve uitgave is nu beschikbaar: {models}. Open Instellingen > Analyse > Modellen, installeer de definitieve uitgave en verwijder de voorvertoning."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Een geïnstalleerd model heeft een nieuwere versie} other {# geïnstalleerde modellen hebben nieuwere versies}}",
+        "message": "Een nieuwere versie vervangt de geïnstalleerde voor: {models}. De geïnstalleerde versie blijft werken tot er wordt overgeschakeld. Open Instellingen > Analyse > Modellen en kies Bijwerken."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Instellingen konden niet worden geladen",
       "saveFailed": "Instellingen konden niet worden opgeslagen",
       "changedElsewhere": "De instellingen zijn elders gewijzigd. Controleer ze en sla opnieuw op.",
-      "databaseStatsFailed": "Databasestatistieken konden niet worden geladen",
       "csvDownloadFailed": "CSV-download mislukt"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "MySQL database naam"
             }
           },
-          "stats": {
-            "title": "Databasestatistieken",
-            "description": "Runtime-informatie over uw database",
-            "loading": "Databasestatistieken laden...",
-            "retry": "Opnieuw proberen",
-            "refresh": "Vernieuwen",
-            "noData": "Geen databasestatistieken beschikbaar.",
-            "type": "Type",
-            "status": "Status",
-            "size": "Grootte",
-            "totalDetections": "Totaal detecties",
-            "location": "Locatie",
-            "connected": "Verbonden",
-            "disconnected": "Niet verbonden"
-          },
           "errors": {
             "backupStartFailed": "Back-up starten mislukt",
             "backupStatusFailed": "Back-upstatus ophalen mislukt",
             "backupFailed": "Back-up mislukt",
             "backupDownloadFailed": "Back-up downloaden mislukt"
+          },
+          "statsMoved": {
+            "text": "De databasestatistieken zijn verplaatst naar de sectie Systeem.",
+            "link": "Systeem > Database openen"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Vervangen door {name}. Gebruik in plaats daarvan het nieuwere model.",
         "dialogNotice": "Dit model is vervangen door {name}. Overweeg in plaats daarvan {name} te installeren."
       },
+      "update": {
+        "cardNotice": "Een nieuwere versie ({to}) vervangt de geïnstalleerde versie {from}.",
+        "action": "Bijwerken",
+        "applying": "Bijwerken..."
+      },
       "entryIncompatible": "Dit model is niet beschikbaar op dit systeem.",
       "regionGlobal": "Globaal",
       "hardwareLabel": "Hardware",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "OpenVINO-apparaat",
         "helpText": "Gebruikt voor modellen die op OpenVINO draaien.",
+        "helpTextMultipleGpus": "Gebruikt voor modellen die op OpenVINO draaien. Dit apparaat heeft meer dan één GPU, dus kies de GPU waarop de modellen draaien.",
+        "notDetectedHint": "De gekozen GPU wordt niet gevonden. De modellen draaien op ONNX Runtime tot een ander apparaat wordt gekozen.",
         "options": {
           "auto": "Automatisch",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO-standaard: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (niet gevonden)"
+        },
+        "gpuTypes": {
+          "integrated": "geïntegreerd",
+          "discrete": "dedicated"
         }
       },
       "reloadNote": "Het wijzigen van de backend of het apparaat laadt de modellen opnieuw, waardoor de detectie enkele seconden pauzeert.",

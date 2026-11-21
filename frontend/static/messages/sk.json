@@ -493,6 +493,12 @@
         "loadFailedTitle": "Akustický model sa nepodarilo načítať",
         "loadFailedMessage": "Povolený akustický model sa nepodarilo načítať, takže zvuk sa zaznamenáva, ale neanalyzuje. Skontrolujte model na stránke Systém > Modely AI."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel nie je nainštalovaný",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 je potrebný na filtrovanie detekcií podľa polohy pre: {models}. Nainštalujte BirdNET Geomodel v3.0 z galérie modelov v Nastavenia > Analýza > Modely.",
+        "loadFailedTitle": "Geomodel sa nepodarilo načítať",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 sa nepodarilo načítať, preto je filtrovanie podľa polohy vypnuté pre: {models}. Skontrolujte log aplikácie a nainštalujte alebo preinštalujte BirdNET Geomodel v3.0 z galérie modelov v Nastavenia > Analýza > Modely."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# model má lepšie zostavenie pre tento systém} few {# modely majú lepšie zostavenia pre tento systém} many {# modelov má lepšie zostavenia pre tento systém} other {# modelov má lepšie zostavenia pre tento systém}}",
         "message": "Zostavenie, ktoré lepšie zodpovedá hardvéru alebo polohe tohto systému, je k dispozícii pre: {models}. Otvorte Nastavenia > Analýza > Modely a zvoľte Optimalizovať."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Nainštalovaný model má novšie vydanie} few {# nainštalované modely majú novšie vydania} many {# nainštalovaného modelu má novšie vydania} other {# nainštalovaných modelov má novšie vydania}}",
         "message": "Nainštalovaný model je náhľadová verzia a jeho finálne vydanie je teraz k dispozícii: {models}. Otvorte Nastavenia > Analýza > Modely, nainštalujte finálne vydanie a odstráňte náhľadovú verziu."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Nainštalovaný model má novšie zostavenie} few {# nainštalované modely majú novšie zostavenia} many {# nainštalovaného modelu má novšie zostavenia} other {# nainštalovaných modelov má novšie zostavenia}}",
+        "message": "Novšie zostavenie nahrádza nainštalované pre: {models}. Nainštalované zostavenie funguje, kým neprepnete. Otvorte Nastavenia > Analýza > Modely a zvoľte Aktualizovať."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Nepodarilo sa načítať nastavenia",
       "saveFailed": "Nepodarilo sa uložiť nastavenia",
       "changedElsewhere": "Nastavenia boli zmenené inde. Skontrolujte ich a uložte znova.",
-      "databaseStatsFailed": "Nepodarilo sa načítať štatistiky databázy",
       "csvDownloadFailed": "Nepodarilo sa stiahnuť CSV"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "Názov databázy MySQL"
             }
           },
-          "stats": {
-            "title": "Štatistiky databázy",
-            "description": "Runtime informácie o vašej databáze",
-            "loading": "Načítavajú sa štatistiky databázy...",
-            "retry": "Skúsiť znova",
-            "refresh": "Obnoviť",
-            "noData": "Nie sú k dispozícii žiadne štatistiky databázy.",
-            "type": "Typ",
-            "status": "Stav",
-            "size": "Veľkosť",
-            "totalDetections": "Celkovo detekcií",
-            "location": "Umiestnenie",
-            "connected": "Pripojené",
-            "disconnected": "Odpojené"
-          },
           "errors": {
             "backupStartFailed": "Nepodarilo sa spustiť zálohovanie",
             "backupStatusFailed": "Nepodarilo sa získať stav zálohovania",
             "backupFailed": "Zálohovanie zlyhalo",
             "backupDownloadFailed": "Nepodarilo sa stiahnuť zálohu"
+          },
+          "statsMoved": {
+            "text": "Štatistiky databázy boli presunuté do sekcie Systém.",
+            "link": "Otvoriť Systém > Databáza"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Nahradený modelom {name}. Namiesto neho používajte novší model.",
         "dialogNotice": "Tento model bol nahradený modelom {name}. Zvážte inštaláciu modelu {name}."
       },
+      "update": {
+        "cardNotice": "Novšie zostavenie ({to}) nahrádza nainštalované zostavenie {from}.",
+        "action": "Aktualizovať",
+        "applying": "Aktualizuje sa..."
+      },
       "entryIncompatible": "Tento model nie je v tomto systéme k dispozícii.",
       "regionGlobal": "Globálny",
       "hardwareLabel": "Hardvér",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "Zariadenie OpenVINO",
         "helpText": "Používa sa pre modely bežiace na OpenVINO.",
+        "helpTextMultipleGpus": "Používa sa pre modely bežiace na OpenVINO. Toto zariadenie má viac ako jednu GPU, vyberte tú, na ktorej majú modely bežať.",
+        "notDetectedHint": "Vybraná GPU nebola nájdená. Modely bežia na ONNX Runtime, kým nevyberiete iné zariadenie.",
         "options": {
           "auto": "Automaticky",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "Predvolená v OpenVINO: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (nenájdené)"
+        },
+        "gpuTypes": {
+          "integrated": "integrovaná",
+          "discrete": "dedikovaná"
         }
       },
       "reloadNote": "Zmena backendu alebo zariadenia znovu načíta modely, takže sa detekcia na niekoľko sekúnd pozastaví.",

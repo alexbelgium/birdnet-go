@@ -32,6 +32,7 @@
   import { DENOISE_LOSSY_MIN_BITRATE_KBPS, isLosslessExportFormat } from './audioExportFormat';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
   import SettingsNote from '$lib/desktop/features/settings/components/SettingsNote.svelte';
@@ -39,11 +40,11 @@
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import InlineSlider from '$lib/desktop/components/forms/InlineSlider.svelte';
-  import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import FlagIcon, { type FlagLocale } from '$lib/desktop/components/ui/FlagIcon.svelte';
   import { t, getLocale } from '$lib/i18n';
   import { LOCALES } from '$lib/i18n/config';
-  import { Palette, Globe, Image, Volume2, Info } from '@lucide/svelte';
+  import { Palette, Globe, Image, Volume2, Info, Languages, Headphones } from '@lucide/svelte';
   import { api, ApiError } from '$lib/utils/api';
   import { toastActions } from '$lib/stores/toast';
 
@@ -334,6 +335,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.userInterface.appearance.title')}
+      icon={Palette}
       description={t('settings.userInterface.appearance.description')}
       originalData={{
         colorScheme: store.originalData.realtime?.dashboard?.colorScheme,
@@ -355,6 +357,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.userInterface.language.title')}
+      icon={Languages}
       description={t('settings.userInterface.language.description')}
       originalData={{
         locale: store.originalData.realtime?.dashboard?.locale,
@@ -426,6 +429,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.userInterface.audioPlayback.title')}
+      icon={Headphones}
       description={t('settings.userInterface.audioPlayback.description')}
       originalData={{
         defaultAudioGain: store.originalData.realtime?.dashboard?.defaultAudioGain,
@@ -461,14 +465,14 @@
           </div>
         {/if}
 
-        <Checkbox
-          checked={playbackDenoise.enabled}
+        <ToggleField
+          value={playbackDenoise.enabled}
           label={t('settings.userInterface.audioPlayback.denoiseLabel')}
-          helpText={exportDenoiseOn
+          description={exportDenoiseOn
             ? t('settings.userInterface.audioPlayback.denoiseExportPrecedence')
             : t('settings.userInterface.audioPlayback.denoiseHelpText')}
           disabled={exportDenoiseOn || store.isLoading || store.isSaving}
-          onchange={checked => updatePlaybackDenoise({ enabled: checked })}
+          onUpdate={checked => updatePlaybackDenoise({ enabled: checked })}
         />
 
         <SelectDropdown
@@ -516,6 +520,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.userInterface.visualContent.title')}
+      icon={Image}
       description={t('settings.userInterface.visualContent.description')}
       originalData={{
         thumbnails: store.originalData.realtime?.dashboard?.thumbnails,
@@ -529,29 +534,33 @@
       <div class="space-y-6">
         <!-- Bird Images Section -->
         <div class="space-y-4">
-          <h4 class="text-sm font-medium text-[var(--color-base-content)]/70">
+          <SettingsGroupLabel>
             {t('settings.main.sections.userInterface.dashboard.birdImages.title')}
-          </h4>
+          </SettingsGroupLabel>
 
-          <Checkbox
-            checked={settings.dashboard.thumbnails.summary}
-            label={t('settings.main.sections.userInterface.dashboard.thumbnails.summary.label')}
-            helpText={t(
-              'settings.main.sections.userInterface.dashboard.thumbnails.summary.helpText'
-            )}
-            disabled={store.isLoading || store.isSaving}
-            onchange={value => updateThumbnailSetting('summary', value)}
-          />
+          <div class="divide-y divide-[var(--border-100)]">
+            <ToggleField
+              className="pb-4"
+              value={settings.dashboard.thumbnails.summary}
+              label={t('settings.main.sections.userInterface.dashboard.thumbnails.summary.label')}
+              description={t(
+                'settings.main.sections.userInterface.dashboard.thumbnails.summary.helpText'
+              )}
+              disabled={store.isLoading || store.isSaving}
+              onUpdate={value => updateThumbnailSetting('summary', value)}
+            />
 
-          <Checkbox
-            checked={settings.dashboard.thumbnails.recent}
-            label={t('settings.main.sections.userInterface.dashboard.thumbnails.recent.label')}
-            helpText={t(
-              'settings.main.sections.userInterface.dashboard.thumbnails.recent.helpText'
-            )}
-            disabled={store.isLoading || store.isSaving}
-            onchange={value => updateThumbnailSetting('recent', value)}
-          />
+            <ToggleField
+              className="pt-4"
+              value={settings.dashboard.thumbnails.recent}
+              label={t('settings.main.sections.userInterface.dashboard.thumbnails.recent.label')}
+              description={t(
+                'settings.main.sections.userInterface.dashboard.thumbnails.recent.helpText'
+              )}
+              disabled={store.isLoading || store.isSaving}
+              onUpdate={value => updateThumbnailSetting('recent', value)}
+            />
+          </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
             <div class:opacity-50={!multipleProvidersAvailable}>
@@ -613,9 +622,9 @@
 
         <!-- Spectrograms Section -->
         <div class="space-y-4">
-          <h4 class="text-sm font-medium text-[var(--color-base-content)]/70">
+          <SettingsGroupLabel>
             {t('settings.main.sections.userInterface.dashboard.spectrogram.title')}
-          </h4>
+          </SettingsGroupLabel>
 
           <!-- Generation Mode with contextual note -->
           <div class="space-y-3">

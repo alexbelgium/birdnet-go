@@ -493,6 +493,12 @@
         "loadFailedTitle": "Akustisk model kunne ikke indlæses",
         "loadFailedMessage": "En aktiveret akustisk model kunne ikke indlæses, så lyd optages, men analyseres ikke. Tjek modellen på siden System > AI-modeller."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel er ikke installeret",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 er nødvendig for at filtrere registreringer efter placering for: {models}. Installer BirdNET Geomodel v3.0 fra modelgalleriet i Indstillinger > Analyse > Modeller.",
+        "loadFailedTitle": "Geomodel kunne ikke indlæses",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 kunne ikke indlæses, så filtrering efter placering er slået fra for: {models}. Tjek programmets log, og installer eller geninstaller BirdNET Geomodel v3.0 fra modelgalleriet i Indstillinger > Analyse > Modeller."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# model har en bedre version til dette system} other {# modeller har bedre versioner til dette system}}",
         "message": "En version, der passer bedre til systemets hardware eller placering, er tilgængelig for: {models}. Åbn Indstillinger > Analyse > Modeller, og vælg Optimer for at skifte."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {En installeret model har en nyere udgave} other {# installerede modeller har nyere udgaver}}",
         "message": "En installeret model er en forhåndsversion, og den endelige udgave er nu tilgængelig: {models}. Åbn Indstillinger > Analyse > Modeller, installer den endelige udgave, og fjern forhåndsversionen."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {En installeret model har en nyere version} other {# installerede modeller har nyere versioner}}",
+        "message": "En nyere version erstatter den installerede for: {models}. Den installerede version fungerer, indtil du skifter. Åbn Indstillinger > Analyse > Modeller, og vælg Opdater."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "Kunne ikke indlæse indstillinger",
       "saveFailed": "Kunne ikke gemme indstillinger",
       "changedElsewhere": "Indstillingerne blev ændret et andet sted. Gennemgå dem, og gem igen.",
-      "databaseStatsFailed": "Kunne ikke indlæse databasestatistik",
       "csvDownloadFailed": "Kunne ikke downloade CSV"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "MySQL-databasenavn"
             }
           },
-          "stats": {
-            "title": "Databasestatistik",
-            "description": "Kørselsinformation om din database",
-            "loading": "Indlæser databasestatistik...",
-            "retry": "Prøv igen",
-            "refresh": "Opdater",
-            "noData": "Ingen databasestatistik tilgængelig.",
-            "type": "Type",
-            "status": "Status",
-            "size": "Størrelse",
-            "totalDetections": "Detektioner i alt",
-            "location": "Placering",
-            "connected": "Forbundet",
-            "disconnected": "Afbrudt"
-          },
           "errors": {
             "backupStartFailed": "Kunne ikke starte backup",
             "backupStatusFailed": "Kunne ikke hente backupstatus",
             "backupFailed": "Backup mislykkedes",
             "backupDownloadFailed": "Kunne ikke downloade backup"
+          },
+          "statsMoved": {
+            "text": "Databasestatistikken er flyttet til sektionen System.",
+            "link": "Åbn System > Database"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Afløst af {name}. Brug den nyere model i stedet.",
         "dialogNotice": "Denne model er afløst af {name}. Overvej at installere {name} i stedet."
       },
+      "update": {
+        "cardNotice": "En nyere version ({to}) erstatter den installerede version {from}.",
+        "action": "Opdater",
+        "applying": "Opdaterer..."
+      },
       "entryIncompatible": "Denne model er ikke tilgængelig på dette system.",
       "regionGlobal": "Global",
       "hardwareLabel": "Hardware",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "OpenVINO-enhed",
         "helpText": "Bruges til modeller, der kører på OpenVINO.",
+        "helpTextMultipleGpus": "Bruges til modeller, der kører på OpenVINO. Denne enhed har mere end én GPU, så vælg den, modellerne skal køre på.",
+        "notDetectedHint": "Den valgte GPU blev ikke fundet. Modellerne kører på ONNX Runtime, indtil en anden enhed vælges.",
         "options": {
           "auto": "Automatisk",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO-standard: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (ikke fundet)"
+        },
+        "gpuTypes": {
+          "integrated": "integreret",
+          "discrete": "dedikeret"
         }
       },
       "reloadNote": "Ændring af backend eller enhed genindlæser modellerne, så detektionen sættes på pause i et par sekunder.",

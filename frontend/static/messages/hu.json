@@ -493,6 +493,12 @@
         "loadFailedTitle": "Az akusztikai modellt nem sikerült betölteni",
         "loadFailedMessage": "Egy engedélyezett akusztikai modellt nem sikerült betölteni, így a rendszer rögzíti a hangot, de nem elemzi. Ellenőrizze a modellt a Rendszer > AI Modellek oldalon."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel nincs telepítve",
+        "notInstalledMessage": "A BirdNET Geomodel v3.0 szükséges a felismerések hely szerinti szűréséhez a következő modellnél vagy modelleknél: {models}. Telepítse a BirdNET Geomodel v3.0-t a modellgalériából a Beállítások > Elemzés > Modellek oldalon.",
+        "loadFailedTitle": "Geomodel betöltése sikertelen",
+        "loadFailedMessage": "A BirdNET Geomodel v3.0 nem tölthető be, ezért a hely szerinti szűrés ki van kapcsolva a következő modellnél vagy modelleknél: {models}. Ellenőrizze az alkalmazás naplóját, majd telepítse vagy telepítse újra a BirdNET Geomodel v3.0-t a modellgalériából a Beállítások > Elemzés > Modellek oldalon."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# modellnek van jobb változata ehhez a rendszerhez} other {# modellnek van jobb változata ehhez a rendszerhez}}",
         "message": "A rendszer hardveréhez vagy helyéhez jobban illő változat érhető el a következőkhöz: {models}. Nyissa meg a Beállítások > Elemzés > Modellek oldalt, és váltson az Optimalizálás gombbal."
@@ -500,6 +506,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Egy telepített modellnek újabb kiadása van} other {# telepített modellnek újabb kiadása van}}",
         "message": "Egy telepített modell előzetes verzió, és a végleges kiadása már elérhető: {models}. Nyissa meg a Beállítások > Elemzés > Modellek oldalt, telepítse a végleges kiadást, és távolítsa el az előzetes verziót."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Egy telepített modellnek van újabb változata} other {# telepített modellnek van újabb változata}}",
+        "message": "Újabb változat váltja le a telepítettet a következőknél: {models}. A telepített változat addig működik, amíg át nem vált. Nyissa meg a Beállítások > Elemzés > Modellek oldalt, és válassza a Frissítés gombot."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2493,7 +2503,6 @@
       "loadFailed": "A beállítások betöltése sikertelen",
       "saveFailed": "A beállítások mentése sikertelen",
       "changedElsewhere": "A beállításokat máshol módosították. Ellenőrizze őket, és mentse újra.",
-      "databaseStatsFailed": "Az adatbázis statisztikák betöltése sikertelen",
       "csvDownloadFailed": "A CSV letöltése sikertelen"
     },
     "card": {
@@ -2700,26 +2709,15 @@
               "helpText": "MySQL adatbázis név"
             }
           },
-          "stats": {
-            "title": "Adatbázis statisztikák",
-            "description": "Az adatbázis futásidejű információi",
-            "loading": "Adatbázis statisztikák betöltése...",
-            "retry": "Újra",
-            "refresh": "Frissítés",
-            "noData": "Nem érhető el adatbázis statisztika.",
-            "type": "Típus",
-            "status": "Állapot",
-            "size": "Méret",
-            "totalDetections": "Összes észlelés",
-            "location": "Helyszín",
-            "connected": "Csatlakoztatva",
-            "disconnected": "Leválasztva"
-          },
           "errors": {
             "backupStartFailed": "A mentés indítása sikertelen",
             "backupStatusFailed": "A mentés állapotának lekérése sikertelen",
             "backupFailed": "A mentés sikertelen",
             "backupDownloadFailed": "A mentés letöltése sikertelen"
+          },
+          "statsMoved": {
+            "text": "Az adatbázis statisztikái átkerültek a Rendszer részbe.",
+            "link": "Rendszer > Adatbázis megnyitása"
           }
         },
         "interface": {
@@ -6065,6 +6063,11 @@
         "cardNotice": "Leváltotta a(z) {name}. Használja helyette az újabb modellt.",
         "dialogNotice": "Ezt a modellt leváltotta a(z) {name}. Fontolja meg a(z) {name} telepítését helyette."
       },
+      "update": {
+        "cardNotice": "Újabb változat ({to}) váltja le a telepített {from} változatot.",
+        "action": "Frissítés",
+        "applying": "Frissítés..."
+      },
       "entryIncompatible": "Ez a modell nem érhető el ezen a rendszeren.",
       "regionGlobal": "Globális",
       "hardwareLabel": "Hardver",
@@ -6169,10 +6172,19 @@
       "device": {
         "label": "OpenVINO eszköz",
         "helpText": "Az OpenVINO-n futó modellekhez használatos.",
+        "helpTextMultipleGpus": "Az OpenVINO-n futó modellekhez használatos. Ebben az eszközben több GPU is van, válaszd ki, melyiken fussanak a modellek.",
+        "notDetectedHint": "A kiválasztott GPU nem észlelhető. A modellek az ONNX Runtime-on futnak, amíg másik eszközt nem választasz.",
         "options": {
           "auto": "Automatikus",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO alapértelmezés: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (nem észlelhető)"
+        },
+        "gpuTypes": {
+          "integrated": "integrált",
+          "discrete": "dedikált"
         }
       },
       "reloadNote": "A háttérrendszer vagy az eszköz módosítása újratölti a modelleket, így az észlelés néhány másodpercre szünetel.",
