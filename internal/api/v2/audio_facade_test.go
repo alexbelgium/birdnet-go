@@ -39,6 +39,7 @@ func TestIsPrivateModeExempt(t *testing.T) {
 		{http.MethodPost, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSStartPath},
 		{http.MethodPost, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSHeartbeatPath},
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSStatusPath},
+		{http.MethodGet, apiV2Prefix + audioapi.StaticSpectrogramPath},
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSTokenGroupPath + audioapi.HLSPlaylistPath},
 		{http.MethodGet, apiV2Prefix + audioapi.HLSGroupPath + audioapi.HLSTokenGroupPath + audioapi.HLSContentPath},
 	}
