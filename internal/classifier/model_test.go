@@ -313,6 +313,7 @@ func TestModelSpec_RegistryBufferGeometry(t *testing.T) {
 		{"BSG", 288000, 288000, 0, 288000, 144000, 144000, 3 * time.Second},
 		{"BSG_BAT", 786944, 1573888, 402944, 384000, 402944, 384000, 500 * time.Millisecond},
 		{"Bat", 288000, 288000, 0, 288000, 144000, 144000, 3 * time.Second},
+		{"BatDetect2", 288000, 288000, 0, 288000, 144000, 144000, 3 * time.Second},
 		{"BirdNET_V2.4", 288000, 288000, 0, 288000, 144000, 144000, 3 * time.Second},
 		{"BirdNET_V3.0", 320000, 320000, 0, 320000, 96000, 224000, 5 * time.Second},
 		{"BirdNET_Plus_V3.0", 320000, 320000, 0, 320000, 96000, 224000, 5 * time.Second},

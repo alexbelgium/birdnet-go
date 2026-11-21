@@ -5822,6 +5822,9 @@
       "batThreshold": {
         "label": "Vleermuis-detectiedrempel (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Schakel in om een drempel voor dit model in te stellen. Anders geldt de gedeelde drempel voor vleermuizen."
+      },
       "bsgBatThreshold": {
         "label": "Vleermuis-detectiedrempel (BSG-BAT)",
         "sampleRateWarning": "Opnamen op 192 kHz werken, maar soorten die boven 96 kHz roepen kunnen niet worden herkend en de scores zijn minder betrouwbaar. Een opnamefrequentie van 384 kHz wordt aanbevolen."

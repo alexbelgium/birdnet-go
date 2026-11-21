@@ -5822,6 +5822,9 @@
       "batThreshold": {
         "label": "Umbral de detección de murciélagos (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Activa esta opción para definir un umbral para este modelo. De lo contrario, se aplica el umbral compartido para murciélagos."
+      },
       "bsgBatThreshold": {
         "label": "Umbral de detección de murciélagos (BSG-BAT)",
         "sampleRateWarning": "Las grabaciones a 192 kHz funcionan, pero las especies que emiten por encima de 96 kHz no se pueden identificar y las puntuaciones son menos fiables. Se recomienda una frecuencia de captura de 384 kHz."

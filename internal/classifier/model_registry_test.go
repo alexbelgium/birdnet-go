@@ -309,6 +309,7 @@ func TestModelRegistry_EveryEntryHasTaxonGroup(t *testing.T) {
 		RegistryIDPerchV2:       TaxonGroupBird,
 		RegistryIDBSG:           TaxonGroupBird,
 		RegistryIDBat:           TaxonGroupBat,
+		RegistryIDBatDetect2:    TaxonGroupBat,
 		RegistryIDBSGBat:        TaxonGroupBat,
 	}
 	for id := range ModelRegistry {
@@ -458,6 +459,7 @@ func TestResolveConfigModelID_AllModels(t *testing.T) {
 		{"bat resolves", "bat", RegistryIDBat, true},
 		{"bsg resolves", "bsg", RegistryIDBSG, true},
 		{"bsg_bat resolves", "bsg_bat", RegistryIDBSGBat, true},
+		{"legacy fork bsgbat resolves", "bsgbat", RegistryIDBSGBat, true},
 		{"bsg-bat catalog id resolves", "bsg-bat", RegistryIDBSGBat, true},
 		{"case insensitive bat", "BAT", RegistryIDBat, true},
 		{"case insensitive bsg", "BSG", RegistryIDBSG, true},

@@ -5822,6 +5822,9 @@
       "batThreshold": {
         "label": "Fledermaus-Erkennungsschwelle (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Aktivieren, um einen Schwellenwert für dieses Modell festzulegen. Andernfalls gilt der gemeinsame Schwellenwert für Fledermäuse."
+      },
       "bsgBatThreshold": {
         "label": "Fledermaus-Erkennungsschwelle (BSG-BAT)",
         "sampleRateWarning": "Aufnahmen mit 192 kHz funktionieren, aber Arten, die oberhalb von 96 kHz rufen, können nicht erkannt werden, und die Bewertungen sind weniger zuverlässig. Empfohlen wird eine Abtastrate von 384 kHz."

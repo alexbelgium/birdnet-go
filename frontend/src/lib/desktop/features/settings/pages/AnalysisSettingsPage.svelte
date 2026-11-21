@@ -111,6 +111,7 @@
   import SkeletonStatus from '$lib/desktop/components/ui/SkeletonStatus.svelte';
   import ModelVariantPicker from '$lib/desktop/features/settings/components/ModelVariantPicker.svelte';
   import ModelRegionSelector from '$lib/desktop/features/settings/components/ModelRegionSelector.svelte';
+  import BatModelThresholds from './BatModelThresholds_fork.svelte';
   import NumberField from '$lib/desktop/components/forms/NumberField.svelte';
   import FalsePositiveFilterControl, {
     type FilterLevel,
@@ -581,6 +582,7 @@
   });
   const batChange: ChangePair = $derived({
     original: {
+      forkModels: store.originalData.forkModels,
       batNighttimeOnly: store.originalData.bat?.nighttimeOnly,
       batUltrasonicFilter: store.originalData.bat?.ultrasonicFilter?.enabled ?? true,
       batDiscardUnlikely: store.originalData.bat?.ultrasonicFilter?.discardUnlikely ?? false,
@@ -588,6 +590,7 @@
       bsgBatStepFrames: hasBsgBatModel ? savedBsgBatStepFrames : undefined,
     },
     current: {
+      forkModels: store.formData.forkModels,
       batNighttimeOnly: bat.nighttimeOnly,
       batUltrasonicFilter: bat.ultrasonicFilter?.enabled ?? true,
       batDiscardUnlikely: bat.ultrasonicFilter?.discardUnlikely ?? false,
@@ -3010,6 +3013,12 @@
             onUpdate={updateBatDiscardUnlikely}
           />
         {/if}
+      </div>
+
+      <div
+        class="mt-2 grid grid-cols-1 gap-6 border-t border-[var(--border-100)] pt-5 md:grid-cols-2"
+      >
+        <BatModelThresholds />
       </div>
 
       <!-- Bat False Positive Filter -->

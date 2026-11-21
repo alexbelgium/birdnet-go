@@ -49,6 +49,7 @@ const (
 // consistent across models.
 const (
 	errTypeEmptySample         = "empty_sample"
+	errTypeInvalidInput        = "invalid_input"
 	errTypeClassifierNil       = "classifier_nil"
 	errTypeInvokeFailed        = "invoke_failed"
 	errTypeLabelMismatch       = "label_mismatch"

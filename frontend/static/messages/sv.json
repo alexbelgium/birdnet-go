@@ -5822,6 +5822,9 @@
       "batThreshold": {
         "label": "Tröskel för fladdermöss-detektion (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Aktivera för att ange en gräns för denna modell. Annars används den gemensamma gränsen för fladdermöss."
+      },
       "bsgBatThreshold": {
         "label": "Tröskel för fladdermöss-detektion (BSG-BAT)",
         "sampleRateWarning": "Inspelningar med 192 kHz fungerar, men arter som ropar över 96 kHz kan inte identifieras och poängen är mindre tillförlitliga. En inspelningsfrekvens på 384 kHz rekommenderas."

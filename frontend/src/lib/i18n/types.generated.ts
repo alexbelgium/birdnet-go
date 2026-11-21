@@ -4287,6 +4287,7 @@ export type TranslationKey =
   | 'analysis.detection.title'
   | 'analysis.detection.description'
   | 'analysis.detection.batThreshold.label'
+  | 'analysis.detection.batThresholdOverride.helpText'
   | 'analysis.detection.bsgBatThreshold.label'
   | 'analysis.detection.bsgBatThreshold.sampleRateWarning'
   | 'analysis.detection.bsgBatStep.label'
