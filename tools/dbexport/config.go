@@ -4,10 +4,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"strconv"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/spf13/viper"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/datastore"
+)
+
+const (
+	// maskedPassword stands in for the password in the printed DSN.
+	maskedPassword = "****"
+	// unparsableDSNPlaceholder is printed instead of a DSN the driver cannot parse.
+	unparsableDSNPlaceholder = "<unparsable DSN>"
 )
 
 // Config holds the configuration for the export tool.
@@ -122,30 +131,21 @@ func (c *Config) GetMySQLDSN() string {
 		return c.MySQLDSN
 	}
 
-	// Construct DSN from components
-	// Format: user:password@tcp(host:port)/database?charset=utf8mb4&parseTime=True&loc=Local
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		c.MySQLUser,
-		c.MySQLPass,
-		c.MySQLHost,
-		c.MySQLPort,
-		c.MySQLDatabase,
-	)
-
-	return dsn
+	// Construct DSN from components with the driver's formatter, which escapes the
+	// database name, so delimiters in the password or database name do not split it.
+	return datastore.NewMySQLConfig(c.MySQLUser, c.MySQLPass, c.MySQLHost,
+		strconv.Itoa(c.MySQLPort), c.MySQLDatabase).FormatDSN()
 }
 
 // GetSanitizedMySQLDSN returns the MySQL DSN with password masked for logging.
 func (c *Config) GetSanitizedMySQLDSN() string {
-	dsn := c.GetMySQLDSN()
-
-	// Mask password in DSN
-	// Format: user:password@tcp(host:port)/database
-	if idx := strings.Index(dsn, ":"); idx != -1 {
-		if atIdx := strings.Index(dsn, "@"); atIdx != -1 && atIdx > idx {
-			return dsn[:idx+1] + "****" + dsn[atIdx:]
-		}
+	cfg, err := mysql.ParseDSN(c.GetMySQLDSN())
+	if err != nil {
+		// An unparsable DSN cannot be masked reliably, so none of it is shown.
+		return unparsableDSNPlaceholder
 	}
-
-	return dsn
+	if cfg.Passwd != "" {
+		cfg.Passwd = maskedPassword
+	}
+	return cfg.FormatDSN()
 }

@@ -90,7 +90,7 @@ func logStartupDecision(decision string, fields ...logger.Field) {
 }
 
 // dbStartupTimeout is the timeout for database startup operations.
-const dbStartupTimeout = "5s"
+const dbStartupTimeout = 5 * time.Second
 
 // Startup decision labels. Each value is both logged by
 // logStartupDecision and stored in StartupState.Decision so callers
@@ -424,29 +424,15 @@ func fallbackConsolidatedV2State(configuredPath, v2MigrationPath string) (Startu
 	return completedV2StartupState(DecisionStaleSidecarFallback), true
 }
 
-// buildMySQLStartupDSN builds a MySQL DSN for startup-time checks.
-// Uses mysql.Config for proper credential escaping and timeouts.
-// AllowNativePasswords must be explicitly true because mysql.Config{} struct
-// literals default to false (Go zero value), while mysql.NewConfig() defaults
-// to true. MariaDB and MySQL configured with mysql_native_password require this.
+// buildMySQLStartupDSN builds a MySQL DSN for startup-time checks: the shared
+// connection settings with every network step bounded by dbStartupTimeout,
+// since the checks run only short queries.
 func buildMySQLStartupDSN(settings *conf.Settings) string {
-	cfg := mysql.Config{
-		User:                 settings.Output.MySQL.Username,
-		Passwd:               settings.Output.MySQL.Password,
-		Net:                  "tcp",
-		Addr:                 datastore.MySQLAddr(settings.Output.MySQL.Host, settings.Output.MySQL.Port),
-		DBName:               settings.Output.MySQL.Database,
-		AllowNativePasswords: true,
-		CheckConnLiveness:    true,
-		Params: map[string]string{
-			"charset":      "utf8mb4",
-			"parseTime":    "True",
-			"loc":          "Local",
-			"timeout":      dbStartupTimeout,
-			"readTimeout":  dbStartupTimeout,
-			"writeTimeout": dbStartupTimeout,
-		},
-	}
+	cfg := datastore.NewMySQLConfig(settings.Output.MySQL.Username, settings.Output.MySQL.Password,
+		settings.Output.MySQL.Host, settings.Output.MySQL.Port, settings.Output.MySQL.Database)
+	cfg.Timeout = dbStartupTimeout
+	cfg.ReadTimeout = dbStartupTimeout
+	cfg.WriteTimeout = dbStartupTimeout
 	return cfg.FormatDSN()
 }
 

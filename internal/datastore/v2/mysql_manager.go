@@ -55,13 +55,6 @@ type MySQLManager struct {
 // v2TablePrefix is the prefix used for all v2 tables in MySQL.
 const v2TablePrefix = "v2_"
 
-// mysqlDSNParams are the connection parameters of the v2 MySQL DSN.
-// clientFoundRows makes an UPDATE report the rows it matched, as SQLite does,
-// instead of the rows it changed. The repositories read RowsAffected == 0 as
-// "row missing or locked", so an UPDATE that leaves a row's values as they
-// are must not report 0.
-const mysqlDSNParams = "charset=utf8mb4&parseTime=True&loc=Local&clientFoundRows=true"
-
 const (
 	// gormTableOptionsKey is the GORM setting that Migrator.CreateTable appends
 	// to a CREATE TABLE statement, after the closing parenthesis.
@@ -119,8 +112,13 @@ func (m *MySQLManager) migrationDB() (db *gorm.DB, schemaCharset string, err err
 // If UseV2Prefix is true, tables will be created with the "v2_" prefix (migration mode).
 // If UseV2Prefix is false, tables use clean names (fresh install mode).
 func NewMySQLManager(cfg *MySQLConfig) (*MySQLManager, error) {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?%s",
-		cfg.Username, cfg.Password, datastore.MySQLAddr(cfg.Host, cfg.Port), cfg.Database, mysqlDSNParams)
+	dsnCfg := datastore.NewMySQLConfig(cfg.Username, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
+	// clientFoundRows makes an UPDATE report the rows it matched, as SQLite does,
+	// instead of the rows it changed. The repositories read RowsAffected == 0 as
+	// "row missing or locked", so an UPDATE that leaves a row's values as they
+	// are must not report 0.
+	dsnCfg.ClientFoundRows = true
+	dsn := dsnCfg.FormatDSN()
 
 	// Create GORM logger using the adapter if a logger is provided
 	var gormLog gorm_logger.Interface

@@ -461,10 +461,13 @@ func isRepeatableSaveError(err error) bool {
 }
 
 // isRetryableSaveError reports whether a failed save should be retried later: a
-// repeat is safe and the failure looks transient. The legacy bridge carries no
-// store marker, so only its never-connected errors qualify there.
+// repeat is safe and the failure looks transient. A deadline counts as transient:
+// the save runs detached from the caller's cancellation, so only the store's own
+// timeouts end it, which a database that stopped answering trips. The legacy
+// bridge carries no store marker, so only its never-connected errors qualify there.
 func isRetryableSaveError(err error) bool {
-	return isRepeatableSaveError(err) && (errors.IsConnectivityError(err) || datastore.IsTransientDBError(err))
+	return isRepeatableSaveError(err) &&
+		(errors.IsConnectivityError(err) || datastore.IsTransientDBError(err) || errors.Is(err, context.DeadlineExceeded))
 }
 
 // retryPending reports whether the job should run again after a failure: nothing
