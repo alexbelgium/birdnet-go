@@ -43,6 +43,7 @@ Performance Optimizations:
   import { auth as authStore } from '$lib/stores/auth';
   import { sidebar } from '$lib/stores/sidebar';
   import { navigation } from '$lib/stores/navigation.svelte';
+  import { unsavedChanges } from '$lib/stores/unsavedChanges.svelte';
   import type { AuthConfig } from '../../../app.d';
   import {
     LayoutDashboard,
@@ -525,7 +526,9 @@ Performance Optimizations:
     }
   }
 
+  // Logout and login end in a page reload, so a draft is asked about in the app first.
   async function handleLogout() {
+    if (!(await unsavedChanges.confirmDiscard())) return;
     try {
       await authStore.logout();
     } catch {
@@ -534,7 +537,8 @@ Performance Optimizations:
     }
   }
 
-  function handleLogin() {
+  async function handleLogin() {
+    if (!(await unsavedChanges.confirmDiscard())) return;
     // Capture the full current location (path + query) at click time so the
     // post-login redirect returns the user to the exact filtered view (#3306).
     loginRedirectUrl = getCurrentPathWithQuery();
@@ -592,9 +596,9 @@ Performance Optimizations:
         >
           <LogoBadge size="md" variant={logoVariant} />
           {#if !isCollapsed}
-            <span class="text-xl font-bold tracking-tight text-[var(--color-base-content)]"
-              >BirdNET-Go</span
-            >
+            <span class="text-xl font-bold tracking-tight text-[var(--color-base-content)]">
+              BirdNET-Go
+            </span>
           {/if}
         </button>
         <!-- Collapse toggle - desktop only -->

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import { buildAppUrl, isRelativePath } from '$lib/utils/urlHelpers';
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import { Check, Globe, ShieldCheck, Info, Download, XCircle, CircleCheck } from '@lucide/svelte';
   import { onMount } from 'svelte';
@@ -7,6 +8,8 @@
   import { loggers } from '$lib/utils/logger';
   import { api } from '$lib/utils/api';
   import { appState } from '$lib/stores/appState.svelte';
+  import { downloadFromUrl } from '$lib/utils/fileHelpers';
+  import { useUnsavedChangesGuard } from '$lib/utils/useUnsavedChangesGuard.svelte';
 
   import type { HTMLAttributes } from 'svelte/elements';
 
@@ -91,6 +94,13 @@
     userMessage: '',
     uploadToSentry: true,
   });
+
+  // The message the last successful generate sent along. A typed message that differs from it
+  // would be lost when the page is left.
+  let submittedMessage = $state('');
+  useUnsavedChangesGuard(
+    () => supportDump.userMessage.trim() !== '' && supportDump.userMessage !== submittedMessage
+  );
 
   let normalizedGithubIssue = $derived(supportDump.githubIssueNumber.trim());
   let hasValidGithubIssue = $derived(/^#?\d+$/.test(normalizedGithubIssue));
@@ -182,6 +192,7 @@
       generating = false;
 
       if (data.success) {
+        submittedMessage = supportDump.userMessage;
         if (supportDump.uploadToSentry && data.uploaded_at) {
           if (data.dump_id) {
             updateStatus(
@@ -198,15 +209,15 @@
               100
             );
           }
-        } else if (data.download_url) {
+        } else if (data.download_url && isRelativePath(data.download_url)) {
           updateStatus(
             t('settings.support.supportReport.statusMessages.downloadSuccess'),
             'success',
             100
           );
-          const downloadUrl = data.download_url;
+          const downloadUrl = buildAppUrl(data.download_url);
           safeTimeout(() => {
-            window.location.href = downloadUrl;
+            downloadFromUrl(downloadUrl);
           }, 500);
         } else {
           updateStatus(
@@ -292,9 +303,9 @@
             <ul class="text-xs space-y-1 text-[var(--color-base-content)] opacity-70">
               <li class="flex items-center gap-2">
                 <CircleCheck class="size-4 text-[var(--text-success)] shrink-0" />
-                <span
-                  >{@html t('settings.support.supportReport.whatsIncluded.applicationLogs')}</span
-                >
+                <span>
+                  {@html t('settings.support.supportReport.whatsIncluded.applicationLogs')}
+                </span>
               </li>
               <li class="flex items-center gap-2">
                 <CircleCheck class="size-4 text-[var(--text-success)] shrink-0" />
@@ -367,9 +378,9 @@
 
           <div class="mt-4">
             <label class="block py-1" for={userMessageInputId}>
-              <span class="text-sm text-[var(--color-base-content)]"
-                >{t('settings.support.supportReport.userMessage.labelOptional')}</span
-              >
+              <span class="text-sm text-[var(--color-base-content)]">
+                {t('settings.support.supportReport.userMessage.labelOptional')}
+              </span>
             </label>
             <textarea
               id={userMessageInputId}
@@ -461,11 +472,11 @@
             {#if !generating}
               <span class="flex items-center gap-2">
                 <Download class="size-4" />
-                <span
-                  >{supportDump.uploadToSentry
+                <span>
+                  {supportDump.uploadToSentry
                     ? t('settings.support.supportReport.generateButton.upload')
-                    : t('settings.support.supportReport.generateButton.download')}</span
-                >
+                    : t('settings.support.supportReport.generateButton.download')}
+                </span>
               </span>
             {:else}
               <span

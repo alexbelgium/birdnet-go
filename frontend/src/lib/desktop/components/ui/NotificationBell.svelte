@@ -276,6 +276,9 @@
   // Navigate to notifications page
   function navigateToNotifications() {
     dropdownOpen = false;
+    // The focused dropdown item unmounts with the dropdown; focus the trigger first so a leave
+    // prompt records it as the place to return to
+    buttonRef?.focus();
     if (onNavigateToNotifications) {
       onNavigateToNotifications();
     } else {
@@ -601,8 +604,9 @@
                     {#if notification.component}
                       <span
                         class="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium bg-[var(--color-base-200)] text-[var(--color-base-content)]"
-                        >{notification.component}</span
                       >
+                        {notification.component}
+                      </span>
                     {/if}
                     <span
                       class={cn(

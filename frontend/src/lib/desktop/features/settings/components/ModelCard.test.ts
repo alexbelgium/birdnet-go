@@ -5,6 +5,7 @@ import { renderTyped, screen } from '../../../../../test/render-helpers';
 import { expectNoA11yViolations } from '$lib/utils/axe-utils';
 import { t } from '$lib/i18n';
 import type { CatalogVariant } from '$lib/types/models';
+import { formatDate } from '$lib/utils/formatters';
 import { CHANNEL_EXPERIMENTAL, CHANNEL_PREVIEW, CHANNEL_STABLE } from '$lib/utils/variantSelection';
 import {
   catalogEntry as entry,
@@ -325,6 +326,55 @@ describe('ModelCard', () => {
     });
   });
 
+  describe('cancel', () => {
+    it('shows Cancel while downloading with onCancel set, and calls it', async () => {
+      const onCancel = vi.fn();
+      renderCard({
+        entry: entry(),
+        mode: 'available',
+        busy: 'install',
+        progress: progress(),
+        onCancel,
+      });
+
+      await fireEvent.click(button('Cancel'));
+
+      expect(onCancel).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['the download is past its files (loading)', progress({ status: 'loading' }), vi.fn()],
+      ['onCancel is not set (a reinstall)', progress(), undefined],
+    ])('shows no Cancel when %s', (_name, downloadState, onCancel) => {
+      renderCard({
+        entry: entry(),
+        mode: 'available',
+        busy: 'install',
+        progress: downloadState,
+        onCancel,
+      });
+
+      expect(screen.queryByRole('button', { name: /^Cancel / })).not.toBeInTheDocument();
+    });
+
+    it('reads Cancelling and ignores clicks while the cancel is pending', async () => {
+      const onCancel = vi.fn();
+      renderCard({
+        entry: entry(),
+        mode: 'available',
+        busy: 'install',
+        progress: progress(),
+        onCancel,
+        cancelling: true,
+      });
+
+      const cancelling = button('analysis.gallery.cancelling');
+      expect(cancelling).toHaveAttribute('aria-disabled', 'true');
+      await fireEvent.click(cancelling);
+      expect(onCancel).not.toHaveBeenCalled();
+    });
+  });
+
   describe('preview', () => {
     it.each(['available', 'installed'] as const)(
       'shows the pill and build label on a %s card',
@@ -431,6 +481,90 @@ describe('ModelCard', () => {
     it('shows no note when nothing supersedes the entry', () => {
       renderCard({ entry: entry({ installed: true }), mode: 'installed' });
       expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('update', () => {
+    const UPDATE = {
+      variantId: 'v2',
+      fromVersion: '3.0',
+      toVersion: '3.0.1',
+      fromBuild: 1,
+      toBuild: 1,
+    };
+
+    it('shows the note with both versions and an Update button that emits update', async () => {
+      const model = entry({ installed: true, update: UPDATE });
+      const { onAction } = renderCard({ entry: model, mode: 'installed' });
+
+      expect(screen.getByRole('note')).toHaveTextContent('analysis.gallery.update.cardNotice');
+      expect(vi.mocked(t)).toHaveBeenCalledWith('analysis.gallery.update.cardNotice', {
+        from: '3.0',
+        to: '3.0.1',
+      });
+      await fireEvent.click(button('analysis.gallery.update.action'));
+      expect(onAction).toHaveBeenCalledExactlyOnceWith('update', model);
+    });
+
+    it('shows the build note when only the build differs', () => {
+      renderCard({
+        entry: entry({
+          installed: true,
+          update: { ...UPDATE, fromVersion: '2', toVersion: '2', fromBuild: 1, toBuild: 2 },
+        }),
+        mode: 'installed',
+      });
+
+      expect(screen.getByRole('note')).toHaveTextContent('analysis.gallery.update.cardNoticeBuild');
+      expect(vi.mocked(t)).toHaveBeenCalledWith('analysis.gallery.update.cardNoticeBuild', {
+        version: '2',
+        from: 1,
+        to: 2,
+      });
+    });
+
+    it('shows neither the note nor Update on an available card', () => {
+      renderCard({ entry: entry({ update: UPDATE }), mode: 'available' });
+
+      expect(screen.queryByRole('note')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /analysis\.gallery\.update\.action/ })
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows neither the note nor Update without an update', () => {
+      renderCard({ entry: entry({ installed: true }), mode: 'installed' });
+
+      expect(screen.queryByRole('note')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /analysis\.gallery\.update\.action/ })
+      ).not.toBeInTheDocument();
+    });
+
+    it('labels a running swap as updating and pauses the button', async () => {
+      const { onAction } = renderCard({
+        entry: entry({ installed: true, update: UPDATE }),
+        mode: 'installed',
+        busy: 'install',
+      });
+
+      const update = button('analysis.gallery.update.applying');
+      expect(update).toHaveAttribute('aria-disabled', 'true');
+      await fireEvent.click(update);
+      expect(onAction).not.toHaveBeenCalled();
+    });
+
+    it('pauses Update while another card runs an action', async () => {
+      const { onAction } = renderCard({
+        entry: entry({ installed: true, update: UPDATE }),
+        mode: 'installed',
+        actionInFlight: true,
+      });
+
+      const update = button('analysis.gallery.update.action');
+      expect(update).toHaveAttribute('aria-disabled', 'true');
+      await fireEvent.click(update);
+      expect(onAction).not.toHaveBeenCalled();
     });
   });
 
@@ -708,6 +842,76 @@ describe('ModelCard Accessibility', () => {
     });
 
     await expect(expectNoA11yViolations(container)).resolves.toBeUndefined();
+  });
+
+  describe('release notes of the installed build', () => {
+    const notes = {
+      version: '2',
+      build: 2,
+      date: '2026-11-21',
+      reason: 'Every regional model now includes the dog.',
+      notes: ['Dogs are reported again.'],
+    };
+    const installedB2 = variant({ id: 'v-b2', installed: true, version: '2', build: 2 });
+
+    it('shows the installed build and its notes behind a disclosure on the Installed tab only', () => {
+      const withNotes = entry({
+        installed: true,
+        installedVariantId: installedB2.id,
+        recommendedVariantId: installedB2.id,
+        builds: [notes],
+        variants: [installedB2],
+      });
+      const { unmount } = renderCard({ entry: withNotes, mode: 'installed' });
+
+      expect(
+        screen.getByText('analysis.gallery.buildNotes.buildLabel', { selector: 'dt' })
+      ).toBeInTheDocument();
+      const summary = screen.getByText('analysis.gallery.buildNotes.disclosure', {
+        selector: 'summary',
+      });
+      expect(summary.closest('details')).toHaveTextContent('Dogs are reported again.');
+      expect(vi.mocked(t)).toHaveBeenCalledWith('analysis.gallery.buildNotes.buildValue', {
+        build: 2,
+        date: formatDate('2026-11-21'),
+      });
+      unmount();
+
+      renderCard({ entry: withNotes, mode: 'available' });
+      expect(screen.queryByText('analysis.gallery.buildNotes.disclosure')).toBeNull();
+    });
+
+    it('has no violations with the build row and the open notes disclosure', async () => {
+      const { container } = renderCard({
+        entry: entry({
+          installed: true,
+          installedVariantId: installedB2.id,
+          recommendedVariantId: installedB2.id,
+          builds: [notes],
+          variants: [installedB2],
+        }),
+        mode: 'installed',
+      });
+      const details = container.querySelector('details');
+      expect(details).not.toBeNull();
+      details?.setAttribute('open', '');
+
+      await expect(expectNoA11yViolations(container)).resolves.toBeUndefined();
+    });
+
+    it('shows no build row or notes for a build without a record', () => {
+      renderCard({
+        entry: entry({
+          installed: true,
+          installedVariantId: installedB2.id,
+          variants: [installedB2],
+        }),
+        mode: 'installed',
+      });
+
+      expect(screen.queryByText('analysis.gallery.buildNotes.buildLabel')).toBeNull();
+      expect(screen.queryByText('analysis.gallery.buildNotes.disclosure')).toBeNull();
+    });
   });
 
   it('has no violations as an installed card with paused actions', async () => {

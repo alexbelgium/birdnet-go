@@ -85,12 +85,43 @@ on the server outside the form (the model gallery installs, reinstalls,
 swaps and removes models) calls `settingsActions.refreshKeepingEdits()`
 afterwards, so the form shows the server values without losing unsaved edits.
 
-## Immediate Save
+## Save Model
 
-A tab marked `saveMode: 'immediate'` in `SettingsTabs` saves each change as it
-is made, so it has no save bar. The page shows a one line note and the state of
-the saves in its place. Every other tab keeps the bar. Use it for settings that
-take effect without a restart; the rest keep an explicit Apply.
+Every settings tab saves with the page's Save Changes bar: controls write into
+the form with `settingsActions.updateSection` and the bar persists the whole
+form. A page blocks Save with a reason through `setValidationIssues`.
+
+The Audio page's Sound Card and Streams tabs are the model for lists of cards.
+Their cards write the whole sources or streams array into the form (the page
+spreads the store's own `rtsp` object, not its two-key view, so
+`ffmpegParameters` survives). Their save rules (`soundCardProblems` and
+`streamProblems` in `$lib/desktop/components/forms/sourceRules.ts`) are pure
+functions of the form and the saved values, so the page evaluates them whichever
+tab is open and reports them through `setValidationIssues` under a fixed set of
+owned keys (never one key per row); the reason names each invalid card once. A
+duplicate or malformed value the saved configuration already has is not reported,
+while an empty name, device or URL is always reported because the server refuses
+it. A stream URL that is not in the saved configuration needs a successful test
+of exactly that URL in this page session before Save; the page holds the tested
+URLs, since only the active tab is mounted. The cards use the same functions for
+their inline messages.
+
+Card field errors follow one rule: an error hides while its field is edited and
+shows again when the field is left, so keep the editing flag in `$state` and end
+it when the card is disabled or collapsed (the field can lose focus without a
+blur event). A problem another card caused shows at once. A disabled action shows
+its reason and points `aria-describedby` at it, and an add form clears an error
+when its field is edited.
+
+## Immediate Save (engine, not used by any tab now)
+
+No tab saves as it changes any more: the Audio page's Sound Card and Streams tabs
+moved to the Save Changes bar. The auto-save engine (`SettingsTabs`' `saveMode:
+'immediate'`, `commitSetting`, `AutoSaveStatus`, `ApplyDraft`, `ScopedApplyGroup`,
+`CommitTextField`) stays in the repository until it is decided whether any page
+saves that way again. A tab marked `saveMode: 'immediate'` would save each change
+as it is made and show a one line note and the state of the saves in place of the
+bar.
 
 What saves when:
 
@@ -130,29 +161,52 @@ Controls call `commitSetting(section, partial, { field, debounceMs? })` from
   the server changed elsewhere is replaced by the server value and the field says
   so. Keep the control controlled, so it follows the store.
 
-Boolean settings use `ToggleField`, not `Checkbox`.
-
 ## Form Controls
 
 Settings controls (in `$lib/desktop/components/forms/`) are used as controlled
 components: pass the current value one way and write changes back through the
 store in the callback. This is the pattern the existing pages use:
 
-| Component                 | Pattern                |
-| ------------------------- | ---------------------- |
-| `NumberField`             | `value` + `onUpdate`   |
-| `PasswordField`           | `value` + `onUpdate`   |
-| `NetworkAddressListInput` | `values` + `onUpdate`  |
-| `TextInput`               | `value` + `onchange`   |
-| `Checkbox`                | `checked` + `onchange` |
-| `SelectDropdown`          | `value` + `onChange`   |
+| Component                 | Pattern               |
+| ------------------------- | --------------------- |
+| `NumberField`             | `value` + `onUpdate`  |
+| `PasswordField`           | `value` + `onUpdate`  |
+| `NetworkAddressListInput` | `values` + `onUpdate` |
+| `TextInput`               | `value` + `onchange`  |
+| `ToggleField`             | `value` + `onUpdate`  |
+| `SelectDropdown`          | `value` + `onChange`  |
+
+Boolean settings use `ToggleField`, not `Checkbox`. `Checkbox` is for
+acknowledgements and multi-select lists (`ModelAgreementDialog` and the
+notification type filters). Lay the switches out as the bat card in
+`pages/AnalysisSettingsPage.svelte` does:
+
+- A single switch is a plain row in its stack: no wrapper, no `className`.
+- Two or more in a row go in a `divide-y divide-[var(--border-100)]` list; the first takes `className="pb-4"`, middle ones `py-4`, the last `pt-4` when the list sits in a `space-y-*` stack.
+- A switch that only applies while the one above it is on renders under `{#if}` in that list with `pl-6` added.
+- A switch is never a grid cell beside inputs; it takes a full row.
+
+`disabled` on a `ToggleField` sets `aria-disabled`, not the native attribute,
+so put the reason in `description`.
 
 Avoid combining `bind:value` with an update callback on the same control: the
 value is then written twice, and the store update in the callback is the one
 that counts.
 
 Wrap each group in `SettingsSection` (`components/SettingsSection.svelte`) and
-pass its `hasChanges` flag so the section shows an unsaved-changes badge.
+pass its `hasChanges` flag so the section shows an unsaved-changes badge. Give
+each section a Lucide `icon` that the card shows before the title. The one
+exception is the bat card, which uses `BatIcon` (`$lib/components/icons/`), a
+temporary stand-in until Lucide ships a bat icon; do not add other local icons.
+
+Label a subgroup of fields inside a card with `SettingsGroupLabel`
+(`components/SettingsGroupLabel.svelte`), not with hand-written heading classes.
+Choose the element with `as` so the heading level fits the page outline (default
+`h4`; `div` or `span` when the label is not a heading) and pass `divided` for a
+hairline above it. A `SettingsGroup` shows its title this way with
+`titleVariant="group"`, and a disclosure button in its `heading` snippet takes
+`SETTINGS_GROUP_DISCLOSURE_CLASSES` from the same file. The label of a single control
+stays a normal field label.
 
 ## Types
 

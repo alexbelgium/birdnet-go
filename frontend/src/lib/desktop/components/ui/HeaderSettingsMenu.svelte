@@ -20,11 +20,15 @@
     Bug,
     MessageCircleQuestion,
     ExternalLink,
+    Keyboard,
   } from '@lucide/svelte';
   import GithubIcon from '$lib/desktop/components/ui/GithubIcon.svelte';
   import { dropdown } from '$lib/utils/transitions';
   import { appState } from '$lib/stores/appState.svelte';
   import ConfirmModal from '$lib/desktop/components/modals/ConfirmModal.svelte';
+  import Kbd from '$lib/desktop/components/ui/Kbd.svelte';
+  import { HELP_SHORTCUT_ID, shortcuts } from '$lib/stores/shortcuts.svelte';
+  import { DASHBOARD_PATH } from '$lib/utils/loginRedirect';
 
   const logger = getLogger('dashboard');
 
@@ -76,9 +80,15 @@
 
   function handleEditDashboard() {
     isOpen = false;
+    // As for the reset: the leave prompt returns focus to the trigger, not to the unmounted item
+    buttonRef?.focus();
     resetDateToToday();
-    dashboardEditMode.set(true);
-    navigation.navigate('/ui/dashboard');
+    // Armed only once the move applies: after Stay, the next dashboard visit must not open in
+    // edit mode. The dashboard reads the flag reactively, so setting it just after the route
+    // change is equivalent to setting it first.
+    void navigation.navigate(DASHBOARD_PATH).then(applied => {
+      if (applied) dashboardEditMode.set(true);
+    });
   }
 
   const DEFAULT_LAYOUT: DashboardLayout = {
@@ -100,6 +110,16 @@
     // confirmation records it as the place to return to
     buttonRef?.focus();
     showResetConfirm = true;
+  }
+
+  // The key that opens the cheat sheet; null while shortcuts are off
+  let helpHint = $derived(shortcuts.hint(HELP_SHORTCUT_ID));
+
+  function handleKeyboardShortcuts() {
+    isOpen = false;
+    // As for the reset: the sheet returns focus to the trigger, not to the unmounted item
+    buttonRef?.focus();
+    shortcuts.openHelp();
   }
 
   async function confirmResetDashboard() {
@@ -143,7 +163,7 @@
     }));
 
     showResetConfirm = false;
-    navigation.navigate('/ui/dashboard');
+    navigation.navigate(DASHBOARD_PATH);
   }
 
   // Click outside to close
@@ -196,7 +216,7 @@
       id="header-settings-menu"
       in:dropdown
       out:dropdown={{ duration: 100 }}
-      class="absolute right-0 top-full mt-2 min-w-48 rounded-lg border border-[var(--color-base-content)]/10 bg-[var(--color-base-100)] shadow-lg"
+      class="absolute right-0 top-full mt-2 w-max min-w-48 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--color-base-content)]/10 bg-[var(--color-base-100)] shadow-lg"
       style:z-index="1010"
       aria-label={t('navigation.settingsMenu')}
     >
@@ -228,10 +248,26 @@
         <!-- Divider -->
         <div class="my-1 border-t border-[var(--color-base-content)]/10" aria-hidden="true"></div>
 
+        <!-- Keyboard shortcuts cheat sheet -->
+        <button
+          onclick={handleKeyboardShortcuts}
+          class={MENU_ITEM_CLASS}
+          aria-haspopup="dialog"
+          aria-keyshortcuts={helpHint?.aria}
+        >
+          <Keyboard class="size-4 shrink-0 text-[var(--color-base-content)]/70" />
+          <span class="flex-1 text-start">{t('shortcuts.menuItem')}</span>
+          {#if helpHint}
+            <Kbd keys={helpHint.keys} size="sm" className="text-[var(--color-base-content)]/70" />
+          {/if}
+        </button>
+
         <!-- Report Bug -->
         <button
           onclick={() => {
             isOpen = false;
+            // As for Edit dashboard: the leave prompt returns focus to the trigger
+            buttonRef?.focus();
             navigation.navigate('/ui/help/report-bug');
           }}
           class={MENU_ITEM_CLASS}

@@ -40,12 +40,14 @@
   import {
     fetchCatalog,
     fetchModelRegions,
+    cancelInstall,
     installModel,
     reinstallModel,
     uninstallModel,
     subscribeInstallProgress,
     isNetworkDownloadError,
     MODEL_AGREEMENT_REQUIRED_KEY,
+    MODEL_CANCEL_UNAVAILABLE_KEY,
     MODEL_OPERATION_IN_PROGRESS_KEY,
   } from '$lib/utils/modelsApi';
   import {
@@ -71,6 +73,7 @@
     type ThresholdRow,
     type ThresholdSectionValues,
   } from './analysisThresholds';
+  import { openVinoDeviceField } from './openVinoDeviceOptions';
   import { wizardState } from '$lib/desktop/features/wizard/wizardState.svelte';
   import type { InstalledModelContext } from '$lib/desktop/features/wizard/types';
   import {
@@ -96,6 +99,7 @@
     type CadenceReadoutRow,
   } from '$lib/desktop/features/settings/utils/fpCadence';
   import ModelCardGrid from '$lib/desktop/features/settings/components/ModelCardGrid.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import type {
     ModelCardAction,
     ModelCardMode,
@@ -103,10 +107,12 @@
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
+  import BatIcon from '$lib/components/icons/BatIcon.svelte';
   import SettingsNote from '$lib/desktop/features/settings/components/SettingsNote.svelte';
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import SkeletonStatus from '$lib/desktop/components/ui/SkeletonStatus.svelte';
   import ModelVariantPicker from '$lib/desktop/features/settings/components/ModelVariantPicker.svelte';
+  import ModelBuildNotes from '$lib/desktop/features/settings/components/ModelBuildNotes.svelte';
   import ModelRegionSelector from '$lib/desktop/features/settings/components/ModelRegionSelector.svelte';
   import NumberField from '$lib/desktop/components/forms/NumberField.svelte';
   import FalsePositiveFilterControl, {
@@ -142,13 +148,15 @@
   import { api, ApiError, getCsrfToken } from '$lib/utils/api';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { toastActions } from '$lib/stores/toast';
-  import { formatBytes, formatNumber } from '$lib/utils/formatters';
+  import { formatBytes, formatDate, formatNumber } from '$lib/utils/formatters';
   import {
     pickPreselectedVariant,
+    familyRegionSlug,
     normalizeRegionMode,
     DEFAULT_REGION_MODE,
     GLOBAL_REGION_MODE,
     optimizeOffers,
+    targetBuildNotes,
     CHANNEL_EXPERIMENTAL,
     CHANNEL_PREVIEW,
     type OptimizeOffer,
@@ -180,6 +188,14 @@
     Gauge,
     Moon,
     Settings as SettingsIcon,
+    Target,
+    TrendingUp,
+    Tag,
+    ShieldCheck,
+    Map as MapIcon,
+    AudioLines,
+    LayoutGrid,
+    Wrench,
   } from '@lucide/svelte';
 
   const logger = loggers.settings;
@@ -233,6 +249,10 @@
   let installingId = $state<string | null>(null);
   let deletingId = $state<string | null>(null);
   let reinstallingId = $state<string | null>(null);
+  // The entry whose Cancel was requested and whose operation has not ended yet.
+  let cancellingId = $state<string | null>(null);
+  // Counts cancel requests, so a late rejection can tell it is no longer the current one.
+  let cancelRequestCount = 0;
   let downloadProgress = $state<DownloadProgress | null>(null);
   let completionTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -290,14 +310,21 @@
   // The variant the user picked in the license/install dialog, null until they pick
   // one. Reset each time the dialog opens.
   let chosenVariantId = $state<string | null>(null);
+  // The region the dialog's picker is scoped to: the page-wide slug, or the model
+  // family's own resolution when its tile set lacks that slug (familyRegionSlug).
+  const licenseRegionSlug = $derived.by(() =>
+    licenseModel
+      ? familyRegionSlug(licenseModel, activeRegionSlug, regionsData?.families)
+      : activeRegionSlug
+  );
   // The variant the dialog installs: the user's pick, else the smart default (the
   // server-recommended one, falling back sensibly and skipping other regions'
-  // slices). The default follows activeRegionSlug, so it is recomputed when the
+  // slices). The default follows licenseRegionSlug, so it is recomputed when the
   // regions load after the dialog opened. Empty for flat (variant-less) entries.
   const selectedVariantId = $derived.by(
     () =>
       chosenVariantId ??
-      (licenseModel ? pickPreselectedVariant(licenseModel, activeRegionSlug) : '')
+      (licenseModel ? pickPreselectedVariant(licenseModel, licenseRegionSlug) : '')
   );
   // The download-size row and the install target follow the selected variant when
   // the entry has variants; otherwise they fall back to the whole-entry size.
@@ -307,6 +334,14 @@
   const licenseDownloadSize = $derived(
     licenseSelectedVariant?.sizeBytes ?? licenseModel?.totalSizeBytes ?? 0
   );
+  // The release notes of the build a swap of an installed model installs, shown before
+  // the swap runs; null for a fresh install, a swap within the installed build and a
+  // target build without notes (see targetBuildNotes for an unlisted installed variant).
+  const licenseBuildNotes = $derived(
+    licenseModel ? targetBuildNotes(licenseModel, selectedVariantId) : null
+  );
+  // Names the scrollable release notes region after its heading.
+  const BUILD_NOTES_HEADING_ID = generateId('license-build-notes');
   // The notice the license dialog shows for a non-stable release channel
   const licenseChannelNotice = $derived.by(() => {
     switch (licenseModel?.channel) {
@@ -390,8 +425,6 @@
   const INFERENCE_AUTO = 'auto';
   const BACKEND_ONNX = 'onnx';
   const BACKEND_OPENVINO = 'openvino';
-  const DEVICE_CPU = 'cpu';
-  const DEVICE_GPU = 'gpu';
   const INFERENCE_STATUS_ENDPOINT = '/api/v2/system/inference';
   // The line that says why the runtime selects are disabled: loading, or the failure warning.
   const INFERENCE_STATUS_ID = generateId('inference-status');
@@ -431,7 +464,7 @@
     return regionNameMap.has(liveModelRegion) ? liveModelRegion : '';
   });
   // The SAVED region the catalog's recommendation flags were computed from. Those
-  // flags come from the persisted setting (resolveRecommendRegion on the server),
+  // flags come from the persisted setting (resolveRecommendRegions on the server),
   // so the picker's server-side recommendation only needs a re-fetch when this
   // changes, not on unsaved toggles.
   const savedModelRegion = $derived.by<string | null>(() => {
@@ -672,11 +705,7 @@
   // A choice the host lacks stays offered while it is selected or saved, so picking another
   // one keeps the way back to the saved choice.
   const keptBackends = $derived(new Set([selectedBackend, savedBackend]));
-  const keptDevices = $derived(new Set([selectedDevice, savedDevice]));
   const openVinoSupported = $derived(inferenceBackends?.openvino.supported ?? false);
-  const hostHasGpu = $derived(
-    inferenceBackends?.openvino.devices?.some(d => d.toLowerCase().startsWith(DEVICE_GPU)) ?? false
-  );
 
   const backendOptions: SelectOption[] = $derived([
     { value: INFERENCE_AUTO, label: t('analysis.inference.backend.options.auto') },
@@ -687,13 +716,12 @@
       ? [{ value: BACKEND_OPENVINO, label: t('analysis.inference.backend.options.openvino') }]
       : []),
   ]);
-  const deviceOptions: SelectOption[] = $derived([
-    { value: INFERENCE_AUTO, label: t('analysis.inference.device.options.auto') },
-    { value: DEVICE_CPU, label: t('analysis.inference.device.options.cpu') },
-    ...(hostHasGpu || keptDevices.has(DEVICE_GPU)
-      ? [{ value: DEVICE_GPU, label: t('analysis.inference.device.options.gpu') }]
-      : []),
-  ]);
+  const deviceField = $derived(
+    openVinoDeviceField(
+      { status: inferenceBackends?.openvino, selected: selectedDevice, saved: savedDevice },
+      t
+    )
+  );
   // The device applies only to models that OpenVINO runs.
   const showDeviceField = $derived(
     (openVinoSupported || selectedDevice !== INFERENCE_AUTO || savedDevice !== INFERENCE_AUTO) &&
@@ -1881,9 +1909,11 @@
     }
   }
 
-  function openLicenseDialog(entry: CatalogEntry) {
+  // `variantId` preselects a variant (the Update action preselects the successor build); without
+  // it the dialog starts from the smart default.
+  function openLicenseDialog(entry: CatalogEntry, variantId: string | null = null) {
     licenseModel = entry;
-    chosenVariantId = null;
+    chosenVariantId = variantId;
     licenseViewedSha = null;
     licenseDialogRef?.showModal();
   }
@@ -2057,6 +2087,7 @@
     if (galleryActionInFlight) return;
     installError = null;
     installingId = modelId;
+    cancellingId = null;
     downloadProgress = null;
     // A failed install keeps its next steps, so Retry still offers them. A request the
     // server refused also keeps its agreements for Retry; once the server accepted
@@ -2092,6 +2123,7 @@
             totalFiles: 0,
           };
           progressCleanup = null;
+          cancellingId = null;
           const settingsRefreshed = refreshSettingsAfterGalleryChange();
           clearTimeout(completionTimer);
           completionTimer = setTimeout(() => {
@@ -2112,9 +2144,11 @@
         (err: string) => {
           installError = installFailed(err);
           installingId = null;
+          cancellingId = null;
           downloadProgress = null;
           progressCleanup = null;
-        }
+        },
+        () => handleInstallCancelled(modelId, modelName)
       );
     } catch (e) {
       // Cleared before the agreement dialog opens, in the same synchronous step: the
@@ -2137,6 +2171,49 @@
         retryableAgreements(e, accepted)
       );
     }
+  }
+
+  // Ask the server to cancel the running install or update. A refusal (the download can
+  // no longer be cancelled, or the request failed) clears the "Cancelling..." state and
+  // leaves the operation running: the progress stream reports how it ends. A refusal that
+  // arrives late, once that state belongs to nothing or to another model, does nothing.
+  async function handleCancelInstall(entry: CatalogEntry) {
+    if (installingId !== entry.id || cancellingId !== null) return;
+    cancellingId = entry.id;
+    const request = ++cancelRequestCount;
+    try {
+      await cancelInstall(entry.id);
+    } catch (e) {
+      // A rejection of an earlier request owns no state any more, whether its install
+      // ended or the same or another model was cancelled since: leave it alone.
+      if (unmounted || request !== cancelRequestCount || cancellingId !== entry.id) return;
+      cancellingId = null;
+      const showMessage =
+        e instanceof Error &&
+        !(e instanceof ApiError && e.errorKey === MODEL_CANCEL_UNAVAILABLE_KEY);
+      toastActions.warning(
+        showMessage
+          ? e.message
+          : t('analysis.gallery.errors.cancelUnavailable', { name: entry.name })
+      );
+    }
+  }
+
+  // The install ended because the user cancelled it: no error banner. The old variant of
+  // an update keeps running, so the card just returns to its previous state. Cancelling
+  // an optimize swap stops the whole apply-all queue and settles the item neither
+  // applied nor failed; the queue and the applying id are cleared before installingId,
+  // since the completion effect would otherwise mark the cancelled swap applied.
+  function handleInstallCancelled(modelId: string, modelName: string) {
+    if (optimizeApplyingId === modelId) {
+      applyAllQueue = [];
+      optimizeApplyingId = null;
+    }
+    installingId = null;
+    downloadProgress = null;
+    cancellingId = null;
+    progressCleanup = null;
+    toastActions.info(t('analysis.gallery.cancelled', { name: modelName }));
   }
 
   // True when the server refused an install or reinstall because another model
@@ -2213,12 +2290,16 @@
     startReinstall(entry.id, entry.name);
   }
 
-  // A card's action button was used. Install and the Optimize swap both go through the
-  // license dialog, which picks the variant.
+  // A card's action button was used. Install, the Optimize swap and Update all go through the
+  // license dialog, which picks the variant; Update preselects the successor of the installed
+  // build.
   function handleCardAction(action: ModelCardAction, entry: CatalogEntry) {
     switch (action) {
       case 'install':
         openLicenseDialog(entry);
+        break;
+      case 'update':
+        openLicenseDialog(entry, entry.update?.variantId ?? null);
         break;
       case 'reinstall':
         handleReinstall(entry);
@@ -2272,6 +2353,13 @@
         },
         (err: string) => {
           installError = reportActionError(modelId, modelName, 'reinstall', err);
+          reinstallingId = null;
+          downloadProgress = null;
+          progressCleanup = null;
+        },
+        // A reinstall is not cancellable; this ends one that was sent the retained
+        // cancelled state of an earlier install of the same model.
+        () => {
           reinstallingId = null;
           downloadProgress = null;
           progressCleanup = null;
@@ -2417,6 +2505,7 @@
     <!-- Detection thresholds: one row per enabled classifier -->
     <SettingsSection
       title={t('analysis.thresholds.title')}
+      icon={Target}
       description={t('analysis.thresholds.description')}
       defaultOpen={true}
       originalData={thresholdsChange.original}
@@ -2513,6 +2602,7 @@
     <!-- Dynamic threshold -->
     <SettingsSection
       title={t('settings.main.sections.dynamicThreshold.title')}
+      icon={TrendingUp}
       description={t('settings.main.sections.dynamicThreshold.description')}
       originalData={dynamicThresholdChange.original}
       currentData={dynamicThresholdChange.current}
@@ -2577,6 +2667,7 @@
     <!-- Species names -->
     <SettingsSection
       title={t('analysis.speciesNames.title')}
+      icon={Tag}
       description={t('analysis.speciesNames.description')}
       originalData={speciesNamesChange.original}
       currentData={speciesNamesChange.current}
@@ -2638,6 +2729,7 @@
     <!-- False positive filter: every classifier except bats -->
     <SettingsSection
       title={t('settings.main.sections.falsePositiveFilter.title')}
+      icon={ShieldCheck}
       description={t('settings.main.sections.falsePositiveFilter.description')}
       defaultOpen={true}
       originalData={falsePositiveChange.original}
@@ -2738,6 +2830,7 @@
     <!-- Range filter -->
     <SettingsSection
       title={t('settings.main.sections.rangeFilter.title')}
+      icon={MapIcon}
       description={t('settings.main.sections.rangeFilter.description')}
       originalData={rangeFilterChange.original}
       currentData={rangeFilterChange.current}
@@ -2876,39 +2969,41 @@
                 <table class="w-full text-sm">
                   <thead>
                     <tr class="border-b border-[var(--color-base-300)]">
-                      <th scope="col" class="text-left py-2 pr-4 font-medium text-muted"
-                        >{t('analysis.rangeFilter.status.classifier')}</th
-                      >
-                      <th scope="col" class="text-right py-2 px-4 font-medium text-muted"
-                        >{t('analysis.rangeFilter.status.totalSpecies')}</th
-                      >
+                      <th scope="col" class="text-left py-2 pr-4 font-medium text-muted">
+                        {t('analysis.rangeFilter.status.classifier')}
+                      </th>
+                      <th scope="col" class="text-right py-2 px-4 font-medium text-muted">
+                        {t('analysis.rangeFilter.status.totalSpecies')}
+                      </th>
                       <th
                         scope="col"
                         class="text-right py-2 px-4 font-medium text-muted"
                         title={t('analysis.rangeFilter.status.withRangeDataTooltip')}
-                        >{t('analysis.rangeFilter.status.withRangeData')}</th
                       >
+                        {t('analysis.rangeFilter.status.withRangeData')}
+                      </th>
                       <th
                         scope="col"
                         class="text-right py-2 pl-4 font-medium text-muted"
                         title={t('analysis.rangeFilter.status.withoutRangeDataTooltip')}
-                        >{t('analysis.rangeFilter.status.withoutRangeData')}</th
                       >
+                        {t('analysis.rangeFilter.status.withoutRangeData')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {#each rangeCoveredClassifiers as classifier (classifier.id)}
                       <tr class="border-b border-[var(--color-base-300)]/50 last:border-0">
                         <td class="py-2 pr-4 font-medium">{classifier.name}</td>
-                        <td class="py-2 px-4 text-right tabular-nums"
-                          >{formatNumber(classifier.totalSpecies)}</td
-                        >
-                        <td class="py-2 px-4 text-right tabular-nums"
-                          >{formatNumber(classifier.withRangeData)}</td
-                        >
-                        <td class="py-2 pl-4 text-right tabular-nums"
-                          >{formatNumber(classifier.withoutRangeData)}</td
-                        >
+                        <td class="py-2 px-4 text-right tabular-nums">
+                          {formatNumber(classifier.totalSpecies)}
+                        </td>
+                        <td class="py-2 px-4 text-right tabular-nums">
+                          {formatNumber(classifier.withRangeData)}
+                        </td>
+                        <td class="py-2 pl-4 text-right tabular-nums">
+                          {formatNumber(classifier.withoutRangeData)}
+                        </td>
                       </tr>
                     {/each}
                   </tbody>
@@ -2960,6 +3055,7 @@
     <!-- Bat detection -->
     <SettingsSection
       title={t('analysis.bat.title')}
+      icon={BatIcon}
       description={t('analysis.bat.description')}
       defaultOpen={true}
       originalData={batChange.original}
@@ -3061,6 +3157,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('analysis.inference.runtime.title')}
+      icon={Cpu}
       description={t('analysis.inference.runtime.description')}
       originalData={inferenceChange.original}
       currentData={inferenceChange.current}
@@ -3099,10 +3196,10 @@
         />
         {#if showDeviceField}
           <SelectDropdown
-            options={deviceOptions}
+            options={deviceField.options}
             value={selectedDevice}
             label={t('analysis.inference.device.label')}
-            helpText={t('analysis.inference.device.helpText')}
+            helpText={deviceField.helpText}
             disabled={store.isLoading || store.isSaving || !inferenceBackends}
             aria-describedby={inferenceBackends ? undefined : INFERENCE_STATUS_ID}
             variant="select"
@@ -3129,6 +3226,7 @@
 
     <SettingsSection
       title={t('analysis.inference.running.title')}
+      icon={AudioLines}
       description={t('analysis.inference.running.description')}
     >
       <ul class="divide-y divide-[var(--border-100)]" data-testid="inference-running-list">
@@ -3163,6 +3261,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('analysis.gallery.title')}
+      icon={LayoutGrid}
       description={t('analysis.gallery.description')}
       defaultOpen={true}
       originalData={modelRegionChange.original}
@@ -3315,6 +3414,7 @@
 
     <SettingsSection
       title={t('analysis.downloadSource.title')}
+      icon={Download}
       description={t('analysis.downloadSource.description')}
       originalData={downloadSourceChange.original}
       currentData={downloadSourceChange.current}
@@ -3363,6 +3463,7 @@
     <!-- Advanced -->
     <SettingsSection
       title={t('analysis.advanced.title')}
+      icon={Wrench}
       description={t('analysis.advanced.description')}
       defaultOpen={false}
       originalData={advancedChange.original}
@@ -3429,6 +3530,8 @@
     pausedReasonId={GALLERY_ACTION_STATUS_ID}
     optimizeEntryIds={optimizeIds}
     onAction={handleCardAction}
+    onCancel={handleCancelInstall}
+    {cancellingId}
   />
 {/snippet}
 
@@ -3437,9 +3540,9 @@
     {#if loading}
       <div class="flex items-center justify-center py-12">
         <Loader2 class="size-6 animate-spin text-[var(--text-primary)]" />
-        <span class="ml-3 text-sm text-[var(--color-base-content)]/80"
-          >{t('analysis.gallery.loading')}</span
-        >
+        <span class="ml-3 text-sm text-[var(--color-base-content)]/80">
+          {t('analysis.gallery.loading')}
+        </span>
       </div>
     {:else if catalogError}
       {@render catalogErrorBanner()}
@@ -3464,9 +3567,9 @@
     {#if loading}
       <div class="flex items-center justify-center py-12">
         <Loader2 class="size-6 animate-spin text-[var(--text-primary)]" />
-        <span class="ml-3 text-sm text-[var(--color-base-content)]/80"
-          >{t('analysis.gallery.loading')}</span
-        >
+        <span class="ml-3 text-sm text-[var(--color-base-content)]/80">
+          {t('analysis.gallery.loading')}
+        </span>
       </div>
     {:else if catalogError}
       {@render catalogErrorBanner()}
@@ -3474,39 +3577,33 @@
       <!-- Acoustic Classifiers section -->
       {#if availableWildlife.length > 0 || availableBirds.length > 0 || availableBats.length > 0}
         <div class="space-y-4">
-          <h2 class="text-sm font-bold uppercase tracking-wider text-[var(--color-base-content)]">
+          <SettingsGroupLabel as="h2">
             {t('analysis.gallery.sections.acoustic')}
-          </h2>
+          </SettingsGroupLabel>
 
           {#if availableWildlife.length > 0}
             <div>
-              <h3
-                class="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--color-base-content)]/80"
-              >
+              <SettingsGroupLabel as="h3" class="mb-3">
                 {t('analysis.gallery.categories.wildlife')}
-              </h3>
+              </SettingsGroupLabel>
               {@render galleryGrid(availableWildlife, 'available')}
             </div>
           {/if}
 
           {#if availableBirds.length > 0}
             <div>
-              <h3
-                class="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--color-base-content)]/80"
-              >
+              <SettingsGroupLabel as="h3" class="mb-3">
                 {t('analysis.gallery.categories.bird')}
-              </h3>
+              </SettingsGroupLabel>
               {@render galleryGrid(availableBirds, 'available')}
             </div>
           {/if}
 
           {#if availableBats.length > 0}
             <div>
-              <h3
-                class="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--color-base-content)]/80"
-              >
+              <SettingsGroupLabel as="h3" class="mb-3">
                 {t('analysis.gallery.categories.bat')}
-              </h3>
+              </SettingsGroupLabel>
               {@render galleryGrid(availableBats, 'available')}
             </div>
           {/if}
@@ -3516,9 +3613,9 @@
       <!-- Geomodels section -->
       {#if availableGeomodels.length > 0}
         <div class="space-y-4">
-          <h2 class="text-sm font-bold uppercase tracking-wider text-[var(--color-base-content)]">
+          <SettingsGroupLabel as="h2">
             {t('analysis.gallery.sections.geomodel')}
-          </h2>
+          </SettingsGroupLabel>
           {@render galleryGrid(availableGeomodels, 'available')}
         </div>
       {/if}
@@ -3573,39 +3670,44 @@
               <th
                 scope="row"
                 class="px-4 pt-4 pb-1 text-left font-normal align-top text-[var(--color-base-content)]/80"
-                >{t('analysis.gallery.license.model')}</th
               >
+                {t('analysis.gallery.license.model')}
+              </th>
               <td
                 class="px-4 pt-4 pb-1 text-right align-top font-medium text-[var(--color-base-content)]"
-                >{licenseModel.name}</td
               >
+                {licenseModel.name}
+              </td>
             </tr>
             <tr>
               <th
                 scope="row"
                 class="px-4 py-1 text-left font-normal align-top text-[var(--color-base-content)]/80"
-                >{t('analysis.gallery.license.author')}</th
               >
-              <td class="px-4 py-1 text-right align-top text-[var(--color-base-content)]"
-                >{licenseModel.author}</td
-              >
+                {t('analysis.gallery.license.author')}
+              </th>
+              <td class="px-4 py-1 text-right align-top text-[var(--color-base-content)]">
+                {licenseModel.author}
+              </td>
             </tr>
             <tr>
               <th
                 scope="row"
                 class="px-4 py-1 text-left font-normal align-top text-[var(--color-base-content)]/80"
-                >{t('analysis.gallery.license.license')}</th
               >
-              <td class="px-4 py-1 text-right align-top text-[var(--color-base-content)]"
-                >{licenseModel.license}</td
-              >
+                {t('analysis.gallery.license.license')}
+              </th>
+              <td class="px-4 py-1 text-right align-top text-[var(--color-base-content)]">
+                {licenseModel.license}
+              </td>
             </tr>
             <tr>
               <th
                 scope="row"
                 class="px-4 py-1 text-left font-normal align-top text-[var(--color-base-content)]/80"
-                >{t('analysis.gallery.license.commercialUse')}</th
               >
+                {t('analysis.gallery.license.commercialUse')}
+              </th>
               <td class="px-4 py-1 text-right align-top">
                 {#if licenseModel.commercialUse}
                   <span class="inline-flex items-center gap-1 text-[var(--text-success)]">
@@ -3624,11 +3726,12 @@
               <th
                 scope="row"
                 class="px-4 pt-1 pb-4 text-left font-normal align-top text-[var(--color-base-content)]/80"
-                >{t('analysis.gallery.license.downloadSize')}</th
               >
-              <td class="px-4 pt-1 pb-4 text-right align-top text-[var(--color-base-content)]"
-                >{formatBytes(licenseDownloadSize)}</td
-              >
+                {t('analysis.gallery.license.downloadSize')}
+              </th>
+              <td class="px-4 pt-1 pb-4 text-right align-top text-[var(--color-base-content)]">
+                {formatBytes(licenseDownloadSize)}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -3638,7 +3741,7 @@
             variants={licenseModel.variants}
             installedVariantId={licenseModel.installedVariantId}
             {selectedVariantId}
-            {activeRegionSlug}
+            activeRegionSlug={licenseRegionSlug}
             regionNames={regionNameMap}
             onSelect={id => (chosenVariantId = id)}
             idPrefix="license-variant"
@@ -3653,6 +3756,44 @@
             </summary>
             <p class="mt-1">{t('analysis.gallery.variants.precisionHelp')}</p>
           </details>
+        {/if}
+
+        {#if licenseBuildNotes}
+          <div class="rounded-lg border border-[var(--color-base-300)] p-4 text-sm">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h4 id={BUILD_NOTES_HEADING_ID} class="font-medium text-[var(--color-base-content)]">
+                {t('analysis.gallery.buildNotes.heading', {
+                  build: licenseBuildNotes.build,
+                  version: licenseBuildNotes.version,
+                })}
+              </h4>
+              <time
+                datetime={licenseBuildNotes.date}
+                class="text-xs text-[var(--color-base-content)]/80"
+              >
+                {t('analysis.gallery.buildNotes.released', {
+                  date: formatDate(licenseBuildNotes.date),
+                })}
+              </time>
+            </div>
+            <!-- Focusable so keyboard users can scroll long notes. The region has a
+                 bounded height, so the documents and the buttons below stay in reach;
+                 it sits after the variant picker, so a pick that adds or removes it
+                 does not push the picker down within the dialog's content. -->
+            <!-- Keyed on the build, so picking a variant with other notes starts them
+                 at the top instead of keeping the scroll position of the last ones. -->
+            {#key `${licenseBuildNotes.version}:${licenseBuildNotes.build}`}
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+              <div
+                role="region"
+                aria-labelledby={BUILD_NOTES_HEADING_ID}
+                tabindex="0"
+                class="mt-3 max-h-56 overflow-y-auto rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)]"
+              >
+                <ModelBuildNotes record={licenseBuildNotes} />
+              </div>
+            {/key}
+          </div>
         {/if}
 
         {#if licenseDocuments.reference.length > 0}
@@ -3861,27 +4002,27 @@
       <div class="mb-4 p-3 bg-[var(--color-base-200)]/50 rounded-lg">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
-            <span class="text-[var(--color-base-content)] opacity-60"
-              >{t('settings.main.sections.rangeFilter.modal.speciesCount')}</span
-            >
+            <span class="text-[var(--color-base-content)] opacity-60">
+              {t('settings.main.sections.rangeFilter.modal.speciesCount')}
+            </span>
             <span class="font-medium ml-1">{rangeFilterState.speciesCount}</span>
           </div>
           <div>
-            <span class="text-[var(--color-base-content)] opacity-60"
-              >{t('settings.main.sections.rangeFilter.modal.threshold')}</span
-            >
+            <span class="text-[var(--color-base-content)] opacity-60">
+              {t('settings.main.sections.rangeFilter.modal.threshold')}
+            </span>
             <span class="font-medium ml-1">{birdnet?.rangeFilter?.threshold}</span>
           </div>
           <div>
-            <span class="text-[var(--color-base-content)] opacity-60"
-              >{t('settings.main.sections.rangeFilter.modal.latitude')}</span
-            >
+            <span class="text-[var(--color-base-content)] opacity-60">
+              {t('settings.main.sections.rangeFilter.modal.latitude')}
+            </span>
             <span class="font-medium ml-1">{birdnet?.latitude}</span>
           </div>
           <div>
-            <span class="text-[var(--color-base-content)] opacity-60"
-              >{t('settings.main.sections.rangeFilter.modal.longitude')}</span
-            >
+            <span class="text-[var(--color-base-content)] opacity-60">
+              {t('settings.main.sections.rangeFilter.modal.longitude')}
+            </span>
             <span class="font-medium ml-1">{birdnet?.longitude}</span>
           </div>
         </div>

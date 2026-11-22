@@ -20,7 +20,7 @@
   import logoJyu from '$lib/assets/logos/logo-jyu.jpeg';
 
   export type ModelCardMode = 'installed' | 'available';
-  export type ModelCardAction = 'install' | 'reinstall' | 'remove';
+  export type ModelCardAction = 'install' | 'reinstall' | 'remove' | 'update';
 
   const MODEL_LOGOS: Record<string, string> = {
     birdnet: logoBirdnet,
@@ -41,6 +41,7 @@
   import {
     BrainCircuit,
     Check,
+    CircleArrowUp,
     Download,
     ExternalLink,
     Globe,
@@ -62,9 +63,11 @@
   import { t } from '$lib/i18n';
   import { cn } from '$lib/utils/cn';
   import { validateProtocolURL } from '$lib/utils/security';
-  import { formatBytes, formatNumber } from '$lib/utils/formatters';
+  import { formatBytes, formatDate, formatNumber } from '$lib/utils/formatters';
   import { generateId } from '$lib/utils/uuid';
+  import ModelBuildNotes from './ModelBuildNotes.svelte';
   import {
+    buildRecordFor,
     CHANNEL_EXPERIMENTAL,
     CHANNEL_PREVIEW,
     NEW_MODEL_IDS,
@@ -75,11 +78,11 @@
   interface Props {
     /** The catalog entry shown. */
     entry: CatalogEntry;
-    /** 'installed' describes the installed variant and offers Optimize, Reinstall and Remove; 'available' describes the recommended variant and offers Install. */
+    /** 'installed' describes the installed variant and offers Update (when the entry has one), Optimize, Reinstall and Remove; 'available' describes the recommended variant and offers Install. */
     mode: ModelCardMode;
     /** Region slug to localized name, as ModelVariantPicker takes it. */
     regionNames: ReadonlyMap<string, string>;
-    /** The action running on this card, or null. On an installed card 'install' is the variant swap (Optimize). */
+    /** The action running on this card, or null. On an installed card 'install' is the variant swap (Optimize or Update). */
     busy?: ModelCardAction | null;
     /** True while any gallery action runs on any card. */
     actionInFlight?: boolean;
@@ -89,6 +92,10 @@
     progress?: DownloadProgress | null;
     /** Installed mode: a better variant exists for this host. */
     optimizeAvailable?: boolean;
+    /** Cancels this card's running download. The Cancel button shows only while the download runs and this is set; not offered for a reinstall. */
+    onCancel?: () => void;
+    /** True after Cancel was used, until the operation ends: the button reads "Cancelling..." and ignores clicks. */
+    cancelling?: boolean;
     /** Called with the action and the entry when an action button is used. */
     // eslint-disable-next-line no-unused-vars -- the param names document the callback contract
     onAction: (action: ModelCardAction, entry: CatalogEntry) => void;
@@ -103,6 +110,8 @@
     pausedReasonId,
     progress = null,
     optimizeAvailable = false,
+    onCancel,
+    cancelling = false,
     onAction,
   }: Props = $props();
 
@@ -156,6 +165,8 @@
         return t('analysis.gallery.progress.complete');
       case 'failed':
         return t('analysis.gallery.progress.failed');
+      case 'cancelled':
+        return t('analysis.gallery.progress.cancelled');
       default:
         return '';
     }
@@ -190,6 +201,11 @@
       : entry.region || t('analysis.gallery.regionGlobal')
   );
   const speciesCount = $derived(shownVariant?.speciesCount ?? entry.speciesCount);
+  // The release notes of the installed build, on the Installed tab only. A build without notes
+  // shows no build row and no disclosure.
+  const buildNotes = $derived(
+    mode === 'installed' && shownVariant ? buildRecordFor(entry, shownVariant) : null
+  );
   // A caller that passes only `busy` still pauses the card's other buttons
   const inFlight = $derived(actionInFlight || busy !== null);
   // Available cards dim the logo of an entry this host cannot run; the text keeps full contrast
@@ -206,9 +222,27 @@
       ? t('analysis.gallery.superseded.cardNotice', { name: entry.supersededBy.name })
       : null
   );
+  // An installed build that a newer release or a newer build of the same release replaces: a note with
+  // both versions (or both build numbers when the release is the same), and the Update action
+  const update = $derived(mode === 'installed' ? entry.update : undefined);
+  const updateNoticeText = $derived.by(() => {
+    if (!update) return null;
+    if (update.fromVersion === update.toVersion) {
+      return t('analysis.gallery.update.cardNoticeBuild', {
+        version: update.toVersion,
+        from: update.fromBuild,
+        to: update.toBuild,
+      });
+    }
+    return t('analysis.gallery.update.cardNotice', {
+      from: update.fromVersion,
+      to: update.toVersion,
+    });
+  });
   const hasNotices = $derived(
     channelNoticeText !== null ||
       supersededNoticeText !== null ||
+      updateNoticeText !== null ||
       !entry.compatible ||
       progress !== null
   );
@@ -271,6 +305,17 @@
     icon: Sparkles,
     label: t('analysis.gallery.optimize.swap'),
     runningLabel: t('analysis.gallery.optimize.applying'),
+    paused: inFlight && busy !== 'install',
+    running: busy === 'install',
+  });
+
+  // Update is the variant swap to the successor build, so it runs while a swap does ('install')
+  const updateAction = $derived<ActionSpec>({
+    action: 'update',
+    variant: 'primary',
+    icon: CircleArrowUp,
+    label: t('analysis.gallery.update.action'),
+    runningLabel: t('analysis.gallery.update.applying'),
     paused: inFlight && busy !== 'install',
     running: busy === 'install',
   });
@@ -426,6 +471,9 @@
       {#if supersededNoticeText}
         {@render notice('warning', supersededNoticeText, 'note', undefined)}
       {/if}
+      {#if updateNoticeText}
+        {@render notice('warning', updateNoticeText, 'note', undefined)}
+      {/if}
       {#if !entry.compatible}
         {@render notice(
           mode === 'installed' ? 'error' : 'warning',
@@ -450,10 +498,27 @@
             <div
               class="flex flex-wrap items-center justify-between gap-x-2 text-xs text-[var(--color-base-content)]/80"
             >
-              <span>
-                {statusLabel(progress.status)}
-                {#if progress.status === 'downloading' && progress.totalFiles > 1}
-                  ({progress.currentFile}/{progress.totalFiles})
+              <span class="flex items-center gap-2">
+                <span>
+                  {statusLabel(progress.status)}
+                  {#if progress.status === 'downloading' && progress.totalFiles > 1}
+                    ({progress.currentFile}/{progress.totalFiles})
+                  {/if}
+                </span>
+                {#if progress.status === 'downloading' && onCancel}
+                  <Button
+                    size="xs"
+                    aria-disabled={cancelling ? 'true' : undefined}
+                    aria-label="{cancelling
+                      ? t('analysis.gallery.cancelling')
+                      : t('common.cancel')} {entry.name}"
+                    onclick={() => {
+                      if (cancelling) return;
+                      onCancel();
+                    }}
+                  >
+                    {cancelling ? t('analysis.gallery.cancelling') : t('common.cancel')}
+                  </Button>
                 {/if}
               </span>
               {#if progress.status === 'downloading' && progress.totalBytes > 0}
@@ -494,6 +559,15 @@
           {/if}
         </dd>
       {/if}
+      {#if buildNotes}
+        <dt>{t('analysis.gallery.buildNotes.buildLabel')}</dt>
+        <dd class="tabular-nums">
+          {t('analysis.gallery.buildNotes.buildValue', {
+            build: buildNotes.build,
+            date: formatDate(buildNotes.date),
+          })}
+        </dd>
+      {/if}
       <dt>{t('analysis.gallery.license.license')}</dt>
       <dd class="flex flex-wrap items-center gap-x-2 gap-y-1">
         <StatusPill
@@ -507,6 +581,17 @@
         <span>{license.note}</span>
       </dd>
     </dl>
+    {#if buildNotes}
+      <!-- A native <details> opens by keyboard and touch alike. -->
+      <details class="mt-2.5 text-xs">
+        <summary
+          class="w-fit cursor-pointer rounded-sm py-1 text-[var(--color-base-content)]/80 hover:text-[var(--color-base-content)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)]"
+        >
+          {t('analysis.gallery.buildNotes.disclosure')}
+        </summary>
+        <ModelBuildNotes record={buildNotes} className="mt-1.5 leading-relaxed" />
+      </details>
+    {/if}
     {#if showGeomodel}
       <div class="mt-2.5">
         <StatusPill variant="info" size="sm" label={t('analysis.gallery.geomodelBadge')}>
@@ -526,6 +611,9 @@
     {#if mode === 'available'}
       {@render actionButton(installAction)}
     {:else}
+      {#if update}
+        {@render actionButton(updateAction)}
+      {/if}
       {#if showOptimize}
         {@render actionButton(optimizeAction)}
       {/if}

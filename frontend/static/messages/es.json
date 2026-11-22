@@ -155,6 +155,12 @@
       "confirmAction": "Confirmar acción",
       "confirmMessage": "¿Estás seguro de que quieres realizar esta acción?"
     },
+    "unsavedChanges": {
+      "title": "¿Salir de esta página?",
+      "message": "Tienes cambios sin guardar. Si sales, se perderán.",
+      "leave": "Salir de la página",
+      "stay": "Quedarse"
+    },
     "review": {
       "modalTitle": "Revisar detección: {species}",
       "status": {
@@ -493,6 +499,12 @@
         "loadFailedTitle": "No se pudo cargar el modelo acústico",
         "loadFailedMessage": "Un modelo acústico activado no se pudo cargar, por lo que el audio se captura pero no se analiza. Compruebe el modelo en la página Sistema > Modelos de IA."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel no está instalado",
+        "notInstalledMessage": "Se necesita BirdNET Geomodel v3.0 para filtrar las detecciones por ubicación en: {models}. Instale BirdNET Geomodel v3.0 desde la galería de modelos en Configuración > Análisis > Modelos.",
+        "loadFailedTitle": "No se pudo cargar Geomodel",
+        "loadFailedMessage": "No se pudo cargar BirdNET Geomodel v3.0, por lo que el filtrado por ubicación está desactivado para: {models}. Revise el registro de la aplicación e instale o reinstale BirdNET Geomodel v3.0 desde la galería de modelos en Configuración > Análisis > Modelos."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# modelo tiene una versión mejor para este sistema} other {# modelos tienen versiones mejores para este sistema}}",
         "message": "Hay disponible una versión mejor adaptada al hardware o a la ubicación de este sistema para: {models}. Abra Configuración > Análisis > Modelos y elija Optimizar para cambiar."
@@ -500,6 +512,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Un modelo instalado tiene una versión más reciente} other {# modelos instalados tienen versiones más recientes}}",
         "message": "Un modelo instalado es una versión preliminar y su versión final ya está disponible: {models}. Abra Configuración > Análisis > Modelos, instale la versión final y elimine la versión preliminar."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Un modelo instalado tiene una versión más reciente} other {# modelos instalados tienen versiones más recientes}}",
+        "message": "Una versión más reciente sustituye a la instalada para: {models}. La versión instalada sigue funcionando hasta que cambie. Abra Configuración > Análisis > Modelos y elija Actualizar."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2527,7 +2543,6 @@
       "loadFailed": "Error al cargar la configuración",
       "saveFailed": "Error al guardar la configuración",
       "changedElsewhere": "La configuración se modificó en otro lugar. Revísala y vuelve a guardar.",
-      "databaseStatsFailed": "Error al cargar las estadísticas de la base de datos",
       "csvDownloadFailed": "Error al descargar el CSV"
     },
     "card": {
@@ -2734,26 +2749,15 @@
               "helpText": "Nombre de la base de datos MySQL"
             }
           },
-          "stats": {
-            "title": "Estadísticas de base de datos",
-            "description": "Información de tiempo de ejecución sobre su base de datos",
-            "loading": "Cargando estadísticas de base de datos...",
-            "retry": "Reintentar",
-            "refresh": "Actualizar",
-            "noData": "No hay estadísticas de base de datos disponibles.",
-            "type": "Tipo",
-            "status": "Estado",
-            "size": "Tamaño",
-            "totalDetections": "Detecciones totales",
-            "location": "Ubicación",
-            "connected": "Conectado",
-            "disconnected": "Desconectado"
-          },
           "errors": {
             "backupStartFailed": "Error al iniciar la copia de seguridad",
             "backupStatusFailed": "Error al obtener el estado de la copia de seguridad",
             "backupFailed": "Copia de seguridad fallida",
             "backupDownloadFailed": "Error al descargar la copia de seguridad"
+          },
+          "statsMoved": {
+            "text": "Las estadísticas de la base de datos se han movido a la sección Sistema.",
+            "link": "Abrir Sistema > Base de datos"
           }
         },
         "interface": {
@@ -3772,12 +3776,7 @@
           "atLeastOneModel": "Se debe seleccionar al menos un modelo"
         },
         "captureTitle": "Captura",
-        "levelTitle": "Nivel de entrada",
-        "captureApplyHint": "La captura se reinicia al aplicar.",
-        "applyCapture": "Aplicar y reiniciar la captura",
-        "applying": "Aplicando...",
-        "adding": "Añadiendo...",
-        "captureApplyFailed": "La captura no se ha cambiado. Vuelva a aplicar o cancele."
+        "levelTitle": "Nivel de entrada"
       },
       "audioCapture": {
         "title": "Captura de audio",
@@ -3795,7 +3794,8 @@
         "deviceSelected": "Tarjeta de sonido seleccionada y lista para capturar",
         "availableDevices": "Dispositivos de audio disponibles",
         "active": "Activo",
-        "streamsConfigured": "{count} stream(s) configurado(s)"
+        "streamsConfigured": "{count} stream(s) configurado(s)",
+        "description": "Tarjetas de sonido que escucha BirdNET-Go. Un cambio de dispositivo o de frecuencia de muestreo reinicia la captura de esa fuente al guardar."
       },
       "quietHours": {
         "title": "Horas de silencio",
@@ -3819,7 +3819,8 @@
       },
       "rtspStreams": {
         "title": "Configuración de Flujos de Audio",
-        "noStreamsConfigured": "No hay streams configurados"
+        "noStreamsConfigured": "No hay streams configurados",
+        "description": "Configura flujos de audio de red para captura de audio remota. Soporta protocolos RTSP, HTTP, HLS, RTMP y UDP. Un cambio de conexión reconecta el stream al guardar."
       },
       "streams": {
         "streamLabel": "Transmisión",
@@ -3942,12 +3943,7 @@
           "message": "Transmisión estéreo detectada. La mezcla de múltiples canales puede reducir la precisión de detección debido a diferencias de fase entre canales. Seleccione un canal específico (izquierdo/derecho) o use el detector de canales para mejores resultados.",
           "short": "Downmix estéreo activo. La precisión de detección puede estar reducida. Seleccione un canal específico en Conexión."
         },
-        "autoSaveHelp": "Los cambios se guardan al instante. Los cambios de conexión reconectan el stream, así que esperan hasta que pulse Aplicar.",
         "connectionTitle": "Conexión",
-        "connectionApplyHint": "El stream se reconecta al aplicar.",
-        "connectionApplyFailed": "La conexión no se ha cambiado. Vuelva a aplicar o cancele.",
-        "applyConnection": "Aplicar y reconectar",
-        "testBeforeApply": "Pruebe la nueva URL antes de aplicarla.",
         "statsLine": "Total: {total} · Velocidad: {rate} · Último: {last}",
         "ago": {
           "seconds": "hace {count} s",
@@ -4188,8 +4184,13 @@
         "listFailed": "No se pudo cargar la lista de modelos.",
         "warningBadge": "Revisar clasificadores"
       },
-      "sources": {
-        "autoSaveHelp": "Los cambios se guardan al instante. Los cambios de dispositivo y frecuencia de muestreo reinician la captura, así que esperan hasta que pulse Aplicar."
+      "validation": {
+        "soundCards": "Corrija las tarjetas de sonido de la pestaña {tab} antes de guardar: {names}",
+        "unnamedSource": "fuente {position} (sin nombre)",
+        "needsAttention": "Requiere atención",
+        "streams": "Corrija los streams de la pestaña {tab} antes de guardar: {names}",
+        "streamsUntested": "Pruebe la nueva URL del stream en la pestaña {tab} antes de guardar: {names}",
+        "unnamedStream": "stream {position} (sin nombre)"
       }
     },
     "security": {
@@ -5128,8 +5129,8 @@
       "audioPlayback": {
         "title": "Reproducción de audio",
         "description": "Configuración predeterminada para reproducir grabaciones de aves.",
-        "defaultGain": "Amplificación de volumen predeterminada",
-        "defaultGainHelpText": "Ganancia inicial aplicada al reproducir grabaciones. Los sonidos de aves suelen ser suaves, por lo que se recomienda una amplificación de 6-12 dB.",
+        "defaultGain": "Ganancia predeterminada",
+        "defaultGainHelpText": "Ganancia con la que empieza cada clip. Los sonidos de aves suelen ser suaves, así que 6 a 12 dB es un buen punto de partida; un valor negativo hace los clips más silenciosos.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Reducir el ruido de los clips al reproducirlos",
         "denoiseHelpText": "Reproduce y descarga una copia sin ruido de cada clip. Los clips guardados no cambian. Las descargas pasan a ser archivos WAV y son más grandes. Los ajustes de audio de un clip permiten elegir otra intensidad o desactivar la reducción de ruido.",
@@ -5138,7 +5139,11 @@
         "denoiseStrengthDisabledHelp": "Active arriba la reducción de ruido en la reproducción para elegir una intensidad.",
         "denoiseExportPrecedence": "No se aplica mientras «Reducción de ruido de los clips guardados» esté activada (Ajustes de audio, pestaña Procesamiento). Esos clips ya están sin ruido.",
         "denoiseRedenoiseNote": "Los clips guardados mientras «Reducción de ruido de los clips guardados» estaba activada se limpian de ruido de nuevo al reproducirlos. Elija Desactivado en los ajustes de audio de un clip para oírlo tal como se guardó.",
-        "denoiseLossyNote": "La reducción de ruido funciona mejor con clips FLAC o WAV. Por debajo de {minBitrate} kbps, los artefactos del códec limitan lo limpio que queda el resultado."
+        "denoiseLossyNote": "La reducción de ruido funciona mejor con clips FLAC o WAV. Por debajo de {minBitrate} kbps, los artefactos del códec limitan lo limpio que queda el resultado.",
+        "highPassLabel": "Filtro paso alto predeterminado",
+        "highPassHelpText": "Elimina el sonido por debajo de esta frecuencia mientras se reproduce un clip, como el ruido grave del viento y del tráfico. Se aplica en el navegador, por lo que los clips almacenados, descargados y exportados no se filtran.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Desactivado"
       }
     },
     "restartRequired": "Algunos cambios requieren reiniciar el servidor para aplicarse. Reinicia BirdNET-Go."
@@ -5153,6 +5158,8 @@
     "passwordPlaceholder": "Ingresa tu contraseña",
     "enterPassword": "Ingresa tu contraseña",
     "continue": "Continuar",
+    "rememberBrowser": "Recordar este navegador",
+    "rememberBrowserHelp": "Mantener la sesión iniciada en este navegador. Déjalo sin marcar en un ordenador compartido.",
     "or": "o",
     "loginWithGoogle": "Iniciar sesión con Google",
     "loginWithGithub": "Iniciar sesión con GitHub",
@@ -5448,6 +5455,18 @@
       "errors": {
         "generationFailedStatus": "Generación fallida con estado {status}",
         "spectrogramFailed": "Error al generar el espectrograma"
+      },
+      "defaults": {
+        "open": "Valores predeterminados de reproducción",
+        "title": "Valores predeterminados de reproducción",
+        "description": "Todos los clips empiezan con estos valores. Se guardan en esta estación y se aplican a todas las personas que la usan.",
+        "useCurrent": "Usar los valores actuales",
+        "useCurrentHelp": "Copia en los campos de abajo la ganancia, la reducción de ruido y el filtro paso alto que tiene este reproductor. No se guarda nada hasta que elija Guardar cambios.",
+        "useCurrentHelpNoDenoise": "Copia en los campos de abajo la ganancia y el filtro paso alto que tiene este reproductor. No se guarda nada hasta que elija Guardar cambios.",
+        "copied": "Valores actuales copiados. Elija Guardar cambios para conservarlos.",
+        "saved": "Valores predeterminados de reproducción guardados",
+        "saveFailed": "Los valores predeterminados de reproducción no se guardaron. No se ha cambiado nada.",
+        "unavailable": "No se pudo cargar la configuración, así que aquí no se pueden cambiar los valores predeterminados."
       },
       "clipExtraction": {
         "selectRange": "Haz clic y arrastra para seleccionar un rango",
@@ -5994,6 +6013,8 @@
       },
       "actionInProgress": "Espera a que termine la instalación, reinstalación o eliminación del modelo actual",
       "installSuccess": "{name} instalado",
+      "cancelling": "Cancelando...",
+      "cancelled": "Descarga de {name} cancelada.",
       "installedEnableOnSources": "{name} está instalado. Para usarlo, actívelo para sus fuentes en Configuración > Audio.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6041,7 +6062,8 @@
         "verifying": "Verificando...",
         "loading": "Cargando...",
         "complete": "Instalado correctamente",
-        "failed": "Error"
+        "failed": "Error",
+        "cancelled": "Cancelado"
       },
       "license": {
         "title": "Acuerdo de licencia",
@@ -6069,6 +6091,7 @@
         "removeFailed": "No se pudo eliminar el modelo",
         "removeHasDependents": "{name} es necesario para {models}. Elimine primero esos modelos.",
         "operationInProgress": "Ya hay una instalación, reinstalación o eliminación de modelo en curso ({name}). Inténtalo de nuevo cuando termine.",
+        "cancelUnavailable": "La descarga de {name} ya no se puede cancelar.",
         "actionFailed": "Hubo un problema con {name}",
         "downloadSourceHint": "Si huggingface.co está bloqueado o es lento en su red, configure un servidor espejo en la sección Origen de descarga a continuación.",
         "goToDownloadSource": "Ir a Origen de descarga",
@@ -6098,6 +6121,19 @@
       "superseded": {
         "cardNotice": "Sustituido por {name}. Use en su lugar el modelo más reciente.",
         "dialogNotice": "Este modelo ha sido sustituido por {name}. Considere instalar {name} en su lugar."
+      },
+      "update": {
+        "cardNotice": "Una versión más reciente ({to}) sustituye a la versión instalada {from}.",
+        "cardNoticeBuild": "La compilación {to} de la versión {version} sustituye a la compilación instalada {from}.",
+        "action": "Actualizar",
+        "applying": "Actualizando..."
+      },
+      "buildNotes": {
+        "heading": "Novedades de la compilación {build} de la versión {version}",
+        "released": "Publicada el {date}",
+        "buildLabel": "Número de compilación",
+        "buildValue": "{build}, publicada el {date}",
+        "disclosure": "Novedades de esta compilación"
       },
       "entryIncompatible": "Este modelo no está disponible en este sistema.",
       "regionGlobal": "Global",
@@ -6203,10 +6239,19 @@
       "device": {
         "label": "Dispositivo OpenVINO",
         "helpText": "Se usa para los modelos que se ejecutan en OpenVINO.",
+        "helpTextMultipleGpus": "Se usa para los modelos que se ejecutan en OpenVINO. Este dispositivo tiene más de una GPU, así que elige en cuál se ejecutan los modelos.",
+        "notDetectedHint": "No se detecta la GPU seleccionada. Los modelos se ejecutan en ONNX Runtime hasta que se elija otro dispositivo.",
         "options": {
           "auto": "Automático",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "Predeterminada de OpenVINO: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (no detectada)"
+        },
+        "gpuTypes": {
+          "integrated": "integrada",
+          "discrete": "dedicada"
         }
       },
       "reloadNote": "Cambiar el backend o el dispositivo recarga los modelos, por lo que la detección se pausa unos segundos.",
@@ -6404,6 +6449,52 @@
       "patternNone": "Ninguno",
       "patternTransient": "Transitorio",
       "patternSustained": "Persistente"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Atajos de teclado",
+    "modal": {
+      "title": "Atajos de teclado",
+      "enable": "Activar atajos de teclado",
+      "enableHelp": "Desactívalo si los atajos de una sola tecla interfieren con un lector de pantalla, el control por voz o un teclado adaptado.",
+      "offNote": "Los atajos de teclado están desactivados. Las teclas de abajo no hacen nada hasta que los actives.",
+      "or": "o"
+    },
+    "scopes": {
+      "global": "Todas las páginas"
+    },
+    "groups": {
+      "navigation": "Navegación",
+      "review": "Revisión",
+      "audio": "Audio",
+      "general": "Generales"
+    },
+    "keys": {
+      "shift": "Mayús",
+      "space": "Barra espaciadora",
+      "arrowLeft": "Flecha izquierda",
+      "arrowRight": "Flecha derecha",
+      "comma": "Coma",
+      "period": "Punto",
+      "questionMark": "Signo de interrogación",
+      "combination": "{first} más {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Detección anterior de la misma especie",
+      "newerSpecies": "Detección más nueva de la misma especie",
+      "correct": "Marcar como correcta",
+      "falsePositive": "Marcar como falso positivo",
+      "wrongSpecies": "Cambiar la especie",
+      "keep": "Conservar o liberar esta grabación",
+      "playPause": "Reproducir o pausar",
+      "seekBack": "Retroceder un segundo",
+      "seekForward": "Avanzar un segundo",
+      "focusReview": "Ir a los botones de revisión",
+      "backToList": "Volver a las detecciones"
+    },
+    "global": {
+      "help": "Mostrar u ocultar los atajos de teclado"
     }
   },
   "speciesWorkspace": {

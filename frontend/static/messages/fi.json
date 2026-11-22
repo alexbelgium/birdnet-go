@@ -155,6 +155,12 @@
       "confirmAction": "Vahvista toiminto",
       "confirmMessage": "Haluatko varmasti suorittaa tämän toiminnon?"
     },
+    "unsavedChanges": {
+      "title": "Poistutaanko sivulta?",
+      "message": "Sinulla on tallentamattomia muutoksia. Jos poistut, ne menetetään.",
+      "leave": "Poistu sivulta",
+      "stay": "Pysy sivulla"
+    },
     "review": {
       "modalTitle": "Tarkista havainto: {species}",
       "status": {
@@ -493,6 +499,12 @@
         "loadFailedTitle": "Akustisen mallin lataus epäonnistui",
         "loadFailedMessage": "Käytössä olevan akustisen mallin lataus epäonnistui, joten ääntä tallennetaan, mutta sitä ei analysoida. Tarkista malli sivulla Järjestelmä > Tekoälymallit."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel ei ole asennettu",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 -malli tarvitaan havaintojen suodattamiseen sijainnin mukaan seuraaville: {models}. Asenna BirdNET Geomodel v3.0 malligalleriasta kohdassa Asetukset > Analyysi > Mallit.",
+        "loadFailedTitle": "Geomodelia ei voitu ladata",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 -mallia ei voitu ladata, joten sijaintisuodatus on pois päältä seuraaville: {models}. Tarkista sovelluksen loki sekä asenna tai asenna uudelleen BirdNET Geomodel v3.0 malligalleriasta kohdassa Asetukset > Analyysi > Mallit."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# mallille on saatavilla parempi versio tälle järjestelmälle} other {# mallille on saatavilla parempia versioita tälle järjestelmälle}}",
         "message": "Tämän järjestelmän laitteistoon tai sijaintiin paremmin sopiva versio on saatavilla seuraaville malleille: {models}. Avaa Asetukset > Analyysi > Mallit ja vaihda valitsemalla Optimoi."
@@ -500,6 +512,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Asennetulla mallilla on uudempi julkaisu} other {# asennetulla mallilla on uudempi julkaisu}}",
         "message": "Asennettu malli on esiversio, ja sen lopullinen julkaisu on nyt saatavilla: {models}. Avaa Asetukset > Analyysi > Mallit, asenna lopullinen julkaisu ja poista esiversio."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Asennetulle mallille on saatavilla uudempi versio} other {# asennetulle mallille on saatavilla uudempia versioita}}",
+        "message": "Uudempi versio korvaa asennetun seuraaville malleille: {models}. Asennettu versio toimii, kunnes vaihdat. Avaa Asetukset > Analyysi > Mallit ja valitse Päivitä."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2527,7 +2543,6 @@
       "loadFailed": "Asetusten lataaminen epäonnistui",
       "saveFailed": "Asetusten tallentaminen epäonnistui",
       "changedElsewhere": "Asetuksia muutettiin muualla. Tarkista ne ja tallenna uudelleen.",
-      "databaseStatsFailed": "Tietokantatilastojen lataaminen epäonnistui",
       "csvDownloadFailed": "CSV-tiedoston lataaminen epäonnistui"
     },
     "card": {
@@ -2734,26 +2749,15 @@
               "helpText": "MySQL-tietokannan nimi"
             }
           },
-          "stats": {
-            "title": "Tietokantatilastot",
-            "description": "Ajonaikaiset tiedot tietokannastasi",
-            "loading": "Ladataan tietokantatilastoja...",
-            "retry": "Yritä uudelleen",
-            "refresh": "Päivitä",
-            "noData": "Tietokantatilastoja ei saatavilla.",
-            "type": "Tyyppi",
-            "status": "Tila",
-            "size": "Koko",
-            "totalDetections": "Havaintoja yhteensä",
-            "location": "Sijainti",
-            "connected": "Yhdistetty",
-            "disconnected": "Ei yhteyttä"
-          },
           "errors": {
             "backupStartFailed": "Varmuuskopioinnin käynnistäminen epäonnistui",
             "backupStatusFailed": "Varmuuskopioinnin tilan hakeminen epäonnistui",
             "backupFailed": "Varmuuskopiointi epäonnistui",
             "backupDownloadFailed": "Varmuuskopion lataaminen epäonnistui"
+          },
+          "statsMoved": {
+            "text": "Tietokantatilastot on siirretty Järjestelmä-osioon.",
+            "link": "Avaa Järjestelmä > Tietokanta"
           }
         },
         "interface": {
@@ -3772,12 +3776,7 @@
           "atLeastOneModel": "Vähintään yksi malli on valittava"
         },
         "captureTitle": "Tallennus",
-        "levelTitle": "Tulotaso",
-        "captureApplyHint": "Tallennus käynnistyy uudelleen, kun otat muutokset käyttöön.",
-        "applyCapture": "Ota käyttöön ja käynnistä tallennus uudelleen",
-        "applying": "Otetaan käyttöön...",
-        "adding": "Lisätään...",
-        "captureApplyFailed": "Tallennusta ei muutettu. Ota käyttöön uudelleen tai peruuta."
+        "levelTitle": "Tulotaso"
       },
       "audioCapture": {
         "title": "Äänen tallennus",
@@ -3795,7 +3794,8 @@
         "deviceSelected": "Äänikortti valittu ja valmis tallennukseen",
         "availableDevices": "Saatavilla olevat äänilaitteet",
         "active": "Aktiivinen",
-        "streamsConfigured": "{count} striimi(ä) määritetty"
+        "streamsConfigured": "{count} striimi(ä) määritetty",
+        "description": "Äänikortit, joita BirdNET-Go kuuntelee. Laitteen tai näytteenottotaajuuden muutos käynnistää kyseisen lähteen tallennuksen uudelleen, kun tallennat."
       },
       "quietHours": {
         "title": "Hiljaiset tunnit",
@@ -3819,7 +3819,8 @@
       },
       "rtspStreams": {
         "title": "Äänistriimien määritys",
-        "noStreamsConfigured": "Striimejä ei ole määritetty"
+        "noStreamsConfigured": "Striimejä ei ole määritetty",
+        "description": "Määritä verkkoäänistriimejä etäänen tallennukseen. Tukee RTSP-, HTTP-, HLS-, RTMP- ja UDP-protokollia. Yhteyden muutos yhdistää striimin uudelleen, kun tallennat."
       },
       "streams": {
         "streamLabel": "Lähetys",
@@ -3942,12 +3943,7 @@
           "message": "Stereovirta havaittu. Useiden kanavien sekoittaminen voi heikentää tunnistustarkkuutta kanavien välisten vaihe-erojen vuoksi. Valitse tietty kanava (vasen/oikea) tai käytä kanavatunnistinta parhaiden tulosten saavuttamiseksi.",
           "short": "Stereon downmix käytössä. Tunnistustarkkuus voi olla heikentynyt. Valitse tietty kanava Yhteys-kohdasta."
         },
-        "autoSaveHelp": "Muutokset tallennetaan heti. Yhteyden muutokset yhdistävät striimin uudelleen, joten ne odottavat, kunnes valitset Ota käyttöön.",
         "connectionTitle": "Yhteys",
-        "connectionApplyHint": "Striimi yhdistetään uudelleen, kun otat muutokset käyttöön.",
-        "connectionApplyFailed": "Yhteyttä ei muutettu. Ota käyttöön uudelleen tai peruuta.",
-        "applyConnection": "Ota käyttöön ja yhdistä uudelleen",
-        "testBeforeApply": "Testaa uusi URL ennen kuin otat sen käyttöön.",
         "statsLine": "Yhteensä: {total} · Nopeus: {rate} · Viimeksi: {last}",
         "ago": {
           "seconds": "{count} s sitten",
@@ -4188,8 +4184,13 @@
         "listFailed": "Malliluetteloa ei voitu ladata.",
         "warningBadge": "Tarkista luokittimet"
       },
-      "sources": {
-        "autoSaveHelp": "Muutokset tallennetaan heti. Laitteen ja näytteenottotaajuuden muutokset käynnistävät tallennuksen uudelleen, joten ne odottavat, kunnes valitset Ota käyttöön."
+      "validation": {
+        "soundCards": "Korjaa välilehden {tab} äänikortit ennen tallennusta: {names}",
+        "unnamedSource": "lähde {position} (ei nimeä)",
+        "needsAttention": "Vaatii huomiota",
+        "streams": "Korjaa välilehden {tab} striimit ennen tallennusta: {names}",
+        "streamsUntested": "Testaa välilehden {tab} uusi striimin URL-osoite ennen tallennusta: {names}",
+        "unnamedStream": "striimi {position} (ei nimeä)"
       }
     },
     "security": {
@@ -5128,8 +5129,8 @@
       "audioPlayback": {
         "title": "Äänentoisto",
         "description": "Oletusasetukset lintuäänitteiden toistoon.",
-        "defaultGain": "Oletusäänenvahvistus",
-        "defaultGainHelpText": "Alkuvahvistus äänitteiden toistossa. Lintujen äänet ovat usein hiljaisia, joten 6-12 dB:n vahvistus on suositeltavaa.",
+        "defaultGain": "Oletusvahvistus",
+        "defaultGainHelpText": "Vahvistus, jolla jokainen leike alkaa. Lintujen äänet ovat usein hiljaisia, joten 6-12 dB on hyvä lähtökohta; negatiivinen arvo hiljentää leikkeitä.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Poista kohinaa leikkeistä toistettaessa",
         "denoiseHelpText": "Toistaa ja lataa jokaisesta leikkeestä kohinasta puhdistetun kopion. Tallennetut leikkeet pysyvät muuttumattomina. Lataukset ovat WAV-tiedostoja ja suurempia. Leikkeen ääniasetuksista voi valita toisen voimakkuuden tai kytkeä kohinanpoiston pois.",
@@ -5138,7 +5139,11 @@
         "denoiseStrengthDisabledHelp": "Ota toiston kohinanpoisto käyttöön yllä valitaksesi voimakkuuden.",
         "denoiseExportPrecedence": "Ei käytössä, kun „Tallennettujen leikkeiden kohinanpoisto“ on päällä (Ääniasetukset, Käsittely-välilehti). Nämä leikkeet on jo puhdistettu kohinasta.",
         "denoiseRedenoiseNote": "Leikkeet, jotka tallennettiin „Tallennettujen leikkeiden kohinanpoiston“ ollessa päällä, puhdistetaan kohinasta uudelleen toistettaessa. Valitse leikkeen ääniasetuksista Pois kuullaksesi sen tallennettuna.",
-        "denoiseLossyNote": "Kohinanpoisto toimii parhaiten FLAC- tai WAV-leikkeillä. Alle {minBitrate} kbps bitinopeuksilla koodekin artefaktit rajoittavat tuloksen puhtautta."
+        "denoiseLossyNote": "Kohinanpoisto toimii parhaiten FLAC- tai WAV-leikkeillä. Alle {minBitrate} kbps bitinopeuksilla koodekin artefaktit rajoittavat tuloksen puhtautta.",
+        "highPassLabel": "Oletusylipäästösuodatin",
+        "highPassHelpText": "Poistaa tätä taajuutta matalamman äänen leikkeen toiston aikana, esimerkiksi tuulen ja liikenteen jyrinän. Sitä sovelletaan selaimessa, joten tallennettuja, ladattuja ja viedyjä leikkeitä ei suodateta.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Pois"
       }
     },
     "restartRequired": "Jotkin muutokset vaativat palvelimen uudelleenkäynnistyksen astuakseen voimaan. Käynnistä BirdNET-Go uudelleen."
@@ -5153,6 +5158,8 @@
     "passwordPlaceholder": "Syötä salasanasi",
     "enterPassword": "Syötä salasana",
     "continue": "Jatka",
+    "rememberBrowser": "Muista tämä selain",
+    "rememberBrowserHelp": "Pysy kirjautuneena tässä selaimessa. Jätä valitsematta jaetulla tietokoneella.",
     "or": "tai",
     "loginWithGoogle": "Kirjaudu Googlella",
     "loginWithGithub": "Kirjaudu GitHubilla",
@@ -5448,6 +5455,18 @@
       "errors": {
         "generationFailedStatus": "Luonti epäonnistui tilakoodilla {status}",
         "spectrogramFailed": "Spektrogrammin luonti epäonnistui"
+      },
+      "defaults": {
+        "open": "Toiston oletukset",
+        "title": "Toiston oletukset",
+        "description": "Jokainen leike alkaa näillä arvoilla. Ne tallennetaan tälle asemalle ja koskevat kaikkia sen käyttäjiä.",
+        "useCurrent": "Käytä nykyisiä arvoja",
+        "useCurrentHelp": "Kopioi tämän soittimen nykyisen vahvistuksen, kohinanpoiston ja ylipäästösuodattimen alla oleviin kenttiin. Mitään ei tallenneta ennen kuin valitset Tallenna muutokset.",
+        "useCurrentHelpNoDenoise": "Kopioi tämän soittimen nykyisen vahvistuksen ja ylipäästösuodattimen alla oleviin kenttiin. Mitään ei tallenneta ennen kuin valitset Tallenna muutokset.",
+        "copied": "Nykyiset arvot kopioitu. Säilytä ne valitsemalla Tallenna muutokset.",
+        "saved": "Toiston oletukset tallennettu",
+        "saveFailed": "Toiston oletuksia ei tallennettu. Mitään ei muutettu.",
+        "unavailable": "Asetuksia ei voitu ladata, joten oletuksia ei voi muuttaa tässä."
       },
       "clipExtraction": {
         "selectRange": "Napsauta ja vedä valitaksesi alueen",
@@ -5994,6 +6013,8 @@
       },
       "actionInProgress": "Odota, että nykyisen mallin asennus, uudelleenasennus tai poisto valmistuu",
       "installSuccess": "{name} asennettu",
+      "cancelling": "Perutaan...",
+      "cancelled": "Mallin {name} lataus peruttiin.",
       "installedEnableOnSources": "{name} on asennettu. Ota se käyttöön lähteillesi kohdassa Asetukset > Ääni, niin voit käyttää sitä.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6041,7 +6062,8 @@
         "verifying": "Tarkistetaan...",
         "loading": "Ladataan...",
         "complete": "Asennettu onnistuneesti",
-        "failed": "Epäonnistui"
+        "failed": "Epäonnistui",
+        "cancelled": "Peruttu"
       },
       "license": {
         "title": "Lisenssisopimus",
@@ -6069,6 +6091,7 @@
         "removeFailed": "Mallin poistaminen epäonnistui",
         "removeHasDependents": "Seuraavat mallit tarvitsevat mallia {name}: {models}. Poista ne ensin.",
         "operationInProgress": "Mallin asennus, uudelleenasennus tai poisto on jo käynnissä ({name}). Yritä uudelleen, kun se on valmis.",
+        "cancelUnavailable": "Mallin {name} latausta ei voi enää perua.",
         "actionFailed": "Kohteen {name} kanssa ilmeni ongelma",
         "downloadSourceHint": "Jos huggingface.co on estetty tai hidas verkossasi, aseta peilipalvelin alla olevaan Latauslähde-osioon.",
         "goToDownloadSource": "Siirry Latauslähteeseen",
@@ -6098,6 +6121,19 @@
       "superseded": {
         "cardNotice": "Korvattu mallilla {name}. Käytä sen sijaan uudempaa mallia.",
         "dialogNotice": "Tämän mallin on korvannut {name}. Harkitse mallin {name} asentamista sen sijaan."
+      },
+      "update": {
+        "cardNotice": "Uudempi versio ({to}) korvaa asennetun version {from}.",
+        "cardNoticeBuild": "Version {version} koontiversio {to} korvaa asennetun koontiversion {from}.",
+        "action": "Päivitä",
+        "applying": "Päivitetään..."
+      },
+      "buildNotes": {
+        "heading": "Uutta version {version} koontiversiossa {build}",
+        "released": "Julkaistu {date}",
+        "buildLabel": "Koontiversion numero",
+        "buildValue": "{build}, julkaistu {date}",
+        "disclosure": "Uutta tässä koontiversiossa"
       },
       "entryIncompatible": "Tämä malli ei ole saatavilla tässä järjestelmässä.",
       "regionGlobal": "Globaali",
@@ -6203,10 +6239,19 @@
       "device": {
         "label": "OpenVINO-laite",
         "helpText": "Käytetään malleille, jotka suoritetaan OpenVINO:ssa.",
+        "helpTextMultipleGpus": "Käytetään malleille, jotka suoritetaan OpenVINO:ssa. Tässä laitteessa on useampi kuin yksi GPU, joten valitse se, jolla mallit suoritetaan.",
+        "notDetectedHint": "Valittua GPU:ta ei löydy. Mallit suoritetaan ONNX Runtimella, kunnes valitaan toinen laite.",
         "options": {
           "auto": "Automaattinen",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINOn oletus: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (ei löydy)"
+        },
+        "gpuTypes": {
+          "integrated": "integroitu",
+          "discrete": "erillinen"
         }
       },
       "reloadNote": "Taustajärjestelmän tai laitteen vaihtaminen lataa mallit uudelleen, joten tunnistus keskeytyy muutamaksi sekunniksi.",
@@ -6404,6 +6449,52 @@
       "patternNone": "Ei mitään",
       "patternTransient": "Ohimenevä",
       "patternSustained": "Jatkuva"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Pikanäppäimet",
+    "modal": {
+      "title": "Pikanäppäimet",
+      "enable": "Ota pikanäppäimet käyttöön",
+      "enableHelp": "Poista käytöstä, jos yhden näppäimen pikanäppäimet häiritsevät ruudunlukijaa, puheohjausta tai apunäppäimistöä.",
+      "offNote": "Pikanäppäimet ovat pois käytöstä. Alla olevat näppäimet eivät tee mitään, ennen kuin otat ne käyttöön.",
+      "or": "tai"
+    },
+    "scopes": {
+      "global": "Kaikki sivut"
+    },
+    "groups": {
+      "navigation": "Navigointi",
+      "review": "Tarkistus",
+      "audio": "Ääni",
+      "general": "Yleiset"
+    },
+    "keys": {
+      "shift": "Vaihto",
+      "space": "Välilyönti",
+      "arrowLeft": "Vasen nuoli",
+      "arrowRight": "Oikea nuoli",
+      "comma": "Pilkku",
+      "period": "Piste",
+      "questionMark": "Kysymysmerkki",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Vanhempi havainto samasta lajista",
+      "newerSpecies": "Uudempi havainto samasta lajista",
+      "correct": "Merkitse oikeaksi",
+      "falsePositive": "Merkitse virheelliseksi havainnoksi",
+      "wrongSpecies": "Vaihda laji",
+      "keep": "Säilytä tai vapauta tämä tallenne",
+      "playPause": "Toista tai keskeytä",
+      "seekBack": "Sekunti taaksepäin",
+      "seekForward": "Sekunti eteenpäin",
+      "focusReview": "Siirry tarkistuspainikkeisiin",
+      "backToList": "Takaisin havaintoihin"
+    },
+    "global": {
+      "help": "Näytä tai piilota pikanäppäimet"
     }
   },
   "speciesWorkspace": {

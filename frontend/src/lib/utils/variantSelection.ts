@@ -2,7 +2,13 @@
 // unit-testable; the only non-pure import is `t` for reason localization, which
 // every test environment mocks (see src/test/setup.ts).
 
-import type { CatalogEntry, CatalogVariant, VariantReason } from '$lib/types/models';
+import type {
+  CatalogBuild,
+  CatalogEntry,
+  CatalogVariant,
+  RegionFamily,
+  VariantReason,
+} from '$lib/types/models';
 import { t } from '$lib/i18n';
 
 /**
@@ -46,6 +52,27 @@ export function pickPreselectedVariant(entry: CatalogEntry, activeRegionSlug = '
     local.at(0) ??
     variants[0];
   return preferred.id;
+}
+
+/**
+ * The region slug an entry's variant picker is scoped to. Model families ship
+ * different tile sets, so the page-wide slug (the detected or pinned region) may
+ * name a tile this entry's family lacks; the server then resolves the station
+ * coordinates to the family's own nearest tile (RegionFamily.resolved, computed
+ * from the saved location, so an unsaved region change is not reflected). Returns the active slug when the
+ * entry ships a variant for it, else the family's own resolution from `families`
+ * ('' when that is the global model), and the active slug when the entry has no
+ * family record. '' (no region) stays '' so a global scope is never narrowed.
+ */
+export function familyRegionSlug(
+  entry: CatalogEntry,
+  activeRegionSlug: string,
+  families: readonly RegionFamily[] | undefined
+): string {
+  if (!activeRegionSlug) return '';
+  if (entry.variants?.some(v => v.region === activeRegionSlug)) return activeRegionSlug;
+  const family = families?.find(f => f.catalogId === entry.id);
+  return family ? family.resolved.slug : activeRegionSlug;
 }
 
 /**
@@ -245,13 +272,15 @@ export interface OptimizeOffer {
  * like any other installed model (its BuiltIn baseline is the installed variant when
  * no DFT build is active). An entry with `supersededBy` (the server sets it only when
  * the successor is visible) gets no offer: the superseded notice tells the user to
- * move to the successor instead of switching builds of the old model.
+ * move to the successor instead of switching builds of the old model. An entry with
+ * `update` (its installed build is an older release or an older build) gets none either: the update notice
+ * and the card's Update action cover it, so one model never has two prompts.
  */
 export function optimizeOffers(catalog: CatalogEntry[]): OptimizeOffer[] {
   const offers: OptimizeOffer[] = [];
   for (const entry of catalog) {
     const variants = entry.variants ?? [];
-    if (variants.length === 0 || !entry.installed || entry.supersededBy) continue;
+    if (variants.length === 0 || !entry.installed || entry.supersededBy || entry.update) continue;
 
     const installedId = entry.installedVariantId;
     const recommendedId = entry.recommendedVariantId;
@@ -266,6 +295,56 @@ export function optimizeOffers(catalog: CatalogEntry[]): OptimizeOffer[] {
     offers.push({ entry, from, to, reasons: topReasons(to.reasons) });
   }
   return offers;
+}
+
+/** The build a variant without a `build` (an older server, a hand-written variant) belongs to. */
+const DEFAULT_BUILD = 1;
+
+/** The release and build of a variant's files: its own, else the entry's release and build 1. */
+function variantBuildKey(entry: CatalogEntry, variant: CatalogVariant): [string, number] {
+  return [variant.version ?? entry.version, variant.build ?? DEFAULT_BUILD];
+}
+
+/** Whether a release-notes record has any text to show: a non-blank reason or note. */
+function hasNotesText(record: CatalogBuild): boolean {
+  return Boolean(record.reason?.trim()) || (record.notes ?? []).some(n => n.trim() !== '');
+}
+
+/**
+ * The release notes of a variant's build: the entry's `builds` record with the
+ * variant's release and build, or null when that build has none or its record has
+ * no text (a build without notes shows nothing).
+ */
+export function buildRecordFor(entry: CatalogEntry, variant: CatalogVariant): CatalogBuild | null {
+  const [version, build] = variantBuildKey(entry, variant);
+  const record = entry.builds?.find(b => b.version === version && b.build === build);
+  return record && hasNotesText(record) ? record : null;
+}
+
+/**
+ * The release notes the install dialog shows before a variant swap: those of the
+ * target variant's build, when the model is installed and the target is a
+ * different release or build than the installed variant. Null for a fresh
+ * install, for a swap within the installed build (another region or precision of
+ * it brings nothing new), and for a target build without notes. When the
+ * installed variant is not in the list its build is unknown, so the target's
+ * notes are returned.
+ */
+export function targetBuildNotes(
+  entry: CatalogEntry,
+  targetVariantId: string
+): CatalogBuild | null {
+  if (!entry.installed) return null;
+  const variants = entry.variants ?? [];
+  const target = variants.find(v => v.id === targetVariantId);
+  if (!target) return null;
+  const installed = variants.find(v => v.id === entry.installedVariantId);
+  if (installed) {
+    const [fromVersion, fromBuild] = variantBuildKey(entry, installed);
+    const [toVersion, toBuild] = variantBuildKey(entry, target);
+    if (fromVersion === toVersion && fromBuild === toBuild) return null;
+  }
+  return buildRecordFor(entry, target);
 }
 
 /**
