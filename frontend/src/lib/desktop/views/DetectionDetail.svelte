@@ -83,7 +83,6 @@
   import { loggers } from '$lib/utils/logger';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
-  import { navigation } from '$lib/stores/navigation.svelte';
   import { openReanalyze } from '$lib/stores/reanalyze.svelte';
   import { useShortcuts } from '$lib/utils/useShortcuts.svelte';
 
