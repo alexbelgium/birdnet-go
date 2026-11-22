@@ -31,9 +31,11 @@
   import Badge from '$lib/desktop/components/ui/Badge.svelte';
   import StatusPill from '$lib/desktop/components/ui/StatusPill.svelte';
   import Sparkline from '$lib/desktop/features/system/components/Sparkline.svelte';
+  import InferenceSkeleton from '$lib/desktop/features/system/components/InferenceSkeleton.svelte';
   import {
     Brain,
     Binary,
+    CircleX,
     CircuitBoard,
     Container,
     Cpu,
@@ -49,6 +51,10 @@
     TriangleAlert,
   } from '@lucide/svelte';
   import { isContainerEnvironment } from '$lib/desktop/features/system/environment';
+  import {
+    ERROR_CLASS_NON_FINITE,
+    MODEL_HEALTH_FAILING,
+  } from '$lib/desktop/features/system/inference.types';
   import type {
     InferenceStatusResponse,
     InferenceModel,
@@ -246,7 +252,7 @@
     if (!keys) return;
 
     metricsSSE = new ReconnectingEventSource(
-      `/api/v2/system/metrics/stream?metrics=${encodeURIComponent(keys)}`,
+      buildAppUrl(`/api/v2/system/metrics/stream?metrics=${encodeURIComponent(keys)}`),
       { max_retry_time: 30000 }
     );
 
@@ -436,6 +442,18 @@
     return (hz / HZ_PER_KHZ).toFixed(hz % HZ_PER_KHZ === 0 ? 0 : 1);
   }
 
+  /**
+   * The visible explanation for a failing model: why its analyses fail (from the
+   * backend error class) and what to try next.
+   */
+  function modelFailingHelp(model: InferenceModel): string {
+    const reason =
+      model.health?.errorClass === ERROR_CLASS_NON_FINITE
+        ? t('system.inference.modelFailingReasonNonFinite')
+        : t('system.inference.modelFailingReasonError');
+    return t('system.inference.modelFailingHelp', { reason });
+  }
+
   // RTF is absent or meaningless when there are no invocations.
   function rtfDisplay(model: InferenceModel): string {
     const { invocations, rtf } = model.stats;
@@ -476,7 +494,7 @@
   }
 
   // Plain-English explanation of the current VAD gate state, so a disabled / no-model
-  // / idle indicator is never ambiguous (frontend/CLAUDE.md: never ship ambiguous states).
+  // / idle indicator is never ambiguous (frontend/AGENTS.md: never ship ambiguous states).
   function vadStateHelp(v: InferenceVAD): string {
     if (!v.enabled) return t('system.inference.vad.disabledHelp');
     if (!v.available) return t('system.inference.vad.unavailableHelp');
@@ -524,22 +542,9 @@
 
 <div class="space-y-4">
   {#if loading}
-    <div
-      class="flex items-center gap-3 p-4 text-sm text-base-content/70"
-      role="status"
-      aria-live="polite"
-    >
-      <span
-        class="animate-spin motion-reduce:animate-none h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full"
-        aria-hidden="true"
-      ></span>
-      <span>{t('system.inference.loading')}</span>
-    </div>
+    <InferenceSkeleton />
   {:else if error && !snapshot}
-    <div
-      role="alert"
-      class="p-4 rounded-lg bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
-    >
+    <div role="alert" class="p-4 rounded-lg bg-red-100 dark:bg-red-900/30 text-[var(--text-error)]">
       {error}
     </div>
   {:else if snapshot}
@@ -601,9 +606,9 @@
             </dt>
             <dd class="flex items-center gap-3 min-w-0">
               {#if snapshot.hardware.board.model}
-                <span class="text-sm truncate min-w-0" title={snapshot.hardware.board.model}
-                  >{snapshot.hardware.board.model}</span
-                >
+                <span class="text-sm truncate min-w-0" title={snapshot.hardware.board.model}>
+                  {snapshot.hardware.board.model}
+                </span>
               {/if}
               {#if snapshot.hardware.board.soc}
                 <span class="text-xs text-muted font-mono shrink-0">
@@ -682,8 +687,9 @@
                   <span
                     class="text-sm truncate min-w-0"
                     title={accelerator.name ?? accelerator.vendor}
-                    >{accelerator.name ?? accelerator.vendor}</span
                   >
+                    {accelerator.name ?? accelerator.vendor}
+                  </span>
                   {#if accelerator.accessible}
                     <StatusPill
                       variant="success"
@@ -730,9 +736,9 @@
               >
                 {t('system.inference.capabilities')}
               </span>
-              <span id={HARDWARE_CAPABILITIES_HELP_ID} class="sr-only"
-                >{t('system.inference.capabilitiesHelp')}</span
-              >
+              <span id={HARDWARE_CAPABILITIES_HELP_ID} class="sr-only">
+                {t('system.inference.capabilitiesHelp')}
+              </span>
               <div class="flex flex-wrap items-center gap-2">
                 {#each snapshot.hardware.capabilities as capability}
                   <Badge variant="neutral" size="sm" text={capability} />
@@ -828,7 +834,7 @@
 
         The backend still returns `snapshot.audio` and its i18n keys are kept, so
         re-enabling is just a matter of restoring the markup. Tracked in the
-        Phase A spec (Forgejo #1144). Do NOT delete the audio types/fields.
+        internal Phase A spec. Do NOT delete the audio types/fields.
       -->
     </div>
 
@@ -861,18 +867,21 @@
                 <Minus class="w-3 h-3 shrink-0 text-base-content/30" aria-hidden="true" />
                 <span class="text-xs text-muted">{t('system.inference.vad.disabled')}</span>
               {:else if !vad.available}
-                <TriangleAlert class="w-3 h-3 shrink-0 text-amber-500" aria-hidden="true" />
-                <span class="text-xs text-amber-600 dark:text-amber-400"
-                  >{t('system.inference.vad.unavailable')}</span
-                >
-              {:else if vad.loaded}
-                <Activity
-                  class="w-3 h-3 shrink-0 text-green-500 animate-pulse motion-reduce:animate-none"
+                <TriangleAlert
+                  class="w-3 h-3 shrink-0 text-[var(--text-warning)]"
                   aria-hidden="true"
                 />
-                <span class="text-xs text-green-600 dark:text-green-400"
-                  >{t('system.inference.vad.active')}</span
-                >
+                <span class="text-xs text-[var(--text-warning)]">
+                  {t('system.inference.vad.unavailable')}
+                </span>
+              {:else if vad.loaded}
+                <Activity
+                  class="w-3 h-3 shrink-0 text-[var(--text-success)] animate-pulse motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+                <span class="text-xs text-[var(--text-success)]">
+                  {t('system.inference.vad.active')}
+                </span>
               {:else}
                 <Minus class="w-3 h-3 shrink-0 text-base-content/30" aria-hidden="true" />
                 <span class="text-xs text-muted">{t('system.inference.vad.idle')}</span>
@@ -899,9 +908,9 @@
             </span>
             <span class="text-muted">
               {t('system.inference.vad.threshold')}:
-              <span class="font-mono tabular-nums text-base-content"
-                >{vad.threshold.toFixed(2)}</span
-              >
+              <span class="font-mono tabular-nums text-base-content">
+                {vad.threshold.toFixed(2)}
+              </span>
             </span>
           </div>
 
@@ -910,9 +919,9 @@
           <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
             <span class="text-muted">
               {t('system.inference.invocations')}:
-              <span class="font-mono tabular-nums text-base-content"
-                >{formatNumber(vad.stats.invocations)}</span
-              >
+              <span class="font-mono tabular-nums text-base-content">
+                {formatNumber(vad.stats.invocations)}
+              </span>
             </span>
             <span class="text-muted">
               {t('system.inference.avgLatency')}:
@@ -932,9 +941,9 @@
             </span>
             <span class="text-muted">
               {t('system.inference.vad.speechHits')}:
-              <span class="font-mono tabular-nums text-base-content"
-                >{formatNumber(vad.stats.speechHits)}</span
-              >
+              <span class="font-mono tabular-nums text-base-content">
+                {formatNumber(vad.stats.speechHits)}
+              </span>
             </span>
           </div>
 
@@ -947,15 +956,15 @@
               <table class="w-full text-xs table-fixed">
                 <thead class="text-muted">
                   <tr>
-                    <th class="text-left font-normal py-0.5 w-16 whitespace-nowrap"
-                      >{t('system.inference.vad.colWhen')}</th
-                    >
-                    <th class="text-left font-normal py-0.5 w-20 whitespace-nowrap"
-                      >{t('system.inference.vad.colProbability')}</th
-                    >
-                    <th class="text-left font-normal py-0.5"
-                      >{t('system.inference.vad.colSource')}</th
-                    >
+                    <th scope="col" class="text-left font-normal py-0.5 w-16 whitespace-nowrap">
+                      {t('system.inference.vad.colWhen')}
+                    </th>
+                    <th scope="col" class="text-left font-normal py-0.5 w-20 whitespace-nowrap">
+                      {t('system.inference.vad.colProbability')}
+                    </th>
+                    <th scope="col" class="text-left font-normal py-0.5">
+                      {t('system.inference.vad.colSource')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1011,6 +1020,11 @@
             {@const throughputLatest =
               throughputSeries.length > 0 ? throughputSeries[throughputSeries.length - 1] : 0}
             {@const isActive = throughputSeries.length > 0 && throughputLatest > 0}
+            {@const downCount = model.sources.filter(s => s.notRunning).length}
+            {@const anySourceDown = downCount > 0}
+            {@const allSourcesDown = model.sources.length > 0 && downCount === model.sources.length}
+            {@const isFailing = model.health?.state === MODEL_HEALTH_FAILING}
+            {@const failingHelp = isFailing ? modelFailingHelp(model) : ''}
             <div
               class="bg-[var(--surface-100)] border border-[var(--border-100)] rounded-xl p-4 shadow-sm flex flex-col gap-3"
             >
@@ -1030,7 +1044,52 @@
                     title={t('system.inference.deviceHelp')}
                   />
                 {/if}
-                {#if model.paused}
+                {#if anySourceDown && !allSourcesDown}
+                  <!-- Partial degradation: at least one assigned source is down but not all,
+                       so the model still analyzes through its healthy source(s). Surface it in
+                       the header with a persistent amber chip driven purely by source health
+                       (not throughput/isActive), so it does not flap between silence and
+                       detections the way the old "any source down" alarm did (#4209). Mutually
+                       exclusive with the red not-analyzing state below, which requires ALL
+                       sources down. This chip lives outside the ml-auto activity slot so the
+                       live Active/Idle status still shows on the right; the specific down source
+                       and its remedy are in the per-source list further down. No aria-label, so
+                       screen readers announce the visible count rather than a generic label. -->
+                  <span
+                    class="flex items-center gap-1.5"
+                    role="status"
+                    title={t('system.inference.sourcesDegradedTooltip')}
+                  >
+                    <TriangleAlert
+                      class="w-3 h-3 shrink-0 text-[var(--text-warning)]"
+                      aria-hidden="true"
+                    />
+                    <span class="text-xs font-medium text-[var(--text-warning)]">
+                      {t('system.inference.sourcesDegraded', {
+                        count: downCount,
+                        total: model.sources.length,
+                      })}
+                    </span>
+                  </span>
+                {/if}
+                {#if isFailing}
+                  <!-- Every recent analysis window of this model failed (a broken backend or
+                       precision, e.g. non-finite scores): it is loaded but detects nothing.
+                       Takes the dominant header slot ahead of paused, since a paused model
+                       keeps the verdict of its last window. -->
+                  <span
+                    class="ml-auto flex items-center gap-1.5"
+                    role="status"
+                    data-testid="model-failing"
+                    title={failingHelp}
+                    aria-describedby={`model-failing-help-${model.id}`}
+                  >
+                    <CircleX class="w-3 h-3 shrink-0 text-[var(--text-error)]" aria-hidden="true" />
+                    <span class="text-xs font-medium text-[var(--text-error)]">
+                      {t('system.inference.modelFailing')}
+                    </span>
+                  </span>
+                {:else if model.paused}
                   <!-- Schedule-gated model that is currently off-schedule: explain the
                        flat latency line instead of showing a bare "idle" dash. -->
                   <span
@@ -1039,11 +1098,36 @@
                     aria-label={t('system.inference.activityPaused')}
                     title={t('system.inference.pausedScheduleHelp')}
                   >
-                    <Pause class="w-3 h-3 shrink-0 text-amber-500" aria-hidden="true" />
-                    <span class="text-xs text-amber-600 dark:text-amber-400">
+                    <Pause class="w-3 h-3 shrink-0 text-[var(--text-warning)]" aria-hidden="true" />
+                    <span class="text-xs text-[var(--text-warning)]">
                       {t('system.inference.paused')}{#if model.scheduleLabel}<span
-                          class="text-muted">&nbsp;({model.scheduleLabel})</span
-                        >{/if}
+                          class="text-muted"
+                        >
+                          &nbsp;({model.scheduleLabel})
+                        </span>{/if}
+                    </span>
+                  </span>
+                {:else if allSourcesDown && !isActive}
+                  <!-- EVERY source assigned to this model is down AND the model is producing
+                       no throughput, so it is genuinely not analyzing. Surface it in the
+                       dominant header slot rather than a benign "Idle" (#4209). Gating on
+                       allSourcesDown (not "any source down") keeps a multi-source model with
+                       one healthy source out of this alarm: during silence it reads "idle"
+                       instead of flapping to "not analyzing" and back when a bird sings, and
+                       the specific down source is still flagged by its badge below.
+                       Precedence: failing > paused > not-analyzing > active > idle. -->
+                  <span
+                    class="ml-auto flex items-center gap-1.5"
+                    role="status"
+                    aria-label={t('system.inference.modelNotAnalyzingTooltip')}
+                    title={t('system.inference.modelNotAnalyzingTooltip')}
+                  >
+                    <TriangleAlert
+                      class="w-3 h-3 shrink-0 text-[var(--text-error)]"
+                      aria-hidden="true"
+                    />
+                    <span class="text-xs font-medium text-[var(--text-error)]">
+                      {t('system.inference.sourceNotRunning')}
                     </span>
                   </span>
                 {:else}
@@ -1059,12 +1143,12 @@
                   >
                     {#if isActive}
                       <Activity
-                        class="w-3 h-3 shrink-0 text-green-500 animate-pulse motion-reduce:animate-none"
+                        class="w-3 h-3 shrink-0 text-[var(--text-success)] animate-pulse motion-reduce:animate-none"
                         aria-hidden="true"
                       />
-                      <span class="text-xs text-green-600 dark:text-green-400"
-                        >{t('system.inference.active')}</span
-                      >
+                      <span class="text-xs text-[var(--text-success)]">
+                        {t('system.inference.active')}
+                      </span>
                     {:else}
                       <Minus class="w-3 h-3 shrink-0 text-base-content/30" aria-hidden="true" />
                       <span class="text-xs text-muted">{t('system.inference.activityIdle')}</span>
@@ -1072,6 +1156,18 @@
                   </span>
                 {/if}
               </div>
+
+              {#if isFailing}
+                <!-- Visible remedy for the failing chip: a title tooltip never shows on
+                     a touch device, so the reason and the next step are spelled out. -->
+                <p
+                  id={`model-failing-help-${model.id}`}
+                  class="text-xs text-[var(--text-error)]"
+                  data-testid="model-failing-help"
+                >
+                  {failingHelp}
+                </p>
+              {/if}
 
               <!-- Spec line -->
               <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
@@ -1121,8 +1217,10 @@
                   {t('system.inference.rtf')}:
                   <span
                     class="font-mono tabular-nums text-base-content"
-                    aria-describedby={`rtf-help-${model.id}`}>{rtfDisplay(model)}</span
+                    aria-describedby={`rtf-help-${model.id}`}
                   >
+                    {rtfDisplay(model)}
+                  </span>
                   <span id={`rtf-help-${model.id}`} class="sr-only">
                     {t('system.inference.rtfHelp')}
                   </span>
@@ -1139,6 +1237,16 @@
                     t('system.inference.errorRateHelp'),
                     Math.round(model.stats.errorRate * 100) + '%',
                     `help-error-rate-${model.id}`
+                  )}
+                {/if}
+                {#if model.health && model.health.inferenceCount > 0}
+                  {@render stat(
+                    t('system.inference.lastSuccess'),
+                    t('system.inference.lastSuccessHelp'),
+                    model.health.lastSuccessAtUnix
+                      ? formatLocalDateTime(new Date(model.health.lastSuccessAtUnix * 1000))
+                      : t('system.inference.lastSuccessNever'),
+                    `help-last-success-${model.id}`
                   )}
                 {/if}
                 {#if model.stats.loadFailures !== undefined && model.stats.loadFailures > 0}
@@ -1193,20 +1301,22 @@
                   <table class="w-full text-xs table-fixed">
                     <thead class="text-muted">
                       <tr>
-                        <th class="text-left font-normal py-0.5 pr-2">
+                        <th scope="col" class="text-left font-normal py-0.5 pr-2">
                           {t('system.inference.species')}
                         </th>
                         <th
+                          scope="col"
                           class="text-left font-normal py-0.5 w-12 whitespace-nowrap"
                           title={t('common.labels.confidence')}
                           aria-label={t('common.labels.confidence')}
                         >
                           {t('system.inference.confidenceColumn')}
                         </th>
-                        <th class="text-left font-normal py-0.5 w-16 whitespace-nowrap">
+                        <th scope="col" class="text-left font-normal py-0.5 w-16 whitespace-nowrap">
                           {t('system.inference.heardWhen')}
                         </th>
                         <th
+                          scope="col"
                           class="text-left font-normal py-0.5 pl-2 w-20 whitespace-nowrap"
                           title={t('system.inference.coDetectedHelp', {
                             seconds: CO_DETECTION_TOLERANCE_SEC,
@@ -1319,19 +1429,52 @@
                 {#if model.sources.length === 0}
                   <span class="text-xs text-muted">{t('system.inference.noSources')}</span>
                 {:else}
+                  {@const notAnalyzingHelpId = `model-not-analyzing-${model.id}`}
                   <div class="flex flex-wrap gap-1.5">
                     {#each model.sources as source}
-                      <Badge variant="ghost" size="sm">
+                      <!-- notRunning uses the filled (not outline) error variant: the
+                           outline variant's transparent background failed WCAG AA
+                           contrast at this size (#4209). -->
+                      <Badge
+                        variant={source.notRunning ? 'error' : 'ghost'}
+                        size="sm"
+                        title={source.notRunning
+                          ? t('system.inference.sourceNotRunningTooltip')
+                          : undefined}
+                        aria-describedby={source.notRunning ? notAnalyzingHelpId : undefined}
+                      >
                         {source.name}{#if source.type}
-                          <span class="text-muted ml-1">({source.type})</span>
+                          <span class={source.notRunning ? 'ml-1' : 'text-muted ml-1'}>
+                            ({source.type})
+                          </span>
                         {/if}{#if source.fallback}
-                          <span class="text-muted ml-1">
+                          <span class={source.notRunning ? 'ml-1' : 'text-muted ml-1'}>
                             - {t('system.inference.primaryFallback')}
+                          </span>
+                        {/if}{#if source.notRunning}
+                          <span class="ml-1">
+                            - {t('system.inference.sourceNotRunning')}
                           </span>
                         {/if}
                       </Badge>
                     {/each}
                   </div>
+                  <!-- Persistent, visible reason so keyboard and touch users get the
+                       cause without a hover (frontend/AGENTS.md: no ambiguous states).
+                       Each not-analyzing badge references it via aria-describedby for
+                       screen readers. Gated on anySourceDown (not the header's
+                       allSourcesDown) so a single down source among healthy ones still
+                       renders the element every down-source badge points at, leaving no
+                       dangling aria-describedby. It points at this page, not the model
+                       gallery, which has no per-source liveness view (#4209). -->
+                  {#if anySourceDown}
+                    <p
+                      id={notAnalyzingHelpId}
+                      class="text-xs text-[var(--text-error)] mt-1.5 leading-snug"
+                    >
+                      {t('system.inference.sourceNotRunningTooltip')}
+                    </p>
+                  {/if}
                 {/if}
               </div>
             </div>

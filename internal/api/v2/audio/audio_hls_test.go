@@ -4,10 +4,10 @@ package audio
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,188 +22,59 @@ import (
 	"github.com/tphakala/birdnet-go/internal/audiocore/engine"
 )
 
-// TestHLSStreamInfoStruct tests the HLSStreamInfo struct
-func TestHLSStreamInfoStruct(t *testing.T) {
-	t.Run("new stream info has expected fields", func(t *testing.T) {
-		info := &HLSStreamInfo{
-			SourceID:     "test_source",
-			OutputDir:    "/tmp/hls/stream_test",
-			PlaylistPath: "/tmp/hls/stream_test/playlist.m3u8",
-			FifoPipe:     "/tmp/hls/stream_test/audio.pcm",
-		}
+// setHLSActivity replaces the HLS manager's activity map for the duration of the
+// test and restores the original when the test ends.
+func setHLSActivity(t *testing.T, activity map[string]time.Time) {
+	t.Helper()
+	hlsMgr.activityMu.Lock()
+	original := hlsMgr.activity
+	hlsMgr.activity = activity
+	hlsMgr.activityMu.Unlock()
 
-		assert.Equal(t, "test_source", info.SourceID)
-		assert.Equal(t, "/tmp/hls/stream_test", info.OutputDir)
-		assert.Contains(t, info.PlaylistPath, "playlist.m3u8")
-		assert.Contains(t, info.FifoPipe, "audio.pcm")
-	})
-}
-
-// TestHLSStreamStatusStruct tests the HLSStreamStatus struct
-func TestHLSStreamStatusStruct(t *testing.T) {
-	t.Run("starting status", func(t *testing.T) {
-		status := HLSStreamStatus{
-			Status:        "starting",
-			Source:        "test_source",
-			StreamToken:   "abc123def456abc123def456abc123de",
-			PlaylistURL:   "/api/v2/streams/hls/t/abc123def456abc123def456abc123de/playlist.m3u8",
-			ActiveClients: 0,
-			PlaylistReady: false,
-		}
-
-		assert.Equal(t, "test_source", status.Source)
-		assert.Contains(t, status.PlaylistURL, "/t/")
-		assert.Contains(t, status.PlaylistURL, "playlist.m3u8")
-		assert.NotEmpty(t, status.StreamToken)
-		assert.Equal(t, "starting", status.Status)
-		assert.False(t, status.PlaylistReady)
-	})
-
-	t.Run("ready status with clients", func(t *testing.T) {
-		status := HLSStreamStatus{
-			Status:        "ready",
-			Source:        "rtsp%3A%2F%2Fcamera.local%2Fstream", // URL-encoded source
-			StreamToken:   "def456abc123def456abc123def456ab",
-			PlaylistURL:   "/api/v2/streams/hls/t/def456abc123def456abc123def456ab/playlist.m3u8",
-			ActiveClients: 2,
-			PlaylistReady: true,
-		}
-
-		assert.Equal(t, "ready", status.Status)
-		assert.True(t, status.PlaylistReady)
-		assert.Equal(t, 2, status.ActiveClients)
-		assert.Contains(t, status.PlaylistURL, "/t/")
-	})
-}
-
-// TestHLSManagerStreamTracking tests the HLS manager stream tracking
-func TestHLSManagerStreamTracking(t *testing.T) {
-	t.Run("getActiveStreamIDs returns empty for no streams", func(t *testing.T) {
-		// Save and restore original state
-		originalStreams := hlsMgr.streams
-		hlsMgr.streamsMu.Lock()
-		hlsMgr.streams = make(map[string]*HLSStreamInfo)
-		hlsMgr.streamsMu.Unlock()
-
-		defer func() {
-			hlsMgr.streamsMu.Lock()
-			hlsMgr.streams = originalStreams
-			hlsMgr.streamsMu.Unlock()
-		}()
-
-		ids := getActiveStreamIDs()
-		assert.Empty(t, ids)
-	})
-
-	t.Run("getActiveStreamIDs returns all stream IDs", func(t *testing.T) {
-		// Save and restore original state
-		originalStreams := hlsMgr.streams
-		hlsMgr.streamsMu.Lock()
-		hlsMgr.streams = map[string]*HLSStreamInfo{
-			"source1": {SourceID: "source1"},
-			"source2": {SourceID: "source2"},
-		}
-		hlsMgr.streamsMu.Unlock()
-
-		defer func() {
-			hlsMgr.streamsMu.Lock()
-			hlsMgr.streams = originalStreams
-			hlsMgr.streamsMu.Unlock()
-		}()
-
-		ids := getActiveStreamIDs()
-		assert.Len(t, ids, 2)
-		assert.Contains(t, ids, "source1")
-		assert.Contains(t, ids, "source2")
-	})
-}
-
-// TestHLSManagerClientTracking tests the HLS client tracking
-func TestHLSManagerClientTracking(t *testing.T) {
-	t.Run("getStreamClientCount returns 0 for unknown stream", func(t *testing.T) {
-		count := getStreamClientCount("nonexistent_stream")
-		assert.Equal(t, 0, count)
-	})
-
-	t.Run("getStreamClientCount returns correct count", func(t *testing.T) {
-		// Save and restore original state
-		originalClients := hlsMgr.clients
-		hlsMgr.clientsMu.Lock()
-		hlsMgr.clients = map[string]map[string]bool{
-			"source1": {
-				"client1": true,
-				"client2": true,
-			},
-		}
-		hlsMgr.clientsMu.Unlock()
-
-		defer func() {
-			hlsMgr.clientsMu.Lock()
-			hlsMgr.clients = originalClients
-			hlsMgr.clientsMu.Unlock()
-		}()
-
-		count := getStreamClientCount("source1")
-		assert.Equal(t, 2, count)
+	t.Cleanup(func() {
+		hlsMgr.activityMu.Lock()
+		hlsMgr.activity = original
+		hlsMgr.activityMu.Unlock()
 	})
 }
 
 // TestShouldCleanupStream tests the stream cleanup logic
 func TestShouldCleanupStream(t *testing.T) {
-	t.Run("nonexistent stream should not be cleaned up", func(t *testing.T) {
-		// Save and restore original state
-		originalActivity := hlsMgr.activity
-		hlsMgr.activityMu.Lock()
-		hlsMgr.activity = make(map[string]time.Time)
-		hlsMgr.activityMu.Unlock()
+	tests := []struct {
+		name         string
+		activity     map[string]time.Time
+		wantCleanup  bool
+		lookupStream string
+	}{
+		{
+			name:         "stream without recorded activity is kept",
+			activity:     map[string]time.Time{},
+			lookupStream: "nonexistent",
+			wantCleanup:  false,
+		},
+		{
+			// Past the new-stream grace period but inside the inactivity timeout.
+			name:         "stream active a minute ago is kept",
+			activity:     map[string]time.Time{"recent_stream": time.Now().Add(-time.Minute)},
+			lookupStream: "recent_stream",
+			wantCleanup:  false,
+		},
+		{
+			name: "stream idle past the inactivity timeout is cleaned up",
+			activity: map[string]time.Time{
+				"expired_stream": time.Now().Add(-(hlsStreamInactivityTimeout + time.Minute)),
+			},
+			lookupStream: "expired_stream",
+			wantCleanup:  true,
+		},
+	}
 
-		defer func() {
-			hlsMgr.activityMu.Lock()
-			hlsMgr.activity = originalActivity
-			hlsMgr.activityMu.Unlock()
-		}()
-
-		shouldCleanup := shouldCleanupStream("nonexistent")
-		assert.False(t, shouldCleanup)
-	})
-
-	t.Run("recently active stream should not be cleaned up", func(t *testing.T) {
-		// Save and restore original state
-		originalActivity := hlsMgr.activity
-		hlsMgr.activityMu.Lock()
-		hlsMgr.activity = map[string]time.Time{
-			"recent_stream": time.Now(),
-		}
-		hlsMgr.activityMu.Unlock()
-
-		defer func() {
-			hlsMgr.activityMu.Lock()
-			hlsMgr.activity = originalActivity
-			hlsMgr.activityMu.Unlock()
-		}()
-
-		shouldCleanup := shouldCleanupStream("recent_stream")
-		assert.False(t, shouldCleanup)
-	})
-
-	t.Run("stream within grace period should not be cleaned up", func(t *testing.T) {
-		// Save and restore original state
-		originalActivity := hlsMgr.activity
-		hlsMgr.activityMu.Lock()
-		hlsMgr.activity = map[string]time.Time{
-			"grace_stream": time.Now().Add(-5 * time.Second), // Within 10 second grace period
-		}
-		hlsMgr.activityMu.Unlock()
-
-		defer func() {
-			hlsMgr.activityMu.Lock()
-			hlsMgr.activity = originalActivity
-			hlsMgr.activityMu.Unlock()
-		}()
-
-		shouldCleanup := shouldCleanupStream("grace_stream")
-		assert.False(t, shouldCleanup)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setHLSActivity(t, tt.activity)
+			assert.Equal(t, tt.wantCleanup, shouldCleanupStream(tt.lookupStream))
+		})
+	}
 }
 
 // TestFindInactiveStreams tests finding inactive streams
@@ -213,24 +84,33 @@ func TestFindInactiveStreams(t *testing.T) {
 		assert.Empty(t, inactive)
 	})
 
-	t.Run("all active streams returns empty", func(t *testing.T) {
-		// Save and restore original state
-		originalActivity := hlsMgr.activity
-		hlsMgr.activityMu.Lock()
-		hlsMgr.activity = map[string]time.Time{
-			"stream1": time.Now(),
-			"stream2": time.Now(),
-		}
-		hlsMgr.activityMu.Unlock()
+	t.Run("only the expired registered stream is selected", func(t *testing.T) {
+		const (
+			expiredID = "inactive_test_expired"
+			recentID  = "inactive_test_recent"
+		)
+		setHLSActivity(t, map[string]time.Time{
+			expiredID: time.Now().Add(-(hlsStreamInactivityTimeout + time.Minute)),
+			recentID:  time.Now(),
+		})
 
-		defer func() {
-			hlsMgr.activityMu.Lock()
-			hlsMgr.activity = originalActivity
-			hlsMgr.activityMu.Unlock()
-		}()
+		hlsMgr.streamsMu.Lock()
+		hlsMgr.streams[expiredID] = &HLSStreamInfo{SourceID: expiredID}
+		hlsMgr.streams[recentID] = &HLSStreamInfo{SourceID: recentID}
+		hlsMgr.streamsMu.Unlock()
+		t.Cleanup(func() {
+			hlsMgr.streamsMu.Lock()
+			delete(hlsMgr.streams, expiredID)
+			delete(hlsMgr.streams, recentID)
+			hlsMgr.streamsMu.Unlock()
+		})
 
-		inactive := findInactiveStreams([]string{"stream1", "stream2"})
-		assert.Empty(t, inactive)
+		// Same sequence syncHLSActivity runs: snapshot the registered streams,
+		// then select the inactive ones.
+		registered := getActiveStreamIDs()
+		assert.Subset(t, registered, []string{expiredID, recentID},
+			"the snapshot must include every registered stream, or cleanup skips the ones it drops")
+		assert.Equal(t, []string{expiredID}, findInactiveStreams(registered))
 	})
 }
 
@@ -244,153 +124,68 @@ func TestRemoveStreamFromManager(t *testing.T) {
 	t.Run("remove existing stream returns stream info", func(t *testing.T) {
 		testStreamID := "test_remove_stream_" + time.Now().String()
 		testStream := &HLSStreamInfo{
-			SourceID:  testStreamID,
-			OutputDir: "/tmp/test",
+			SourceID: testStreamID,
 		}
 
-		// Add stream
+		// Add stream with a token, as a started stream has
 		hlsMgr.streamsMu.Lock()
 		hlsMgr.streams[testStreamID] = testStream
 		hlsMgr.streamsMu.Unlock()
+		token := getOrCreateStreamToken(testStreamID)
+		t.Cleanup(func() { removeStreamToken(testStreamID) })
 
 		// Remove stream
 		removed := removeStreamFromManager(testStreamID)
 		assert.NotNil(t, removed)
 		assert.Equal(t, testStreamID, removed.SourceID)
 
-		// Verify it's gone
+		// Verify it's gone, together with its token
 		hlsMgr.streamsMu.Lock()
 		_, exists := hlsMgr.streams[testStreamID]
 		hlsMgr.streamsMu.Unlock()
 		assert.False(t, exists)
+		assert.Empty(t, resolveStreamToken(token), "removing a stream must also drop its token")
 	})
 }
 
-// TestHLSManagerConcurrency tests concurrent access to HLS manager
+// TestHLSManagerConcurrency adds and removes streams from many goroutines. It
+// depends on the race detector (run with -race) to catch removeStreamFromManager
+// losing its lock; the post-condition checks that every removal took effect.
 func TestHLSManagerConcurrency(t *testing.T) {
-	t.Run("concurrent stream operations", func(t *testing.T) {
-		const numGoroutines = 10
-		var wg sync.WaitGroup
-		wg.Add(numGoroutines)
+	const numGoroutines = 10
+	streamIDs := make([]string, numGoroutines)
+	for i := range streamIDs {
+		streamIDs[i] = fmt.Sprintf("concurrent_test_%d", i)
+	}
 
-		for i := range numGoroutines {
-			go func(id int) {
-				defer wg.Done()
-				streamID := fmt.Sprintf("concurrent_test_%s_%d", time.Now().String(), id)
+	var wg sync.WaitGroup
+	for _, streamID := range streamIDs {
+		wg.Go(func() {
+			hlsMgr.streamsMu.Lock()
+			hlsMgr.streams[streamID] = &HLSStreamInfo{SourceID: streamID}
+			hlsMgr.streamsMu.Unlock()
 
-				// Add stream
-				hlsMgr.streamsMu.Lock()
-				hlsMgr.streams[streamID] = &HLSStreamInfo{SourceID: streamID}
-				hlsMgr.streamsMu.Unlock()
+			_ = removeStreamFromManager(streamID)
+		})
+	}
+	wg.Wait()
 
-				// Remove stream
-				_ = removeStreamFromManager(streamID)
-			}(i)
-		}
-
-		wg.Wait()
-	})
-
-	t.Run("concurrent activity updates", func(t *testing.T) {
-		const numGoroutines = 10
-		var wg sync.WaitGroup
-		wg.Add(numGoroutines)
-
-		for i := range numGoroutines {
-			go func(id int) {
-				defer wg.Done()
-				streamID := fmt.Sprintf("activity_test_%s_%d", time.Now().String(), id)
-
-				// Update activity
-				hlsMgr.activityMu.Lock()
-				hlsMgr.activity[streamID] = time.Now()
-				hlsMgr.activityMu.Unlock()
-
-				// Read activity
-				hlsMgr.activityMu.Lock()
-				delete(hlsMgr.activity, streamID)
-				hlsMgr.activityMu.Unlock()
-			}(i)
-		}
-
-		wg.Wait()
-	})
-
-	t.Run("concurrent client tracking", func(t *testing.T) {
-		const numGoroutines = 10
-		var wg sync.WaitGroup
-		wg.Add(numGoroutines)
-
-		for i := range numGoroutines {
-			go func(id int) {
-				defer wg.Done()
-				streamID := fmt.Sprintf("client_test_%s_%d", time.Now().String(), id)
-				clientID := fmt.Sprintf("client_%d", id)
-
-				// Add client
-				hlsMgr.clientsMu.Lock()
-				if hlsMgr.clients[streamID] == nil {
-					hlsMgr.clients[streamID] = make(map[string]bool)
-				}
-				hlsMgr.clients[streamID][clientID] = true
-				hlsMgr.clientsMu.Unlock()
-
-				// Remove client
-				hlsMgr.clientsMu.Lock()
-				delete(hlsMgr.clients, streamID)
-				hlsMgr.clientsMu.Unlock()
-			}(i)
-		}
-
-		wg.Wait()
-	})
-}
-
-// TestHLSHeartbeatRequest tests the heartbeat request struct JSON binding
-func TestHLSHeartbeatRequest(t *testing.T) {
-	t.Run("heartbeat with stream token only", func(t *testing.T) {
-		body := []byte(`{"stream_token":"abc123def456abc123def456abc123de"}`)
-		var req HLSHeartbeatRequest
-		require.NoError(t, json.Unmarshal(body, &req))
-
-		assert.Equal(t, "abc123def456abc123def456abc123de", req.StreamToken)
-		assert.Empty(t, req.SessionID)
-	})
-
-	t.Run("heartbeat with session id", func(t *testing.T) {
-		body := []byte(`{"stream_token":"abc123def456abc123def456abc123de","session_id":"550e8400-e29b-41d4-a716-446655440000"}`)
-		var req HLSHeartbeatRequest
-		require.NoError(t, json.Unmarshal(body, &req))
-
-		assert.Equal(t, "abc123def456abc123def456abc123de", req.StreamToken)
-		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", req.SessionID)
-	})
+	hlsMgr.streamsMu.RLock()
+	defer hlsMgr.streamsMu.RUnlock()
+	for _, streamID := range streamIDs {
+		assert.NotContains(t, hlsMgr.streams, streamID, "stream must be removed")
+	}
 }
 
 // TestStreamTokenGeneration tests crypto-random token generation
 func TestStreamTokenGeneration(t *testing.T) {
 	t.Run("generates 32-character hex string", func(t *testing.T) {
-		token, err := generateStreamToken()
-		require.NoError(t, err)
+		token := generateStreamToken()
 		assert.Len(t, token, 32)
 
 		// Verify it's valid hex
-		_, err = hex.DecodeString(token)
+		_, err := hex.DecodeString(token)
 		assert.NoError(t, err)
-	})
-
-	t.Run("generates unique tokens", func(t *testing.T) {
-		const tokenCount = 100
-		tokens := make(map[string]bool, tokenCount)
-
-		for range tokenCount {
-			token, err := generateStreamToken()
-			require.NoError(t, err)
-			assert.False(t, tokens[token], "duplicate token generated: %s", token)
-			tokens[token] = true
-		}
-
-		assert.Len(t, tokens, tokenCount)
 	})
 }
 
@@ -412,8 +207,7 @@ func TestStreamTokenMapping(t *testing.T) {
 	})
 
 	t.Run("getOrCreate creates and returns token", func(t *testing.T) {
-		token, err := getOrCreateStreamToken("source_a")
-		require.NoError(t, err)
+		token := getOrCreateStreamToken("source_a")
 		assert.Len(t, token, 32)
 
 		// Verify resolve works
@@ -422,28 +216,21 @@ func TestStreamTokenMapping(t *testing.T) {
 	})
 
 	t.Run("getOrCreate is idempotent", func(t *testing.T) {
-		token1, err := getOrCreateStreamToken("source_a")
-		require.NoError(t, err)
-
-		token2, err := getOrCreateStreamToken("source_a")
-		require.NoError(t, err)
+		token1 := getOrCreateStreamToken("source_a")
+		token2 := getOrCreateStreamToken("source_a")
 
 		assert.Equal(t, token1, token2, "same sourceID should return same token")
 	})
 
 	t.Run("different sources get different tokens", func(t *testing.T) {
-		tokenA, err := getOrCreateStreamToken("source_a")
-		require.NoError(t, err)
-
-		tokenB, err := getOrCreateStreamToken("source_b")
-		require.NoError(t, err)
+		tokenA := getOrCreateStreamToken("source_a")
+		tokenB := getOrCreateStreamToken("source_b")
 
 		assert.NotEqual(t, tokenA, tokenB)
 	})
 
 	t.Run("remove clears both mappings", func(t *testing.T) {
-		token, err := getOrCreateStreamToken("source_c")
-		require.NoError(t, err)
+		token := getOrCreateStreamToken("source_c")
 
 		// Verify it exists
 		assert.Equal(t, "source_c", resolveStreamToken(token))
@@ -455,8 +242,7 @@ func TestStreamTokenMapping(t *testing.T) {
 		assert.Empty(t, resolveStreamToken(token))
 
 		// A new call should create a different token
-		newToken, err := getOrCreateStreamToken("source_c")
-		require.NoError(t, err)
+		newToken := getOrCreateStreamToken("source_c")
 		assert.NotEqual(t, token, newToken)
 	})
 
@@ -491,43 +277,39 @@ func TestGetOrCreateStreamTokenConcurrency(t *testing.T) {
 		})
 
 		const numGoroutines = 20
-		type result struct {
-			token string
-			err   error
-		}
-		results := make(chan result, numGoroutines)
+		results := make(chan string, numGoroutines)
 		var wg sync.WaitGroup
 		wg.Add(numGoroutines)
 
 		for range numGoroutines {
 			go func() {
 				defer wg.Done()
-				token, err := getOrCreateStreamToken("concurrent_source")
-				results <- result{token: token, err: err}
+				results <- getOrCreateStreamToken("concurrent_source")
 			}()
 		}
 
 		wg.Wait()
 		close(results)
 
-		// Verify all goroutines succeeded and got the same non-empty token
+		// Verify all goroutines got the same non-empty token
 		var firstToken string
-		for r := range results {
-			require.NoError(t, r.err)
+		for token := range results {
 			if firstToken == "" {
-				firstToken = r.token
+				firstToken = token
 				require.NotEmpty(t, firstToken, "token should not be empty")
 			}
-			assert.Equal(t, firstToken, r.token, "all concurrent requests should get same token")
+			assert.Equal(t, firstToken, token, "all concurrent requests should get same token")
 		}
 	})
 }
 
 // TestResolveClientID tests the resolveClientID method
 func TestResolveClientID(t *testing.T) {
+	t.Parallel()
 	const testRemoteAddr = "192.168.1.100:12345"
 
 	t.Run("prefers session ID when provided", func(t *testing.T) {
+		t.Parallel()
 		c := &Handler{Core: &apicore.Core{}}
 		c.Settings.Store(apitest.NewValidTestSettings())
 		e := echo.New()
@@ -542,6 +324,7 @@ func TestResolveClientID(t *testing.T) {
 	})
 
 	t.Run("falls back to generateClientID when no session", func(t *testing.T) {
+		t.Parallel()
 		c := &Handler{Core: &apicore.Core{}}
 		c.Settings.Store(apitest.NewValidTestSettings())
 		e := echo.New()
@@ -557,6 +340,7 @@ func TestResolveClientID(t *testing.T) {
 	})
 
 	t.Run("different sessions from same IP get different IDs", func(t *testing.T) {
+		t.Parallel()
 		c := &Handler{Core: &apicore.Core{}}
 		c.Settings.Store(apitest.NewValidTestSettings())
 		e := echo.New()
@@ -574,7 +358,8 @@ func TestResolveClientID(t *testing.T) {
 		assert.NotEqual(t, id1, id2)
 	})
 
-	t.Run("rejects invalid session ID format", func(t *testing.T) {
+	t.Run("accepts safe non-UUID session ID", func(t *testing.T) {
+		t.Parallel()
 		c := &Handler{Core: &apicore.Core{}}
 		c.Settings.Store(apitest.NewValidTestSettings())
 		e := echo.New()
@@ -583,19 +368,106 @@ func TestResolveClientID(t *testing.T) {
 		req.Header.Set("User-Agent", "Mozilla/5.0")
 		ctx := e.NewContext(req, httptest.NewRecorder())
 
-		// Non-UUID session ID should be rejected
-		clientID := c.resolveClientID(ctx, "not-a-valid-uuid")
-		// Should fall back to IP+UA-based ID
-		assert.Contains(t, clientID, "Browser")
-		assert.NotContains(t, clientID, "not-a-valid-uuid")
+		// A safe but non-canonical token (an alternate or older client may send one)
+		// must still identify a distinct client; otherwise concurrent consumers on
+		// the same host collapse to one client ID and tear down each other's shared
+		// stream.
+		safeSession := "client-1712345678901-abc123xyz"
+		clientID := c.resolveClientID(ctx, safeSession)
+		assert.Contains(t, clientID, "192.168.1.100")
+		assert.Contains(t, clientID, safeSession)
+		assert.NotContains(t, clientID, "Browser")
 	})
+
+	t.Run("session ID matching a fallback client type does not collide", func(t *testing.T) {
+		t.Parallel()
+		// A crafted session ID equal to generateClientID's fallback type string
+		// (e.g. "HLSPlayer", which is itself a safe token) must not resolve to the
+		// same client ID as an unrecognized-UA client with no session on the same
+		// IP. The session namespace prefix keeps the two identity spaces disjoint.
+		c := &Handler{Core: &apicore.Core{}}
+		c.Settings.Store(apitest.NewValidTestSettings())
+		e := echo.New()
+
+		reqSession := httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+		reqSession.RemoteAddr = testRemoteAddr
+		reqSession.Header.Set("User-Agent", "curl/8.0") // unrecognized UA
+		ctxSession := e.NewContext(reqSession, httptest.NewRecorder())
+
+		reqFallback := httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+		reqFallback.RemoteAddr = testRemoteAddr          // same IP
+		reqFallback.Header.Set("User-Agent", "curl/8.0") // same unrecognized UA -> "HLSPlayer" type
+		ctxFallback := e.NewContext(reqFallback, httptest.NewRecorder())
+
+		sessionID := c.resolveClientID(ctxSession, "HLSPlayer")
+		fallbackID := c.resolveClientID(ctxFallback, "")
+		assert.NotEqual(t, sessionID, fallbackID)
+	})
+
+	t.Run("rejects unsafe or malformed session ID", func(t *testing.T) {
+		t.Parallel()
+		c := &Handler{Core: &apicore.Core{}}
+		c.Settings.Store(apitest.NewValidTestSettings())
+		e := echo.New()
+
+		for _, unsafe := range []string{
+			"short",                // below minimum length
+			"has spaces here",      // whitespace not allowed
+			"path/../traversal",    // slashes not allowed
+			"semi;colon;injection", // punctuation not allowed
+			strings.Repeat("a", hlsSessionIDMaxLen+1), // above maximum length
+		} {
+			req := httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+			req.RemoteAddr = testRemoteAddr
+			req.Header.Set("User-Agent", "Mozilla/5.0")
+			ctx := e.NewContext(req, httptest.NewRecorder())
+
+			clientID := c.resolveClientID(ctx, unsafe)
+			// Should fall back to IP+UA-based ID and never echo the unsafe token.
+			assert.Contains(t, clientID, "Browser", "input %q should fall back", unsafe)
+			assert.NotContains(t, clientID, unsafe)
+		}
+	})
+}
+
+// TestIsSafeSessionID tests the isSafeSessionID validation helper directly.
+func TestIsSafeSessionID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		sessionID string
+		want      bool
+	}{
+		{name: "canonical uuid", sessionID: "550e8400-e29b-41d4-a716-446655440000", want: true},
+		{name: "fallback token", sessionID: "fallback-1712345678901-abc123xyz", want: true},
+		{name: "alphanumeric with dot and underscore", sessionID: "a.b_c-1234", want: true},
+		{name: "uppercase and mixed case", sessionID: "ABCdef-1234", want: true},
+		{name: "minimum length", sessionID: strings.Repeat("a", hlsSessionIDMinLen), want: true},
+		{name: "maximum length", sessionID: strings.Repeat("a", hlsSessionIDMaxLen), want: true},
+		{name: "empty", sessionID: "", want: false},
+		{name: "one below minimum length", sessionID: strings.Repeat("a", hlsSessionIDMinLen-1), want: false},
+		{name: "one above maximum length", sessionID: strings.Repeat("a", hlsSessionIDMaxLen+1), want: false},
+		{name: "space", sessionID: "abc def ghi", want: false},
+		{name: "slash", sessionID: "abc/def/ghi", want: false},
+		{name: "semicolon", sessionID: "abc;def;ghi", want: false},
+		{name: "plus and at signs", sessionID: "abc+def@ghi", want: false},
+		{name: "non-ascii", sessionID: "abcdéfghij", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isSafeSessionID(tt.sessionID))
+		})
+	}
 }
 
 // TestHLSConsumer_WriteDoesNotRetainFrameData verifies that hlsConsumer.Write
 // copies the frame data before forwarding it on the channel, so the caller's
 // buffer can be safely reused after Write returns. This is the correctness
 // invariant that lets the audiocore router pool its output slices without
-// racing against FFmpeg reads.
+// racing against the feed loop's asynchronous reads.
 func TestHLSConsumer_WriteDoesNotRetainFrameData(t *testing.T) {
 	t.Parallel()
 

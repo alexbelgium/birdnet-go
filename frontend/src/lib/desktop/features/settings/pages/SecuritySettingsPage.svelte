@@ -2,11 +2,13 @@
   Security Settings Page Component
 
   Purpose: Configure authentication and access control for BirdNET-Go including
-  HTTPS/TLS settings, basic authentication, OAuth2 social login providers, and
-  subnet-based authentication bypass.
+  HTTPS/TLS settings, trusted reverse proxies, basic authentication, OAuth2 social
+  login providers, and subnet-based authentication bypass.
 
   Features:
   - Server configuration with automatic TLS via Let's Encrypt
+  - Reverse Proxy card (ReverseProxySection): trusted proxy list, Cloudflare preset and
+    a live check of how this browser's connection reaches the server
   - Basic authentication with password protection
   - OAuth2 integration (Google, GitHub, Microsoft) with dynamic provider management
   - Subnet-based authentication bypass for local networks
@@ -25,7 +27,7 @@
   @component
 -->
 <script lang="ts">
-  import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import TextInput from '$lib/desktop/components/forms/TextInput.svelte';
   import PasswordField from '$lib/desktop/components/forms/PasswordField.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
@@ -33,7 +35,10 @@
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import CertificateField from '$lib/desktop/components/forms/CertificateField.svelte';
   import CertificateStateDisplay from '$lib/desktop/components/ui/CertificateStateDisplay.svelte';
+  import NetworkAddressListInput from '$lib/desktop/components/forms/NetworkAddressListInput.svelte';
+  import ReverseProxySection from '$lib/desktop/features/settings/components/ReverseProxySection.svelte';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import SettingsNote from '$lib/desktop/features/settings/components/SettingsNote.svelte';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
@@ -41,16 +46,28 @@
     settingsStore,
     settingsActions,
     securitySettings,
+    setValidationIssues,
     type OAuthProviderConfig,
   } from '$lib/stores/settings';
+  import {
+    hasInvalidTrustedProxy,
+  } from '$lib/desktop/features/settings/utils/trustedProxies';
+  import {
+    joinSubnetList,
+    splitSubnetList,
+  } from '$lib/desktop/features/settings/utils/subnetList';
+  import { hasInvalidAddress } from '$lib/utils/networkAddress';
   import { fetchRestartStatus } from '$lib/stores/restart.svelte';
+  import { handleAppLinkClick } from '$lib/stores/navigation.svelte';
+  import { buildAppUrl } from '$lib/utils/urlHelpers';
+  import { SETTINGS_ROUTES } from '$lib/utils/settingsRoutes';
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import { settingsAPI, type TLSCertificateInfo } from '$lib/utils/settingsApi';
   import { toastActions } from '$lib/stores/toast';
-  import { ExternalLink, Server, KeyRound, Users, Plus, Pencil, Trash2, Terminal, ShieldCheck, Upload, Globe, RefreshCw, TriangleAlert } from '@lucide/svelte';
+  import { ExternalLink, Server, KeyRound, Users, Plus, Pencil, Trash2, Terminal, ShieldCheck, Upload, Globe, RefreshCw, TriangleAlert, LogIn, ShieldOff, SquareTerminal } from '@lucide/svelte';
   import { t } from '$lib/i18n';
   import { GoogleIcon, AUTH_PROVIDERS } from '$lib/auth';
-  import type { Component } from 'svelte';
+  import { onDestroy, type Component } from 'svelte';
 
   // Provider type for OAuth providers
   type OAuthProviderType = 'google' | 'github' | 'microsoft' | 'line' | 'kakao' | 'oidc';
@@ -94,6 +111,7 @@
         liveAudio: false,
       },
       privateMode: false,
+      trustedProxies: [],
     }
   );
 
@@ -315,6 +333,13 @@
     )
   );
 
+  let reverseProxyHasChanges = $derived(
+    hasSettingsChanged(
+      store.originalData.security?.trustedProxies ?? [],
+      store.formData.security?.trustedProxies ?? []
+    )
+  );
+
   let basicAuthHasChanges = $derived(
     hasSettingsChanged(
       store.originalData.security?.basicAuth,
@@ -340,6 +365,7 @@
     enabled: boolean;
     issuerUrl: string;
     scopesText: string;
+    postLogoutRedirect: boolean;
   }>({
     clientId: '',
     clientSecret: '',
@@ -347,6 +373,7 @@
     enabled: true,
     issuerUrl: '',
     scopesText: '',
+    postLogoutRedirect: false,
   });
 
   // Available providers (filter out already configured ones)
@@ -381,6 +408,10 @@
   let exceptionsHasChanges = $derived(
     subnetBypassHasChanges || publicAccessHasChanges || privateModeHasChanges
   );
+
+  // Page the identity provider returns to after sign-out. The backend appends the
+  // same path to the OAuth origin (postLogoutReturnPath in internal/api/auth).
+  const POST_LOGOUT_RETURN_PATH = '/ui/';
 
   // Canonical base URL for redirect URIs (uses configured host/baseUrl)
   // This is what gets persisted to config.yaml for OAuth callbacks
@@ -474,6 +505,7 @@
       enabled: true,
       issuerUrl: '',
       scopesText: '',
+      postLogoutRedirect: false,
     };
     showProviderForm = true;
   }
@@ -492,6 +524,7 @@
       enabled: provider.enabled,
       issuerUrl: provider.issuerUrl ?? '',
       scopesText: provider.scopes?.join(', ') ?? '',
+      postLogoutRedirect: provider.postLogoutRedirect ?? false,
     };
     showProviderForm = true;
   }
@@ -537,6 +570,7 @@
       // OIDC-specific fields
       ...(selectedProvider === 'oidc' && {
         issuerUrl: providerFormData.issuerUrl.trim(),
+        postLogoutRedirect: providerFormData.postLogoutRedirect || undefined,
         scopes: (() => {
           const parsed = providerFormData.scopesText.split(',').map(s => s.trim()).filter(Boolean);
           return parsed.length > 0 ? parsed : undefined;
@@ -616,6 +650,93 @@
     });
   }
 
+  function updateAllowedSubnets(values: string[]) {
+    updateSubnetBypassSubnet(
+      joinSubnetList(values, store.originalData.security?.allowSubnetBypass?.subnet ?? '')
+    );
+  }
+
+  function updateTrustedProxies(trustedProxies: string[]) {
+    settingsActions.updateSection('security', {
+      ...settings,
+      trustedProxies,
+    });
+  }
+
+  // Save stays blocked while either address list holds a row the backend would reject,
+  // or text that was typed but not added (it would otherwise be lost on save). The
+  // drafts live here, not in the list components, so they survive a tab switch. The
+  // subnet list counts only while the bypass is on, since the backend checks it only then.
+  // Each entry carries a reason naming the tab and field, shown next to the Save button.
+  let trustedProxiesDraft = $state('');
+  let bypassSubnetsDraft = $state('');
+
+  // Bumped on Reset: the address lists' add reports clear even when Reset restores the
+  // draft and the list to what the add left.
+  let addressResetGeneration = $state(0);
+
+  function clearAddressDrafts() {
+    trustedProxiesDraft = '';
+    bypassSubnetsDraft = '';
+    addressResetGeneration++;
+  }
+
+  let trustedProxies = $derived(settings.trustedProxies ?? []);
+  let allowedSubnets = $derived(splitSubnetList(settings.allowSubnetBypass?.subnet ?? ''));
+  let bypassEnabled = $derived(settings.allowSubnetBypass?.enabled ?? false);
+
+  // Primitive flags, so the issue map below only recomputes when one flips.
+  let trustedProxiesInvalid = $derived(hasInvalidTrustedProxy(trustedProxies));
+  let trustedProxiesPending = $derived(trustedProxiesDraft.trim() !== '');
+  let bypassSubnetsInvalid = $derived(bypassEnabled && hasInvalidAddress(allowedSubnets, 'cidr'));
+  let bypassSubnetsPending = $derived(bypassEnabled && bypassSubnetsDraft.trim() !== '');
+
+  // Validation entry keys for the two address lists, each with a flag for an invalid
+  // row and one for text typed but not added.
+  const TRUSTED_PROXIES_INVALID_KEY = 'security-trusted-proxies-invalid';
+  const TRUSTED_PROXIES_PENDING_KEY = 'security-trusted-proxies-pending';
+  const BYPASS_SUBNETS_INVALID_KEY = 'security-bypass-subnets-invalid';
+  const BYPASS_SUBNETS_PENDING_KEY = 'security-bypass-subnets-pending';
+  const ADDRESS_LIST_ISSUE_KEYS = [
+    TRUSTED_PROXIES_INVALID_KEY,
+    TRUSTED_PROXIES_PENDING_KEY,
+    BYPASS_SUBNETS_INVALID_KEY,
+    BYPASS_SUBNETS_PENDING_KEY,
+  ];
+
+  let addressListIssues = $derived.by(() => {
+    const lists = [
+      {
+        tab: t('settings.security.serverConfiguration.title'),
+        field: t('settings.security.reverseProxy.listLabel'),
+        invalidKey: TRUSTED_PROXIES_INVALID_KEY,
+        pendingKey: TRUSTED_PROXIES_PENDING_KEY,
+        hasInvalid: trustedProxiesInvalid,
+        hasPending: trustedProxiesPending,
+      },
+      {
+        tab: t('settings.security.exceptions.title'),
+        field: t('settings.security.allowedSubnetsLabel'),
+        invalidKey: BYPASS_SUBNETS_INVALID_KEY,
+        pendingKey: BYPASS_SUBNETS_PENDING_KEY,
+        hasInvalid: bypassSubnetsInvalid,
+        hasPending: bypassSubnetsPending,
+      },
+    ];
+    const active = new Map<string, string>();
+    for (const { tab, field, invalidKey, pendingKey, hasInvalid, hasPending } of lists) {
+      if (hasInvalid) active.set(invalidKey, t('settings.security.validation.invalidEntry', { tab, field }));
+      if (hasPending) active.set(pendingKey, t('settings.security.validation.pendingEntry', { tab, field }));
+    }
+    return active;
+  });
+
+  $effect(() => {
+    setValidationIssues(ADDRESS_LIST_ISSUE_KEYS, addressListIssues);
+  });
+
+  onDestroy(() => setValidationIssues(ADDRESS_LIST_ISSUE_KEYS, new Map()));
+
   function updatePublicLiveAudio(checked: boolean) {
     settingsActions.updateSection('security', {
       publicAccess: { ...(settings.publicAccess ?? {}), liveAudio: checked },
@@ -626,7 +747,7 @@
     settingsActions.updateSection('security', { privateMode: checked });
   }
 
-  // Terminal toggle — reads from webServer section of the settings store
+  // Terminal toggle: reads from the webServer section of the settings store
   let webServerData = $derived($settingsStore.formData.webServer);
   let enableTerminal = $derived(webServerData?.enableTerminal ?? false);
 
@@ -656,7 +777,7 @@
       label: t('settings.security.serverConfiguration.title'),
       icon: Server,
       content: serverTabContent,
-      hasChanges: serverConfigHasChanges,
+      hasChanges: serverConfigHasChanges || reverseProxyHasChanges,
     },
     {
       id: 'basic-auth',
@@ -694,6 +815,7 @@
     <!-- Server Configuration Card -->
     <SettingsSection
       title={t('settings.security.serverConfiguration.title')}
+      icon={Server}
       description={t('settings.security.serverConfiguration.description')}
       originalData={{
         baseUrl: store.originalData.security?.baseUrl,
@@ -741,7 +863,7 @@
       />
 
       <div class="border-t border-[var(--border-100)] pt-4 mt-4">
-        <h4 class="text-lg font-medium mb-2">{t('settings.security.tls.title')}</h4>
+        <SettingsGroupLabel class="mb-2">{t('settings.security.tls.title')}</SettingsGroupLabel>
         <p class="text-sm text-[var(--color-base-content)] opacity-70 mb-4">
           {t('settings.security.tls.description')}
         </p>
@@ -928,7 +1050,7 @@
             loading={certLoading}
             error={certError}
             {certInfo}
-            downloadUrl="/api/v2/tls/certificate/download"
+            downloadUrl={buildAppUrl('/api/v2/tls/certificate/download')}
             onRegenerate={settings.tlsMode === 'selfsigned' ? handleGenerateCert : undefined}
             onDelete={handleDeleteCert}
             regenerateLoading={generateLoading}
@@ -951,14 +1073,14 @@
           </div>
         {/if}
 
-        <!-- Redirect to HTTPS checkbox -->
+        <!-- Redirect to HTTPS switch -->
         {#if settings.tlsMode !== ''}
           <div class="mt-4">
-            <Checkbox
-              checked={settings.redirectToHttps}
+            <ToggleField
+              value={settings.redirectToHttps}
               label={t('settings.security.tls.redirectToHttps')}
               disabled={store.isLoading || store.isSaving}
-              onchange={updateRedirectToHttps}
+              onUpdate={updateRedirectToHttps}
             />
           </div>
         {/if}
@@ -972,6 +1094,18 @@
       </div>
     </div>
     </SettingsSection>
+
+    <!-- Reverse Proxy Card (trusted proxies apply without a restart) -->
+    <ReverseProxySection
+      {trustedProxies}
+      savedTrustedProxies={store.originalData.security?.trustedProxies ?? []}
+      dataLoaded={store.dataLoaded}
+      disabled={store.isLoading || store.isSaving}
+      hasChanges={reverseProxyHasChanges}
+      onUpdate={updateTrustedProxies}
+      bind:draft={trustedProxiesDraft}
+      reportResetKey={addressResetGeneration}
+    />
   </div>
 {/snippet}
 
@@ -980,16 +1114,17 @@
     <!-- Basic Authentication Card -->
     <SettingsSection
       title={t('settings.security.basicAuthentication.title')}
+      icon={KeyRound}
       description={t('settings.security.basicAuthentication.description')}
       originalData={store.originalData.security?.basicAuth}
       currentData={store.formData.security?.basicAuth}
     >
       <form class="space-y-4" onsubmit={(e) => e.preventDefault()} autocomplete="off">
-        <Checkbox
-          checked={settings.basicAuth.enabled}
+        <ToggleField
+          value={settings.basicAuth.enabled}
           label={t('settings.security.basicAuthentication.enableLabel')}
           disabled={store.isLoading || store.isSaving}
-          onchange={updateBasicAuthEnabled}
+          onUpdate={updateBasicAuthEnabled}
         />
 
         <!-- Fieldset for accessible disabled state - all inputs greyed out when feature disabled -->
@@ -1030,6 +1165,7 @@
     <!-- OAuth2 Social Authentication Card -->
     <SettingsSection
       title={t('settings.security.oauth.title')}
+      icon={LogIn}
       description={t('settings.security.oauth.description')}
       originalData={store.originalData.security?.oauthProviders}
       currentData={store.formData.security?.oauthProviders}
@@ -1042,6 +1178,13 @@
               <div>
                 <p class="font-medium">{t('settings.security.oauth.hostRequiredWarning')}</p>
                 <p class="text-xs mt-1">{t('settings.security.oauth.hostRequiredWarningDescription')}</p>
+                <a
+                  href={buildAppUrl(SETTINGS_ROUTES.securityServer)}
+                  onclick={handleAppLinkClick}
+                  class="inline-block mt-2 text-sm text-primary underline"
+                >
+                  {t('settings.security.serverConfiguration.title')}
+                </a>
               </div>
             {/snippet}
           </ErrorAlert>
@@ -1101,7 +1244,7 @@
                     {#if hasExplicitBaseUrl}
                       <code class="text-xs bg-[var(--color-base-200)] px-2 py-1 rounded-sm break-all">{getConfigRedirectURI(selectedProvider)}</code>
                     {:else}
-                      <p class="text-xs text-[var(--color-warning)] italic">{t('settings.security.oauth.redirectUriNotConfigured')}</p>
+                      <p class="text-xs text-[var(--text-warning)] italic">{t('settings.security.oauth.redirectUriNotConfigured')}</p>
                     {/if}
                   </div>
                   {#if getCredentialsUrl(selectedProvider)}
@@ -1109,7 +1252,7 @@
                       href={getCredentialsUrl(selectedProvider)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      class="text-sm text-[var(--color-primary)] hover:opacity-80 inline-flex items-center gap-1 mt-2"
+                      class="text-sm text-[var(--text-primary)] underline hover:decoration-2 inline-flex items-center gap-1 mt-2"
                     >
                       {t('settings.security.oauth.getCredentialsLabel', { provider: getProviderDisplayName(selectedProvider) })}
                       <ExternalLink class="size-4" />
@@ -1117,7 +1260,7 @@
                   {/if}
                 </div>
 
-                <!-- OIDC: Issuer URL (before credentials — identifies the IdP) -->
+                <!-- OIDC: Issuer URL (before credentials, identifies the IdP) -->
                 {#if selectedProvider === 'oidc'}
                   <TextInput
                     id="oidc-issuer-url"
@@ -1130,7 +1273,7 @@
                     onchange={(value) => (providerFormData.issuerUrl = value)}
                   />
                   {#if oidcValidationError}
-                    <p class="text-xs text-[var(--color-error)] -mt-2">{oidcValidationError}</p>
+                    <p class="text-xs text-[var(--text-error)] -mt-2">{oidcValidationError}</p>
                   {/if}
                 {/if}
 
@@ -1157,7 +1300,7 @@
                   />
                 </div>
 
-                <!-- OIDC: Scopes (after credentials — secondary config) -->
+                <!-- OIDC: Scopes (after credentials, secondary config) -->
                 {#if selectedProvider === 'oidc'}
                   <TextInput
                     id="oidc-scopes"
@@ -1167,6 +1310,18 @@
                     helpText={t('settings.security.oauth.oidc.scopesHelpText')}
                     disabled={store.isLoading || store.isSaving}
                     onchange={(value) => (providerFormData.scopesText = value)}
+                  />
+
+                  <ToggleField
+                    value={providerFormData.postLogoutRedirect}
+                    label={t('settings.security.oauth.oidc.postLogoutRedirectLabel')}
+                    description={configuredBaseUrl
+                      ? t('settings.security.oauth.oidc.postLogoutRedirectHelpText', {
+                          url: `${configuredBaseUrl}${POST_LOGOUT_RETURN_PATH}`,
+                        })
+                      : t('settings.security.oauth.oidc.postLogoutRedirectNoBaseUrl')}
+                    disabled={store.isLoading || store.isSaving}
+                    onUpdate={(enabled) => (providerFormData.postLogoutRedirect = enabled)}
                   />
                 {/if}
 
@@ -1185,7 +1340,7 @@
                      match the providers-list badge and avoid noise for draft/disabled providers. -->
                 {#if providerFormData.enabled && hasNoAllowedUsers(providerFormData.userId)}
                   <p
-                    class="text-xs text-[var(--color-warning)] -mt-2 flex items-start gap-1.5"
+                    class="text-xs text-[var(--text-warning)] -mt-2 flex items-start gap-1.5"
                     role="status"
                   >
                     <TriangleAlert class="size-3.5 shrink-0 mt-0.5" />
@@ -1193,11 +1348,11 @@
                   </p>
                 {/if}
 
-                <Checkbox
-                  checked={providerFormData.enabled}
+                <ToggleField
+                  value={providerFormData.enabled}
                   label={t('settings.security.oauth.enableProviderLabel')}
                   disabled={store.isLoading || store.isSaving}
-                  onchange={(enabled) => (providerFormData.enabled = enabled)}
+                  onUpdate={(enabled) => (providerFormData.enabled = enabled)}
                 />
 
                 <!-- Form Actions -->
@@ -1239,7 +1394,7 @@
         <!-- Providers List -->
         {#if oauthProviders.length > 0}
           <div class="space-y-2">
-            {#each oauthProviders as provider, index (provider.provider)}
+            {#each oauthProviders as provider, index (`${provider.provider}-${index}`)}
               {@const providerType = provider.provider as OAuthProviderType}
               {@const IconComponent = getProviderIcon(providerType)}
               <div
@@ -1275,7 +1430,7 @@
                                can log in with them (issue #3381). -->
                           {#if provider.enabled && hasNoAllowedUsers(provider.userId)}
                             <div
-                              class="text-xs text-[var(--color-warning)] flex items-center gap-1 mt-0.5"
+                              class="text-xs text-[var(--text-warning)] flex items-center gap-1 mt-0.5"
                               role="status"
                             >
                               <TriangleAlert class="size-3 shrink-0" />
@@ -1299,7 +1454,7 @@
                       </button>
                       <button
                         onclick={() => deleteProvider(index)}
-                        class="inline-flex items-center justify-center p-1 aspect-square rounded-md cursor-pointer transition-all bg-transparent hover:bg-black/5 dark:hover:bg-white/5 text-[var(--color-error)] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="inline-flex items-center justify-center p-1 aspect-square rounded-md cursor-pointer transition-all bg-transparent hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-error)] disabled:opacity-50 disabled:cursor-not-allowed"
                         title={t('settings.security.oauth.providers.deleteButton')}
                         aria-label={t('settings.security.oauth.providers.deleteButton')}
                         disabled={showProviderForm}
@@ -1331,20 +1486,32 @@
     <!-- Bypass Authentication Card -->
     <SettingsSection
       title={t('settings.security.bypassAuthentication.title')}
+      icon={ShieldOff}
       description={t('settings.security.bypassAuthentication.description')}
       originalData={store.originalData.security?.allowSubnetBypass}
       currentData={store.formData.security?.allowSubnetBypass}
     >
       <div class="space-y-4">
-        <Checkbox
-          checked={settings.allowSubnetBypass.enabled}
+        <ToggleField
+          value={settings.allowSubnetBypass.enabled}
           label={t('settings.security.allowSubnetBypassLabel')}
           disabled={store.isLoading || store.isSaving}
-          onchange={updateSubnetBypassEnabled}
+          onUpdate={updateSubnetBypassEnabled}
         />
 
+        <!-- Outside the fieldset so the link stays usable while the bypass is off -->
         <SettingsNote>
           <p>{t('settings.security.subnetBypassLocalNote')}</p>
+          <p class="mt-2">
+            {t('settings.security.bypassProxyNote')}
+            <a
+              href={buildAppUrl(SETTINGS_ROUTES.securityReverseProxy)}
+              onclick={handleAppLinkClick}
+              class="text-[var(--text-primary)] underline"
+            >
+              {t('settings.security.bypassProxyLink')}
+            </a>
+          </p>
         </SettingsNote>
 
         <!-- Fieldset for accessible disabled state - all inputs greyed out when feature disabled -->
@@ -1362,16 +1529,20 @@
             class="space-y-4 transition-opacity duration-200"
             class:opacity-50={!settings.allowSubnetBypass?.enabled}
           >
-            <TextInput
+            <NetworkAddressListInput
               id="allowed-subnet"
-              value={settings.allowSubnetBypass.subnet}
+              values={allowedSubnets}
+              onUpdate={updateAllowedSubnets}
+              accept="cidr"
               label={t('settings.security.allowedSubnetsLabel')}
               placeholder={t('settings.security.placeholders.subnet')}
               helpText={t('settings.security.allowedSubnetsHelp')}
+              emptyStateMessage={t('settings.security.allowedSubnetsEmpty')}
               disabled={!settings.allowSubnetBypass?.enabled ||
                 store.isLoading ||
                 store.isSaving}
-              onchange={updateSubnetBypassSubnet}
+              bind:draft={bypassSubnetsDraft}
+              reportResetKey={addressResetGeneration}
             />
 
             <ErrorAlert type="warning">
@@ -1390,26 +1561,31 @@
     <!-- Public Access section -->
     <SettingsSection
       title={t('settings.security.publicAccess.title')}
+      icon={Globe}
       description={t('settings.security.publicAccess.description')}
       originalData={store.originalData.security?.publicAccess}
       currentData={store.formData.security?.publicAccess}
     >
       <div class="space-y-4">
-        <Checkbox
-          checked={settings.privateMode ?? false}
-          label={t('settings.security.privateMode.label')}
-          helpText={t('settings.security.privateMode.help')}
-          disabled={store.isLoading || store.isSaving}
-          onchange={updatePrivateMode}
-        />
+        <div class="divide-y divide-[var(--border-100)]">
+          <ToggleField
+            className="pb-4"
+            value={settings.privateMode ?? false}
+            label={t('settings.security.privateMode.label')}
+            description={t('settings.security.privateMode.help')}
+            disabled={store.isLoading || store.isSaving}
+            onUpdate={updatePrivateMode}
+          />
 
-        <Checkbox
-          checked={settings.publicAccess?.liveAudio ?? false}
-          label={t('settings.security.publicAccess.liveAudioLabel')}
-          helpText={t('settings.security.publicAccess.liveAudioHelp')}
-          disabled={store.isLoading || store.isSaving}
-          onchange={updatePublicLiveAudio}
-        />
+          <ToggleField
+            className="pt-4"
+            value={settings.publicAccess?.liveAudio ?? false}
+            label={t('settings.security.publicAccess.liveAudioLabel')}
+            description={t('settings.security.publicAccess.liveAudioHelp')}
+            disabled={store.isLoading || store.isSaving}
+            onUpdate={updatePublicLiveAudio}
+          />
+        </div>
 
         <ErrorAlert type="warning">
           {#snippet children()}
@@ -1426,17 +1602,17 @@
 
 {#snippet terminalTabContent()}
   <div class="space-y-6">
-    <SettingsSection title={t('settings.security.terminal.title')}>
+    <SettingsSection title={t('settings.security.terminal.title')} icon={SquareTerminal}>
       <ErrorAlert type="warning" className="mb-4">
         {#snippet children()}
           {t('settings.security.terminal.securityWarning')}
         {/snippet}
       </ErrorAlert>
-      <Checkbox
+      <ToggleField
         label={t('settings.security.terminal.enableLabel')}
-        helpText={t('settings.security.terminal.enableHelpText')}
-        checked={enableTerminal}
-        onchange={handleTerminalToggle}
+        description={t('settings.security.terminal.enableHelpText')}
+        value={enableTerminal}
+        onUpdate={handleTerminalToggle}
         disabled={store.isLoading || store.isSaving}
       />
     </SettingsSection>
@@ -1445,5 +1621,5 @@
 
 <!-- Main Content -->
 <main class="settings-page-content" aria-label={t('settings.security.pageLabel')}>
-  <SettingsTabs {tabs} bind:activeTab />
+  <SettingsTabs {tabs} bind:activeTab onReset={clearAddressDrafts} />
 </main>

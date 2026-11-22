@@ -12,7 +12,7 @@ ARG TENSORFLOW_VERSION=2.17.1
 # sync with TENSORFLOW_VERSION (headers) and the Taskfile TFLITE_VERSION var; the
 # runtime-base stage downloads the matching prebuilt libtensorflowlite_c.so.
 ARG TFLITE_VERSION=v2.17.1
-ARG ONNXRUNTIME_VERSION=1.25.1
+ARG ONNXRUNTIME_VERSION=1.32.0
 # OpenVINO toolkit pin for the runtime libraries bundled into the images. Keep the
 # release/build in sync with the Taskfile OPENVINO_RELEASE / OPENVINO_BUILD values;
 # the SHA256s are per-arch (arm64 matches the Taskfile OPENVINO_SHA256 header pin).
@@ -51,9 +51,11 @@ ARG LEGACY_SHA256_IGC_OPENCL=ac2088331d55c7de15bd57373f73630e95b40e1275934bcfd96
 ARG LEGACY_SHA256_OPENCL_ICD=1ac4639c148ab6c9db6bc5a7733ca40bac3782cccc5b3da8e8cb7da8e8f20b1b
 ARG LEGACY_SHA256_ZE_GPU=54d42056c627dd36eaaf3dcfad5d80fb90e9c0d65e4a4d5ab8b0e8ed1277891b
 
-FROM --platform=$BUILDPLATFORM golang:1.26-trixie AS buildenv
+FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS buildenv
 
-# Pass BUILD_VERSION through to the build stage
+# Pass BUILD_VERSION through to the build stage. .dockerignore excludes .git,
+# so the build cannot derive a version itself; for a local build pass
+# --build-arg BUILD_VERSION="$(sh scripts/build-version.sh)".
 ARG BUILD_VERSION
 ENV BUILD_VERSION=${BUILD_VERSION:-unknown}
 
@@ -66,9 +68,9 @@ RUN apt-get update -q && apt-get install -q -y \
     gcc-aarch64-linux-gnu && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Node.js v24 from NodeSource
+# Install Node.js v26 from NodeSource
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+RUN curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
@@ -175,10 +177,30 @@ RUN --mount=type=cache,target=/go/pkg/mod,uid=10001,gid=10001 \
     BUILD_VERSION="${BUILD_VERSION}" SENTRY_DSN="${SENTRY_DSN}" PROJECT_NAME="${PROJECT_NAME}" PROJECT_REPO_URL="${PROJECT_REPO_URL}" PROJECT_COMMUNITY_URL="${PROJECT_COMMUNITY_URL}" DOCKER_LIB_DIR=/home/dev-user/lib task noembed_${TARGET} OPENVINO_BUILD="${OPENVINO_BUILD}"
 
 # ============================================================================
+# ort-fetch: download and verify the ONNX Runtime libraries.
+#
+# Runs on the build platform because it only downloads and checks files, so a
+# cross-arch build needs no emulation here. The download source and the SHA-256
+# pins live in scripts/fetch-onnxruntime.sh and scripts/onnxruntime-pins.sha256;
+# nothing reaches /ort/lib before its hash matched a pin. unzip and the downloaded
+# package stay in this stage and out of the runtime image.
+# ============================================================================
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS ort-fetch
+RUN apt-get update -q && apt-get install -q -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    unzip
+ARG TARGETARCH
+ARG ONNXRUNTIME_VERSION
+COPY scripts/fetch-onnxruntime.sh scripts/onnxruntime-pins.sha256 /ort/
+RUN sh /ort/fetch-onnxruntime.sh install "${ONNXRUNTIME_VERSION}" "linux-${TARGETARCH}" /ort/lib
+
+# ============================================================================
 # runtime-base: the heavy, rarely-changing runtime library layer.
 #
 # This stage is published separately as ghcr.io/<repo>-base:base-<sha> (the tag is
-# content-addressed on this Dockerfile; see .github/workflows/base-image.yml). The
+# content-addressed on this Dockerfile and the two ONNX Runtime fetch files it
+# copies; see .github/workflows/base-image.yml). The
 # final app stage below does `FROM ${BASE_IMAGE}` where BASE_IMAGE defaults to this
 # local stage (so a from-scratch `docker build .` and the PR container-test build
 # are fully self-contained), and CI publish builds override BASE_IMAGE with the
@@ -186,26 +208,36 @@ RUN --mount=type=cache,target=/go/pkg/mod,uid=10001,gid=10001 \
 # model/script/binary layers on top of immutable base blobs (structural layer
 # dedup, independent of BuildKit cache state).
 #
-# It downloads its own runtime .so sets rather than copying from the `build`
+# It provisions its own runtime .so sets rather than copying from the `build`
 # stage, so building `--target runtime-base` never drags in the Go compile. The
-# pins are the top-of-file ARGs (the single source of truth); content-addressing
-# the base tag on this Dockerfile means any pin change yields a new base tag and a
-# rebuild, so the shipped runtime libs never drift from what the binary linked and
-# compiled against.
+# ONNX Runtime libraries come from the ort-fetch stage and their pins from
+# scripts/onnxruntime-pins.sha256; the other pins are the top-of-file ARGs.
+# Content-addressing the base tag on this Dockerfile and the two scripts/ files
+# means any pin change yields a new base tag and a rebuild, so the shipped runtime
+# libs never drift from what the binary linked and compiled against.
 # ============================================================================
 FROM --platform=$TARGETPLATFORM debian:trixie-slim AS runtime-base
 ARG TARGETPLATFORM
 
-# Install ALSA library and SOX for audio processing, tini (a tiny init run as
+# Install ALSA library for audio processing, tini (a tiny init run as
 # PID 1, see the final-stage ENTRYPOINT note), and other system utilities for
 # debugging.
+#
+# libnss-mdns lets libc getaddrinfo (FFmpeg) and Go's cgo resolver resolve .local
+# names, but it does no multicast itself: it asks the HOST's avahi-daemon over
+# /run/avahi-daemon/socket, so the deployment must bind-mount the host's
+# /run/avahi-daemon read-only. --no-install-recommends keeps avahi-daemon (a
+# Recommends of libnss-mdns) out of the image. The hosts line is forced after the
+# install (the package postinst writes its own variant) to
+# "files mdns4_minimal dns": no [NOTFOUND=return], so a .local name Avahi does not
+# know still falls through to unicast DNS exactly as before. The grep fails the
+# build if the line is not what we expect (sed would silently no-op without a
+# hosts: line).
 RUN apt-get update -q && apt-get install -q -y --no-install-recommends \
     adduser \
     ca-certificates \
     libasound2 \
     ffmpeg \
-    sox \
-    libsox-fmt-mp3 \
     procps \
     iproute2 \
     net-tools \
@@ -222,29 +254,20 @@ RUN apt-get update -q && apt-get install -q -y --no-install-recommends \
     bash-completion \
     gosu \
     tini \
+    libnss-mdns \
+    && sed -i -E 's/^hosts:[[:space:]].*$/hosts:          files mdns4_minimal dns/' /etc/nsswitch.conf \
+    && grep -Eqx 'hosts:[[:space:]]+files mdns4_minimal dns' /etc/nsswitch.conf \
     && rm -rf /var/lib/apt/lists/*
 
 # ONNX Runtime (used by all arches; arm64 relies on it exclusively). onnxruntime
 # is dlopened at runtime, never linked at compile, so it is provisioned here in
-# the base rather than in the `build` stage. `tar --no-same-owner` extracts the
-# archive as root (GNU tar as root otherwise restores the archive's stored UIDs),
-# so the libraries land root-owned under /usr/lib and a non-root runtime process
-# sharing an unrelated UID cannot overwrite them. The same flag is used for the
-# TFLite and OpenVINO extractions below for the same reason.
+# the base rather than in the `build` stage. COPY writes the files root-owned
+# under /usr/lib, so a non-root runtime process sharing an unrelated UID cannot
+# overwrite them. The check fails the build when the library links do not resolve
+# to the pinned version.
 ARG ONNXRUNTIME_VERSION
-RUN set -eu; \
-    ONNX_ARCH=$(case "${TARGETPLATFORM}" in \
-        "linux/amd64") echo "x64" ;; \
-        "linux/arm64") echo "aarch64" ;; \
-        *) echo "Error: unsupported platform ${TARGETPLATFORM}" >&2; exit 1 ;; \
-    esac); \
-    echo "Downloading ONNX Runtime ${ONNXRUNTIME_VERSION} for ${ONNX_ARCH}"; \
-    curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ONNX_ARCH}-${ONNXRUNTIME_VERSION}.tgz" \
-        -o /tmp/onnxruntime.tgz; \
-    mkdir -p /tmp/onnxruntime; \
-    tar --no-same-owner -xzf /tmp/onnxruntime.tgz -C /tmp/onnxruntime --strip-components=1; \
-    cp -a /tmp/onnxruntime/lib/libonnxruntime*.so* /usr/lib/; \
-    rm -rf /tmp/onnxruntime /tmp/onnxruntime.tgz
+COPY --from=ort-fetch /ort/lib/ /usr/lib/
+RUN test "$(readlink -f /usr/lib/libonnxruntime.so)" = "/usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}"
 
 # TensorFlow Lite C runtime library: installed for all arches. The stock default
 # classifier is ONNX on arm64 (reduced memory) and TFLite on amd64, but every arch
@@ -253,6 +276,11 @@ RUN set -eu; \
 # loaded, so the arm64 memory win for the ONNX default is preserved. Downloaded from
 # the same prebuilt release the Taskfile download-tflite task uses; the bare soname
 # symlink is created so a bare-soname dlopen/link resolves.
+# `tar --no-same-owner` extracts the archive as root (GNU tar as root otherwise
+# restores the archive's stored UIDs), so the libraries land root-owned under
+# /usr/lib and a non-root runtime process sharing an unrelated UID cannot
+# overwrite them. The OpenVINO extraction below uses the same flag for the same
+# reason.
 ARG TFLITE_VERSION
 RUN set -eu; \
     TFA=$(case "${TARGETPLATFORM}" in \
@@ -393,6 +421,11 @@ FROM models-${TARGETARCH} AS models
 # ============================================================================
 FROM ${BASE_IMAGE} AS final
 
+# ONNX Runtime 1.29+ official Linux builds send Microsoft telemetry unless
+# ORT_DISABLE_TELEMETRY is set before the library loads. BirdNET-Go also sets
+# it in-process; this covers anything else in the image that loads ORT.
+ENV ORT_DISABLE_TELEMETRY=1
+
 # Copy the arch-selected stock models, then normalize permissions explicitly.
 # Do NOT use `COPY --chmod` here: when the source is a stage root, BuildKit applies
 # the mode to the destination directory itself, so `--chmod=644` leaves /models
@@ -455,14 +488,34 @@ LABEL usage.compose.podman="Use Podman/podman-compose.yml"
 # Uses /health endpoint and validates JSON status via jq to avoid false positives
 # from HTTP->HTTPS 308 redirects (curl -f treats 3xx as success).
 # Extended start-period for low-power devices (e.g., Raspberry Pi)
+# Default port (BIRDNET_WEBSERVER_PORT unset, 8080 or invalid, as the app ignores
+# an invalid value): the original probes, HTTP 8080 then HTTPS 8443 and 443.
+# Custom port (host networking, where the app listens on that port directly):
+# only the app's own ports are probed, HTTP on that port, then HTTPS on
+# BIRDNET_SECURITY_TLSPORT (default 8443; when it equals the HTTP port the app
+# moves TLS to 8443, or 8444 if the HTTP port is 8443, as resolveTLSPort in
+# internal/api/config.go does). Under host networking another service
+# on the host could answer on 8080 or 443. Like the app, values are trimmed of
+# leading and trailing whitespace and may carry a leading + (Go parses +18080).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD curl -fs --connect-timeout 2 --max-time 3 http://localhost:8080/health | jq -e '.status == "healthy"' >/dev/null || curl -fsk --connect-timeout 2 --max-time 3 https://localhost:8443/health | jq -e '.status == "healthy"' >/dev/null || curl -fsk --connect-timeout 2 --max-time 3 https://localhost:443/health | jq -e '.status == "healthy"' >/dev/null || exit 1
+    CMD port() { v="$(printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"; v="${v#+}"; \
+            case "$v" in ''|*[!0-9]*) v="$2" ;; esac; \
+            { [ "$v" -ge 1 ] && [ "$v" -le 65535 ]; } 2>/dev/null || v="$2"; echo "$v"; }; \
+        ok() { curl -fsk --connect-timeout 2 --max-time 3 "$1" | jq -e '.status == "healthy"' >/dev/null; }; \
+        P="$(port "${BIRDNET_WEBSERVER_PORT:-}" 8080)"; \
+        if [ "$P" = 8080 ]; then \
+            ok http://localhost:8080/health || ok https://localhost:8443/health || ok https://localhost:443/health; \
+        else \
+            T="$(port "${BIRDNET_SECURITY_TLSPORT:-}" 8443)"; \
+            if [ "$T" = "$P" ]; then if [ "$P" = 8443 ]; then T=8444; else T=8443; fi; fi; \
+            ok "http://localhost:${P}/health" || ok "https://localhost:${T}/health"; \
+        fi || exit 1
 
 # Container startup execution chain:
 # 0. tini - A tiny init run as PID 1. This is defense-in-depth, not a bug fix:
 #    the bash wrapper below already forwards signals and (via its SIGCHLD
 #    handling) reaps processes reparented to PID 1, and birdnet-go Wait()s the
-#    ffmpeg/sox children it spawns. tini makes correct PID 1 behaviour (orphan
+#    ffmpeg children it spawns. tini makes correct PID 1 behaviour (orphan
 #    reaping + signal handling) intrinsic to the image instead of relying on the
 #    shell's semantics, so it stays correct across future entrypoint changes and
 #    matches Docker's own --init default. Baked into the image so every deploy

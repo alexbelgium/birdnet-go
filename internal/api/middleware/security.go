@@ -18,6 +18,12 @@ func GetLogger() logger.Logger {
 
 // Security configuration constants.
 const (
+	// corsHeaderIfMatch and corsHeaderETag are the conditional-write headers the
+	// settings API uses (apicore.HeaderIfMatch and apicore.HeaderETag; this package
+	// does not import apicore).
+	corsHeaderIfMatch = "If-Match"
+	corsHeaderETag    = "ETag"
+
 	// HSTSMaxAge is the max-age value for HSTS header (1 year in seconds).
 	HSTSMaxAge = 31536000
 )
@@ -25,11 +31,12 @@ const (
 // SecurityConfig holds configuration for security middleware.
 type SecurityConfig struct {
 	// AllowedOrigins specifies which origins are permitted for CORS requests.
-	// Use []string{"*"} to allow all origins (not recommended with credentials).
+	// Use []string{"*"} to allow all origins.
 	AllowedOrigins []string
 
-	// AllowCredentials indicates whether credentials (cookies, auth headers) are allowed.
-	// Note: Cannot be true when AllowedOrigins contains "*" per CORS specification.
+	// AllowCredentials indicates whether cross-origin requests may carry
+	// credentials (cookies, HTTP authentication). It only takes effect for a
+	// non-empty list of literal origins; see NewCORS.
 	AllowCredentials bool
 
 	// HSTSMaxAge is the max-age value in seconds for the Strict-Transport-Security header.
@@ -72,18 +79,30 @@ func DefaultSecurityConfig() *SecurityConfig {
 	}
 }
 
-// hasWildcardOrigin reports whether the origin list contains the wildcard "*".
-func hasWildcardOrigin(origins []string) bool {
-	return slices.Contains(origins, "*")
+// corsPatternChars are the characters the CORS middleware treats as pattern
+// syntax in an allowed origin: "*" matches any run of characters and "?" any
+// single character.
+const corsPatternChars = "*?"
+
+// hasExplicitOrigins reports whether the origin list is non-empty and holds
+// only literal origins, with no "*" wildcard and no entry containing a pattern
+// character. It is the only kind of list credentials may be allowed for.
+func hasExplicitOrigins(origins []string) bool {
+	return len(origins) > 0 && !slices.ContainsFunc(origins, func(origin string) bool {
+		return strings.ContainsAny(origin, corsPatternChars)
+	})
 }
 
 // NewCORS creates a CORS middleware with the given configuration.
 //
-// When AllowCredentials is true and AllowedOrigins contains "*", the middleware
-// reflects the request's Origin header instead of sending the literal "*".
-// Sending "Access-Control-Allow-Origin: *" together with
-// "Access-Control-Allow-Credentials: true" violates the CORS specification and
-// causes browsers to reject the response.
+// Credentials are allowed only for a non-empty list of literal origins. When
+// AllowedOrigins is empty or has an entry containing "*" or "?", the middleware
+// omits "Access-Control-Allow-Credentials" whatever AllowCredentials says, and
+// answers a "*" entry or an empty list with "Access-Control-Allow-Origin: *". Sending
+// "*" together with credentials violates the CORS specification, and reflecting
+// the request origin to work around that would let any page, including one
+// served from another port of the same host, read credentialed responses.
+// Requests that authenticate with an Authorization header are not affected.
 func NewCORS(config *SecurityConfig) echo.MiddlewareFunc {
 	corsConfig := middleware.CORSConfig{
 		AllowOrigins: config.AllowedOrigins,
@@ -104,17 +123,12 @@ func NewCORS(config *SecurityConfig) echo.MiddlewareFunc {
 			echo.HeaderCacheControl,
 			"X-Requested-With",
 			"X-CSRF-Token",
+			corsHeaderIfMatch,
 		},
-		AllowCredentials: config.AllowCredentials,
-	}
-
-	// When credentials are enabled with a wildcard origin, use AllowOriginFunc
-	// to reflect the actual request origin. This avoids the spec violation while
-	// preserving the "allow any origin" intent for local-network deployments.
-	if config.AllowCredentials && hasWildcardOrigin(config.AllowedOrigins) {
-		corsConfig.AllowOriginFunc = func(origin string) (bool, error) {
-			return true, nil
-		}
+		// ETag is not a CORS-safelisted response header; cross-origin clients need
+		// it to send a settings If-Match.
+		ExposeHeaders:    []string{corsHeaderETag},
+		AllowCredentials: config.AllowCredentials && hasExplicitOrigins(config.AllowedOrigins),
 	}
 
 	return middleware.CORSWithConfig(corsConfig)
@@ -123,6 +137,10 @@ func NewCORS(config *SecurityConfig) echo.MiddlewareFunc {
 // NewSecureHeaders creates a middleware that sets security-related HTTP headers.
 // In addition to Echo's built-in secure headers, this sets Cross-Origin-Opener-Policy
 // and adds a frame-ancestors CSP directive when embedding is not allowed.
+//
+// HSTS is sent when Echo's c.Scheme() reports "https". Since Echo v4.16 that
+// depends on Echo#SchemeExtractor, which the API core configures to honor
+// X-Forwarded-Proto only from trusted proxies (see apicore).
 func NewSecureHeaders(config *SecurityConfig) echo.MiddlewareFunc {
 	xFrameOptions := "SAMEORIGIN"
 	if config.AllowEmbedding {

@@ -20,12 +20,16 @@ import {
 import { buildAppUrl, isRelativePath } from '$lib/utils/urlHelpers';
 import { t } from '$lib/i18n';
 import { markOnline } from '$lib/stores/connectionState.svelte';
+import { unsavedChanges } from '$lib/stores/unsavedChanges.svelte';
 
 const logger = loggers.api;
 
 // SECURITY: Define request limits to prevent DoS
 const MAX_REQUEST_SIZE = 10 * 1024 * 1024; // 10MB
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
+// Safari rejects a failed fetch with TypeError('Load failed'); Chrome and
+// Firefox use the "Failed to fetch" and "NetworkError" texts.
+const SAFARI_FETCH_FAILURE = 'Load failed';
 const CSRF_HEADER_NAME = 'X-CSRF-Token';
 
 // Guard: prevents multiple concurrent 401 redirects when parallel API calls
@@ -67,6 +71,10 @@ export class ApiError extends Error {
   response: Response;
   userMessage: string;
   isNetworkError: boolean;
+  /** The server's i18n error_key when the error body carried one. */
+  errorKey?: string;
+  /** The server's error_params, set together with errorKey when the body carried them. */
+  errorParams?: Record<string, unknown>;
 
   constructor(message: string, status: number, response: Response, isNetworkError = false) {
     super(message);
@@ -131,6 +139,9 @@ function redirectToLogin(): Promise<never> {
     // /api/v2/app/config on bootstrap and either renders the dashboard
     // (when accessAllowed) or the full-screen login form (when PrivateMode
     // is enabled and the user is unauthenticated).
+    // The session is gone: a native leave prompt that was cancelled would leave the redirect
+    // flag set and hang every later request, so the prompt stands down.
+    unsavedChanges.allowUnload();
     window.location.href = buildAppUrl('/ui/');
   }
   // Return a never-resolving promise so callers don't continue
@@ -217,6 +228,8 @@ function getSecureErrorMessage(status: number): string {
 async function handleResponse<T = unknown>(response: Response): Promise<T> {
   if (!response.ok) {
     let serverMessage = '';
+    let serverErrorKey: string | undefined;
+    let serverErrorParams: Record<string, unknown> | undefined;
 
     try {
       // SECURITY: Limit response size for error parsing
@@ -232,13 +245,14 @@ async function handleResponse<T = unknown>(response: Response): Promise<T> {
       if (errorData && typeof errorData === 'object') {
         // Try i18n translation via error_key first
         if (errorData.error_key && typeof errorData.error_key === 'string') {
-          const params =
+          serverErrorKey = errorData.error_key;
+          serverErrorParams =
             errorData.error_params &&
             typeof errorData.error_params === 'object' &&
             !Array.isArray(errorData.error_params)
               ? (errorData.error_params as Record<string, unknown>)
-              : {};
-          const translated = t(errorData.error_key, params);
+              : undefined;
+          const translated = t(errorData.error_key, serverErrorParams ?? {});
           if (translated !== errorData.error_key) {
             serverMessage = translated;
           }
@@ -260,7 +274,10 @@ async function handleResponse<T = unknown>(response: Response): Promise<T> {
 
     // Use translated message if available, otherwise fall back to secure generic message
     const userMessage = serverMessage || getSecureErrorMessage(response.status);
-    throw new ApiError(userMessage, response.status, response);
+    const apiError = new ApiError(userMessage, response.status, response);
+    apiError.errorKey = serverErrorKey;
+    apiError.errorParams = serverErrorParams;
+    throw apiError;
   }
 
   // Handle empty responses
@@ -337,10 +354,25 @@ interface FetchOptions extends Omit<RequestInit, 'body'> {
   timeout?: number;
   /** Internal flag to prevent infinite CSRF retry loops */
   _csrfRetried?: boolean;
+  /**
+   * Called with the headers of the final response, success or HTTP error, before
+   * the body is read. Not called for any 401 (the redirect to login, and the
+   * guest and login-request cases that throw an ApiError); a CSRF retry calls it
+   * for the retry's response only.
+   */
+  onHeaders?: (headers: Headers) => void;
 }
 
 /**
  * SECURITY: Enhanced fetch with comprehensive protection
+ *
+ * Headers in options.headers are merged over the defaults (including the CSRF
+ * token) for each request, and options is never modified, so the retry after a
+ * 403 merges them again over the refreshed token.
+ *
+ * A fetch rejected by the browser (Chrome and Firefox "Failed to fetch" or
+ * "NetworkError", Safari "Load failed") and the client-side timeout throw an
+ * ApiError with isNetworkError set.
  */
 export async function fetchWithCSRF<T = unknown>(
   url: string,
@@ -422,8 +454,6 @@ export async function fetchWithCSRF<T = unknown>(
       }
       defaultHeaders.set(key, value);
     }
-
-    options.headers = defaultHeaders;
   }
 
   // SECURITY: Validate and sanitize body
@@ -448,8 +478,13 @@ export async function fetchWithCSRF<T = unknown>(
   }
 
   // Strip signal from options so caller's signal doesn't overwrite the internal one
-  const { signal: _ignored, ...restOptions } = options;
+  // onHeaders is likewise ours, not fetch's. headers are already merged into
+  // defaultOptions.headers above; leaving the caller's copy in the spread would
+  // replace the merged set (and its CSRF token) with only the custom headers.
+  const { signal: _ignored, onHeaders: _onHeaders, headers: _headers, ...restOptions } = options;
   void _ignored; // Consumed via addEventListener above; destructured only to exclude from spread
+  void _onHeaders; // Called below; destructured only to exclude from spread
+  void _headers; // Merged into defaultOptions.headers above; destructured only to exclude from spread
 
   const finalOptions: RequestInit = {
     ...defaultOptions,
@@ -500,6 +535,8 @@ export async function fetchWithCSRF<T = unknown>(
       }
     }
 
+    options.onHeaders?.(response.headers);
+
     const result = await handleResponse<T>(response);
     logger.debug(`Response from ${url} received successfully`);
     return result;
@@ -540,7 +577,11 @@ export async function fetchWithCSRF<T = unknown>(
         }
         throw new ApiError(t('errors.api.requestTimeout'), 408, new Response(), true);
       }
-      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+      if (
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('NetworkError') ||
+        (error instanceof TypeError && error.message.includes(SAFARI_FETCH_FAILURE))
+      ) {
         throw new ApiError(t('errors.api.networkError'), 0, new Response(), true);
       }
     }

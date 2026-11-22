@@ -6,6 +6,7 @@
     DetectionsListData,
     DetectionQueryParams,
     DetectionSortBy,
+    PaginatedDetectionResponse,
   } from '$lib/types/detection.types';
   import DetectionsCard from './components/DetectionsCard.svelte';
   import { getLogger } from '$lib/utils/logger';
@@ -89,11 +90,13 @@
     const date =
       params.get('date')?.trim() || (queryType !== 'search' ? getLocalDateString() : undefined);
 
+    const durationParam = params.get('duration');
+
     return {
       queryType,
       date,
       hour: params.get('hour') || undefined,
-      duration: params.get('duration') ? parseInt(params.get('duration')!) : undefined,
+      duration: durationParam ? parseInt(durationParam) : undefined,
       species: params.get('species') || undefined,
       search: search || undefined,
       numResults,
@@ -120,7 +123,9 @@
       // Always include weather data for the detections page
       queryString.append('includeWeather', 'true');
 
-      const data = (await fetchWithCSRF(`/api/v2/detections?${queryString.toString()}`)) as any;
+      const data = await fetchWithCSRF<PaginatedDetectionResponse>(
+        `/api/v2/detections?${queryString.toString()}`
+      );
 
       // Validate numResults before using
       const validatedNumResults =
@@ -138,14 +143,13 @@
         species: queryParams.species,
         search: queryParams.search,
         numResults: validatedNumResults,
-        offset: queryParams.offset!,
+        offset: queryParams.offset ?? 0,
         totalResults: data.total || 0,
         itemsPerPage: data.limit || validatedNumResults,
         currentPage: data.current_page || 1,
         totalPages: data.total_pages || 1,
         showingFrom: (queryParams.offset || 0) + 1,
         showingTo: Math.min((queryParams.offset || 0) + (data.data?.length || 0), data.total || 0),
-        dashboardSettings: data.dashboardSettings,
       };
     } catch (err) {
       error = err instanceof Error ? err.message : t('detections.errors.fetchFailed');
@@ -163,7 +167,7 @@
       params.set('offset', String(newOffset));
 
       // Update URL without navigation
-      window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+      navigation.writeUrl(`${window.location.pathname}?${params.toString()}`, 'push');
 
       // Fetch new data
       fetchDetections();
@@ -192,7 +196,7 @@
       params.set('offset', '0'); // Reset to first page
 
       // Update URL without navigation
-      window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+      navigation.writeUrl(`${window.location.pathname}?${params.toString()}`, 'push');
 
       // Fetch new data
       fetchDetections();
@@ -214,7 +218,7 @@
     }
     params.set('offset', '0'); // Reset to first page
 
-    window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`);
+    navigation.writeUrl(`${window.location.pathname}?${params.toString()}`, 'push');
     fetchDetections();
   }
 
@@ -239,7 +243,7 @@
     // Update URL without navigation
     const url = new URL(window.location.href);
     url.search = params.toString();
-    window.history.replaceState({}, '', url.toString());
+    navigation.writeUrl(url.toString());
 
     // Refresh detections with new search
     fetchDetections();

@@ -3,40 +3,12 @@
 package classifier
 
 import (
-	"bytes"
-	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/tphakala/birdnet-go/internal/conf"
-	"github.com/tphakala/birdnet-go/internal/logger"
 )
-
-// newCaptureLogger swaps the process-global logger for one that writes to the
-// returned buffer at debug level, restoring the previous logger on cleanup. It is
-// used to assert which lines logOpenVINODeclined emits. Callers must NOT run in
-// parallel: it mutates global state.
-func newCaptureLogger(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	capture := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	cl, err := logger.NewCentralLogger(
-		&logger.LoggingConfig{
-			Console:      &logger.ConsoleOutput{Enabled: false},
-			FileOutput:   &logger.FileOutput{Enabled: false},
-			DefaultLevel: "debug",
-		},
-		capture,
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = cl.Close() })
-	prev := logger.Global()
-	logger.SetGlobal(cl)
-	t.Cleanup(func() { logger.SetGlobal(prev) })
-	return &buf
-}
 
 // TestShouldTryOpenVINO_FalseWithoutTag verifies that without the openvino build
 // tag, shouldTryOpenVINO returns false regardless of config or CPU state.
@@ -110,10 +82,11 @@ func TestTryBatOpenVINO_FallsBackWithoutTag(t *testing.T) {
 		Backend:        conf.BackendPrefOpenVINO,
 		OpenVINODevice: conf.OVDeviceGPU,
 	}
-	ext, device, ok := tryBatOpenVINO(cfg, 1024)
+	ext, device, precision, ok := tryBatOpenVINO(cfg, 1024)
 	assert.False(t, ok, "without the openvino tag, the bat OV path must decline")
 	assert.Nil(t, ext, "a declined OV path must return a nil extractor (no typed-nil trap)")
 	assert.Empty(t, device)
+	assert.Empty(t, precision, "a declined OV path reports no precision; NewBat's ORT branch sets it")
 }
 
 // TestOpenVINOPlanForBat_NotBuilt verifies that in the default (no-tag) build the

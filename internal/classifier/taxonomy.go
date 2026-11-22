@@ -11,6 +11,9 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/tphakala/birdnet-go/internal/labels/soundevent"
+	"github.com/tphakala/birdnet-go/internal/openfauna"
 )
 
 //go:embed data/eBird_taxonomy_codes_2021E.json
@@ -69,7 +72,9 @@ func LoadTaxonomyData(customPath string) (TaxonomyMap, ScientificNameIndex, erro
 	return taxonomyMap, scientificIndex, nil
 }
 
-// CreateScientificNameIndex builds an index mapping scientific names to codes
+// CreateScientificNameIndex builds an index mapping scientific names to codes.
+// It also indexes the OpenFauna alias names the taxonomy lacks, so a species
+// listed under an older or newer scientific name resolves to the same code.
 func CreateScientificNameIndex(taxonomyMap TaxonomyMap) ScientificNameIndex {
 	index := make(ScientificNameIndex)
 	for taxonName, taxonCode := range taxonomyMap {
@@ -81,6 +86,7 @@ func CreateScientificNameIndex(taxonomyMap TaxonomyMap) ScientificNameIndex {
 			}
 		}
 	}
+	openfauna.ExpandScientificCodeMap(index)
 	return index
 }
 
@@ -176,10 +182,16 @@ func GetSpeciesNameFromCode(taxonomyMap TaxonomyMap, code string) (string, bool)
 // Handles three formats:
 //   - BirdNET: "Scientific name_Common name" (underscore-separated)
 //   - Perch v2 birds: "Genus species" (binomial scientific name, no common name)
-//   - Perch v2 sounds: "sound_event_name" (underscore-separated, no common name)
+//   - Perch v2 sound classes: a known multi-word class label is returned whole as
+//     the scientific (identity) name with a spaced common name; single-token
+//     classes return (label, "")
 func SplitSpeciesName(speciesName string) (scientific, common string) {
 	if speciesName == "" {
 		return "", ""
+	}
+
+	if id, display, ok := soundevent.MultiWordLabelNames(speciesName); ok {
+		return id, display
 	}
 
 	// Split by underscore

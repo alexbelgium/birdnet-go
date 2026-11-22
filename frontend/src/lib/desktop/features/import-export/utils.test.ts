@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { resetBasePath, setBasePath } from '$lib/utils/urlHelpers';
 import {
+  buildDetectionsFilterUrl,
+  connectImportProgressStream,
   deriveSourceStepState,
   importProgressPercent,
   isUnreadable,
@@ -7,6 +10,35 @@ import {
   STREAM_STALL_THRESHOLD,
 } from './utils';
 import type { ImportProgress, ImportSourcesResponse, SourceCandidate } from './types';
+
+// The URL of each stream opened; the mock constructor reads it only after the module loaded.
+const streamUrls: string[] = [];
+
+vi.mock('$lib/utils/ReconnectingEventSource', () => ({
+  ReconnectingEventSource: class {
+    addEventListener = vi.fn();
+    close = vi.fn();
+    constructor(url: string) {
+      streamUrls.push(url);
+    }
+  },
+}));
+
+function candidate(overrides: Partial<SourceCandidate> = {}): SourceCandidate {
+  return {
+    path: '/home/pi/BirdNET-Pi/birds.db',
+    kind: 'local',
+    detection_count: 0,
+    latest_date: '',
+    audio_dir_guess: '',
+    size: 0,
+    valid: true,
+    reason: '',
+    owner_uid: 1000,
+    owner_name: 'pi',
+    ...overrides,
+  };
+}
 
 const baseResp: ImportSourcesResponse = {
   environment: 'Bare Metal',
@@ -25,7 +57,7 @@ describe('deriveSourceStepState', () => {
   it('returns candidates when one or more candidates are present', () => {
     const resp: ImportSourcesResponse = {
       ...baseResp,
-      candidates: [{ path: '/home/pi/BirdNET-Pi/birds.db' } as SourceCandidate],
+      candidates: [candidate()],
     };
     expect(deriveSourceStepState(resp)).toBe('candidates');
   });
@@ -37,17 +69,17 @@ describe('deriveSourceStepState', () => {
 
 describe('isUnreadable', () => {
   it('returns true for a permission_denied invalid candidate', () => {
-    const c = { valid: false, reason: 'permission_denied' } as SourceCandidate;
+    const c = candidate({ valid: false, reason: 'permission_denied' });
     expect(isUnreadable(c)).toBe(true);
   });
 
   it('returns false for a valid candidate', () => {
-    const c = { valid: true, reason: '' } as SourceCandidate;
+    const c = candidate({ valid: true, reason: '' });
     expect(isUnreadable(c)).toBe(false);
   });
 
   it('returns false for an invalid candidate with a non-permission reason', () => {
-    const c = { valid: false, reason: 'invalid_schema' } as SourceCandidate;
+    const c = candidate({ valid: false, reason: 'invalid_schema' });
     expect(isUnreadable(c)).toBe(false);
   });
 });
@@ -102,5 +134,46 @@ describe('shouldReconcileStalledStream', () => {
     expect(shouldReconcileStalledStream(STREAM_STALL_THRESHOLD + 1)).toBe(false);
     expect(shouldReconcileStalledStream(STREAM_STALL_THRESHOLD * 2)).toBe(true);
     expect(shouldReconcileStalledStream(STREAM_STALL_THRESHOLD * 3)).toBe(true);
+  });
+});
+
+describe('reverse proxy prefix', () => {
+  // BirdNET-Go served by a proxy at /birdnet, which does not rewrite response bodies.
+  const PROXY_PREFIX = '/birdnet';
+
+  afterEach(() => {
+    resetBasePath();
+    streamUrls.length = 0;
+  });
+
+  it('builds the imported detections link under the proxy prefix', () => {
+    setBasePath(PROXY_PREFIX);
+    expect(buildDetectionsFilterUrl()).toBe('/birdnet/ui/detections?source=birdnet-pi');
+  });
+
+  it('opens the import progress stream under the proxy prefix', () => {
+    setBasePath(PROXY_PREFIX);
+    connectImportProgressStream('job-1', {
+      onProgress: vi.fn(),
+      onComplete: vi.fn(),
+      onCancelled: vi.fn(),
+      onError: vi.fn(),
+    });
+    expect(streamUrls).toEqual(['/birdnet/api/v2/import/jobs/job-1/progress']);
+  });
+
+  it('encodes the job id in the import progress stream URL', () => {
+    connectImportProgressStream('job/1?x#y', {
+      onProgress: vi.fn(),
+      onComplete: vi.fn(),
+      onCancelled: vi.fn(),
+      onError: vi.fn(),
+    });
+    expect(streamUrls).toEqual(['/api/v2/import/jobs/job%2F1%3Fx%23y/progress']);
+  });
+
+  it('keeps unprefixed URLs when no proxy prefix is set', () => {
+    setBasePath('');
+    expect(buildDetectionsFilterUrl()).toBe('/ui/detections?source=birdnet-pi');
   });
 });

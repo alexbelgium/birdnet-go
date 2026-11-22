@@ -4,14 +4,14 @@ BirdNET-Go is an application inspired by BirdNET-Pi and BirdNET Analyzer. It aim
 
 ## BirdNET-Go Features
 
-- Audio analysis based on the BirdNET 2.4 tflite model
-- 24/7 real-time analysis of soundcard capture
+- Multi-model audio analysis: built-in BirdNET v2.4 plus installable ONNX models (BirdNET+ v3.0, Google Perch v2, BattyBirdNET regional bat classifiers, BSG-BAT, and BirdNET Geomodel v3.0)
+- 24/7 real-time analysis of soundcard capture and RTSP / network audio streams
 - Real-time analysis output compatible with OBS chat log input for wildlife streams
 - BirdWeather API support for real-time analysis
-- Analysis output options: SQLite or MySQL database
-- Localized species labels, with extensive language support (over 30 languages)
+- Analysis output options: SQLite or MySQL/MariaDB database
+- Localized species labels, with extensive language support (over 40 languages)
 - Runs on Windows, Linux (including Raspberry Pi), and macOS
-- Minimal runtime dependencies; the BirdNET TensorFlow Lite model and other supporting files are embedded in the executable
+- Minimal runtime dependencies; release archives bundle the TensorFlow Lite C and ONNX Runtime libraries, and the BirdNET v2.4 model is embedded in the executable
 - Web dashboard with visualization capabilities
 - Weather integration through OpenWeather or Yr.no
 - MQTT support for IoT integration
@@ -78,12 +78,11 @@ The installation script includes several features:
 
 For users who prefer Docker Compose for container management, BirdNET-Go can also be set up using this approach. Docker Compose offers more flexibility and makes it easier to manage container configurations.
 
-A [premade docker-compose.yml](https://github.com/tphakala/birdnet-go/blob/main/Docker/docker-compose.yml) file is available in the repository. This file includes:
+Two premade files are available in the repository: [docker-compose.host.yml](https://github.com/tphakala/birdnet-go/blob/main/Docker/docker-compose.host.yml) (host networking, recommended for new installs) and [docker-compose.yml](https://github.com/tphakala/birdnet-go/blob/main/Docker/docker-compose.yml) (bridge networking, remains supported). See [Choosing a Network Mode](docker_compose_guide.md#choosing-a-network-mode). Both files include:
 
 - The BirdNET-Go container configuration with the latest nightly image
 - Environment variables for customization (timezone, user permissions, etc.)
 - Volume mounts for persistent configuration and data storage
-- RAM disk (tmpfs) for HLS streaming segments to improve performance
 - Device mounts for sound card access
 - An optional Cloudflared service (commented out) for secure internet access
 
@@ -98,23 +97,23 @@ Pre-compiled BirdNET-Go executables are also available at https://github.com/tph
 BirdNET-Go has minimal external dependencies, but requires a few specific tools for certain features:
 
 - **TensorFlow Lite C library**: Required for the core audio analysis functionality
-- **FFmpeg**: Required for RTSP stream capture, the HLS live stream feature in the web interface, on-demand clip transcoding in the web interface, and audio export to MP3. WAV, FLAC and Opus are encoded natively and do not need FFmpeg. AAC export uses FFmpeg by default, but a native encoder is available as an opt-in preview via the `BIRDNET_AAC_ENCODER=native` environment variable. The HLS live stream also runs through FFmpeg by default; setting `BIRDNET_HLS_ENCODER=native` switches it to a pure-Go encoder and muxer, as an opt-in preview. Loudness normalization of saved clips is done natively for every format and no longer needs FFmpeg.
+- **FFmpeg**: Required for RTSP and other network stream capture. Saved clips in every export format (WAV, FLAC, Opus, AAC and MP3) are encoded natively and do not need FFmpeg. Clip downloads in every format, the denoise, normalize and gain previews, and audible-bats playback are also processed natively. The HLS live stream is now encoded natively and no longer uses FFmpeg. Loudness normalization of saved clips is done natively for every format and no longer needs FFmpeg.
 
-  With `BIRDNET_HLS_ENCODER=native` the live stream is encoded in-process and served from memory, so nothing is written to the HLS directory. Note two differences from the FFmpeg path while the preview is in place: the output sample rate is fixed at 48 kHz, so `webserver.livestream.samplerate` has no effect (a warning is logged if it is set to anything else), and `webserver.livestream.ffmpegloglevel` no longer applies since there is no FFmpeg process to configure.
-
-- **SoX**: Required for rendering spectrograms in the web interface
+  The HLS live stream is encoded in-process and served from memory, so nothing is written to the HLS directory. Its output sample rate is fixed at 48 kHz, so `webserver.livestream.samplerate` has no effect (a warning is logged if it is set to anything else), and `webserver.livestream.ffmpegloglevel` no longer applies since there is no FFmpeg process to configure.
 
 > **Note**: When using the Docker installation method, all these dependencies are already included in the Docker image, so you don't need to install them separately. This is one of the major advantages of using the Docker-based installation.
 
 For manual installations, you'll need to install these dependencies separately on your system.
 
-#### TensorFlow Lite C library
+#### TensorFlow Lite C and ONNX Runtime libraries
 
-In addition to BirdNET-Go executable you also need TensorFlow Lite C library which is available for download at https://github.com/tphakala/tflite_c/releases. Download library for your target platform and install it in proper library path for your system:
+Pre-compiled release archives from the [releases page](https://github.com/tphakala/birdnet-go/releases) already bundle both the TensorFlow Lite C library and the ONNX Runtime library next to the executable (see [Manual Binary Installation](installation.md#manual-binary-installation-all-platforms) and [ONNX Runtime Installation](onnx-runtime-installation.md)).
+
+If you are building from source or installing the TensorFlow Lite C library manually, download it from https://github.com/tphakala/tflite_c/releases and install it in the library path for your system:
 
 - On Linux copy **libtensorflowlite_c.so** to **/usr/local/lib** and run "**sudo ldconfig**"
-- On macOS **libtensorflowlite_c.dylib** to **/usr/local/lib**
-- On Windows copy **libtensorflowlite_c.so** to BirdNET-Go executable directory or any other directory in system PATH
+- On macOS copy **libtensorflowlite_c.dylib** to **/usr/local/lib**
+- On Windows copy **tensorflowlite_c.dll** to the BirdNET-Go executable directory or any directory in your system PATH
 
 > **Note**: For optimal performance using the XNNPACK delegate (enabled by default via `usexnnpack: true` in config), ensure you have downloaded version `v2.17.1` or newer of the TensorFlow Lite C library. If a compatible library is not found, BirdNET-Go will fall back to standard CPU processing.
 
@@ -150,29 +149,38 @@ debug: false # Enable debug messages for troubleshooting
 main:
   name: BirdNET-Go # Name of this node, used to identify the source of notes
   timeas24h: true # true for 24-hour time format, false for 12-hour time format
-  log:
-    enabled: false # Enable main application logging
+
+# Application logging settings
+logging:
+  default_level: info # Default log level for all modules: debug, info, warn, error
+  console:
+    enabled: true # Enable console output
+    level: info # Log level for console output
+  file_output:
+    enabled: true # Enable file output
     path: logs/birdnet.log # Path to log file
-    rotation: daily # Log rotation type: daily, weekly, or size
-    maxsize: 10485760 # Maximum log size in bytes for size rotation (10MB)
-    rotationday: Sunday # Day of the week for weekly rotation
+    level: info # Log level for file output
+    max_size: 100 # Maximum size in MB before rotation (0 = disabled)
+    max_age: 30 # Maximum age in days to keep rotated logs (0 = no limit)
+    max_rotated_files: 10 # Maximum number of rotated log files to keep (0 = no limit)
+    compress: false # Compress rotated logs with gzip
 
 # BirdNET model specific settings
 birdnet:
   debug: false # Enable debug mode for BirdNET functionality
   sensitivity: 1.0 # Sigmoid sensitivity, 0.1 to 1.5
-  threshold: 0.8 # Threshold for prediction confidence to report, 0.0 to 1.0
-  overlap: 0.0 # Overlap between chunks, 0.0 to 2.9
+  threshold: 0.7 # Threshold for prediction confidence to report, 0.0 to 1.0
+  overlap: 1.5 # Overlap between chunks, 0.0 to 2.99 (BIRDNET_OVERLAP env var accepts 0.0 to 2.9)
   latitude: 60.1699 # Latitude of recording location for prediction filtering
   longitude: 24.9384 # Longitude of recording location for prediction filtering
   threads: 0 # Number of CPU threads to use (0 = use all available, automatically optimized for P-cores if detected)
-  locale: en-uk # Language to use for labels
+  locale: en-us # Language to use for labels
   modelpath: "" # Path to external model file (empty for embedded)
   labelpath: "" # Path to external label file (empty for embedded)
   usexnnpack: true # Use XNNPACK delegate for inference acceleration
   rangefilter:
     debug: false # Enable debug mode for range filter
-    model: "" # Range filter model to use. "" (default) uses V2, "legacy" uses V1.
+    model: latest # Range filter model to use: "latest" (V2) or "legacy" (V1). An installed BirdNET Geomodel v3.0 replaces the stock models.
     threshold:
       0.01 # Range filter species occurrence threshold (0.0-1.0)
       # Default (0.01) is recommended for most users
@@ -187,26 +195,27 @@ realtime:
 
   # Audio settings
   audio:
-    source: "" # Audio source to use for analysis
+    sources: [] # Audio capture devices (configured in Settings > Audio)
     ffmpegpath: "" # Path to ffmpeg (runtime value)
-    soxpath: "" # Path to sox (runtime value)
     streamtransport: auto # Preferred transport for audio streaming: auto, sse, or ws
     soundlevel:
       enabled: false # Enable sound level monitoring in 1/3rd octave bands
       interval: 10 # Measurement interval in seconds (default: 10)
     export:
       debug: false # Enable audio export debug
-      enabled: false # Export audio clips containing identified bird calls
+      enabled: true # Export audio clips containing identified bird calls
       path: clips/ # Path to audio clip export directory
-      type: wav # Audio file type: wav, mp3, or flac
-      bitrate: 192k # Bitrate for audio export
+      type: wav # Audio file type: aac, opus, flac, wav, or mp3 (aac/opus recommended for lossy, flac for post-processing; mp3 discouraged)
+      ultrasonictype: flac # Lossless only (flac or wav) for bat/ultrasonic captures above 48 kHz
+      bitrate: 96k # Bitrate for lossy audio exports (32k to 320k; Opus caps at 256k)
       retention:
         debug: false # Enable retention debug
-        policy: none # Retention policy: none, age, or usage
+        policy: usage # Retention policy: none, age, or usage
         maxage: 30d # Maximum age of audio clips to keep
-        maxusage: 85% # Maximum disk usage percentage before cleanup
-        minclips: 5 # Minimum number of clips per species to keep
-        checkInterval: 15 # Cleanup check interval in minutes (default: 15)
+        maxusage: 80% # Maximum disk usage percentage before cleanup
+        minclips: 10 # Minimum number of clips per species to keep
+        keepspectrograms: true # Keep spectrograms even when clips are deleted
+        checkinterval: 15 # Cleanup check interval in minutes (default: 15)
     equalizer:
       enabled: false # Enable equalizer filters
       filters:
@@ -215,7 +224,7 @@ realtime:
           q: 0.7 # Filter Q factor
           gain: 0 # Filter gain (only for certain types)
           width: 0 # Filter width (only for BandPass and BandReject)
-          passes: 1 # Filter passes for added attenuation or gain
+          passes: 1 # Filter passes: 0 or no passes line turns the filter off, each pass adds 12 dB/oct (LowPass, HighPass)
 
   # Web dashboard settings
   dashboard:
@@ -227,10 +236,10 @@ realtime:
 
   # Dynamic threshold adjustment
   dynamicthreshold:
-    enabled: false # Enable dynamic threshold adjustment
+    enabled: true # Enable dynamic threshold adjustment
     debug: false # Enable debug mode for dynamic threshold
-    trigger: 0.5 # Trigger threshold for dynamic adjustment
-    min: 0.3 # Minimum threshold for dynamic adjustment
+    trigger: 0.90 # Trigger threshold for dynamic adjustment
+    min: 0.20 # Minimum threshold for dynamic adjustment
     validhours: 24 # Number of hours to consider for dynamic threshold
 
   # OBS chat log settings
@@ -247,9 +256,9 @@ realtime:
     locationaccuracy: 10 # Accuracy of location in meters
     retrysettings:
       enabled: true # Enable retry mechanism
-      maxretries: 5 # Maximum number of retry attempts
-      initialdelay: 5 # Initial delay before first retry in seconds
-      maxdelay: 300 # Maximum delay between retries in seconds
+      maxretries: 3 # Maximum number of retry attempts
+      initialdelay: 30 # Initial delay before first retry in seconds
+      maxdelay: 600 # Maximum delay between retries in seconds
       backoffmultiplier: 2.0 # Multiplier for exponential backoff
 
   # Weather integration settings
@@ -277,10 +286,13 @@ realtime:
     remember: 60 # How long to remember barks for filtering (in seconds)
     species: ["Eurasian Eagle-Owl", "Hooded Crow"] # Species prone to dog bark confusion
 
-  # RTSP streaming settings
+  # RTSP and other network audio streams
   rtsp:
-    transport: "tcp" # RTSP Transport Protocol: tcp or udp
-    urls: [] # RTSP stream URLs
+    # Each entry needs a name, a url and a type (rtsp, http, hls, rtmp or udp). Optional
+    # fields: enabled, transport (tcp or udp), mediaMode, channelMode and gain.
+    # A legacy `urls` list in an older config is converted to streams on startup.
+    streams: []
+    transport: "tcp" # Default transport (tcp or udp) for RTSP and RTMP streams that do not set their own
 
   # MQTT integration
   mqtt:
@@ -293,9 +305,11 @@ realtime:
     retrysettings:
       enabled: true # Enable retry mechanism
       maxretries: 5 # Maximum number of retry attempts
-      initialdelay: 5 # Initial delay before first retry in seconds
-      maxdelay: 300 # Maximum delay between retries in seconds
+      initialdelay: 30 # Initial delay before first retry in seconds
+      maxdelay: 3600 # Maximum delay between retries in seconds
       backoffmultiplier: 2.0 # Multiplier for exponential backoff
+      # Retries apply when a publish fails with an error. While the broker connection is down, publishes are skipped:
+      # they are not queued or retried, so detections made during an outage are not sent later.
 
   # Telemetry settings
   telemetry:
@@ -321,7 +335,7 @@ realtime:
     newSpeciesWindowDays: 7 # Days to show "New Species" badge after first detection (default: 7)
     syncIntervalMinutes: 60 # How often to sync tracking data with database in minutes (default: 60)
 
-    # Yearly tracking - tracks first arrivals each calendar year
+    # Yearly tracking - tracks first arrivals each year, counted from the reset date
     yearlyTracking:
       enabled: true # Enable yearly "New This Year" tracking (default: true)
       resetMonth: 1 # Month when yearly tracking resets (1-12, default: 1 for January)
@@ -352,12 +366,6 @@ webserver:
   debug: false # Enable debug mode for web server
   enabled: true # Enable web server
   port: "8080" # Port for web server
-  log:
-    enabled: false # Enable web server logging
-    path: logs/webserver.log # Path to log file
-    rotation: daily # Log rotation type: daily, weekly, or size
-    maxsize: 10485760 # Maximum log size in bytes for size rotation (10MB)
-    rotationday: Sunday # Day of the week for weekly rotation
 
 # Security settings
 security:
@@ -367,8 +375,8 @@ security:
     # Set this to your public hostname when using a reverse proxy (e.g., "birdnet.home.arpa")
     # Can also be set via BIRDNET_HOST environment variable
     # Falls back to "localhost" if not configured (works for direct access only)
-  autotls: false # Enable automatic TLS certificate management using Let's Encrypt
-  redirecttohttps: true # Redirect HTTP to HTTPS
+  tlsMode: "" # TLS mode: "" (none), "autotls" (Let's Encrypt), "manual", or "selfsigned" (replaces deprecated autotls boolean)
+  redirecttohttps: false # Redirect HTTP to HTTPS (when TLS is enabled)
   allowsubnetbypass:
     enabled: false # Enable subnet bypass for authentication
     subnet: "192.168.1.0/24" # Subnet to bypass authentication
@@ -379,7 +387,10 @@ security:
     clientsecret: "" # Client secret for OAuth2
     redirecturi: "" # Redirect URI for OAuth2
     authcodeexp: 10m # Duration for authorization code
-    accesstokenexp: 1h # Duration for access token
+    accesstokenexp: 1h # No longer sets how long a browser stays signed in
+  # Preferred format for OAuth2 / OIDC providers (Google, GitHub, Microsoft, generic OIDC):
+  oauthProviders: []
+  # Legacy flat OAuth keys (migrated only when oauthProviders is empty; ignored afterward):
   googleauth:
     enabled: false # Enable Google OAuth2
     clientid: "" # Google client ID
@@ -402,18 +413,25 @@ sentry:
 output:
   # SQLite database output settings
   sqlite:
-    enabled: false # Enable SQLite output
+    enabled: true # Enable SQLite output
     path: birdnet.db # Path to SQLite database
 
-  # MySQL database output settings
+  # MySQL or MariaDB database output settings
   mysql:
-    enabled: false # Enable MySQL output
+    enabled: false # Enable MySQL or MariaDB output
     username: birdnet # MySQL database username
     password: secret # MySQL database user password
     database: birdnet # MySQL database name
     host: localhost # MySQL database host
     port: 3306 # MySQL database port
 ```
+
+MySQL and MariaDB are supported only in the LTS releases BirdNET-Go is tested
+with: MySQL 8.4 and 9.7, and MariaDB 10.11, 11.4, 11.8 or 12.3. MySQL Innovation
+releases (such as 9.0 to 9.6), MariaDB rolling releases and older releases such
+as MySQL 5.7, MySQL 8.0 and MariaDB 10.6 are not supported. Create the database
+with the `utf8mb4` character set (the default on supported releases), for example
+`CREATE DATABASE birdnet CHARACTER SET utf8mb4;`.
 
 ### Command Line Interface
 
@@ -425,13 +443,13 @@ birdnet [command] [flags]
 
 **Available Commands:**
 
-- `realtime`: (Default) Starts the real-time analysis using the configuration file.
+- `serve` (alias `realtime`): Starts real-time analysis and the web server using the configuration file.
 - `benchmark`: Runs a performance benchmark on the current system.
-- `range`: Manages the range filter database (used for location-based species filtering).
-  - `range update`: Downloads or updates the range filter database.
-  - `range info`: Displays information about the current range filter database.
+- `range`: Inspects the range filter for your location and date.
   - `range print`: Shows all species that pass the current threshold for your location and date, with their probability scores.
-- `support`: Generates a support bundle containing logs and configuration (with sensitive data masked) for troubleshooting.
+- `notify`: Tests notification delivery.
+- `support`: Diagnostic and support utilities.
+  - `support collect`: Generates a support bundle containing logs and configuration (with sensitive data masked) for troubleshooting.
 - `authors`: Displays author information.
 - `license`: Displays software license information.
 - `help`: Shows help for any command.
@@ -557,6 +575,7 @@ sudo journalctl -fu birdnet-go
    - Verify the service is running: `sudo systemctl status birdnet-go`
    - Check that port 8080 (or your configured port) is not blocked by a firewall
    - Confirm the port binding in the Docker container: `docker ps | grep birdnet-go`
+   - With host networking (Compose, Portainer or `docker run --network host`), `docker ps` shows no port mapping: the app listens on `WEB_PORT` (`BIRDNET_WEBSERVER_PORT`) directly, and the host firewall applies to it. See [Host Networking Notes](docker_compose_guide.md#host-networking-notes)
 
 3. **Container exits immediately after starting**:
    - Check logs for errors: `sudo journalctl -u birdnet-go -n 100`
@@ -568,8 +587,8 @@ sudo journalctl -fu birdnet-go
    - Check if audio device is working properly: `arecord -d 5 -f S16_LE -r 48000 test.wav`
    - Adjust sensitivity and threshold settings in the configuration file
 
-5. **Constant 'WARNING: BirdNET processing time exceeded buffer length' messages:**
-   - If you have enabled Deep Detection (by setting a high `birdnet.overlap` value, e.g., 2.7), your system might not be powerful enough to keep up with the increased analysis rate. Consider reducing the `birdnet.overlap` value or using more powerful hardware (RPi 4/5 or better recommended for Deep Detection).
+5. **'processing time exceeded buffer interval' or 'analysis is not keeping up with incoming audio' warnings:**
+   - The first warning means one model's own inference takes longer than its analysis step. The second means audio is being dropped before it is analyzed, often because several models or several audio sources share the CPU. Consider reducing the `birdnet.overlap` value, disabling extra models, or using more powerful hardware.
 
 #### Updating a Docker Installation (`install.sh` method)
 
@@ -762,7 +781,9 @@ graph TD
     H -->|Human Detected| D
     H -->|No Human| I{Dog Bark Filter}
     I -->|Recent Bark| D
-    I -->|No Recent Bark| J[✅ Accept Detection]
+    I -->|No Recent Bark| M{"Model Consensus Filter, if enabled"}
+    M -->|Too Few Models Agree| D
+    M -->|Enough Models Agree| J[✅ Accept Detection]
     G --> K{Timeout Reached?}
     K -->|No| G
     K -->|Yes| L{Min Detections Met?}
@@ -991,62 +1012,62 @@ realtime:
 - The system automatically cleans up stale thresholds to prevent memory bloat
 - Custom species thresholds (if configured) take precedence over dynamic adjustments
 
-### Stage 3: Deep Detection Filter
+### Stage 3: Deep Detection (False Positive Filter)
 
-[Deep Detection](BirdNET‐Go-Guide#deep-detection) uses the `overlap` setting to require multiple detections of the same species within a configurable detection window before accepting it, significantly reducing false positives.
+[Deep Detection](#deep-detection) uses overlapping analysis windows and a configurable filter level (`realtime.falsepositivefilter.level`, 0 to 5) to require multiple confirmations of the same species within the pending detection window before accepting it.
 
 #### How It Works:
 
-1. **Detection Holding**: All detections are held in a pending state for `captureLength - preCaptureLength` seconds from first detection (defaults to 12 seconds with 15s clip length and 3s pre-capture buffer)
-2. **Counting Mechanism**: During this window, if the same species is detected again, a counter increments
-3. **Threshold Calculation**: The minimum required detections scales with both overlap and detection window duration:
+1. **Detection Holding**: Pending detections are held for `max(0, captureLength - preCaptureLength)` seconds from first detection (12 seconds with the default 15 s clip length and 3 s pre-capture buffer).
+2. **Counting Mechanism**: During this holding window, each additional detection of the same species increments the confirmation counter.
+3. **Threshold Calculation**: Required confirmations are computed against a 6-second reference vocalization window using the analysis step (`segmentSeconds = max(0.1, 3.0 - overlap)` for 3-second BirdNET clips; models with a different clip length or step derive `segmentSeconds` from their own buffer cadence) and the level's confirmation fraction:
 
 ```yaml
 birdnet:
-  overlap: 2.7 # Enable deep detection (requires more CPU power)
+  overlap: 2.4 # Minimum overlap for Balanced (level 3)
 realtime:
+  falsepositivefilter:
+    level: 3 # 0=Off, 1=Lenient, 2=Moderate, 3=Balanced, 4=Strict, 5=Maximum
   audio:
     export:
       length: 15 # Audio clip length in seconds
-      preCapture: 3 # Pre-detection buffer in seconds
+      precapture: 3 # Pre-detection buffer in seconds
 ```
 
-**Exact Minimum Detections Calculation:**
+**Minimum Detections Calculation (3-second BirdNET clips):**
 
+```text
+segmentSeconds = max(0.1, 3.0 - overlap)
+maxDetections  = 6.0 / segmentSeconds
+minDetections  = max(1, ceil(maxDetections * levelThreshold))   # always 1 when level = 0
 ```
-detectionWindow = captureLength - preCaptureLength
-segmentLength = max(0.1, 3.0 - overlap)
-baseMinDetections = 3.0 / segmentLength
-scaleFactor = detectionWindow / 15.0
-minDetections = max(1, round(baseMinDetections * scaleFactor))
 
-Examples (with default 12-second detection window):
-- overlap: 0.0  → segmentLength: 3.0  → minDetections: 1  (standard mode)
-- overlap: 1.5  → segmentLength: 1.5  → minDetections: 2
-- overlap: 2.4  → segmentLength: 0.6  → minDetections: 4  (recommended)
-- overlap: 2.7  → segmentLength: 0.3  → minDetections: 8  (deep detection)
-- overlap: 2.9  → segmentLength: 0.1  → minDetections: 24 (very strict)
+| Level | Name     | Min overlap | Step  | Threshold | Min detections (at min overlap) |
+| ----- | -------- | ----------- | ----- | --------- | ------------------------------- |
+| 0     | Off      | 0.0         | 3.0 s | 0%        | 1                               |
+| 1     | Lenient  | 2.0         | 1.0 s | 20%       | 2                               |
+| 2     | Moderate | 2.2         | 0.8 s | 30%       | 3                               |
+| 3     | Balanced | 2.4         | 0.6 s | 50%       | 5                               |
+| 4     | Strict   | 2.7         | 0.3 s | 60%       | 12                              |
+| 5     | Maximum  | 2.8         | 0.2 s | 70%       | 21                              |
 
-With longer detection window (30s clip, 0s pre-capture = 30s window):
-- overlap: 2.4  → minDetections: 10 (2x baseline)
-- overlap: 2.7  → minDetections: 20 (2x baseline)
-```
+Bat models use their own separate `bat.falsepositivefilter.level` setting (0 to 5).
 
 #### Processing Timeline:
 
 1. **0 seconds**: Species detected for first time, detection window timer starts
 2. **0 to detectionWindow seconds**: Additional detections increment the counter
 3. **detectionWindow seconds**: Decision point reached:
-   - **If count ≥ minDetections**: Detection approved and processed
-   - **If count < minDetections**: Detection discarded as "false positive"
+   - **If count >= minDetections**: Detection approved and processed
+   - **If count < minDetections**: Detection discarded as a false positive
 
 #### Key Behavior Notes:
 
-- **Configurable timeout**: Detection window duration is `captureLength - preCaptureLength` (prevents audio clip gaps)
-- **No early approval**: Even if minimum detections are met early, the system waits for the full window
+- **Configurable holding window**: Duration is `max(0, captureLength - preCaptureLength)` (12 seconds by default)
+- **No early approval**: Even if minimum detections are met early, the system waits for the full holding window
 - **Quality improvement**: Higher confidence detections within the window replace lower ones
 - **Memory efficient**: Only one pending detection per species is held at a time
-- **Runtime adaptable**: Changes to overlap, clip length, or pre-capture settings take effect within 1 second
+- **Runtime adaptable**: Changes to filter level, overlap, clip length, or pre-capture saved via the web UI or settings API apply without restarting; `config.yaml` edits take effect after a restart
 
 ### Stage 4: Privacy and Behavioral Filters
 
@@ -1061,8 +1082,10 @@ realtime:
     confidence: 0.05 # Sensitivity to human voices
 ```
 
-- Discards bird detections if human speech is detected after the initial detection
+- Discards a bird detection when human speech is heard anywhere in its saved clip, including the pre-capture part, and also when speech is heard after the clip while the detection is still waiting. A detection waits until its whole clip has been scanned. Only a detection whose clip is never fully scanned within 30 seconds after the clip end is saved and counted as unscanned
 - Protects privacy by preventing recordings during conversations
+- Among Perch V2 labels, only voiced human sounds trigger it: speech, conversation, whispering, shouting, singing, laughter, crying and cheering (Perch V2 labels such as `Speech`, `Human_voice`, `Conversation`, `Laughter`, `Singing`), plus the `Homo sapiens` taxon. BirdNET's `Human` classes (`Human vocal`, `Human non-vocal`, `Human whistle`) are matched by prefix and all trigger it. These non-voiced Perch V2 body and action labels do not trigger it: `Cough`, `Sneeze`, `Breathing`, `Respiratory_sounds`, `Sigh`, `Gasp`, `Hands`, `Clapping`, `Applause`, `Finger_snapping`, `Chewing_and_mastication`, `Fart`, `Burping_and_eructation`, `Walk_and_footsteps`, `Run`, `Crowd` and `Human_group_actions`. These are still never saved as bird detections
+- When `birdnet.overlap` is above 1.5 (as applied after any cadence cap), a human voice label match is held until a second match from the same audio source arrives within 15 seconds: another label match from any model, or a VAD speech hit. A held match that is not confirmed in time is ignored. At 1.5 or below, and for VAD speech hits on their own, a single match counts
 
 #### Dog Bark Filter
 
@@ -1080,6 +1103,27 @@ realtime:
 - **Use Cases**: Prevents false detections during periods of constant dog barking, particularly for species that have acoustic similarities to canine vocalizations
 - **Species Selection**: Focus on owl species (especially larger owls) and corvids (crows/ravens) which are most commonly confused with dog barks
 
+#### Model Consensus Filter
+
+```yaml
+realtime:
+  modelconsensus:
+    allspecies: false # Require consensus for every species
+    listedspecies: true # Require consensus for the species listed below
+    species: ["Parus major"] # Scientific names recommended
+    minmodels: 2 # Agreeing models required, 2 to 4
+    alleligible: false # Require every eligible model instead of minmodels
+    debug: false # Log each consensus discard at info level
+```
+
+- Discards a detection unless at least `minmodels` distinct models of its taxon group detected it within the detection window. Bird and bat models are counted separately, and BirdNET 2.4 and 3.0 count as separate models
+- A model is eligible only if it can classify the species, is not excluded by the range filter for it, and has scored all the audio the agreeing models heard. A model that is still behind in processing is not counted as eligible until it catches up. The requirement is capped at the number of eligible models, so a species that only one model can detect is never blocked
+- `alleligible` requires every eligible model to agree, whatever `minmodels` is
+- A model that knows a species but rarely scores it above its threshold blocks it, so start with `listedspecies` for the species you want to confirm
+- List entries are best written as scientific names in `config.yaml`: a common name stops matching after a locale change. The settings API converts the entries it can resolve to scientific names
+- Detections from audio sources that give no capture timestamps are not filtered
+- The filter is off by default and has no settings page yet; use `config.yaml` or the settings API
+
 ### Setting Precedence Summary
 
 **Highest to Lowest Precedence:**
@@ -1094,6 +1138,7 @@ realtime:
 8. **Deep Detection Filter** - Requires multiple matches
 9. **Privacy Filter** - Environmental safety
 10. **Dog Bark Filter** - Behavioral filtering
+11. **Model Consensus Filter** - Requires multiple models to agree
 
 ### Optimization Tips
 
@@ -1140,7 +1185,7 @@ The BirdNET Range Filter is an intelligent location and time-based filtering sys
 
 #### Model Overview
 
-The range filter uses a secondary AI model trained on [eBird checklist frequency data](https://support.ebird.org/en/support/solutions/articles/48000948655-ebird-glossary#:~:text=frequency%3A%20as%20of%20a%20species,purple%20grid%20on%20species%20maps) to estimate the probability of bird species occurrence based on three factors:
+The range filter uses a separate model trained on [eBird checklist frequency data](https://support.ebird.org/en/support/solutions/articles/48000948655-ebird-glossary#:~:text=frequency%3A%20as%20of%20a%20species,purple%20grid%20on%20species%20maps) to estimate the probability of bird species occurrence based on three factors:
 
 1. **Latitude** - Your geographic latitude coordinate
 2. **Longitude** - Your geographic longitude coordinate
@@ -1169,7 +1214,7 @@ birdnet:
   longitude: 24.9384 # Your location longitude
   rangefilter:
     debug: false # Enable debug logging
-    model: "" # "" for V2 (default), "legacy" for V1
+    model: "" # "" for V2 (default), "legacy" for V1; an installed BirdNET Geomodel v3.0 replaces the stock models
     threshold: 0.01 # Species occurrence threshold (0.0-1.0)
 ```
 
@@ -1272,9 +1317,11 @@ This displays all species that pass the threshold for your current location and 
 BirdNET-Go supports two range filter model versions:
 
 - **V2 (Default)**: Latest model with improved accuracy
-- **V1 (Legacy)**: Original model, use `model: "legacy"` if needed for compatibility
+- **V1 (Legacy)**: Original model, use `model: "legacy"` if needed for compatibility, unless the BirdNET Geomodel v3.0 is installed
 
 The V2 model generally provides better predictions and should be used unless you have specific compatibility requirements.
+
+> **Note**: When the BirdNET Geomodel v3.0 is installed, it replaces the V1 and V2 range filter models, including `model: "legacy"` and a `modelpath` that points at a stock MData model file. A `modelpath` to a file with any other name is kept. Installing Perch v2, BirdNET+ v3.0 or the BirdNET v3.0 preview also installs the geomodel.
 
 ### Troubleshooting
 
@@ -1340,7 +1387,7 @@ BirdNET-Go offers advanced audio processing capabilities:
 
 - Support for various audio sources including direct soundcard capture and RTSP streams
 - Configurable equalizer with multiple filter types (LowPass, HighPass, BandPass, etc.)
-- Audio export in multiple formats (WAV, MP3, FLAC)
+- Native audio clip export in AAC, Opus, FLAC, WAV, and MP3 (with lossless FLAC or WAV for ultrasonic bat recordings; see [Audio Formats](audio-formats.md))
 - Retention policies for managing exported audio clips
 
 ### Audio Clip Retention
@@ -1352,26 +1399,27 @@ The cleanup task runs periodically to check if clips need to be deleted based on
 Configure these options under `realtime.audio.export.retention` in your `config.yaml`:
 
 - **`policy`**: Sets the retention strategy. Options are:
-  - **`none`** (Default): No automatic deletion. You are responsible for managing the clip files.
+  - **`usage`** (Default): Deletes the oldest clips _only when_ the disk usage of the partition containing the clips directory exceeds the `maxusage` percentage. This policy tries to keep at least `minclips` per species, deleting the oldest clips first when cleanup is needed.
   - **`age`**: Deletes clips older than the specified `maxage`.
-  - **`usage`**: Deletes the oldest clips _only when_ the disk usage of the partition containing the clips directory exceeds the `maxusage` percentage. This policy tries to keep at least `minclips` per species, deleting the oldest clips first when cleanup is needed.
+  - **`none`**: No automatic deletion. You are responsible for managing the clip files.
 - **`maxage`**: (Used with `policy: age`) Maximum age for clips (e.g., `30d` for 30 days, `7d` for 7 days, `24h` for 24 hours). Clips older than this will be deleted.
-- **`maxusage`**: (Used with `policy: usage`) The target maximum disk usage percentage (e.g., `85%`). Cleanup triggers when usage exceeds this threshold.
-- **`minclips`**: (Used with `policy: usage`) The minimum number of clips to keep for each species, even when cleaning up based on disk usage. This ensures you retain at least some recent examples per species.
-- **`checkInterval`**: How often to check if cleanup is needed, in minutes (default: 15). Higher values reduce CPU/IO overhead but may delay cleanup. For usage-based policy, disk usage is checked first before scanning files, so setting this too low won't waste resources when disk usage is below threshold.
+- **`maxusage`**: (Used with `policy: usage`) The target maximum disk usage percentage (default: `80%`). Cleanup triggers when usage exceeds this threshold.
+- **`minclips`**: (Used with `policy: usage`) The minimum number of clips to keep for each species (default: `10`), even when cleaning up based on disk usage. This ensures you retain at least some recent examples per species.
+- **`keepspectrograms`**: Keep rendered spectrogram images when audio clips are evicted (default: `true`).
+- **`checkinterval`**: How often to check if cleanup is needed, in minutes (default: `15`). Higher values reduce CPU/IO overhead but may delay cleanup. For usage-based policy, disk usage is checked first before scanning files, so setting this too low won't waste resources when disk usage is below threshold.
 
 ### Security Features
 
 The application includes several security options:
 
 - Basic authentication with password protection
-- OAuth2 authentication through Google or GitHub
-- Automatic TLS certificate management via Let's Encrypt
+- OAuth2 and OpenID Connect (OIDC) authentication (Google, GitHub, Microsoft, and generic OIDC providers; see [Security & Access Control](security.md))
+- TLS certificate management (`tlsMode`: Let's Encrypt AutoTLS, manual certificates, or self-signed)
 - IP subnet-based authentication bypass for local networks
 
 #### Setting Up OAuth Authentication
 
-BirdNET-Go supports OAuth2 authentication with Google and GitHub for secure access to your web interface. This is the recommended authentication method when exposing your instance to the internet.
+BirdNET-Go supports OAuth2 and OpenID Connect authentication (Google, GitHub, Microsoft, and generic OIDC providers) for secure access to your web interface. Configure providers in the web UI under **Settings > Security** or via `security.oauthProviders` in `config.yaml` (see [Security & Access Control](security.md) for OIDC and allowed-user ID guidance). The examples below cover Google and GitHub app registration:
 
 ##### Google OAuth Setup
 
@@ -1439,40 +1487,29 @@ BirdNET-Go supports OAuth2 authentication with Google and GitHub for secure acce
 ```yaml
 security:
   host: "yourdomain.com" # Your domain for HTTPS
-  autotls: true # Enable automatic HTTPS certificates
+  tlsMode: "autotls" # Enable automatic HTTPS certificates via Let's Encrypt
 
-  googleauth:
-    enabled: true
-    clientid: "123456789-abcdefghijklmnop.apps.googleusercontent.com"
-    clientsecret: "GOCSPX-your-secret-key-here"
-    userid: "user@gmail.com" # Optional: restrict to specific user
+  oauthProviders:
+    - provider: google
+      enabled: true
+      clientId: "123456789-abcdefghijklmnop.apps.googleusercontent.com"
+      clientSecret: "GOCSPX-your-secret-key-here"
+      userId: "your-google-user-id" # Optional: restrict to specific user ID (preferred over email)
 
-  githubauth:
-    enabled: true
-    clientid: "Ov23liABCDEFGHIJ1234"
-    clientsecret: "your-github-secret-key-here"
-    userid: "yourusername" # Optional: restrict to specific user
+    - provider: github
+      enabled: true
+      clientId: "Ov23liABCDEFGHIJ1234"
+      clientSecret: "your-github-secret-key-here"
+      userId: "your-github-user-id" # Optional: restrict to specific user ID
 ```
 
-**Environment variables** (Docker):
-
-```bash
-BIRDNET_SECURITY_GOOGLEAUTH_ENABLED=true
-BIRDNET_SECURITY_GOOGLEAUTH_CLIENTID=123456789-abcdefghijklmnop.apps.googleusercontent.com
-BIRDNET_SECURITY_GOOGLEAUTH_CLIENTSECRET=GOCSPX-your-secret-key-here
-BIRDNET_SECURITY_GOOGLEAUTH_USERID=user@gmail.com
-
-BIRDNET_SECURITY_GITHUBAUTH_ENABLED=true
-BIRDNET_SECURITY_GITHUBAUTH_CLIENTID=Ov23liABCDEFGHIJ1234
-BIRDNET_SECURITY_GITHUBAUTH_CLIENTSECRET=your-github-secret-key-here
-BIRDNET_SECURITY_GITHUBAUTH_USERID=yourusername
-```
+OAuth providers are configured in `config.yaml` under `security.oauthProviders` or in the web UI under **Settings > Security** (OAuth provider settings do not have individual environment variables).
 
 ##### Important OAuth Notes
 
 - **Callback URLs**: Always use the format `/auth/provider/callback` (e.g., `/auth/google/callback`, `/auth/github/callback`) as shown in the BirdNET-Go settings page
-- **HTTPS Requirement**: OAuth providers typically require HTTPS for production use. Enable `autotls: true` or use a reverse proxy with SSL certificates
-- **User ID Restrictions**: The optional `userid` field allows you to restrict access to a specific account for enhanced security
+- **HTTPS Requirement**: OAuth providers typically require HTTPS for production use. Enable `tlsMode: "autotls"` or use a reverse proxy with SSL certificates
+- **User ID Restrictions**: The optional `userId` field allows you to restrict access to a specific account for enhanced security (prefer provider user IDs over email addresses; see [Security & Access Control](security.md#allowed-users-prefer-user-ids))
 - **Local Network**: OAuth authentication works on local networks, but you can also enable subnet bypass for local access without OAuth
 - **Multiple Providers**: You can enable both Google and GitHub OAuth simultaneously - users will see both options on the login page
 
@@ -1506,84 +1543,71 @@ BirdNET-Go includes intelligent filtering mechanisms:
 
 ### Deep Detection
 
-BirdNET-Go includes a "Deep Detection" feature designed to improve detection reliability and reduce false positives by requiring multiple detections of the same species within a time window.
+BirdNET-Go includes a "Deep Detection" (false-positive filter) mechanism designed to improve detection reliability by requiring multiple overlapping confirmations of the same species within the pending detection window.
 
 #### Deep Detection Flow Chart
 
 ```mermaid
 graph TD
-    A[Species Detected<br/>by BirdNET] --> B{First Detection<br/>of This Species?}
+    A[Species Detected<br/>by Model] --> B{First Detection<br/>of This Species?}
 
-    B -->|Yes| C[⏱️ Start 15-Second<br/>Counting Window<br/>Count = 1]
-    B -->|No| D[📈 Increment Counter<br/>Count = Count + 1]
+    B -->|Yes| C[Start Pending Window<br/>captureLength - preCapture<br/>Count = 1]
+    B -->|No| D[Increment Counter<br/>Count = Count + 1]
 
-    C --> E[🎧 Continue Listening<br/>for More Audio]
+    C --> E[Continue Listening<br/>for More Audio]
     D --> E
 
     E --> F{Same Species<br/>Detected Again?}
-    F -->|Yes| G[⬆️ Add to Count]
-    F -->|No| H{15 Seconds<br/>Elapsed?}
+    F -->|Yes| G[Add to Count]
+    F -->|No| H{Window<br/>Elapsed?}
 
     G --> H
     H -->|No| E
-    H -->|Yes| I{Count ≥ Required<br/>Minimum?}
+    H -->|Yes| I{Count >= Required<br/>Minimum?}
 
-    I -->|No| J[❌ Rejected<br/>False Positive]
+    I -->|No| J[Rejected<br/>False Positive]
     I -->|Yes| K{Final Safety<br/>Checks Pass?}
 
-    K -->|No| L[❌ Blocked by<br/>Privacy/Dog Filter]
-    K -->|Yes| M[✅ Detection Approved<br/>Saved to Database]
+    K -->|No| L[Blocked by<br/>Privacy/Dog/Consensus Filter]
+    K -->|Yes| M[Detection Approved<br/>Saved to Database]
 
-    J --> N[🗂️ Log: Not enough matches]
-    L --> O[🗂️ Log: Blocked by filter]
-    M --> P[🗂️ Log: Species confirmed]
+    J --> N[Log: Not enough matches]
+    L --> O[Log: Blocked by filter]
+    M --> P[Log: Species confirmed]
 ```
 
 #### How Deep Detection Works
 
-1. **Increased Analysis Frequency**: Higher `overlap` values reduce the step size between audio analysis windows (e.g., from 1.5 seconds to 300ms), causing the BirdNET AI model to run more frequently
-
-2. **Pending Detection System**: All detections are held in memory for exactly **15 seconds** from the first detection
-
-3. **Counting Mechanism**: During the 15-second window, each additional detection of the same species increments a counter
-
-4. **Variable Threshold**: The number of required detections scales with the overlap setting:
-
-   ```
-   Required Detections = max(1, 3 / max(0.1, 3.0 - overlap))
-
-   Examples:
-   - overlap: 0.0 → 1 detection required (standard mode)
-   - overlap: 2.4 → 5 detections required
-   - overlap: 2.7 → 10 detections required (typical deep detection)
-   - overlap: 2.9 → 30 detections required (very strict)
-   ```
-
-5. **Decision Point**: After exactly 15 seconds, the detection is either approved (if minimum count reached) or discarded as a false positive
+1. **Increased Analysis Frequency**: Higher `overlap` values reduce the step size between audio analysis windows (for example from 1.5 s down to 200 ms), causing the model to run more frequently.
+2. **Pending Detection Window**: Detections are held in memory for `max(0, captureLength - preCaptureLength)` seconds from the first detection (12 seconds with the default 15 s clip length and 3 s pre-capture buffer).
+3. **Counting Mechanism**: During the holding window, each additional detection of the same species increments the counter and retains the highest confidence score.
+4. **Level-Based Confirmation Threshold**: Required confirmations are computed from `realtime.falsepositivefilter.level` (0 to 5) and the analysis step against a 6-second reference vocalization window (see [Stage 3: Deep Detection (False Positive Filter)](#stage-3-deep-detection-false-positive-filter) for the exact formula and level table).
+5. **Decision Point**: When the holding window expires, the detection is either approved (if the confirmation count meets or exceeds the minimum) or discarded as a false positive.
 
 #### Benefits and Use Cases
 
-- **False Positive Reduction**: Eliminates single spurious detections that don't repeat
-- **Lower Threshold Tolerance**: Allows using lower `birdnet.threshold` values (e.g., 0.3-0.6) while maintaining accuracy
-- **Quality Selection**: Keeps the highest confidence detection from the 15-second window
-- **Consistent Behavior**: All detections are held for exactly 15 seconds, providing predictable timing
+- **False Positive Reduction**: Eliminates single spurious detections that do not repeat across overlapping windows
+- **Lower Threshold Tolerance**: Allows using lower `birdnet.threshold` values while maintaining accuracy
+- **Quality Selection**: Keeps the highest confidence detection from the pending window
 
 #### System Requirements
 
-- **CPU Load**: Significantly increases processing requirements due to higher analysis frequency
+- **CPU Load**: Higher overlap increases inference frequency and CPU load; BirdNET-Go caps the effective overlap if the hardware cannot keep up with the configured cadence
 - **Recommended Hardware**: Raspberry Pi 4/5 or more powerful systems
-- **Performance Monitoring**: Watch for `WARNING: BirdNET processing time exceeded buffer length` messages indicating the system cannot keep up
+- **Performance Monitoring**: Watch for `processing time exceeded buffer interval` (one model is too slow for its step) and `analysis is not keeping up with incoming audio` (audio is being lost) warnings
 
 #### Configuration
 
-- **Docker Installation**: Deep Detection is **enabled by default** with the `install.sh` script, which benchmarks your hardware and sets appropriate overlap values
-- **Manual Configuration**: Set `birdnet.overlap` in your `config.yaml`:
+- **Web UI**: Choose a filter level (Off through Maximum) under **Settings > Analysis**; BirdNET-Go sets the matching overlap automatically.
+- **Manual Configuration**: Set `realtime.falsepositivefilter.level` (and `birdnet.overlap` if needed) in `config.yaml`:
   ```yaml
   birdnet:
-    overlap: 2.7 # Enable deep detection (10 detections required)
-    threshold: 0.5 # Can use lower thresholds with deep detection
+    overlap: 2.4 # Minimum overlap for Balanced (level 3)
+  realtime:
+    falsepositivefilter:
+      level: 3 # 0=Off, 1=Lenient, 2=Moderate, 3=Balanced, 4=Strict, 5=Maximum
   ```
-- **Disabling**: Set `overlap: 0.0` for standard single-detection mode
+- **Disabling**: Set `realtime.falsepositivefilter.level: 0` for single-detection mode.
 
 #### Reference
 
@@ -1601,7 +1625,7 @@ BirdNET-Go allows you to listen to the live audio feed directly from the web int
   5.  Audio playback will begin using your browser's audio capabilities.
   6.  Click the stop icon (⏹️) to end the stream.
 - **Technology:** The live stream uses HLS (HTTP Live Streaming) for broad browser compatibility and efficient delivery.
-- **Dependency:** This feature requires **FFmpeg** to be installed and accessible by BirdNET-Go. If FFmpeg is not found, the play button may not appear or function.
+- **Dependency:** This feature is encoded natively in-process and does not require FFmpeg.
 - **Server Interaction:** Starting the live stream initiates audio encoding on the server. The stream uses a heartbeat mechanism to stay active while you are listening. Stopping the stream or closing the browser tab/window signals the server to stop the encoding process, conserving server resources.
 
 ### Sound Level Monitoring
@@ -1620,20 +1644,17 @@ BirdNET-Go includes an advanced sound level monitoring feature that provides det
 The sound level monitoring system:
 
 1. **Analyzes audio in 1/3rd octave bands** following the ISO 266 standard (25 Hz to 20 kHz)
-2. **Aggregates measurements over 10-second windows** to provide stable readings
+2. **Aggregates measurements over a configurable interval** (default 10 seconds, minimum 5 seconds) to provide stable readings
 3. **Calculates min/max/mean values** for each frequency band within the window
 4. **Publishes data via multiple channels**: MQTT, SSE, and Prometheus metrics
 
 ##### Audio Processing Architecture
 
-The sound level measurement system reads the raw audio directly from the source without any equalization or filtering applied. This ensures that measurements reflect the actual acoustic environment:
+Sound level is measured after the source's gain and equalizer settings are applied, so the readings follow the audio the rest of BirdNET-Go sees. With the default settings (no gain, no equalizer) the measurement is of the unmodified signal.
 
-- **Raw Audio Input**: Audio samples are processed directly as received from the audio source (internal/myaudio/soundlevel.go:268-271)
-- **Direct Band Analysis**: Raw samples are passed through octave band filters without any pre-processing or equalization (internal/myaudio/soundlevel.go:308-310)
-- **Pure Measurement**: The octave band filters isolate specific frequency bands for measurement but do not apply any equalization - they simply measure the energy present in each frequency band (internal/myaudio/soundlevel.go:143-220)
-- **Unmodified Output**: Sound level data is sanitized for JSON compatibility and published without any acoustic modifications (internal/analysis/sound_level.go)
-
-This approach ensures that sound level measurements represent the true acoustic conditions at the monitoring location, which is essential for environmental monitoring, research applications, and compliance with acoustic measurement standards.
+- **Band filters**: One second-order band-pass filter per 1/3rd octave band from the go-audio-dsp `octave` package, tuned to the exact base-10 centre frequency and labelled with the nominal frequency. The filters measure the energy present in each band and do not equalize the audio.
+- **Bands**: 30 bands from 25 Hz to 20 kHz at 48 kHz and above. Bands whose upper edge reaches 0.95 of the Nyquist frequency are left out.
+- **Unmodified output**: Sound level data is sanitized for JSON compatibility and published without any acoustic modification (internal/analysis/sound_level.go).
 
 #### Configuration
 
@@ -1646,7 +1667,7 @@ realtime:
       enabled: true # Enable sound level monitoring (default: false)
       interval: 10 # Measurement interval in seconds (default: 10)
       debug: false # Enable debug logging (default: false)
-      debug_realtime_logging: false # Enable per-sample debug logs (default: false)
+      debug_realtime_logging: false # Enable per-band debug logs for every interval (default: false)
 ```
 
 > **Note**: Sound level monitoring is disabled by default to avoid performance overhead. Enable it only if you need this functionality.
@@ -1658,7 +1679,7 @@ Sound level data is published as JSON with the following structure:
 ```json
 {
   "timestamp": "2024-01-15T08:30:45Z",
-  "source": "USB Audio Device",
+  "source": "rtsp_65c31a0b",
   "name": "Primary Microphone",
   "duration_seconds": 10,
   "octave_bands": {
@@ -1683,12 +1704,19 @@ When MQTT is enabled, sound level data is published to the topic:
 <base_topic>/soundlevel
 ```
 
+When Home Assistant discovery is also enabled, each source's data is additionally published to its own topic, which the discovered Sound Level sensor reads:
+
+```
+<base_topic>/sources/<source_id>/soundlevel
+```
+
 The MQTT message uses a compact JSON format to minimize payload size:
 
 ```json
 {
   "ts": "2024-01-15T08:30:45Z",
-  "src": "USB Audio Device",
+  "node": "Bird Station",
+  "src": "rtsp_65c31a0b",
   "nm": "Primary Microphone",
   "dur": 10,
   "b": {
@@ -1794,7 +1822,7 @@ The MQTT message uses a compact JSON format to minimize payload size:
       "x": -35.8,
       "m": -39.9
     },
-    "1.25_kHz": {
+    "1.2_kHz": {
       "f": 1250.0,
       "n": -39.7,
       "x": -32.2,
@@ -1818,7 +1846,7 @@ The MQTT message uses a compact JSON format to minimize payload size:
       "x": -20.8,
       "m": -24.9
     },
-    "3.15_kHz": {
+    "3.1_kHz": {
       "f": 3150.0,
       "n": -24.2,
       "x": -16.7,
@@ -1879,6 +1907,7 @@ The MQTT message uses a compact JSON format to minimize payload size:
 **Field Reference:**
 
 - `ts`: ISO8601 timestamp
+- `node`: Name of this BirdNET-Go instance
 - `src`: Audio source identifier
 - `nm`: Human-readable name of the source
 - `dur`: Measurement duration in seconds
@@ -1889,17 +1918,35 @@ The MQTT message uses a compact JSON format to minimize payload size:
   - `x`: Maximum dB level (1 decimal place)
   - `m`: Mean/average dB level (1 decimal place)
 
-Example Home Assistant configuration:
+Example Home Assistant configuration (single source). This reads the shared `birdnet/soundlevel` topic without a source filter, so on a multi-source install it mixes every source's readings into one sensor. Modern Home Assistant configures MQTT sensors under the `mqtt:` key; the older `sensor:` block with `platform: mqtt` was removed in Home Assistant 2022.9:
 
 ```yaml
-sensor:
-  - platform: mqtt
-    name: "Bird Station Sound Level 1kHz"
-    state_topic: "birdnet/soundlevel"
-    value_template: "{{ value_json.b['1.0_kHz'].m }}"
-    unit_of_measurement: "dB"
-    device_class: "sound_pressure"
-    state_class: "measurement"
+mqtt:
+  sensor:
+    - name: "Bird Station Sound Level 1kHz"
+      state_topic: "birdnet/soundlevel"
+      value_template: "{{ value_json.b['1.0_kHz'].m }}"
+      unit_of_measurement: "dB"
+      device_class: "sound_pressure"
+      state_class: "measurement"
+```
+
+For multiple sources, prefer Home Assistant discovery: when it is enabled, BirdNET-Go creates a per-source Sound Level sensor automatically, and each one reads its own topic (`<base_topic>/sources/<source_id>/soundlevel`), so no manual YAML is needed. For manual YAML without discovery, filter by source with a trigger-based template sensor that matches the payload's `src` field. Replace `rtsp_65c31a0b` with your source ID (as listed by `/api/v2/system/audio/sources`):
+
+```yaml
+template:
+  - trigger:
+      - platform: mqtt
+        topic: "birdnet/soundlevel"
+    condition:
+      - condition: template
+        value_template: "{{ trigger.payload_json.src == 'rtsp_65c31a0b' }}"
+    sensor:
+      - name: "Backyard Sound Level 1kHz"
+        state: "{{ trigger.payload_json.b['1.0_kHz'].m }}"
+        unit_of_measurement: "dB"
+        device_class: sound_pressure
+        state_class: measurement
 ```
 
 ##### SSE Streaming
@@ -1914,14 +1961,17 @@ GET /api/v2/soundlevels/stream
 
 Sound level data is exposed as Prometheus metrics:
 
-- `birdnet_sound_level_db`: Current sound level for each octave band
-- `birdnet_sound_level_processing_duration_seconds`: Processing time histogram
-- `birdnet_sound_level_publishing_total`: Publishing success/error counters
+- `myaudio_octave_band_level_db`, `myaudio_octave_band_min_db`, `myaudio_octave_band_max_db`, `myaudio_octave_band_mean_db`: Level of each 1/3rd octave band, labelled by `source`, `name` and `frequency_band`
+- `myaudio_sound_level_db`: Overall sound level of a source (`measurement_type="overall"`), the mean of the band powers
+- `myaudio_sound_level_processing_duration_seconds`: Processing time histogram
+- `myaudio_sound_level_publishing_total`: Publishing success/error counters
+
+Every sound level series carries the source ID in both the `source` and the `name` label. The display name is not used, because the metrics listener has no authentication. A dashboard that wants the display name can map it from the source ID with relabeling.
 
 #### Performance Considerations
 
-- **CPU Usage**: Sound level analysis adds approximately 5-10% CPU overhead on a Raspberry Pi 4
-- **Memory**: Minimal additional memory usage (< 10MB)
+- **CPU Usage**: About 7 ms of CPU per second of 48 kHz audio on a Raspberry Pi 5 (0.7% of one core) and 37 ms per second at 256 kHz
+- **Memory**: Under 100 KB per source
 - **Network**: Each 10-second measurement produces ~2KB of JSON data per source
 
 #### Use Cases
@@ -1935,25 +1985,29 @@ Sound level data is exposed as Prometheus metrics:
 
 ##### Digital Signal Processing
 
-The sound level monitoring system implements professional-grade signal processing:
+Band levels are measured with the go-audio-dsp `octave` package:
 
 1. **1/3rd Octave Band Filtering**:
-   - Implements 30 frequency bands according to ISO 266 standard
-   - Center frequencies: 25 Hz to 20 kHz in standard 1/3rd octave steps
-   - Uses 2nd order IIR biquad filters based on Robert Bristow-Johnson's audio EQ cookbook
-   - Q factor calculation: `Q = f_center / (f_high - f_low)` ≈ 4.318 for 1/3rd octave bands
-   - Includes stability checks and numerical overflow protection
+   - 30 frequency bands according to the ISO 266 preferred series
+   - Centre frequencies: 25 Hz to 20 kHz in 1/3rd octave steps; the filters are tuned to the exact base-10 centres `1000 * 10^(n/10)` Hz and the bands are labelled with the nominal frequency
+   - One 2nd order IIR band-pass filter per band (RBJ design with bandwidth prewarping), with a width of log2(10^0.1) octaves
+   - Non-finite input samples count as 0, so they cannot disturb the filter state
 
-2. **RMS and dB Calculation**:
-   - RMS (Root Mean Square) calculation over 1-second windows
-   - dB conversion: `20 * log10(RMS)` relative to digital full scale
-   - Range clamping: -200 dB to +20 dB
-   - Non-finite value protection (NaN/Inf handling)
+2. **Level Calculation**:
+   - Mean square of each band's output over 1-second periods
+   - dB conversion: `10 * log10(mean square)` relative to a digital full scale amplitude of 1.0 (a full scale sine reads -3.01 dB)
+   - Range: -200 dB to +20 dB
 
 3. **Data Aggregation**:
-   - Two-stage aggregation: 1-second measurements → 10-second statistics
-   - Provides min/max/mean for each frequency band
-   - Continuous processing with sample overflow handling
+   - Two-stage aggregation: 1-second levels, then interval statistics
+   - Min, max and arithmetic mean of the 1-second dB values for each frequency band
+
+4. **Accuracy**:
+   - A steady tone at a band's centre frequency reads its true level
+   - White noise reads 1 to 2 dB above an ideal rectangular band, because the noise bandwidth of a second-order band-pass is pi/2 times its 3 dB bandwidth
+   - Near the Nyquist frequency the 20 kHz band at 48 kHz is about 3 dB off at its upper edge
+   - The first second after a start or a settings change includes the filter start-up transient
+   - This is not an IEC 61260-1 class compliant meter
 
 ##### Implementation Architecture
 
@@ -1977,10 +2031,9 @@ The sound level monitoring system implements professional-grade signal processin
    - No A-weighting or C-weighting curves implemented
    - May not correlate directly with perceived loudness
 
-3. **Fixed Aggregation Windows**:
-   - Hardcoded 10-second measurement periods
-   - Cannot adjust for different temporal resolutions
-   - The `interval` setting validates but doesn't change window size
+3. **Aggregation Interval**:
+   - The `interval` setting sets the number of seconds per published measurement (minimum 5, default 10)
+   - The underlying levels are always measured over 1-second periods
 
 4. **Limited Statistical Analysis**:
    - Only provides min/max/mean values
@@ -1989,8 +2042,9 @@ The sound level monitoring system implements professional-grade signal processin
 
 5. **Hardware Dependencies**:
    - Assumes 16-bit audio at system sample rate (typically 48 kHz)
-   - Frequency bands above Nyquist frequency (sample_rate/2) are automatically excluded
+   - Bands whose upper edge reaches 0.95 of the Nyquist frequency (sample_rate/2) are automatically excluded
    - No compensation for microphone frequency response
+   - Not an IEC 61260-1 class meter
 
 ##### Debug Options
 
@@ -2001,10 +2055,10 @@ realtime:
   audio:
     soundlevel:
       debug: true # Enable debug logging
-      debug_realtime_logging: true # Enable per-sample logging (very verbose!)
+      debug_realtime_logging: true # Enable per-band logging for every interval (verbose!)
 ```
 
-Debug logs are written to `logs/soundlevel.log`. Use `debug_realtime_logging` sparingly as it generates high log volume.
+Debug logs are written by the `analysis.soundlevel` logger module, and its `analysis.soundlevel.metrics` child for the per-band metric updates. No dedicated log file is configured for it by default, so they go to the application log unless you add a file for that module under `logging.modules`. Use `debug_realtime_logging` sparingly as it logs every band of every interval.
 
 ##### Extending the System
 
@@ -2013,10 +2067,17 @@ Advanced users interested in extending the sound level monitoring capabilities s
 1. **Adding Frequency Weighting**: Could be implemented as post-RMS filter curves
 2. **Calibration Support**: Would require known reference signals and microphone sensitivity data
 3. **Additional Statistics**: Percentile tracking could be added to the aggregation system
-4. **Variable Time Windows**: The 10-second window is currently hardcoded but could be made configurable
-5. **Peak Detection**: True peak tracking would require additional buffer management
+4. **Peak Detection**: True peak tracking would require additional buffer management
 
 The implementation provides a solid foundation for environmental sound monitoring with robust signal processing and comprehensive error handling. While it cannot provide absolute SPL measurements, it excels at relative sound level monitoring and frequency analysis for research and environmental assessment purposes.
+
+##### Changes in this release
+
+Sound level monitoring now uses the go-audio-dsp octave band meter. The previous filters were too narrow near the Nyquist frequency, so the high bands read too low on broadband sound. The high bands now read higher: at 48 kHz by about +6.4 dB in the 20 kHz band, +3.3 dB at 16 kHz, +1.9 dB at 12.5 kHz, +1.2 dB at 10 kHz and +0.7 dB at 8 kHz, with smaller changes down to 2.5 kHz. Bands up to 2 kHz, including the 1 kHz band that the Home Assistant Sound Level sensor shows, change by 0.06 dB or less. At 96 kHz the top band moves by about +1.2 dB and at 256 kHz by +0.1 dB. A steady tone at a band's centre reads the same as before. This affects the MQTT sound level topics, the SSE stream and the Prometheus band gauges. The Prometheus overall sound level, which averages the band powers, rises with broadband high-frequency sound: about +1.8 dB for white noise, +0.3 dB for pink noise and close to 0 dB for typical outdoor sound dominated by low frequencies. Dashboards or automations with thresholds on high bands or on the overall level may need adjusting. Band names and the message format are unchanged. Each source now uses under 100 KB of memory instead of about 11 MB at 48 kHz, and half the CPU on a Raspberry Pi 5.
+
+The `nm` field of the MQTT messages and the `name` field of the SSE stream for signed-in users now show the source name instead of the source ID. The SSE stream sends the source ID as `name` to clients that are not signed in. The `source` field, the per-source MQTT topic and the Home Assistant sensor still use the source ID. The Prometheus sound level series are labelled with the source ID, as before, in both the `source` and the `name` label.
+
+MQTT, SSE and Prometheus each receive every measurement now. Before, with all three enabled, each one received only about a third of them.
 
 ### Push Notifications
 
@@ -2209,7 +2270,7 @@ This produces Discord messages with:
 - Green color bar (color code `3066993` = green; use `15158332` for red, `3447003` for blue)
 - Species name, confidence, and location as inline fields
 
-> **Note**: The `bg_*` metadata fields (bird image URL, confidence, location, etc.) are populated for detection notifications. See [template variables](#available-template-fields) below for the full list.
+> **Note**: The `bg_*` metadata fields (bird image URL, confidence, location, etc.) are populated for detection notifications. See the detection metadata fields in the [Webhook section](#2-webhook-custom-http) below for the full list.
 
 **Troubleshooting Discord**
 
@@ -2819,7 +2880,7 @@ The system tracks three different types of "new" species appearances:
 
 ##### 📅 **New This Year** (Annual First)
 
-- **What it means**: A bird species detected for the first time this calendar year
+- **What it means**: A bird species detected for the first time since the yearly reset date (January 1 by default)
 - **Visual indicator**: Blue calendar icon
 - **When shown**: For 7 days after the first detection of the year (configurable via `yearlyTracking.windowDays`)
 - **Resets**: January 1st each year (configurable via `yearlyTracking.resetMonth` and `resetDay`)
@@ -2863,7 +2924,7 @@ The species tracking system is enabled by default with sensible settings. You ca
 
 ##### Yearly Tracking Settings
 
-Configure how the system tracks first arrivals each calendar year:
+Configure how the system tracks first arrivals each year, counted from the reset date:
 
 - **Enable Yearly Tracking** (`yearlyTracking.enabled`): Turn yearly tracking on/off (default: `true`)
 - **Reset Date** (`yearlyTracking.resetMonth` and `resetDay`): When to reset the yearly list
@@ -2996,6 +3057,11 @@ The application offers several integration points:
 
 * MQTT support for IoT ecosystems.
   - The `retain` flag in MQTT settings is recommended for Home Assistant integration to ensure sensor states are preserved across restarts.
+  - With Home Assistant discovery enabled, each detection with a source ID is also published to a per-source topic, `<base_topic>/sources/<source_id>`, and each source's discovered sensors read their own topic. Here `<source_id>` is the source's internal ID (for example `rtsp_65c31a0b`, as listed by `/api/v2/system/audio/sources`), not its display name, with any character other than letters, digits, `_` and `-` replaced by `_`. A detection from one source therefore does not change another source's sensors. The shared `<base_topic>` still carries every detection, so a subscriber to `<base_topic>/#` receives each message twice (once on the shared topic and once on the per-source topic) while discovery is enabled; subscribe to `<base_topic>` or `<base_topic>/+` to avoid the duplicate. Brokers with topic ACLs must allow publishing to `<base_topic>/sources/#` (and allow Home Assistant to read it), otherwise the discovered sensors stay unknown.
+  - After upgrading, each source's discovered sensors read as unknown until that source's next detection (or next sound level reading, if sound level monitoring is on), because the new per-source topics have no retained message yet. They populate as soon as new data arrives.
+  - The MQTT delivered-message metrics count both publishes: while discovery is enabled, each detection with a source ID increments the counter twice, once for the shared topic and once for the per-source topic.
+  - Turning Home Assistant discovery off removes BirdNET-Go's entities from Home Assistant (if the broker is unreachable at that moment, on the next successful connection). Deleting a stream or audio source in settings removes its entities; disabling a stream keeps them, so they resume when it is enabled again. Renaming a source removes the entities under its old name and publishes them under the new one. A source that merely restarts (watchdog, quiet hours, a brief unplug) keeps its entities and retained state. Turning sound level monitoring off removes the Sound Level sensor.
+  - Changing the node name (main name) or the discovery prefix publishes the entities under the new identity but does not remove the old ones; delete the old BirdNET-Go device in Home Assistant.
 * Telemetry endpoint compatible with Prometheus.
 * BirdWeather API integration for community data sharing.
   - **About BirdWeather:** [BirdWeather.com](https://www.birdweather.com/) is a citizen science platform that collects bird vocalizations from stations around the world. It uses the BirdNET model (developed by Cornell Lab of Ornithology and Chemnitz University of Technology) for identification. Uploading data helps contribute to this global library.
@@ -3022,7 +3088,7 @@ BirdNET-Go provides a Server-Sent Events (SSE) API that streams bird detections 
 - Compatibility with embedded systems and IoT devices
 - Reduced complexity for read-only access to detection data
 
-The endpoints include built-in rate limiting (10 requests per minute per IP) to prevent abuse while maintaining open access.
+The endpoints include built-in rate limiting (10 requests per minute per client; IPv6 clients are counted per /64) to prevent abuse while maintaining open access.
 
 > **🔒 Need Authentication?** If you require password protection for the detection stream API, please file a feature request by creating a GitHub issue at [https://github.com/tphakala/birdnet-go/issues](https://github.com/tphakala/birdnet-go/issues). Include your specific use case and security requirements to help guide the implementation.
 
@@ -3032,7 +3098,7 @@ The endpoints include built-in rate limiting (10 requests per minute per IP) to 
 
 **URL:** `GET /api/v2/detections/stream`  
 **Authentication:** None required (public endpoint)  
-**Rate Limiting:** 10 connections per minute per IP address
+**Rate Limiting:** 10 connections per minute per client (IPv6 clients are counted per /64)
 
 The SSE stream sends different types of events:
 
@@ -3488,10 +3554,6 @@ realtime:
 
 ## Log Rotation
 
-The application supports several log rotation strategies:
-
-- Daily rotation
-- Weekly rotation (on a specified day)
-- Size-based rotation (with configurable maximum size)
+Rotation is based on file size only. Once the active log file grows past `logging.file_output.max_size` (megabytes), it is rotated out. The `max_age` (days), `max_rotated_files` (count) and `compress` (gzip) options under `logging.file_output` decide how long rotated files are kept and whether they are compressed. The [Configuration Reference](configuration-reference.md) lists every option in the `logging` section.
 
 This helps manage log files for long-running installations.

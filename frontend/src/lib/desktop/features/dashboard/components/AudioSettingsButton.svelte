@@ -12,13 +12,25 @@
   - onFilterChange: (value: number) => void - Callback when filter changes
   - onSpeedChange: (value: number) => void - Callback when speed changes
   - disabled?: boolean - Whether the button is disabled (e.g., AudioContext not available)
+  - closeSignal?: number - Bump this to force-close an open popup (e.g. a sibling
+    Audible Bats popup just opened); mirrors AudibleBatsButton
 -->
 <script lang="ts">
   import { Volume2 } from '@lucide/svelte';
   import { dropdown } from '$lib/utils/transitions';
   import { computeAnchorPosition, applyAnchorPosition } from '$lib/utils/anchorPosition';
+  import { useCloseSignal } from '$lib/utils/useCloseSignal.svelte';
   import { t } from '$lib/i18n';
   import { SPEED_OPTIONS, DEFAULT_PLAYBACK_SPEED } from '$lib/utils/audio';
+  import {
+    PLAYBACK_GAIN_MAX_DB,
+    PLAYBACK_GAIN_MIN_DB,
+    PLAYBACK_GAIN_STEP_DB,
+    PLAYBACK_HIGH_PASS_MAX_HZ,
+    PLAYBACK_HIGH_PASS_MIN_HZ,
+    PLAYBACK_HIGH_PASS_STEP_HZ,
+    formatPlaybackGain,
+  } from '$lib/utils/playbackDefaults';
 
   interface Props {
     gainValue: number;
@@ -28,7 +40,10 @@
     onFilterChange: (_value: number) => void;
     onSpeedChange: (_value: number) => void;
     defaultGainValue?: number;
+    /** High-pass cutoff in Hz that Reset returns to and the "modified" dot compares with */
+    defaultFilterFreq?: number;
     disabled?: boolean;
+    closeSignal?: number;
     onMenuOpen?: () => void;
     onMenuClose?: () => void;
   }
@@ -41,16 +56,14 @@
     onFilterChange,
     onSpeedChange,
     defaultGainValue = 0,
+    defaultFilterFreq = PLAYBACK_HIGH_PASS_MIN_HZ,
     disabled = false,
+    closeSignal = 0,
     onMenuOpen,
     onMenuClose,
   }: Props = $props();
 
   // Constants
-  const GAIN_MAX_DB = 24;
-  const GAIN_MIN_DB = -20;
-  const FILTER_HP_MIN_FREQ = 20;
-  const FILTER_HP_MAX_FREQ = 5000;
   // Gap in px between the trigger button and the settings menu.
   const MENU_OFFSET = 8;
 
@@ -69,7 +82,7 @@
   // Check if settings have been modified from defaults
   const hasModifiedSettings = $derived(
     gainValue !== defaultGainValue ||
-      filterFreq > FILTER_HP_MIN_FREQ ||
+      filterFreq !== defaultFilterFreq ||
       playbackSpeed !== DEFAULT_PLAYBACK_SPEED
   );
 
@@ -130,9 +143,21 @@
 
   function handleReset() {
     onGainChange(defaultGainValue);
-    onFilterChange(FILTER_HP_MIN_FREQ);
+    onFilterChange(defaultFilterFreq);
     onSpeedChange(DEFAULT_PLAYBACK_SPEED);
   }
+
+  // Force-close when the parent bumps closeSignal (e.g. the sibling Audible
+  // Bats popup was just opened) so only one popup is ever visible at once.
+  useCloseSignal(
+    () => closeSignal,
+    () => {
+      if (showSettings) {
+        showSettings = false;
+        onMenuClose?.();
+      }
+    }
+  );
 
   $effect(() => {
     if (showSettings) {
@@ -216,14 +241,14 @@
             bind:this={gainSliderElement}
             id={gainSliderId}
             type="range"
-            min={GAIN_MIN_DB}
-            max={GAIN_MAX_DB}
-            step="1"
+            min={PLAYBACK_GAIN_MIN_DB}
+            max={PLAYBACK_GAIN_MAX_DB}
+            step={PLAYBACK_GAIN_STEP_DB}
             value={gainValue}
             oninput={e => onGainChange(Number((e.target as HTMLInputElement).value))}
             class="slider"
           />
-          <span class="slider-value">{gainValue > 0 ? '+' : ''}{gainValue} dB</span>
+          <span class="slider-value">{formatPlaybackGain(gainValue, 'dB')}</span>
         </div>
       </div>
 
@@ -236,9 +261,9 @@
           <input
             id={filterSliderId}
             type="range"
-            min={FILTER_HP_MIN_FREQ}
-            max={FILTER_HP_MAX_FREQ}
-            step="10"
+            min={PLAYBACK_HIGH_PASS_MIN_HZ}
+            max={PLAYBACK_HIGH_PASS_MAX_HZ}
+            step={PLAYBACK_HIGH_PASS_STEP_HZ}
             value={filterFreq}
             oninput={e => onFilterChange(Number((e.target as HTMLInputElement).value))}
             class="slider"
@@ -319,6 +344,13 @@
   .settings-menu {
     position: fixed;
     min-width: 14rem;
+
+    /* Caps the box itself so it can never exceed the viewport on narrow/short
+       screens, independent of the JS position clamp in anchorPosition.ts (which
+       only clamps the left/top offset, not the box's own dimensions). */
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    overflow-y: auto;
     padding: 0.75rem;
     background-color: rgb(30 41 59 / 0.95);
     border: 1px solid rgb(51 65 85);

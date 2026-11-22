@@ -3,7 +3,6 @@ package migration
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/entities"
 	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 	"github.com/tphakala/birdnet-go/internal/detection"
+	"github.com/tphakala/birdnet-go/internal/errors"
 	"github.com/tphakala/birdnet-go/internal/logger"
 	"github.com/tphakala/birdnet-go/internal/notification"
 	"github.com/tphakala/birdnet-go/internal/privacy"
@@ -59,7 +59,7 @@ const validationCatchUpPercent = 5.0
 // used when the percentage-based threshold would be too small for small datasets.
 const validationCatchUpMinThreshold = 100
 
-// validationPreDelay is the delay before validation to let dual-writes complete.
+// validationPreDelay is the delay before each validation attempt.
 const validationPreDelay = 3 * time.Second
 
 // catchUpMaxBatches is the safety limit for catch-up iterations per validation attempt.
@@ -72,14 +72,32 @@ const catchUpMaxBatches = 10000
 // database between migration completion and system restart.
 const tailSyncInterval = 10 * time.Second
 
+// relatedFullScanInterval is how often the tail sync reconciles reviews and
+// locks. Both are edited in place in the legacy store, so seeing an edit needs a
+// read of the whole legacy tables; comments and predictions use cursors and are
+// synced on every tail sync cycle. The first cycle after the worker starts and
+// the final drain always reconcile.
+const relatedFullScanInterval = time.Minute
+
+// Operation names for log fields of the related data sync in tail sync mode.
+const (
+	operationTailSyncRelated   = "tail_sync_related_data"
+	operationFinalDrainRelated = "final_drain_related_data"
+)
+
 // ErrMigrationPaused is returned when migration is paused by user.
-var ErrMigrationPaused = errors.New("migration paused")
+var ErrMigrationPaused = errors.NewStd("migration paused")
 
 // ErrMigrationCancelled is returned when migration is cancelled.
-var ErrMigrationCancelled = errors.New("migration cancelled")
+var ErrMigrationCancelled = errors.NewStd("migration cancelled")
 
 // ErrTooManyErrors is returned when too many consecutive errors occur.
-var ErrTooManyErrors = errors.New("too many consecutive errors")
+var ErrTooManyErrors = errors.NewStd("too many consecutive errors")
+
+// ErrWorkerStopTimeout is returned by Stop and Abandon when the worker goroutine
+// has not exited before the caller's context ended. The worker keeps stopping in
+// the background.
+var ErrWorkerStopTimeout = errors.NewStd("migration worker did not stop in time")
 
 // rateSample records a batch's timing for rate calculation.
 type rateSample struct {
@@ -117,9 +135,17 @@ type Worker struct {
 	mu                sync.RWMutex
 	running           bool
 	paused            bool
+	done              chan struct{} // closed when the current run goroutine has exited; nil before the first Start
+	stopping          bool          // stopCh is already closed for the current run
+	skipFinalDrain    bool          // Abandon was requested: tail sync must not drain on exit
 	lastError         error
 	consecutiveErrors int
 	maxConsecErrors   int
+
+	// Tail sync state. Only the run goroutine touches these; Start resets them
+	// before it spawns the goroutine.
+	lastRelatedFullScan          time.Time // when the last complete review and lock reconcile started
+	relatedSyncUnavailableLogged bool      // the "older version" notice was logged for this run
 
 	// Rate tracking for time estimates (sliding window for display)
 	rateSamples []rateSample
@@ -169,31 +195,31 @@ type WorkerConfig struct {
 func NewWorker(cfg *WorkerConfig) (*Worker, error) {
 	// Validate required dependencies
 	if cfg == nil {
-		return nil, errors.New("worker config is required")
+		return nil, errors.NewStd("worker config is required")
 	}
 	if cfg.Legacy == nil {
-		return nil, errors.New("legacy repository is required")
+		return nil, errors.NewStd("legacy repository is required")
 	}
 	if cfg.V2Detection == nil {
-		return nil, errors.New("v2 detection repository is required")
+		return nil, errors.NewStd("v2 detection repository is required")
 	}
 	if cfg.LabelRepo == nil {
-		return nil, errors.New("label repository is required")
+		return nil, errors.NewStd("label repository is required")
 	}
 	if cfg.ModelRepo == nil {
-		return nil, errors.New("model repository is required")
+		return nil, errors.NewStd("model repository is required")
 	}
 	if cfg.SourceRepo == nil {
-		return nil, errors.New("source repository is required")
+		return nil, errors.NewStd("source repository is required")
 	}
 	if cfg.StateManager == nil {
-		return nil, errors.New("state manager is required")
+		return nil, errors.NewStd("state manager is required")
 	}
 	if cfg.Logger == nil {
-		return nil, errors.New("logger is required")
+		return nil, errors.NewStd("logger is required")
 	}
 	if cfg.SpeciesLabelTypeID == 0 {
-		return nil, errors.New("species label type ID is required")
+		return nil, errors.NewStd("species label type ID is required")
 	}
 
 	batchSize := cfg.BatchSize
@@ -244,16 +270,27 @@ func NewWorker(cfg *WorkerConfig) (*Worker, error) {
 
 // Start begins the background migration process.
 // It should be called after the state manager transitions to DUAL_WRITE.
+// It fails while a previous run goroutine is still alive, including one that is
+// still stopping; Stop or Abandon return only after the goroutine has exited.
+// A start clears the abandon request and the tail sync bookkeeping of the
+// previous run (the last review and lock reconcile time and the "older version"
+// notice), so the first tail sync cycle of the new run reconciles reviews and locks.
 func (w *Worker) Start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.running {
 		w.mu.Unlock()
-		return errors.New("worker already running")
+		return errors.NewStd("worker already running")
 	}
 	w.running = true
 	w.paused = false
 	w.lastError = nil
 	w.consecutiveErrors = 0
+	w.stopping = false
+	w.skipFinalDrain = false
+	w.lastRelatedFullScan = time.Time{}
+	w.relatedSyncUnavailableLogged = false
+	done := make(chan struct{})
+	w.done = done
 
 	// Reinitialize control channels in case they were closed by a previous Stop()
 	w.stopCh = make(chan struct{})
@@ -268,7 +305,7 @@ func (w *Worker) Start(ctx context.Context) error {
 
 	w.mu.Unlock()
 
-	go w.run(ctx)
+	go w.run(ctx, done)
 	return nil
 }
 
@@ -277,7 +314,7 @@ func (w *Worker) Pause() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if !w.running || w.paused {
+	if !w.running || w.stopping || w.paused {
 		return
 	}
 
@@ -291,7 +328,7 @@ func (w *Worker) Resume() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if !w.running || !w.paused {
+	if !w.running || w.stopping || !w.paused {
 		return
 	}
 
@@ -300,20 +337,61 @@ func (w *Worker) Resume() {
 	w.resumeCh = make(chan struct{})
 }
 
-// Stop permanently stops the migration worker.
-func (w *Worker) Stop() {
+// Stop asks the worker to stop and waits until its goroutine has exited or ctx
+// ends. A stop once the migration is completed (tail sync mode) drains legacy
+// rows written since the last sync, detections first, then related data;
+// Abandon skips the drain. A stop while migrating or validating exits without
+// it; a paused worker whose migration is completed drains too. It is safe to
+// call repeatedly and concurrently, and returns nil when the worker is not running. On timeout it returns an error wrapping
+// ErrWorkerStopTimeout and the worker keeps stopping in the background.
+func (w *Worker) Stop(ctx context.Context) error {
+	return w.stop(ctx, false)
+}
+
+// Abandon stops the worker like Stop but skips the final tail sync drain. Use it
+// when the migration is being discarded (cancel, rollback), so nothing writes to
+// the v2 tables after the caller resets the state.
+func (w *Worker) Abandon(ctx context.Context) error {
+	return w.stop(ctx, true)
+}
+
+// stop signals the current run to exit and waits for it.
+func (w *Worker) stop(ctx context.Context, skipDrain bool) error {
 	w.mu.Lock()
 	if !w.running {
 		w.mu.Unlock()
-		return
+		return nil
 	}
-
-	w.running = false
-	close(w.stopCh)
+	if skipDrain {
+		w.skipFinalDrain = true
+	}
+	if !w.stopping {
+		w.stopping = true
+		close(w.stopCh)
+	}
+	done := w.done
 	w.mu.Unlock()
+
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("%w: %w", ErrWorkerStopTimeout, ctx.Err())
+	}
 }
 
-// IsRunning returns whether the worker is currently running.
+// shouldSkipFinalDrain reports whether Abandon was requested for the current run.
+func (w *Worker) shouldSkipFinalDrain() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.skipFinalDrain
+}
+
+// IsRunning returns whether a run goroutine is alive, including while it is
+// stopping.
 func (w *Worker) IsRunning() bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -342,15 +420,18 @@ const (
 	runActionReturn
 )
 
-// run is the main migration loop.
-func (w *Worker) run(ctx context.Context) {
+// run is the main migration loop. It closes done as its last step, after
+// clearing running, so a caller that waited on done sees a worker that has made
+// its last write. When the loop ends while the migration is completed, run
+// performs the final drain (detections, then related data) before that, unless
+// Abandon was requested.
+func (w *Worker) run(ctx context.Context, done chan struct{}) {
 	var panicked bool
 
 	defer func() {
-		w.mu.Lock()
+		w.mu.RLock()
 		wasPaused := w.paused
-		w.running = false
-		w.mu.Unlock()
+		w.mu.RUnlock()
 		// Clear phase on exit
 		_ = w.stateManager.SetCurrentPhase(entities.MigrationPhaseNone)
 
@@ -364,6 +445,12 @@ func (w *Worker) run(ctx context.Context) {
 				w.telemetry.ReportCancelled(state.MigratedRecords, state.TotalRecords)
 			}
 		}
+
+		// Last step: only now may Start spawn a new run or a caller touch state.
+		w.mu.Lock()
+		w.running = false
+		w.mu.Unlock()
+		close(done)
 	}()
 
 	// Recover from panics in the migration goroutine to prevent silent death.
@@ -397,9 +484,28 @@ func (w *Worker) run(ctx context.Context) {
 	for {
 		action := w.runIteration(ctx)
 		if action == runActionReturn {
-			return
+			break
 		}
 	}
+
+	// Once the migration is completed, every exit that is not an abandon
+	// drains, whether the stop arrived while waiting, between batches, inside a
+	// related data pass or before the first tail sync cycle. A panic in the
+	// drain is recovered by the deferred handler above.
+	if w.inTailSyncMode() {
+		w.finalDrain("worker exiting")
+	}
+}
+
+// inTailSyncMode reports whether the migration is completed and a legacy
+// repository is available, which is when the worker keeps legacy rows
+// synced and an exit has a final drain to run.
+func (w *Worker) inTailSyncMode() bool {
+	if w.legacy == nil {
+		return false
+	}
+	state, err := w.stateManager.GetState()
+	return err == nil && state.State == entities.MigrationStatusCompleted
 }
 
 // runIteration processes one iteration of the migration loop.
@@ -492,6 +598,8 @@ func (w *Worker) handlePausedState(ctx context.Context) runAction {
 }
 
 // handleValidatingState runs validation with auto-retry and catch-up logic.
+// It returns promptly when the context ends or the worker is asked to stop,
+// including during the delay before each validation attempt.
 // If validation fails due to small count differences (from records added during migration),
 // it attempts to catch up by migrating the new records and retrying validation.
 func (w *Worker) handleValidatingState(ctx context.Context) runAction {
@@ -501,9 +609,11 @@ func (w *Worker) handleValidatingState(ctx context.Context) runAction {
 	for attempt := 1; attempt <= validationMaxRetries; attempt++ {
 		w.logger.Info("running validation", logger.Int("attempt", attempt))
 
-		// Wait for in-flight dual-writes to complete
+		// Wait before counting records
 		select {
 		case <-ctx.Done():
+			return runActionReturn
+		case <-w.stopCh:
 			return runActionReturn
 		case <-time.After(validationPreDelay):
 		}
@@ -614,7 +724,7 @@ func (w *Worker) completeValidation(_ context.Context) runAction {
 		}
 	}
 
-	// Continue running — next iteration will enter tail sync via COMPLETED case
+	// Continue running: next iteration will enter tail sync via COMPLETED case
 	return runActionContinue
 }
 
@@ -622,7 +732,8 @@ func (w *Worker) completeValidation(_ context.Context) runAction {
 // Dirty IDs are records that failed migration previously and are the most likely
 // cause of count mismatches. Iterates over batches until all dirty IDs are
 // processed or no progress is made (to avoid infinite loops on persistent errors).
-// Returns the number of records successfully migrated.
+// Returns the number of dirty IDs reconciled (migrated from legacy, or removed from v2 when
+// the legacy row was deleted).
 // Returns ctx.Err() if the context is cancelled during processing.
 func (w *Worker) processDirtyIDs(ctx context.Context) (int64, error) {
 	var totalCaught int64
@@ -642,7 +753,7 @@ func (w *Worker) processDirtyIDs(ctx context.Context) (int64, error) {
 		if err != nil {
 			return totalCaught, err
 		}
-		// Stop if no progress was made — remaining IDs have persistent errors
+		// Stop if no progress was made: remaining IDs have persistent errors
 		if batchCaught == 0 {
 			break
 		}
@@ -655,8 +766,9 @@ func (w *Worker) processDirtyIDs(ctx context.Context) (int64, error) {
 	return totalCaught, nil
 }
 
-// processDirtyIDsBatch processes a single batch of dirty IDs, migrating each
-// from legacy to v2. Returns the count of successfully migrated records.
+// processDirtyIDsBatch processes a single batch of dirty IDs, migrating each from legacy to
+// v2. Returns the count of dirty IDs reconciled in this batch: records migrated, plus ghosts
+// removed from v2 when their legacy row was deleted (both count as forward progress).
 func (w *Worker) processDirtyIDsBatch(ctx context.Context, dirtyIDs []uint) (int64, error) {
 	var caught int64
 	for _, dirtyID := range dirtyIDs {
@@ -685,13 +797,21 @@ func (w *Worker) processDirtyIDsBatch(ctx context.Context, dirtyIDs []uint) (int
 			continue
 		}
 		if len(results) == 0 || results[0].ID != dirtyID {
-			w.logger.Warn("dirty ID not found in legacy, removing",
-				logger.Uint64("id", uint64(dirtyID)))
-			if removeErr := w.stateManager.RemoveDirtyID(dirtyID); removeErr != nil {
-				w.logger.Warn("failed to remove stale dirty ID",
+			// The legacy row for this dirty ID is gone, so the detection was deleted and any
+			// surviving v2 row is an orphan that would resurrect after v2 promotion.
+			// Reconcile the v2 side and clear the marker; on any error other than
+			// not-found/locked, leave the id dirty for retry.
+			if recErr := reconcileDeletedGhost(ctx, w.v2Detection, w.stateManager, dirtyID); recErr != nil {
+				w.logger.Warn("failed to reconcile deleted dirty ID in v2, will retry",
 					logger.Uint64("id", uint64(dirtyID)),
-					logger.Error(removeErr))
+					logger.Error(recErr))
+				continue
 			}
+			// Count the reconciled ghost as progress so processDirtyIDs does not stop early
+			// when a batch contained only deletions.
+			w.logger.Debug("dirty ID missing from legacy, reconciled deletion in v2",
+				logger.Uint64("id", uint64(dirtyID)))
+			caught++
 			continue
 		}
 
@@ -703,7 +823,7 @@ func (w *Worker) processDirtyIDsBatch(ctx context.Context, dirtyIDs []uint) (int
 			continue // Leave as dirty for next attempt
 		}
 
-		// Successfully migrated — remove from dirty set
+		// Successfully migrated: remove from dirty set
 		if removeErr := w.stateManager.RemoveDirtyID(dirtyID); removeErr != nil {
 			w.logger.Warn("failed to remove dirty ID after migration",
 				logger.Uint64("id", uint64(dirtyID)),
@@ -714,6 +834,26 @@ func (w *Worker) processDirtyIDsBatch(ctx context.Context, dirtyIDs []uint) (int
 	return caught, nil
 }
 
+// reconcileDeletedGhost removes from v2 a detection whose legacy row no longer exists and
+// clears its dirty marker. Legacy is the source of truth during migration, so a missing
+// legacy row means the detection was deleted; a surviving v2 row is an orphan that would
+// resurrect after v2 promotion. A row already absent from v2 (ErrDetectionNotFound) needs
+// no delete. A locked, user-verified v2 row (ErrDetectionLocked) is never force-deleted;
+// its marker is still cleared so the id does not linger in the dirty set and block
+// migration validation forever, and the protected row is left in place. Any other delete
+// error leaves the marker for a later retry (a non-nil return); it returns nil once the
+// marker is cleared or the row was already gone.
+func reconcileDeletedGhost(ctx context.Context, v2Repo repository.DetectionRepository, sm *datastoreV2.StateManager, id uint) error {
+	if v2Repo == nil || sm == nil {
+		return fmt.Errorf("reconcile deleted ghost %d: nil repository or state manager", id)
+	}
+	if delErr := v2Repo.Delete(ctx, id); delErr != nil &&
+		!errors.Is(delErr, repository.ErrDetectionNotFound) && !errors.Is(delErr, repository.ErrDetectionLocked) {
+		return delErr
+	}
+	return sm.RemoveDirtyID(id)
+}
+
 // runCatchUp finds and migrates records that exist in legacy but not in V2.
 // Unlike processBatch which continues from LastMigratedID, this function
 // scans the entire legacy database to find actually missing records.
@@ -722,7 +862,7 @@ func (w *Worker) processDirtyIDsBatch(ctx context.Context, dirtyIDs []uint) (int
 func (w *Worker) runCatchUp(ctx context.Context) (int64, error) {
 	var totalCaught int64
 
-	// Phase 1: Process known dirty IDs first — these are the most likely cause
+	// Phase 1: Process known dirty IDs first, since these are the most likely cause
 	// of count mismatches and can be resolved without a full scan.
 	dirtyCaught, dirtyErr := w.processDirtyIDs(ctx)
 	if dirtyErr != nil {
@@ -864,8 +1004,94 @@ func (w *Worker) handleCutoverState(ctx context.Context) runAction {
 		}
 	}
 
-	// Continue running — next iteration will enter tail sync via COMPLETED case
+	// Continue running: next iteration will enter tail sync via COMPLETED case
 	return runActionContinue
+}
+
+// finalDrain runs the last tail sync drain on exit unless Abandon was requested.
+func (w *Worker) finalDrain(reason string) {
+	if w.shouldSkipFinalDrain() {
+		w.logger.Info("tail sync: migration abandoned, skipping final drain", logger.String("reason", reason))
+		return
+	}
+	w.logger.Info("tail sync: performing final drain", logger.String("reason", reason))
+	w.drainLegacyRecords(context.Background())
+	w.drainRelatedData(context.Background())
+}
+
+// drainRelatedData runs the last related data sync of the final drain: comments
+// and predictions from their cursors, then a full review and lock reconcile. It
+// runs after the detections drain so the detections the rows belong to are in v2.
+func (w *Worker) drainRelatedData(ctx context.Context) {
+	if w.relatedMigrator == nil {
+		return
+	}
+	result, err := w.relatedMigrator.SyncTail(ctx, true)
+	w.logRelatedTailSync(&result, err, operationFinalDrainRelated)
+}
+
+// logRelatedTailSync logs the outcome of a related data tail sync.
+// datastoreV2.ErrRelatedSyncNotRecorded (related data copied by an older
+// version) is logged once per run, other errors on every call.
+func (w *Worker) logRelatedTailSync(result *TailSyncResult, err error, operation string) {
+	switch {
+	case err == nil:
+		if result.Blocked {
+			w.logger.Debug("related data sync waiting for detections not yet in v2",
+				logger.String("operation", operation))
+		}
+	case errors.Is(err, context.Canceled):
+		w.logger.Debug("related data tail sync interrupted by shutdown",
+			logger.String("operation", operation))
+	case errors.Is(err, datastoreV2.ErrRelatedSyncNotRecorded):
+		if !w.relatedSyncUnavailableLogged {
+			w.relatedSyncUnavailableLogged = true
+			w.logger.Info("related data tail sync unavailable: related data was copied by an older version",
+				logger.String("operation", operation))
+		}
+	default:
+		w.logger.Warn("related data tail sync failed",
+			logger.String("operation", operation),
+			logger.Error(err))
+	}
+}
+
+// syncRelatedTail runs one related data sync of a tail sync cycle. Comments and
+// predictions are synced every cycle; reviews and locks on the first cycle after
+// the worker starts and then every relatedFullScanInterval. The pass stops
+// promptly when the worker is asked to stop; the final drain then continues it.
+func (w *Worker) syncRelatedTail(ctx context.Context) {
+	if w.relatedMigrator == nil {
+		return
+	}
+	syncCtx, cancel := w.stopAwareContext(ctx)
+	defer cancel()
+
+	fullScan := w.lastRelatedFullScan.IsZero() || time.Since(w.lastRelatedFullScan) >= relatedFullScanInterval
+	scanStart := time.Now()
+	result, err := w.relatedMigrator.SyncTail(syncCtx, fullScan)
+	if result.FullScanCompleted {
+		w.lastRelatedFullScan = scanStart
+	}
+	w.logRelatedTailSync(&result, err, operationTailSyncRelated)
+}
+
+// stopAwareContext returns a context that ends when ctx ends or the worker is
+// asked to stop. The caller must call the returned cancel function.
+func (w *Worker) stopAwareContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	w.mu.RLock()
+	stopCh := w.stopCh
+	w.mu.RUnlock()
+
+	stopCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		select {
+		case <-stopCh:
+			cancel()
+		case <-stopCtx.Done():
+		}
+	}()
+	return stopCtx, cancel
 }
 
 // runTailSync runs a single tail sync iteration after migration has completed.
@@ -874,8 +1100,11 @@ func (w *Worker) handleCutoverState(ctx context.Context) runAction {
 // (issue #2442).
 //
 // The method sleeps for tailSyncInterval between checks, responding to stop
-// signals during the wait. Returns runActionContinue to keep the worker loop
-// alive, or runActionReturn on shutdown.
+// signals during the wait. After the detections it syncs the related data
+// (comments, predictions, and periodically reviews and locks). It returns
+// runActionReturn on shutdown without draining: run drains once it sees the
+// worker was in tail sync mode, except after Abandon. Returns runActionContinue
+// to keep the worker loop alive.
 func (w *Worker) runTailSync(ctx context.Context) runAction {
 	// If legacy repository is not available, nothing to sync
 	if w.legacy == nil {
@@ -883,16 +1112,12 @@ func (w *Worker) runTailSync(ctx context.Context) runAction {
 		return runActionReturn
 	}
 
-	// Sleep with responsive cancellation. On shutdown, perform a final
-	// drain to minimize data loss before the system switches to v2-only mode.
+	// Sleep with responsive cancellation. An exit drains (see run), unless the
+	// migration is being abandoned (cancel, rollback).
 	select {
 	case <-ctx.Done():
-		w.logger.Info("tail sync: context cancelled, performing final drain")
-		w.drainLegacyRecords(context.Background())
 		return runActionReturn
 	case <-w.stopCh:
-		w.logger.Info("tail sync: shutdown requested, performing final drain")
-		w.drainLegacyRecords(context.Background())
 		return runActionReturn
 	case <-time.After(tailSyncInterval):
 	}
@@ -909,7 +1134,7 @@ func (w *Worker) runTailSync(ctx context.Context) runAction {
 			break
 		}
 		// If no records were synced in a non-empty batch, all records failed.
-		// Break to avoid a tight retry loop — failed records are tracked as
+		// Break to avoid a tight retry loop: failed records are tracked as
 		// dirty IDs and will be retried on the next tail sync cycle.
 		if synced == 0 {
 			w.logger.Warn("tail sync: all records in batch failed, backing off")
@@ -937,6 +1162,9 @@ func (w *Worker) runTailSync(ctx context.Context) runAction {
 			logger.String("operation", "tail_sync_dirty_id_retry"),
 			logger.Int64("count", caught))
 	}
+
+	// Related data goes last: it needs the detections above in v2.
+	w.syncRelatedTail(ctx)
 
 	return runActionContinue
 }
@@ -1080,6 +1308,8 @@ func (w *Worker) failOnValidation() {
 // Handles the case where we're still in dual_write by transitioning through migrating first.
 // The ctx parameter is used as the parent context for related data migration, ensuring
 // cancellation from Start(ctx) propagates to the migration.
+// When an auxiliary migrator is configured, its outcome is recorded in the same
+// UPDATE as the transition; it never changes whether the transition happens.
 func (w *Worker) transitionToValidation(ctx context.Context) {
 	w.logger.Info("migration complete, starting validation")
 
@@ -1132,6 +1362,10 @@ func (w *Worker) transitionToValidation(ctx context.Context) {
 	}
 
 	// Migrate auxiliary data (weather, thresholds, image cache, notifications)
+	var (
+		auxStatus entities.AuxiliaryDataStatus
+		auxMsg    string
+	)
 	if w.auxiliaryMigrator != nil {
 		w.logger.Info("starting auxiliary data migration")
 
@@ -1166,6 +1400,9 @@ func (w *Worker) transitionToValidation(ctx context.Context) {
 				auxResult.LogErrors(w.logger)
 			}
 		}
+
+		auxStatus, auxMsg = auxiliaryOutcome(auxResult, auxErr)
+		w.logger.Info("auxiliary data outcome", logger.String("status", string(auxStatus)))
 	}
 
 	// Clear the phase after related data migration (also resets phase_number/total_phases)
@@ -1173,10 +1410,36 @@ func (w *Worker) transitionToValidation(ctx context.Context) {
 		w.logger.Warn("failed to clear migration phase", logger.Error(err))
 	}
 
-	// Now transition to validating
-	if err := w.stateManager.TransitionToValidating(); err != nil {
-		w.logger.Error("failed to transition to validating", logger.Error(err))
+	// Now transition to validating, recording the auxiliary outcome in the same
+	// UPDATE so it exists only if this transition happened after the run above.
+	var transitionErr error
+	if w.auxiliaryMigrator != nil {
+		transitionErr = w.stateManager.TransitionToValidatingWithAuxiliaryOutcome(auxStatus, auxMsg)
+	} else {
+		transitionErr = w.stateManager.TransitionToValidating()
 	}
+	if transitionErr != nil {
+		w.logger.Error("failed to transition to validating", logger.Error(transitionErr))
+	}
+}
+
+// auxRunFailedSummary is the persisted summary when the auxiliary migration returned
+// an error instead of a result.
+const auxRunFailedSummary = "auxiliary migration could not run"
+
+// auxiliaryOutcome maps the auxiliary migration result to the status and error
+// summary persisted with the validating transition. A MigrateAll error means the
+// run did not copy anything reliably and is recorded as failed. The persisted
+// summary is a fixed message because it is shown in the status API and the support
+// dump, and an error text can carry paths or credentials; the caller logs the error.
+func auxiliaryOutcome(result *AuxiliaryMigrationResult, err error) (status entities.AuxiliaryDataStatus, summary string) {
+	if err != nil {
+		return entities.AuxiliaryDataStatusFailed, auxRunFailedSummary
+	}
+	if result == nil {
+		return entities.AuxiliaryDataStatusFailed, "auxiliary migration returned no result"
+	}
+	return result.Outcome()
 }
 
 // updateBatchProgress records rate sample and updates progress.
@@ -1296,7 +1559,7 @@ func (w *Worker) validateWithCounts(ctx context.Context) (legacyCount, v2Count i
 		logger.Int64("legacy", legacyCount),
 		logger.Int64("v2", v2Count))
 
-	// V2 should have at least as many records as legacy (could have more from dual-write)
+	// V2 should have at least as many records as legacy (it can have more, for example a locked v2 row kept after its legacy row was deleted)
 	if v2Count < legacyCount {
 		return legacyCount, v2Count, fmt.Errorf("v2 count (%d) is less than legacy count (%d)", v2Count, legacyCount)
 	}
@@ -1395,10 +1658,10 @@ type batchResult struct {
 // Returns the number of records migrated and the highest ID processed.
 func (w *Worker) processBatch(ctx context.Context) (batchResult, error) {
 	// Get the last migrated ID from the state manager (NOT from V2 table).
-	// CRITICAL: We must use state.LastMigratedID because during dual-write mode,
-	// new detections are written to V2 with high IDs. Querying MAX(legacy_id)
-	// from V2 would return the newest detection's ID, causing the worker to
-	// incorrectly believe all historical records have been migrated.
+	// CRITICAL: We must use state.LastMigratedID because V2 can hold
+	// rows above the watermark (for example from catch-up or tail sync). Querying
+	// MAX(legacy_id) from V2 would then run ahead of the watermark, causing the
+	// worker to incorrectly believe all historical records have been migrated.
 	state, err := w.stateManager.GetState()
 	if err != nil {
 		return batchResult{}, fmt.Errorf("failed to get migration state: %w", err)
@@ -1638,7 +1901,11 @@ func (w *Worker) updateExistingRecords(ctx context.Context, records []*detection
 		}
 		if det.ClipName != nil {
 			updates["clip_name"] = *det.ClipName
+			// Keep clip_name and spectrogram_clip_name mutually exclusive.
+			updates["spectrogram_clip_name"] = nil
 		}
+		// clip_sample_rate is deliberately not touched: the legacy table has no such
+		// column, so the migration has nothing to copy and must not clear a stored value.
 
 		if updateErr := w.v2Detection.Update(ctx, r.ID, updates); updateErr != nil {
 			w.logger.Warn("failed to update record", logger.Uint64("id", uint64(r.ID)), logger.Error(updateErr))
@@ -1665,7 +1932,7 @@ func (w *Worker) migrateRecord(ctx context.Context, result *detection.Result) er
 		return fmt.Errorf("conversion failed: %w", err)
 	}
 
-	// Check if record already exists in V2 (from dual-write)
+	// Check if record already exists in V2 (from an earlier pass)
 	existing, err := w.v2Detection.Get(ctx, result.ID)
 	if err == nil && existing != nil {
 		// Record already exists - check if it's locked
@@ -1688,7 +1955,10 @@ func (w *Worker) migrateRecord(ctx context.Context, result *detection.Result) er
 		}
 		if det.ClipName != nil {
 			updates["clip_name"] = *det.ClipName
+			// Keep clip_name and spectrogram_clip_name mutually exclusive.
+			updates["spectrogram_clip_name"] = nil
 		}
+		// clip_sample_rate is left untouched here too (see the update above).
 		return w.v2Detection.Update(ctx, result.ID, updates)
 	}
 

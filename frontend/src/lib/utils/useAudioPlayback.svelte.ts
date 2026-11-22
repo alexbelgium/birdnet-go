@@ -25,7 +25,7 @@
  *   // On destroy: cleanup is automatic via onMount return
  */
 
-import { onMount } from 'svelte';
+import { onMount, untrack } from 'svelte';
 import {
   applyPlaybackRate,
   dbToGain,
@@ -34,7 +34,19 @@ import {
   PROGRESS_UPDATE_INTERVAL_MS,
   MAX_AUDIO_LOAD_RETRIES,
   AUDIO_RETRY_DELAY_MS,
+  isPlayInterruptedError,
+  pendingRetryDelayMs,
+  probeAudioSource,
 } from '$lib/utils/audio';
+import { swapSourceKeepingPosition } from '$lib/utils/playbackDenoise';
+import {
+  PLAYBACK_GAIN_MAX_DB,
+  PLAYBACK_GAIN_MIN_DB,
+  PLAYBACK_HIGH_PASS_MAX_HZ,
+  PLAYBACK_HIGH_PASS_MIN_HZ,
+  clampToRange,
+} from '$lib/utils/playbackDefaults';
+import { isSpectrogramSourceKnownMissing } from '$lib/utils/spectrogramStatus';
 import {
   getAudioContext,
   isAudioContextSupported,
@@ -54,10 +66,18 @@ const logger = loggers.audio;
 export interface AudioPlaybackOptions {
   /** Initial audio source URL */
   audioUrl: string;
-  /** Unique detection ID for logging and element IDs */
+  /**
+   * URL played instead of audioUrl once the first play starts (the denoised
+   * clip when a playback denoise default is set). audioUrl is still what loads
+   * for metadata, so a row never triggers server processing just by rendering.
+   */
+  playUrl?: string;
+  /** Unique detection ID for logging, element IDs and the known-missing check; read once, so it must not change for one instance */
   detectionId: string;
   /** Default gain in dB (default: 0) */
   defaultGainDb?: number;
+  /** Default high-pass cutoff in Hz (default: PLAYBACK_HIGH_PASS_MIN_HZ, which is off) */
+  defaultFilterFreq?: number;
   /** Callback when playback starts - used to freeze SSE detection updates */
   onPlayStart?: () => void;
   /** Callback after playback stops (with PLAY_END_DELAY_MS delay) - resumes SSE */
@@ -95,18 +115,25 @@ export interface AudioPlaybackState {
   togglePlayPause: () => Promise<void>;
   /** Seek to a specific time in seconds */
   seek: (timeSec: number) => void;
-  /** Update gain in dB. Clamps to [0, MAX_GAIN_DB]. */
+  /** Update gain in dB. Clamps to [PLAYBACK_GAIN_MIN_DB, PLAYBACK_GAIN_MAX_DB]. */
   updateGain: (db: number) => void;
   /** Update high-pass filter frequency in Hz */
   updateFilter: (freq: number) => void;
   /** Change playback speed */
   setPlaybackSpeed: (speed: number) => void;
-  /** Update the audio source URL (e.g. when detection changes) */
-  setAudioUrl: (url: string) => void;
+  /** Update the audio source URL (e.g. when detection changes) and the URL its first play switches to */
+  setAudioUrl: (url: string, playUrl?: string) => void;
 }
 
 export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackState {
-  const { detectionId, defaultGainDb = 0, onPlayStart, onPlayEnd, debug = false } = options;
+  const {
+    detectionId,
+    defaultGainDb = 0,
+    defaultFilterFreq = PLAYBACK_HIGH_PASS_MIN_HZ,
+    onPlayStart,
+    onPlayEnd,
+    debug = false,
+  } = options;
 
   // Debug logging helper
   const debugLog = (message: string, data?: unknown) => {
@@ -118,6 +145,13 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
 
   // --- Reactive state ---
   let audioUrl = $state(options.audioUrl);
+  // The URL the first play switches to ('' for none) and whether that switch has
+  // happened. Plain: the swap is made by hand in togglePlayPause.
+  let playUrl = options.playUrl ?? '';
+  let playSwapped = false;
+  // Set when the play URL failed for a reason a retry cannot fix: the stored clip
+  // plays instead until the row is given another clip.
+  let denoiseFailed = false;
   let audioElement = $state<HTMLAudioElement | null>(null);
   let isPlaying = $state(false);
   let currentTime = $state(0);
@@ -127,7 +161,7 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
   let error = $state<string | null>(null);
   let audioContextAvailable = $state(true);
   let gainValue = $state(defaultGainDb);
-  let filterFreq = $state(20);
+  let filterFreq = $state(defaultFilterFreq);
   let playbackSpeed = $state(1.0);
 
   // --- Non-reactive internal state ---
@@ -139,6 +173,8 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
   let canplayTimeoutId: ReturnType<typeof setTimeout> | undefined;
   let audioRetryCount = 0;
   let audioRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  // Aborts the one byte probe of the audio URL that runs beside the first retry timer.
+  let audioProbeController: AbortController | undefined;
   // True when the user pressed play during an active load retry; consumed by the
   // 'canplay' handler to resume playback once the reloaded clip is ready, so the
   // play intent is not lost when the transient error is suppressed.
@@ -148,11 +184,6 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
     event: string;
     handler: EventListener;
   }> = [];
-
-  // --- Constants ---
-  const GAIN_MAX_DB = 24;
-  const FILTER_HP_MIN_FREQ = 20;
-  const FILTER_HP_MAX_FREQ = 10000;
 
   // --- Helper functions ---
 
@@ -197,6 +228,185 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
     if (audioElement) {
       duration = audioElement.duration;
     }
+    // Metadata is enough to play: do not wait for 'canplay', which may not fire
+    // under preload=metadata.
+    isLoading = false;
+    if (canplayTimeoutId) {
+      clearTimeout(canplayTimeoutId);
+      canplayTimeoutId = undefined;
+    }
+    consumePendingPlay();
+  }
+
+  // Stop bookkeeping shared by the pause listener and by deliberate resets.
+  function handlePause() {
+    isPlaying = false;
+    stopInterval();
+    clearPlayEndTimeout();
+    playEndTimeout = setTimeout(() => {
+      onPlayEnd?.();
+    }, PLAY_END_DELAY_MS);
+  }
+
+  // Whether the element currently loads the play URL.
+  function onPlayUrl(): boolean {
+    return playSwapped && playUrl !== '' && !denoiseFailed;
+  }
+
+  // The clip a (re)load uses: the play URL once the first play switched to it.
+  function currentUrl(): string {
+    return onPlayUrl() ? playUrl : audioUrl;
+  }
+
+  // Switch from the stored clip to the play URL on the first play, keeping the
+  // position. Runs synchronously in the click, before any await, so the play
+  // call that follows keeps its user gesture.
+  function useDenoisedSource() {
+    if (playSwapped || denoiseFailed || !playUrl || !audioElement) return;
+    playSwapped = true;
+    // A retry of the stored clip must not reload or spend the play URL's budget.
+    clearRetryTimer();
+    audioRetryCount = 0;
+    swapSourceKeepingPosition(audioElement, playUrl);
+  }
+
+  // A src assignment or load() pauses the element without a 'pause' event, so
+  // mirror the pause listener when the flag still says playing.
+  function markPlaybackStopped() {
+    if (isPlaying) handlePause();
+  }
+
+  // Also ends the probe: it only matters while the retry it may cancel is pending.
+  function clearRetryTimer() {
+    audioProbeController?.abort();
+    audioProbeController = undefined;
+    if (audioRetryTimer !== undefined) {
+      clearTimeout(audioRetryTimer);
+      audioRetryTimer = undefined;
+    }
+  }
+
+  // Retry the load after delayMs. A media element cannot read the HTTP status.
+  function scheduleLoadRetry(delayMs: number) {
+    if (audioRetryTimer !== undefined) clearTimeout(audioRetryTimer);
+    audioRetryTimer = setTimeout(() => {
+      clearRetryTimer();
+      if (audioElement) {
+        markPlaybackStopped();
+        audioElement.src = currentUrl();
+        audioElement.load();
+      }
+    }, delayMs);
+  }
+
+  // Gives up without retrying: the clip is gone, so the error shows now.
+  function failLoadPermanently() {
+    clearRetryTimer();
+    error = t('media.audio.error');
+    isLoading = false;
+    markPlaybackStopped();
+    // Drop any pending play intent so a late 'canplay' can't resume a failed clip.
+    playRequestedAfterRetry = false;
+  }
+
+  // On the first failure of a load, ask the server what the failure was. The retry is
+  // already scheduled, so a 404 only has to cancel it and a 503 to move it later;
+  // any other answer leaves the scheduled blind retry in place.
+  function probeFailedLoad() {
+    const controller = new AbortController();
+    audioProbeController = controller;
+    const probedUrl = currentUrl();
+    void probeAudioSource(probedUrl, controller.signal).then(outcome => {
+      // An answer for a clip that is no longer the current source says nothing about it
+      if (controller.signal.aborted || probedUrl !== currentUrl()) return;
+      audioProbeController = undefined;
+      if (outcome.kind === 'missing') {
+        debugLog('Audio probe: clip is gone, not retrying');
+        failLoadPermanently();
+      } else if (outcome.kind === 'pending') {
+        scheduleLoadRetry(pendingRetryDelayMs(outcome, AUDIO_RETRY_DELAY_MS));
+      }
+    });
+  }
+
+  // The play URL failed for a reason a retry cannot fix: play the stored clip from
+  // the same position instead, and do not ask for the play URL again.
+  function fallbackToStoredClip() {
+    if (!audioElement) return;
+    logger.warn('Play URL failed, playing the stored clip', { detectionId });
+    const resume = playRequestedAfterRetry || isPlaying;
+    denoiseFailed = true;
+    clearRetryTimer();
+    audioRetryCount = 0;
+    playRequestedAfterRetry = false;
+    markPlaybackStopped();
+    error = null;
+    swapSourceKeepingPosition(audioElement, audioUrl);
+    if (resume) void audioElement.play().catch(handlePlayRejection);
+  }
+
+  // On the first failure of the play URL, ask the server why beside the scheduled
+  // retry: a 503 moves that retry to its Retry-After, a 404 ends it, and anything
+  // else is a failure a retry cannot fix.
+  function probeDenoisedLoad() {
+    const controller = new AbortController();
+    audioProbeController = controller;
+    const probedUrl = currentUrl();
+    void probeAudioSource(probedUrl, controller.signal).then(outcome => {
+      if (controller.signal.aborted || probedUrl !== currentUrl()) return;
+      audioProbeController = undefined;
+      if (outcome.kind === 'missing') {
+        failLoadPermanently();
+      } else if (outcome.kind === 'pending') {
+        scheduleLoadRetry(pendingRetryDelayMs(outcome, AUDIO_RETRY_DELAY_MS));
+      } else {
+        fallbackToStoredClip();
+      }
+    });
+  }
+
+  // Resume playback the user asked for during a retry, at most once.
+  function consumePendingPlay() {
+    if (!playRequestedAfterRetry) return;
+    playRequestedAfterRetry = false;
+    if (audioElement?.paused) {
+      void audioElement.play().catch(handlePlayRejection);
+    }
+  }
+
+  // Handle a rejected play(). While a retry timer is pending the retry can
+  // still succeed, so only remember the play intent.
+  function handlePlayRejection(err: unknown) {
+    if (audioRetryTimer !== undefined || audioProbeController !== undefined) {
+      playRequestedAfterRetry = true;
+      return;
+    }
+    if (isPlayInterruptedError(err)) {
+      logger.debug('Playback interrupted', { detectionId });
+      return;
+    }
+    // A reload's loadstart set isLoading and the button is disabled while it is
+    // set, so an error must never sit behind a disabled spinner button.
+    isLoading = false;
+    if (audioElement?.error) {
+      error ??= t('media.audio.error');
+      logger.warn('Playback failed after a load error', { detectionId });
+      return;
+    }
+    logger.error('Playback failed', err);
+    error = t('media.audio.playError');
+  }
+
+  // Reload a failed clip at once, cancelling any pending retry and restoring the
+  // full retry budget. Runs inside the click so the gesture reaches play().
+  function reloadAfterFailure() {
+    if (!audioElement) return;
+    clearRetryTimer();
+    audioRetryCount = 0;
+    playRequestedAfterRetry = false;
+    markPlaybackStopped();
+    audioElement.src = currentUrl();
+    audioElement.load();
   }
 
   function clearPlayEndTimeout() {
@@ -239,7 +449,7 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
       audioContextAvailable = audioNodes !== null && audioContext.state === 'running';
       return true;
     } catch (err) {
-      logger.warn('AudioContext initialization failed', err as Error);
+      logger.warn('AudioContext initialization failed', err);
       audioContextAvailable = false;
       return false;
     } finally {
@@ -248,14 +458,14 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
   }
 
   function updateGainInternal(db: number) {
-    gainValue = Math.max(0, Math.min(GAIN_MAX_DB, db));
+    gainValue = clampToRange(db, PLAYBACK_GAIN_MIN_DB, PLAYBACK_GAIN_MAX_DB);
     if (audioNodes?.gain) {
       audioNodes.gain.gain.value = dbToGain(gainValue);
     }
   }
 
   function updateFilterInternal(freq: number) {
-    filterFreq = Math.max(FILTER_HP_MIN_FREQ, Math.min(FILTER_HP_MAX_FREQ, freq));
+    filterFreq = clampToRange(freq, PLAYBACK_HIGH_PASS_MIN_HZ, PLAYBACK_HIGH_PASS_MAX_HZ);
     if (audioNodes?.highPass) {
       audioNodes.highPass.frequency.value = filterFreq;
     }
@@ -271,24 +481,21 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
   async function togglePlayPause(): Promise<void> {
     if (!audioElement) return;
 
-    if (audioElement.paused) {
-      await initAudioContext();
-      try {
-        await audioElement.play();
-      } catch (err) {
-        // The media 'error' handler can run before play() rejects and may have
-        // queued a transient retry. Don't clobber that with an error message: the
-        // retry can still succeed. Remember the play intent so 'canplay' resumes
-        // playback once the reloaded clip is ready, instead of leaving it paused.
-        if (audioRetryCount > 0) {
-          playRequestedAfterRetry = true;
-          return;
-        }
-        logger.error('Playback failed', err as Error);
-        error = t('media.audio.playError');
-      }
-    } else {
+    if (!audioElement.paused && !audioElement.error) {
       audioElement.pause();
+      return;
+    }
+
+    error = null;
+    useDenoisedSource();
+    // A failed element cannot play (retries exhausted, or a retry timer pending):
+    // reload it now instead of swallowing the click.
+    if (audioElement.error) reloadAfterFailure();
+    await initAudioContext();
+    try {
+      await audioElement.play();
+    } catch (err) {
+      handlePlayRejection(err);
     }
   }
 
@@ -300,9 +507,25 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
     progress = (clamped / duration) * 100;
   }
 
-  function setAudioUrl(url: string) {
-    if (url === audioUrl) return;
-    audioUrl = url;
+  function setAudioUrl(url: string, nextPlayUrl = '') {
+    if (url === audioUrl && nextPlayUrl === playUrl) return;
+    playUrl = nextPlayUrl;
+    playSwapped = false;
+    denoiseFailed = false;
+    if (url !== audioUrl) {
+      audioUrl = url;
+      return;
+    }
+    // Same clip, other play URL: back to the stored clip until the next first play.
+    if (audioElement && audioElement.src !== new URL(audioUrl, window.location.origin).href) {
+      untrack(() => markPlaybackStopped());
+      // The stored clip starts with a fresh retry budget and no stale error.
+      clearRetryTimer();
+      audioRetryCount = 0;
+      playRequestedAfterRetry = false;
+      error = null;
+      audioElement.src = audioUrl;
+    }
   }
 
   // --- Audio URL change effect ---
@@ -311,6 +534,7 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
       const absoluteUrl = new URL(audioUrl, window.location.origin).href;
       if (audioElement.src !== absoluteUrl) {
         debugLog('audioUrl changed, updating src', { from: audioElement.src, to: audioUrl });
+        untrack(() => markPlaybackStopped());
         audioElement.src = audioUrl;
         // Reset playback state
         isPlaying = false;
@@ -320,10 +544,7 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
         error = null;
         audioRetryCount = 0;
         playRequestedAfterRetry = false;
-        if (audioRetryTimer) {
-          clearTimeout(audioRetryTimer);
-          audioRetryTimer = undefined;
-        }
+        clearRetryTimer();
         if (canplayTimeoutId) {
           clearTimeout(canplayTimeoutId);
           canplayTimeoutId = undefined;
@@ -353,14 +574,7 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
       onPlayStart?.();
     });
 
-    addTrackedEventListener(audio, 'pause', () => {
-      isPlaying = false;
-      stopInterval();
-      clearPlayEndTimeout();
-      playEndTimeout = setTimeout(() => {
-        onPlayEnd?.();
-      }, PLAY_END_DELAY_MS);
-    });
+    addTrackedEventListener(audio, 'pause', handlePause);
 
     addTrackedEventListener(audio, 'ended', () => {
       isPlaying = false;
@@ -394,19 +608,10 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
       isLoading = false;
       error = null;
       audioRetryCount = 0;
-      if (audioRetryTimer) {
-        clearTimeout(audioRetryTimer);
-        audioRetryTimer = undefined;
-      }
+      clearRetryTimer();
       // If the user pressed play while the clip was still loading/encoding and we
       // suppressed the transient error, resume playback now that it can play.
-      if (playRequestedAfterRetry) {
-        playRequestedAfterRetry = false;
-        void audio.play().catch(err => {
-          logger.error('Playback failed after retry', err as Error);
-          error = t('media.audio.playError');
-        });
-      }
+      consumePendingPlay();
     });
 
     addTrackedEventListener(audio, 'error', () => {
@@ -415,29 +620,40 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
         canplayTimeoutId = undefined;
       }
 
-      // Retry on load failure (audio still encoding by FFmpeg, served as 503/404).
+      // Retry on load failure (audio still being exported, served as 503/404).
       // A media element reports such HTTP errors as MediaError.code 4
       // (MEDIA_ERR_SRC_NOT_SUPPORTED), indistinguishable from a genuinely
-      // unsupported format, so we cannot skip retrying on code 4 without breaking
-      // the still-encoding path. Retrying is bounded by MAX_AUDIO_LOAD_RETRIES.
+      // unsupported format, so the error code alone cannot end the retries without
+      // breaking the still-encoding path. probeAudioSource asks the server on the
+      // first failure instead. Retrying is bounded by MAX_AUDIO_LOAD_RETRIES.
+
+      // A clip the server already reported gone for good is not retried or probed.
+      if (isSpectrogramSourceKnownMissing(detectionId)) {
+        failLoadPermanently();
+        return;
+      }
       if (audioRetryCount < MAX_AUDIO_LOAD_RETRIES) {
-        if (audioRetryTimer) {
-          clearTimeout(audioRetryTimer);
-          audioRetryTimer = undefined;
-        }
+        const isFirstFailure = audioRetryCount === 0;
+        clearRetryTimer();
         audioRetryCount++;
         debugLog(`Audio load failed, retrying (${audioRetryCount}/${MAX_AUDIO_LOAD_RETRIES})`);
-        audioRetryTimer = setTimeout(() => {
-          if (audioElement) {
-            audioElement.src = audioUrl;
-            audioElement.load();
-          }
-        }, AUDIO_RETRY_DELAY_MS);
+        scheduleLoadRetry(AUDIO_RETRY_DELAY_MS);
+        // The probe runs beside the scheduled retry, so a slow answer never stalls recovery.
+        if (isFirstFailure) {
+          if (onPlayUrl()) probeDenoisedLoad();
+          else probeFailedLoad();
+        }
+        return;
+      }
+
+      if (onPlayUrl()) {
+        fallbackToStoredClip();
         return;
       }
 
       error = t('media.audio.error');
       isLoading = false;
+      markPlaybackStopped();
       // Retries are exhausted; drop any pending play intent so a late 'canplay'
       // can't resume a clip that has permanently failed.
       playRequestedAfterRetry = false;
@@ -457,10 +673,7 @@ export function useAudioPlayback(options: AudioPlaybackOptions): AudioPlaybackSt
         clearTimeout(canplayTimeoutId);
         canplayTimeoutId = undefined;
       }
-      if (audioRetryTimer) {
-        clearTimeout(audioRetryTimer);
-        audioRetryTimer = undefined;
-      }
+      clearRetryTimer();
 
       // Remove all tracked event listeners
       eventListeners.forEach(({ element, event, handler }) => {

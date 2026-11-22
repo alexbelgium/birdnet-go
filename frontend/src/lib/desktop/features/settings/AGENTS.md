@@ -1,0 +1,225 @@
+# Settings Pages
+
+Settings pages live in `pages/`, shared settings UI in `components/`, and all
+state in `$lib/stores/settings.ts`. Every setting must take effect without a
+server restart (hot reload), so a new setting also needs backend support that
+reads the value at the point of use.
+
+## Store Structure: Verify, Never Assume
+
+The form state mirrors the backend config JSON (`SettingsFormData` in
+`$lib/stores/settings.ts`), not the page layout. Before wiring a control:
+
+- Check the actual exports in `settings.ts` (for example `birdnetSettings`,
+  `audioSettings`, `speciesSettings`, `securitySettings`, `settingsStore`,
+  `settingsActions`) and import only what exists.
+- Find the real path of the value. Many settings are nested under `realtime`
+  (audio, species, privacy and dog-bark filters) rather than at the top level,
+  and the top-level sections are named after the backend config (`main`,
+  `birdnet`, `realtime`, `security`, `webServer`, `output`, ...).
+- Change-detection paths must use the same structure:
+
+```typescript
+import { settingsStore } from '$lib/stores/settings';
+import { hasSettingsChanged } from '$lib/utils/settingsChanges';
+
+let store = $derived($settingsStore);
+let privacyFilterHasChanges = $derived(
+  hasSettingsChanged(
+    store.originalData.realtime?.privacyFilter,
+    store.formData.realtime?.privacyFilter
+  )
+);
+```
+
+## Updating Values
+
+`settingsActions.updateSection(section, data)` merges `data` into the section
+**shallowly** and then coerces values into their valid ranges. Nested objects
+are replaced, not merged, so spread the existing nested object yourself:
+
+```typescript
+import { privacyFilterSettings, settingsActions } from '$lib/stores/settings';
+
+// A $derived view of the store with every field defaulted, so the spread
+// below always produces a complete object (FilterSettingsPage.svelte does this)
+let privacy = $derived({
+  enabled: $privacyFilterSettings?.enabled ?? false,
+  confidence: $privacyFilterSettings?.confidence ?? 0.05,
+  // ... every other field of the nested object
+});
+
+function updatePrivacyConfidence(confidence: number) {
+  settingsActions.updateSection('realtime', {
+    privacyFilter: { ...privacy, confidence },
+  });
+}
+```
+
+The other `realtime` fields are kept by the top-level merge; only the nested
+`privacyFilter` object needs the spread. Spreading the raw store value instead
+can produce an incomplete object when the section has not loaded yet.
+
+`section` is typed as `keyof SettingsFormData`, so a wrong section name is a
+type error; do not cast around it.
+
+For flows that save outside the Settings form (the onboarding wizard),
+`settingsActions.saveSection(section, partial)` persists one backend section
+with `PATCH /api/v2/settings/:section` and, only after the server accepts it,
+deep-merges `partial` into `originalData` and into `formData`, where a pending
+edit to a patched key is kept and still counts as unsaved. Objects merge key by
+key and arrays replace, as on the server, so `partial` carries only the keys it
+changes, with each nested value typed as a complete object and each array sent
+whole; a failed request leaves the store untouched. It shows no toast and does
+not touch `isSaving`, so the caller owns busy and error UI. Like `saveSettings`
+it refreshes the restart status, applies a changed dashboard locale to the UI
+and applies a saved Error Tracking value to the browser Sentry SDK without a
+reload. `section` is the lowercase backend section name from
+`SettingsSectionPayloads` (for example `privacyfilter`, `rtsp`), not a store
+key such as `realtime` or `privacyFilter`.
+
+`settingsActions.saveSettings()` fetches the server settings first and merges
+the unsaved edits onto them before it sends the whole form, so a change the
+server made since the page loaded is not reverted. A flow that changes settings
+on the server outside the form (the model gallery installs, reinstalls,
+swaps and removes models) calls `settingsActions.refreshKeepingEdits()`
+afterwards, so the form shows the server values without losing unsaved edits.
+
+## Save Model
+
+Every settings tab saves with the page's Save Changes bar: controls write into
+the form with `settingsActions.updateSection` and the bar persists the whole
+form. A page blocks Save with a reason through `setValidationIssues`.
+
+The Audio page's Sound Card and Streams tabs are the model for lists of cards.
+Their cards write the whole sources or streams array into the form (the page
+spreads the store's own `rtsp` object, not its two-key view, so
+`ffmpegParameters` survives). Their save rules (`soundCardProblems` and
+`streamProblems` in `$lib/desktop/components/forms/sourceRules.ts`) are pure
+functions of the form and the saved values, so the page evaluates them whichever
+tab is open and reports them through `setValidationIssues` under a fixed set of
+owned keys (never one key per row); the reason names each invalid card once. A
+duplicate or malformed value the saved configuration already has is not reported,
+while an empty name, device or URL is always reported because the server refuses
+it. A stream URL that is not in the saved configuration needs a successful test
+of exactly that URL in this page session before Save; the page holds the tested
+URLs, since only the active tab is mounted. The cards use the same functions for
+their inline messages.
+
+Card field errors follow one rule: an error hides while its field is edited and
+shows again when the field is left, so keep the editing flag in `$state` and end
+it when the card is disabled or collapsed (the field can lose focus without a
+blur event). A problem another card caused shows at once. A disabled action shows
+its reason and points `aria-describedby` at it, and an add form clears an error
+when its field is edited.
+
+## Immediate Save (engine, not used by any tab now)
+
+No tab saves as it changes any more: the Audio page's Sound Card and Streams tabs
+moved to the Save Changes bar. The auto-save engine (`SettingsTabs`' `saveMode:
+'immediate'`, `commitSetting`, `AutoSaveStatus`, `ApplyDraft`, `ScopedApplyGroup`,
+`CommitTextField`) stays in the repository until it is decided whether any page
+saves that way again. A tab marked `saveMode: 'immediate'` would save each change
+as it is made and show a one line note and the state of the saves in place of the
+bar.
+
+What saves when:
+
+| Class      | Controls                                                                   | Behaviour                                                                                         |
+| ---------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Discrete   | toggles, selects, add, delete                                              | Save on change, no delay. Edits made while a request runs are coalesced into the next one.        |
+| Continuous | sliders, number steppers, time inputs                                      | Stage on every input, save after `AUTOSAVE_DEBOUNCE_MS` of quiet.                                 |
+| Text       | names, paths                                                               | Local draft, commit on blur or Enter, Escape restores; validation blocks the commit and says why. |
+| Restarting | device, sample rate, stream URL, type, transport, media mode, channel mode | Local draft and a scoped Apply shown only while the draft differs, named for its effect.          |
+| Risky      | security, database, listener settings                                      | Scoped Apply per card.                                                                            |
+
+Controls call `commitSetting(section, partial, { field, debounceMs? })` from
+`$lib/stores/settingsAutoSave.svelte`:
+
+- `section` is the lowercase backend section name of `SettingsSectionPayloads`,
+  and the section must be listed in `SECTION_STORE_PATHS`.
+- Send whole arrays and complete nested objects: arrays are whole values on the
+  server, and a partial array would replace the stored one.
+- Use one `field` key per visible control (`audio:sources:<rowId>:gain`). Put an
+  `AutoSaveStatus` with the same key next to it and point the control's
+  `aria-describedby` at its `id` while an error shows.
+- List rows need a UI row id that is never persisted (`generateId()`), not the
+  array index, so a status and an expanded state follow the row.
+- Pass `debounceMs: AUTOSAVE_DEBOUNCE_MS` for a continuous control. A commit
+  without a delay saves at once and carries any debounced value with it.
+- A migrated tab passes neither `hasChanges` nor `originalData` and
+  `currentData` to its `SettingsSection`: it has no unsaved state to show.
+- Give the tab definition an `autoSaveScope`: a field key prefix that every key
+  of its controls starts with and no other tab's key does (`audio:sources:` for keys
+  such as `audio:sources:<rowId>:gain`), so the tab's save state counts only its own fields.
+  End the prefix with the separator, since a prefix of `audio:sources:1`
+  also matches `audio:sources:10:gain`. The tab names other tabs of the page with unsaved changes;
+  they are saved on their own tab.
+- `AutoSaveStatus` clears its field's error when it unmounts (a row deleted, a
+  tab switched), so a stale error never stays in the tab's count.
+- A refused value goes back to the stored one and the field shows why; a value
+  the server changed elsewhere is replaced by the server value and the field says
+  so. Keep the control controlled, so it follows the store.
+
+## Form Controls
+
+Settings controls (in `$lib/desktop/components/forms/`) are used as controlled
+components: pass the current value one way and write changes back through the
+store in the callback. This is the pattern the existing pages use:
+
+| Component                 | Pattern               |
+| ------------------------- | --------------------- |
+| `NumberField`             | `value` + `onUpdate`  |
+| `PasswordField`           | `value` + `onUpdate`  |
+| `NetworkAddressListInput` | `values` + `onUpdate` |
+| `TextInput`               | `value` + `onchange`  |
+| `ToggleField`             | `value` + `onUpdate`  |
+| `SelectDropdown`          | `value` + `onChange`  |
+
+Boolean settings use `ToggleField`, not `Checkbox`. `Checkbox` is for
+acknowledgements and multi-select lists (`ModelAgreementDialog` and the
+notification type filters). Lay the switches out as the bat card in
+`pages/AnalysisSettingsPage.svelte` does:
+
+- A single switch is a plain row in its stack: no wrapper, no `className`.
+- Two or more in a row go in a `divide-y divide-[var(--border-100)]` list; the first takes `className="pb-4"`, middle ones `py-4`, the last `pt-4` when the list sits in a `space-y-*` stack.
+- A switch that only applies while the one above it is on renders under `{#if}` in that list with `pl-6` added.
+- A switch is never a grid cell beside inputs; it takes a full row.
+
+`disabled` on a `ToggleField` sets `aria-disabled`, not the native attribute,
+so put the reason in `description`.
+
+Avoid combining `bind:value` with an update callback on the same control: the
+value is then written twice, and the store update in the callback is the one
+that counts.
+
+Wrap each group in `SettingsSection` (`components/SettingsSection.svelte`) and
+pass its `hasChanges` flag so the section shows an unsaved-changes badge. Give
+each section a Lucide `icon` that the card shows before the title. The one
+exception is the bat card, which uses `BatIcon` (`$lib/components/icons/`), a
+temporary stand-in until Lucide ships a bat icon; do not add other local icons.
+
+Label a subgroup of fields inside a card with `SettingsGroupLabel`
+(`components/SettingsGroupLabel.svelte`), not with hand-written heading classes.
+Choose the element with `as` so the heading level fits the page outline (default
+`h4`; `div` or `span` when the label is not a heading) and pass `divided` for a
+hairline above it. A `SettingsGroup` shows its title this way with
+`titleVariant="group"`, and a disclosure button in its `heading` snippet takes
+`SETTINGS_GROUP_DISCLOSURE_CLASSES` from the same file. The label of a single control
+stays a normal field label.
+
+## Types
+
+Do not use `as any` or other casts to get past settings typing problems. If a
+property is missing, add it to the interface in `settings.ts` and to the
+defaults in the same change. When the IDE and the build disagree, trust
+`npm run typecheck` and restart the TypeScript language server.
+
+## Checklist for a New Setting
+
+- [ ] Backend config field exists and is read at the point of use (hot reload)
+- [ ] Interface and defaults updated in `$lib/stores/settings.ts`
+- [ ] Control wired with the pattern above, change detection on the right path
+- [ ] Disabled or invalid states explain why (see `frontend/AGENTS.md` UX rules)
+- [ ] Labels and help text translated in every locale
+- [ ] Test covering the update handler or the rendered control

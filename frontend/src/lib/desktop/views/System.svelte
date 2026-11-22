@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import MetricStrip from '$lib/desktop/features/system/components/MetricStrip.svelte';
+  import { buildAppUrl } from '$lib/utils/urlHelpers';
   import SystemDetailsCard from '$lib/desktop/features/system/components/SystemDetailsCard.svelte';
   import StorageCard from '$lib/desktop/features/system/components/StorageCard.svelte';
   import SystemProcessTable from '$lib/desktop/features/system/components/SystemProcessTable.svelte';
@@ -21,6 +23,7 @@
   import { ReconnectingEventSource } from '$lib/utils/ReconnectingEventSource';
   import { connectionState } from '$lib/stores/connectionState.svelte';
   import type { ModelMetrics } from '$lib/desktop/features/system/types';
+  import { createProcessList } from '$lib/desktop/features/system/processList.svelte';
 
   const logger = loggers.ui;
 
@@ -82,15 +85,6 @@
     celsius?: number;
   }
 
-  interface ProcessInfo {
-    pid: number;
-    name: string;
-    status: string;
-    cpu: number;
-    memory: number;
-    uptime: number;
-  }
-
   interface MetricPoint {
     timestamp: string;
     value: number;
@@ -134,19 +128,50 @@
   }
 
   // System information state
-  let systemInfo = $state<SystemInfo>({} as SystemInfo);
+  // Empty until /api/v2/system/info loads; the template falls back for each missing field
+  let systemInfo = $state<Partial<SystemInfo>>({});
   let diskUsage = $state<DiskInfo[]>([]);
-  let memoryUsage = $state<MemoryInfo>({} as MemoryInfo);
+  let memoryUsage = $state<MemoryInfo>({
+    total: 0,
+    used: 0,
+    free: 0,
+    available: 0,
+    buffers: 0,
+    cached: 0,
+    usedPercent: 0,
+  });
   let systemTemperature = $state<TemperatureInfo>({ is_available: false });
-  let processes = $state<ProcessInfo[]>([]);
+  const processList = createProcessList();
+
+  // First-load state of the sections that load their own data. A section leaves 'loading'
+  // once and never returns to it, so a refresh never brings its skeleton back; a failed
+  // refresh keeps the data on screen and shows no error.
+  interface SectionState {
+    status: 'loading' | 'ready' | 'failed';
+    error: string | null;
+  }
+  const initialSection = (): SectionState => ({ status: 'loading', error: null });
+  let infoSection = $state<SectionState>(initialSection());
+  let disksSection = $state<SectionState>(initialSection());
+  let resourcesSection = $state<SectionState>(initialSection());
+  let temperatureSettled = $state(false);
+  let metricsSettled = $state(false);
+
+  /** Records the outcome of a section request; pass the caught error on failure. */
+  function settleSection(section: SectionState, failure?: unknown): void {
+    if (failure === undefined) {
+      section.status = 'ready';
+      section.error = null;
+    } else if (section.status !== 'ready') {
+      section.status = 'failed';
+      section.error = failure instanceof ApiError ? failure.message : t('errors.api.unknownError');
+    }
+  }
   // Sparkline history arrays
   let cpuHistory = $state<number[]>([]);
   let memoryHistory = $state<number[]>([]);
   let temperatureHistory = $state<number[]>([]);
   let modelMetrics = $state<ModelMetrics[]>([]);
-
-  // Toggle for showing all processes
-  let showAllProcesses = $state(false);
 
   // SSE connection reference
   let metricsSSE: ReconnectingEventSource | null = null;
@@ -166,11 +191,22 @@
   });
   let tempSymbol = $derived(getTemperatureSymbol(temperatureUnit));
 
-  // Computed values for MetricStrip — derived from history arrays so they
+  // Computed values for MetricStrip, derived from history arrays so they
   // stay in sync with both SSE and polling updates
-  let cpuPercent = $derived(cpuHistory.length > 0 ? cpuHistory[cpuHistory.length - 1] : 0);
+  // With no history and a failed resources load there is no reading at all: null, shown as a dash
+  let cpuPercent = $derived(
+    cpuHistory.length > 0
+      ? cpuHistory[cpuHistory.length - 1]
+      : resourcesSection.status === 'failed'
+        ? null
+        : 0
+  );
   let memoryPercent = $derived(
-    memoryHistory.length > 0 ? memoryHistory[memoryHistory.length - 1] : 0
+    memoryHistory.length > 0
+      ? memoryHistory[memoryHistory.length - 1]
+      : resourcesSection.status === 'failed'
+        ? null
+        : memoryUsage.usedPercent
   );
   let temperatureCelsius = $derived(
     temperatureHistory.length > 0
@@ -244,6 +280,8 @@
       if (!active.current) return;
       logger.debug('Metrics history endpoint not available, falling back to polling');
       startPollingFallback(active);
+    } finally {
+      metricsSettled = true;
     }
   }
 
@@ -286,6 +324,8 @@
           cached: data.memory_cached,
           usedPercent: data.memory_usage_percent,
         };
+        // A poll that answers clears a failed first load, as a Retry would
+        settleSection(resourcesSection);
       } catch {
         // Silently ignore polling failures
       }
@@ -298,7 +338,7 @@
           temperatureHistory = appendHistory(temperatureHistory, temp.celsius);
         }
       } catch {
-        // Temperature may not be available — that's fine
+        // Temperature may not be available; that's fine
       }
 
       if (active.current) {
@@ -319,7 +359,7 @@
   // Connect to metrics SSE stream for live updates
   function connectMetricsStream(): void {
     metricsSSE = new ReconnectingEventSource(
-      `/api/v2/system/metrics/stream?metrics=${buildMetricsParam()}`,
+      buildAppUrl(`/api/v2/system/metrics/stream?metrics=${buildMetricsParam()}`),
       { max_retry_time: 30000 }
     );
 
@@ -359,7 +399,9 @@
   async function loadSystemInfo(): Promise<void> {
     try {
       systemInfo = await api.get<SystemInfo>('/api/v2/system/info');
+      settleSection(infoSection);
     } catch (error: unknown) {
+      settleSection(infoSection, error);
       logger.debug('Failed to load system info', {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
@@ -370,7 +412,9 @@
   async function loadDiskUsage(): Promise<void> {
     try {
       diskUsage = await api.get<DiskInfo[]>('/api/v2/system/disks');
+      settleSection(disksSection);
     } catch (error: unknown) {
+      settleSection(disksSection, error);
       logger.debug('Failed to load disk usage', {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
@@ -394,7 +438,9 @@
       if (data.cpu_usage_percent > 0) {
         cpuHistory = appendHistory(cpuHistory, data.cpu_usage_percent);
       }
+      settleSection(resourcesSection);
     } catch (error: unknown) {
+      settleSection(resourcesSection, error);
       logger.debug('Failed to load memory usage', {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
@@ -414,21 +460,9 @@
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       systemTemperature = { is_available: false };
-    }
-  }
-
-  // Load process information
-  async function loadProcesses(): Promise<void> {
-    try {
-      const url = showAllProcesses
-        ? '/api/v2/system/processes?all=true'
-        : '/api/v2/system/processes';
-      processes = await api.get<ProcessInfo[]>(url);
-    } catch (error: unknown) {
-      logger.debug('Failed to load processes', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-      processes = [];
+    } finally {
+      // A missing sensor (404) and a failure both settle it: the tile then shows unavailable
+      temperatureSettled = true;
     }
   }
 
@@ -443,6 +477,9 @@
 
   // Refresh slow-changing data not delivered by SSE (system info, disks, processes).
   // Uses recursive setTimeout (like startPollingFallback) to avoid overlapping requests.
+  // Each call is one loop that runs while its own `active` flag is set. A tick still awaiting
+  // its requests when the loop is stopped finds the flag cleared and does not re-arm, so a
+  // stopped loop never leaves a timer behind.
   function startSlowRefresh(active: { current: boolean }): void {
     async function tick(): Promise<void> {
       if (!active.current) return;
@@ -455,7 +492,7 @@
         return;
       }
 
-      await Promise.all([loadSystemInfo(), loadDiskUsage(), loadProcesses()]);
+      await Promise.all([loadSystemInfo(), loadDiskUsage(), processList.load()]);
       if (active.current) {
         slowRefreshTimeout = setTimeout(tick, SLOW_REFRESH_INTERVAL_MS);
       }
@@ -478,7 +515,7 @@
       loadDiskUsage(),
       loadMemoryUsage(),
       loadSystemTemperature(),
-      loadProcesses(),
+      processList.load(),
       loadBirdnetOverlap(),
     ]);
   }
@@ -490,14 +527,18 @@
   $effect(() => {
     componentActive.current = true;
 
-    // Load initial data, fetch active models, then load metrics history
-    loadAllData().then(async () => {
-      if (!componentActive.current) return;
-      await fetchActiveModels();
-      if (componentActive.current) {
-        loadMetricsHistory(componentActive);
-      }
-    });
+    // Load initial data, fetch active models, then load metrics history. Untracked: the
+    // loaders read state before their first await (Show All, the CSRF token), and a change
+    // to it must not rerun the whole initialization.
+    untrack(() =>
+      loadAllData().then(async () => {
+        if (!componentActive.current) return;
+        await fetchActiveModels();
+        if (componentActive.current) {
+          loadMetricsHistory(componentActive);
+        }
+      })
+    );
 
     return () => {
       componentActive.current = false;
@@ -506,15 +547,17 @@
     };
   });
 
-  // Start/stop slow refresh based on active subpage.
-  // The active guard lives inside startSlowRefresh's tick(), so no need to
-  // check componentActive here — avoids an ordering dependency between effects.
+  // Run one slow-refresh loop while the overview is shown. Each start gets its own flag,
+  // cleared before the timer is: a tick that is mid-request when the subpage changes (its timer
+  // has already fired, so there is nothing to clear) then ends instead of arming a second loop.
   $effect(() => {
-    if (currentSubpage === 'overview') {
-      startSlowRefresh(componentActive);
-    }
+    if (currentSubpage !== 'overview') return;
+
+    const loop = { current: true };
+    startSlowRefresh(loop);
 
     return () => {
+      loop.current = false;
       stopSlowRefresh();
     };
   });
@@ -554,12 +597,12 @@
     <!-- Top Metric Strip -->
     <MetricStrip
       {cpuPercent}
-      cpuCores={systemInfo.num_cpu ?? 0}
+      cpuCores={infoSection.status === 'failed' ? null : (systemInfo.num_cpu ?? 0)}
       {cpuHistory}
       {memoryPercent}
-      memoryUsed={memoryUsage.used ?? 0}
-      memoryTotal={memoryUsage.total ?? 0}
-      memoryAvailable={memoryUsage.available ?? 0}
+      memoryUsed={resourcesSection.status === 'failed' ? null : (memoryUsage.used ?? 0)}
+      memoryTotal={resourcesSection.status === 'failed' ? null : (memoryUsage.total ?? 0)}
+      memoryAvailable={resourcesSection.status === 'failed' ? null : (memoryUsage.available ?? 0)}
       {memoryHistory}
       temperatureAvailable={systemTemperature.is_available}
       temperatureValue={temperatureDisplay}
@@ -567,6 +610,10 @@
       {tempSymbol}
       models={modelMetrics}
       {birdnetOverlap}
+      cpuLoading={infoSection.status === 'loading' || resourcesSection.status === 'loading'}
+      memoryLoading={resourcesSection.status === 'loading'}
+      temperatureLoading={!temperatureSettled}
+      inferenceLoading={!metricsSettled}
     />
 
     <!-- System Details + Storage -->
@@ -585,6 +632,11 @@
         temperatureAvailable={systemTemperature.is_available}
         temperatureValue={temperatureDisplay}
         {tempSymbol}
+        loading={infoSection.status === 'loading' || !temperatureSettled}
+        error={infoSection.error === null
+          ? null
+          : t('system.errors.systemInfo', { error: infoSection.error })}
+        onRetry={loadSystemInfo}
       />
       <div class="lg:col-span-2">
         <StorageCard
@@ -592,19 +644,28 @@
           memory={memoryUsage.total
             ? memoryUsage
             : { total: 0, used: 0, free: 0, available: 0, buffers: 0, cached: 0, usedPercent: 0 }}
+          loading={disksSection.status === 'loading' || resourcesSection.status === 'loading'}
+          diskError={disksSection.error === null
+            ? null
+            : t('system.errors.diskUsage', { error: disksSection.error })}
+          memoryError={resourcesSection.error === null
+            ? null
+            : t('system.errors.memoryUsage', { error: resourcesSection.error })}
+          onRetryDisks={loadDiskUsage}
+          onRetryMemory={loadMemoryUsage}
         />
       </div>
     </div>
 
     <!-- Process Table -->
     <SystemProcessTable
-      {processes}
-      {showAllProcesses}
+      processes={processList.processes}
+      loading={!processList.loaded}
+      error={processList.error}
+      showAllProcesses={processList.showAll}
       processName={BIRDNET_PROCESS_NAME}
-      onToggleShowAll={() => {
-        showAllProcesses = !showAllProcesses;
-        loadProcesses();
-      }}
+      onShowAllChange={processList.setShowAll}
+      onRetry={processList.load}
     />
 
     <!-- Restart Controls -->

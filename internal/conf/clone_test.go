@@ -69,7 +69,6 @@ func newPopulatedSettings() *Settings {
 	s.BirdNET.RangeFilter.Species = []string{"Turdus merula", "Parus major"}
 
 	s.Models.Enabled = []string{"birdnet", "perch_v2"}
-	s.Models.Installed = []string{"birdnet", "perch_v3"}
 
 	s.Realtime.Audio.Sources = []AudioSourceConfig{
 		{
@@ -81,7 +80,6 @@ func newPopulatedSettings() *Settings {
 			},
 		},
 	}
-	s.Realtime.Audio.SoxAudioTypes = []string{"wav", "flac"}
 	s.Realtime.Audio.Equalizer.Filters = []EqualizerFilter{{Type: "HighPass", Frequency: 200}}
 
 	s.Realtime.Dashboard.CustomColors = &CustomColors{Primary: "#2563eb"}
@@ -99,6 +97,7 @@ func newPopulatedSettings() *Settings {
 
 	s.Realtime.DogBarkFilter.Species = []string{"Canis familiaris"}
 	s.Realtime.DaylightFilter.Species = []string{"Strix aluco"}
+	s.Realtime.ModelConsensus.Species = []string{"Parus major"}
 
 	s.Realtime.RTSP.Streams = []StreamConfig{
 		{
@@ -135,6 +134,7 @@ func newPopulatedSettings() *Settings {
 		{Provider: "google", Scopes: []string{"openid", "email"}},
 	}
 	s.Security.TrustedProxies = []string{"cloudflare", "10.0.0.0/8"}
+	s.Security.PlainHTTPSessionClients = []string{"172.18.0.5"}
 
 	// Include nested slices and nested maps inside the Settings map[string]any
 	// so the clone test catches a regression if the deep copy ever degrades
@@ -207,14 +207,11 @@ func mutateCloneEverywhere(dst *Settings) {
 	dst.BirdNET.RangeFilter.Species = append(dst.BirdNET.RangeFilter.Species, "Corvus corax")
 
 	dst.Models.Enabled[0] = mutated
-	dst.Models.Installed[0] = mutated
-	dst.Models.Installed = append(dst.Models.Installed, "added-model")
 
 	dst.Realtime.Audio.Sources[0].Name = mutated
 	dst.Realtime.Audio.Sources[0].Models[0] = mutated
 	dst.Realtime.Audio.Sources[0].Equalizer.Enabled = false
 	dst.Realtime.Audio.Sources[0].Equalizer.Filters[0].Type = mutated
-	dst.Realtime.Audio.SoxAudioTypes[0] = mutated
 	dst.Realtime.Audio.Equalizer.Filters[0].Type = mutated
 
 	dst.Realtime.Dashboard.CustomColors.Primary = mutated
@@ -227,6 +224,7 @@ func mutateCloneEverywhere(dst *Settings) {
 
 	dst.Realtime.DogBarkFilter.Species[0] = mutated
 	dst.Realtime.DaylightFilter.Species[0] = mutated
+	dst.Realtime.ModelConsensus.Species[0] = mutated
 
 	dst.Realtime.RTSP.Streams[0].Models[0] = mutated
 	dst.Realtime.RTSP.Streams[0].Enabled = false
@@ -252,6 +250,7 @@ func mutateCloneEverywhere(dst *Settings) {
 
 	dst.Security.OAuthProviders[0].Scopes[0] = mutated
 	dst.Security.TrustedProxies[0] = mutated
+	dst.Security.PlainHTTPSessionClients[0] = mutated
 
 	dst.Backup.Targets[0].Settings["path"] = mutated
 	// Mutate nested slice and nested map inside the any-typed Settings so
@@ -330,7 +329,6 @@ func assertSourceUnchanged(t *testing.T, src *Settings) {
 	assert.Equal(t, []string{"Turdus merula", "Parus major"}, src.BirdNET.RangeFilter.Species)
 
 	assert.Equal(t, []string{"birdnet", "perch_v2"}, src.Models.Enabled)
-	assert.Equal(t, []string{"birdnet", "perch_v3"}, src.Models.Installed)
 
 	require.Len(t, src.Realtime.Audio.Sources, 1)
 	assert.Equal(t, "front", src.Realtime.Audio.Sources[0].Name)
@@ -339,7 +337,6 @@ func assertSourceUnchanged(t *testing.T, src *Settings) {
 	assert.True(t, src.Realtime.Audio.Sources[0].Equalizer.Enabled)
 	require.Len(t, src.Realtime.Audio.Sources[0].Equalizer.Filters, 1)
 	assert.Equal(t, "LowPass", src.Realtime.Audio.Sources[0].Equalizer.Filters[0].Type)
-	assert.Equal(t, []string{"wav", "flac"}, src.Realtime.Audio.SoxAudioTypes)
 	require.Len(t, src.Realtime.Audio.Equalizer.Filters, 1)
 	assert.Equal(t, "HighPass", src.Realtime.Audio.Equalizer.Filters[0].Type)
 
@@ -357,6 +354,7 @@ func assertSourceUnchanged(t *testing.T, src *Settings) {
 
 	assert.Equal(t, []string{"Canis familiaris"}, src.Realtime.DogBarkFilter.Species)
 	assert.Equal(t, []string{"Strix aluco"}, src.Realtime.DaylightFilter.Species)
+	assert.Equal(t, []string{"Parus major"}, src.Realtime.ModelConsensus.Species)
 
 	require.Len(t, src.Realtime.RTSP.Streams, 1)
 	assert.True(t, src.Realtime.RTSP.Streams[0].Enabled)
@@ -388,6 +386,7 @@ func assertSourceUnchanged(t *testing.T, src *Settings) {
 	require.Len(t, src.Security.OAuthProviders, 1)
 	assert.Equal(t, []string{"openid", "email"}, src.Security.OAuthProviders[0].Scopes)
 	assert.Equal(t, []string{"cloudflare", "10.0.0.0/8"}, src.Security.TrustedProxies)
+	assert.Equal(t, []string{"172.18.0.5"}, src.Security.PlainHTTPSessionClients)
 
 	require.Len(t, src.Backup.Targets, 1)
 	assert.Equal(t, "/backups", src.Backup.Targets[0].Settings["path"])

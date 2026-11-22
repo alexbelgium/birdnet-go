@@ -6,9 +6,9 @@ BirdNET-Go includes an optional, privacy-first error tracking system designed to
 
 ## Quick Start
 
-1. Navigate to **Settings → Support** in the BirdNET-Go web interface
+1. Navigate to **Settings → General** (General tab) in the BirdNET-Go web interface
 2. Read the privacy notice and data collection information
-3. Check **"Enable Error Tracking (Opt-in)"** if you want to help improve BirdNET-Go
+3. Turn on **"Enable Error Tracking (Opt-in)"** if you want to help improve BirdNET-Go
 4. Save your settings
 
 That's it! No additional configuration is required. Error reports will be automatically sent to the BirdNET-Go development team for analysis.
@@ -173,13 +173,17 @@ The same sensitive data always produces the same anonymized identifier, allowing
 
 **A:** No. Error tracking is completely disabled by default and requires explicit opt-in through the web interface.
 
+### Q: Why is nothing sent from my old installation?
+
+**A:** Builds older than about six months (183 days after their build date) do not send error reports, even with telemetry enabled. Update to a current release to resume reporting. Support dump uploads you request yourself still work.
+
 ### Q: Can I see what data is being sent?
 
 **A:** While you cannot see the exact transmitted data, all URLs and sensitive information are automatically anonymized using the privacy protection system described above.
 
 ### Q: How do I disable telemetry?
 
-**A:** Go to Settings → Support and uncheck "Enable Error Tracking". Changes take effect immediately.
+**A:** Go to Settings → General, General tab, turn off the "Enable Error Tracking" switch, and click **Save Changes**. The change takes effect without a restart.
 
 ### Q: Where is the data sent?
 
@@ -224,7 +228,7 @@ BirdNET-Go is provided as free, open-source software maintained by volunteers. W
 - **Response times** may vary significantly during busy periods
 - **No warranties** - software provided "as is"
 
-For immediate privacy protection, simply disable telemetry in Settings → Support.
+For immediate privacy protection, turn off telemetry in Settings → General (General tab) and click **Save Changes**.
 
 ---
 

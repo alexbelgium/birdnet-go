@@ -23,13 +23,18 @@ A comprehensive collection of reusable Svelte 5 components for the BirdNET-Go de
 
 - [Input](#input) - Text, number, date, and other input types
 - [Select](#select) - Dropdown selection component
+- [RadioCardGroup](#radiocardgroup) - Card-style single choice with arrow-key navigation
 - [DatePicker](#datepicker) - Date selection interface
 
 ### Feedback & Status
 
 - [Badge](#badge) - Status indicators and labels
+- [Kbd](#kbd) - Key caps for keyboard shortcuts
 - [ProgressBar](#progressbar) - Progress visualization with thresholds
+- [Meter](#meter) - Static measurement bar (disk, CPU, table size) on the data visualization tokens
 - [LoadingSpinner](#loadingspinner) - Loading state indicator
+- [Skeleton](#skeleton) - Placeholder bar of a loading skeleton
+- [SkeletonStatus](#skeletonstatus) - Visible loading label of a skeleton
 - [EmptyState](#emptystate) - Empty content placeholder
 - [ErrorAlert](#erroralert) - Error and notification messages
 - [NotificationToast](#notificationtoast) - Toast notifications
@@ -42,8 +47,7 @@ A comprehensive collection of reusable Svelte 5 components for the BirdNET-Go de
 
 ### Data Display
 
-- [ProcessTable](#processtable) - System process information
-- [SystemInfoCard](#systeminfocard) - System information display
+- [ExpandableText](#expandabletext) - Text clamped to a few lines with a Show more toggle
 - [SettingsCard](#settingscard) - Configuration settings card
 - [SettingsSection](#settingssection) - Settings organization
 
@@ -51,7 +55,7 @@ A comprehensive collection of reusable Svelte 5 components for the BirdNET-Go de
 
 - [AudioLevelIndicator](#audiolevelindicator) - Audio level visualization
 - [ThemeToggle](#themetoggle) - Theme switching component
-- [HeaderSettingsMenu](#headersettingsmenu) - Header dropdown menu with theme toggle, edit dashboard, and links
+- [HeaderSettingsMenu](#headersettingsmenu) - Header dropdown menu with theme toggle, edit dashboard, keyboard shortcuts, and links
 - [TimeOfDayIcon](#timeofdayicon) - Time-based icon display
 
 ### Advanced
@@ -116,14 +120,27 @@ interface Props {
 
 **File**: `Card.svelte`
 
-Flexible container component with header, body, and footer sections.
+Container with an optional header row, a body, and a footer. Two variants share
+the same structure:
+
+- `default`: the roomy content card (About, Help, Import/Export).
+- `panel`: the dense bordered panel for data views such as the System pages:
+  `surface-100` background, `border-100` border, `rounded-xl`, 1rem padding, and
+  a small uppercase muted title. The panel is a flex column whose body fills the
+  remaining height, so panels stretched to one grid row keep their footers
+  aligned. It does not clip its content, so sticky table headers and popovers
+  inside it are not cut off.
 
 ```typescript
-interface Props {
+interface Props extends HTMLAttributes<HTMLDivElement> {
   title?: string;
-  padding?: boolean;
-  className?: string;
-  header?: Snippet;
+  description?: string;
+  variant?: 'default' | 'panel'; // default: 'default'
+  padding?: boolean; // default: true; false leaves the body flush (tables)
+  className?: string; // root
+  bodyClassName?: string; // body wrapper, e.g. 'flex flex-col gap-3'
+  header?: Snippet; // replaces the title and description
+  headerActions?: Snippet; // trailing end of the title row
   children?: Snippet;
   footer?: Snippet;
 }
@@ -137,16 +154,32 @@ interface Props {
     Card content goes here
   {/snippet}
   {#snippet footer()}
-    <button class="btn btn-primary">Action</button>
+    <Button variant="primary" onclick={handleAction}>{t('common.save')}</Button>
   {/snippet}
+</Card>
+
+<Card variant="panel" title={t('health.diagnostics')} bodyClassName="flex flex-col gap-3">
+  {#snippet headerActions()}
+    <button type="button" aria-label={t('health.refresh')} onclick={refresh}>
+      <RefreshCw class="size-4" />
+    </button>
+  {/snippet}
+  <p class="text-sm">{summary}</p>
 </Card>
 ```
 
 **Features:**
 
-- Optional title or custom header
-- Configurable padding
-- Three content sections
+- Optional title or custom header, with trailing `headerActions` in both
+  variants. The title side wraps; when the row is too narrow, the actions move
+  below the title instead of squeezing it.
+- `bodyClassName` lays out the body itself; in the panel the body is already
+  `flex-1 min-h-0`, so a `flex flex-col` body can push a footer row down with
+  `mt-auto`.
+- `padding={false}` keeps the header padded and leaves the body flush.
+- `tabindex`, `data-testid` and other attributes pass through to the root.
+- Choose the look with `variant`, not with `className`: `cn()` does not resolve
+  conflicting utilities, so overriding the shell classes is unreliable.
 
 ---
 
@@ -160,7 +193,7 @@ Comprehensive modal component with multiple types and configurations.
 interface Props {
   isOpen: boolean;
   title?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl' | '7xl' | 'full';
   type?: 'default' | 'confirm' | 'alert';
   confirmLabel?: string;
   cancelLabel?: string;
@@ -172,7 +205,9 @@ interface Props {
   className?: string;
   onClose?: () => void;
   onConfirm?: () => void | Promise<void>;
-  header?: Snippet;
+  describeBody?: boolean;
+  scrollBody?: boolean;
+  header?: Snippet<[{ titleId: string }]>;
   children?: Snippet;
   footer?: Snippet;
 }
@@ -199,11 +234,12 @@ interface Props {
 **Features:**
 
 - Multiple modal types
-- 5 size variants
+- Size variants from `sm` to `7xl`, plus `full`
+- `scrollBody` keeps the header and footer in view and scrolls only the body once the dialog reaches its maximum height (default off: the whole panel scrolls as one). The body then runs to the panel edges so focus rings are not clipped, and shows an edge shadow on a side with content out of view. Content wider than the dialog is clipped, not scrolled sideways, and the body assumes the panel's default `p-6` padding, so a `className` that sets less padding pushes the body past the panel edge, where its scrollbar and focus rings are clipped. While the body overflows it is a tab stop and a named region (the dialog's label), with an inset focus ring, so the keyboard can scroll it
 - Async confirm handlers
 - Keyboard/backdrop controls
 - Loading states
-- Full accessibility
+- Named by `title` (a `header` snippet receives `titleId` for its heading's `id`) and described by its body only with `describeBody`; to describe it by one element instead, pass `aria-describedby` with that element's id (other attributes are spread onto the dialog element)
 
 ---
 
@@ -291,11 +327,73 @@ interface Props {
 
 ---
 
+### RadioCardGroup
+
+**File**: `RadioCardGroup.svelte` (types in `RadioCardGroup.types.ts`)
+
+Card-style single choice that follows the WAI-ARIA radio group pattern. Use it when each option needs a title, a description or an icon; a plain radio list needs none of this.
+
+```typescript
+interface RadioCardOption<T extends string = string> {
+  value: T; // unique within the group
+  label: string;
+  description?: string;
+  detail?: string; // second line in a mono font
+  badge?: string; // small pill beside the label
+  icon?: LucideIcon;
+  disabled?: boolean; // when true, disabledReason is required
+  disabledReason?: string;
+}
+
+interface Props<T extends string> extends Omit<HTMLAttributes<HTMLDivElement>, 'role' | 'class'> {
+  options: RadioCardOption<T>[];
+  value: T | null; // the checked option, or null for none
+  onChange: (value: T) => void;
+  columns?: 1 | 2; // default 1
+  className?: string;
+}
+```
+
+**Usage:**
+
+```svelte
+<RadioCardGroup
+  options={presetOptions}
+  value={selectedId}
+  onChange={selectOption}
+  aria-label={t('wizard.steps.detection.title')}
+/>
+```
+
+**Keyboard:**
+
+| Key                             | Action                                                                |
+| ------------------------------- | --------------------------------------------------------------------- |
+| Tab, Shift+Tab                  | Enter or leave the group; the group is one Tab stop                   |
+| Arrow Down or Right             | Move focus to the next enabled card and check it, wrapping at the end |
+| Arrow Up or Left                | Move focus to the previous enabled card and check it, wrapping        |
+| Space                           | Check the focused card                                                |
+| Enter                           | Check the focused card (the native button click, same as a click)     |
+| Alt, Ctrl or Meta with an arrow | Not handled, so browser shortcuts such as Alt+Left keep working       |
+
+**Features:**
+
+- One Tab stop: the checked card, else the first enabled card, else the first card
+- Selection follows arrow-key focus; focus alone (Tab) never selects
+- Disabled cards are skipped by the arrows, stay focusable with `aria-disabled`, and must carry a `disabledReason` that is shown inside the card
+- The parent owns the selection (`value` is controlled); the component never keeps its own
+- `onChange` fires on every activation, including a click on the card that is already checked, so a handler must be idempotent. With a single enabled card the arrows do nothing; Space or a click checks it
+- The caller names the group with `aria-label` or `aria-labelledby`; other attributes (for example `aria-describedby`) go to the `radiogroup` element
+- Each card is a `role="radio"` button, so its accessible name is its visible content (label, badge, description, detail)
+- Inside a `Modal`, initial focus goes to the first tabbable control, so a leading `RadioCardGroup` receives it on its single Tab stop (the checked card, else the first enabled card), and focusing it selects nothing
+
+---
+
 ### ProgressBar
 
 **File**: `ProgressBar.svelte`
 
-Advanced progress bar with dynamic coloring and animations.
+Advanced progress bar with dynamic coloring and animations. Use it for the progress of a running task; for a measurement (disk usage, CPU share, table size) use [Meter](#meter).
 
 ```typescript
 interface ColorThreshold {
@@ -344,6 +442,90 @@ interface Props {
 
 ---
 
+### Meter
+
+**File**: `Meter.svelte`
+
+A static measurement bar with `role="meter"`: disk usage, a process CPU share, a table's share of the database. Fills come only from the `--viz-*` tokens in `styles/tailwind.css`, which reach 3:1 against the card and against the track in both themes and do not change with the color scheme. The track is a decorative groove, so always print the value as text beside the meter.
+
+```typescript
+type MeterTone =
+  | 'series-1'
+  | 'series-2'
+  | 'series-3'
+  | 'series-4'
+  | 'series-5'
+  | 'series-6'
+  | 'series-7'
+  | 'series-8'
+  | 'success'
+  | 'warning'
+  | 'error';
+
+interface MeterThreshold {
+  value: number; // from this value upwards (units of value and max), compared with the clamped value
+  tone: MeterTone;
+}
+
+interface MeterSegment {
+  value: number; // units of value and max
+  tone: MeterTone;
+  pattern?: 'solid' | 'hatched'; // hatched marks a secondary part without a second color
+}
+
+interface Props extends HTMLAttributes<HTMLDivElement> {
+  value: number; // clamped to 0..max; a non-finite value reads as 0
+  max?: number; // default 100
+  tone?: MeterTone; // default 'series-1'
+  thresholds?: MeterThreshold[]; // single fill only; the highest threshold at or below the clamped value wins
+  segments?: MeterSegment[]; // stacked parts instead of one fill; value stays the reported value
+  size?: 'xs' | 'sm'; // xs 0.375rem for table rows, sm 0.5rem (default) for cards
+  label: string; // accessible name
+  valueText?: string; // aria-valuetext, such as "3.2 GB of 8 GB"
+  className?: string;
+}
+```
+
+**Usage:**
+
+```svelte
+<!-- Disk usage on a card: green, then amber from 70%, red from 90% -->
+<Meter
+  value={disk.usage_percent}
+  tone="success"
+  thresholds={[
+    { value: 70, tone: 'warning' },
+    { value: 90, tone: 'error' },
+  ]}
+  label={t('system.storage.title')}
+/>
+
+<!-- RAM used plus buffers and cache as two parts of one hue -->
+<Meter
+  value={usedPct}
+  segments={[
+    { value: usedPct, tone: 'series-2' },
+    { value: cachePct, tone: 'series-2', pattern: 'hatched' },
+  ]}
+  label={t('system.storage.ram')}
+/>
+
+<!-- CPU in a table row: the caller sets the width in a flex row -->
+<div class="flex items-center justify-end gap-2">
+  <Meter size="xs" value={cpu} className="w-12" label={name} />
+  <span class="w-12 text-right tabular-nums">{cpu.toFixed(1)}%</span>
+</div>
+```
+
+**Features:**
+
+- Full width by default; a width utility in `className` overrides it
+- Stacked parts are separated by a 2 px gap; only the data end is rounded
+- Series 2 to 7 stay distinguishable from each other in both themes, including under protanopia and deuteranopia, so they can share one chart; series 1 and 8 are for single-series marks and overflow
+- Width changes animate, except under `prefers-reduced-motion`; forced-colors mode outlines the track and paints fills in a system color
+
+---
+
 ### LoadingSpinner
 
 **File**: `LoadingSpinner.svelte`
@@ -361,15 +543,152 @@ interface Props {
 **Usage:**
 
 ```svelte
-<LoadingSpinner size="md" label="Loading..." />
+<LoadingSpinner size="md" label={t('common.ui.loading')} />
 <LoadingSpinner size="lg" color="text-secondary" />
+<!-- Decorative: an always-rendered role="status" region elsewhere announces the state -->
+<LoadingSpinner size="sm" aria-hidden="true" />
 ```
 
 **Features:**
 
 - 5 size options
 - Custom color support
-- Screen reader accessibility
+- Stops spinning under `prefers-reduced-motion`
+- Root is a `role="status"` element with an sr-only label (default
+  `common.ui.loading`; pass a specific `label`)
+- `aria-hidden="true"` renders a decorative spinner with no role or label
+
+**Accessibility:** a live region only announces changes made after it is
+already in the DOM. A spinner mounted inside `{#if}` inserts the region and its
+text together, so it is often not announced. For a state change that must be
+heard, keep an always-rendered sr-only `role="status"` region, change its text,
+and pass `aria-hidden="true"` to the spinner.
+
+---
+
+### Skeleton
+
+**File**: `Skeleton.svelte`
+
+One placeholder bar of a loading skeleton. Size and shape come from `className`.
+
+```typescript
+interface Props extends HTMLAttributes<HTMLElement> {
+  className?: string;
+  inline?: boolean; // sit on a line of text, vertically centred
+}
+```
+
+**Usage:**
+
+```svelte
+<Skeleton className="h-4 w-28" />
+<Skeleton className="h-5 w-16 rounded-full" />
+<!-- Inside a line of text, for example in place of a numeral -->
+<span class="text-2xl font-mono"><Skeleton inline className="h-7 w-8" /></span>
+```
+
+**Features:**
+
+- Root is a `<span>` with `display: block`, so it is valid inside `<p>`, `<span>` and `<td>`
+- Always `aria-hidden="true"` (a caller cannot override it) and marked `data-skeleton`
+- Shrinks with its container (`min-w-0 max-w-full`)
+- Pulses, and stops under `prefers-reduced-motion`
+- `cn()` does not merge conflicting classes; a shape override such as
+  `rounded-full` wins because Tailwind emits it after `rounded`
+
+---
+
+### SkeletonStatus
+
+**File**: `SkeletonStatus.svelte`
+
+The one visible loading label of a skeleton: a `role="status"` element that holds
+only the label text.
+
+```typescript
+interface Props extends HTMLAttributes<HTMLElement> {
+  label: string;
+  className?: string;
+}
+```
+
+**Usage:**
+
+```svelte
+<div class="flex items-center justify-between">
+  <h3 class="text-sm font-semibold">{t('system.storage.title')}</h3>
+  <SkeletonStatus label={t('common.loading')} className="text-xs" />
+</div>
+```
+
+**Features:**
+
+- Visible text in the muted colour; sets no font size, so pass one or inherit it
+- Never wrap live data in it: it is the status region of the skeleton only
+
+**Building a skeleton:** a skeleton mirrors the loaded layout (same grid, card
+chrome and minimum heights) and has exactly one visible loading label: a `SkeletonStatus`, or a status region the view already shows. Put the label in
+a slot where a line of loaded text appears, such as a card header's right side, a
+tile footer or an empty-state title, so the skeleton adds no height. Use it two
+ways:
+
+- A dedicated `*Skeleton.svelte` component for a view whose layout cannot render
+  without data (`features/system/components/InferenceSkeleton.svelte`,
+  `DatabaseDashboardSkeleton.svelte`)
+- A `loading` prop on a card that already renders its chrome before the data
+  arrives: titles, icons and labels stay, and only the values become bars
+  (`features/system/components/StorageCard.svelte`)
+
+Show the skeleton only before the first answer. A refresh or a poll keeps the
+data on screen, and a failed first load replaces the skeleton with an error.
+
+---
+
+### Kbd
+
+**File**: `Kbd.svelte`
+
+Key caps for a keyboard shortcut: one key or a combination, one cap per key.
+
+```typescript
+interface Props extends HTMLAttributes<HTMLElement> {
+  keys: readonly string[]; // display tokens, one per cap, in press order
+  label?: string; // spoken form of the whole shortcut, read by screen readers
+  size?: 'sm' | 'md';
+  className?: string;
+}
+```
+
+**Usage:**
+
+```svelte
+<!-- In a shortcut list: the spoken words come from the caller -->
+<Kbd keys={['⇧', '←']} label={t('shortcuts.keys.combination', { first, second })} />
+
+<!-- As a badge inside a button whose own name says what it does -->
+<Button>
+  <Check class="size-4" />
+  {t('detections.detail.review.correct')}
+  <Kbd size="sm" keys={['C']} />
+</Button>
+```
+
+**Features:**
+
+- Each cap is a `<kbd aria-hidden="true">`, so arrows and single letters are never
+  read out as stray characters inside a control's name; `label` renders as
+  `sr-only` text. Pass it where the shortcut itself is the content, leave it out
+  for badges
+- `md` (default): a raised cap on `--surface-200` with a `--border-200` border and
+  a thicker `--border-300` bottom edge, text in `--color-base-content`
+- `sm`: a compact outline cap in the surrounding text colour, so it follows the
+  button it sits in (filled, pressed or dimmed by `aria-disabled`); 16 px high, so
+  it fits a `md` button line without changing the button's height
+- The cap shape is a border, not a shadow, so it stays visible in forced colours
+  mode
+- Takes display tokens only; `describeBinding()` in `$lib/utils/keyboard` builds
+  them, the spoken words and the `aria-keyshortcuts` value from one binding
 
 ---
 
@@ -416,6 +735,40 @@ interface Props {
 
 ---
 
+### ExpandableText
+
+**File**: `ExpandableText.svelte`
+
+Text clamped to a few lines, with a Show more / Show less button that appears only when the text is actually cut off. Use it for catalog or user text of unknown length in a fixed-size card; the whole text stays in the DOM and the accessibility tree, collapsing only clamps it.
+
+```typescript
+interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'class'> {
+  text: string;
+  lines?: 2 | 3 | 4; // lines shown while collapsed, default 3
+  subject?: string; // appended to the toggle's accessible name
+  className?: string; // root element
+  textClassName?: string; // the paragraph
+}
+```
+
+**Usage:**
+
+```svelte
+<ExpandableText
+  text={entry.description}
+  subject={entry.name}
+  textClassName="text-xs text-[var(--color-base-content)]/80"
+/>
+```
+
+**Features:**
+
+- Measures overflow while collapsed, at mount, when the text or `lines` change, when the paragraph is resized and when a web font finishes loading, so the toggle follows the layout
+- Native button with `aria-expanded` and `aria-controls`; the visible label leads its accessible name, and `subject` tells toggles on several cards apart
+- Expansion belongs to the text that was expanded: any other `text` starts collapsed
+
+---
+
 ### ErrorAlert
 
 **File**: `ErrorAlert.svelte`
@@ -424,10 +777,15 @@ Alert component for errors, warnings, and notifications.
 
 ```typescript
 interface Props {
+  title?: string; // bold line above the message or children
   message?: string;
   type?: 'error' | 'warning' | 'info' | 'success';
   dismissible?: boolean;
   onDismiss?: () => void;
+  onRetry?: () => Promise<unknown> | unknown; // shows a Retry button
+  retryBusy?: boolean; // overrides the Retry busy state
+  retryButton?: HTMLButtonElement; // bindable Retry button element
+  focusFallback?: () => Array<HTMLElement | null | undefined>;
   className?: string;
   children?: Snippet;
 }
@@ -437,19 +795,31 @@ interface Props {
 
 ```svelte
 <ErrorAlert type="error" message="An error occurred" dismissible={true} onDismiss={handleDismiss} />
+
+<ErrorAlert
+  title={t('system.database.backup.history.loadFailed')}
+  message={loadError}
+  onRetry={fetchBackups}
+  focusFallback={() => [createButton, panel]}
+/>
 ```
 
 **Features:**
 
-- 4 alert types with icons
-- Dismissible functionality
-- Message or snippet content
+- 4 alert types with icons, `role="alert"`
+- Dismissible functionality; a keyboard dismiss returns focus to where it came from
+- Title plus message or snippet content
+- Retry button from `onRetry`: ignores clicks while the retry runs, stays focusable with
+  `aria-disabled` and reads "Retrying"; a rejected retry is logged
+- `focusFallback`: when the alert is removed while it holds focus (a Retry that succeeded,
+  a mouse dismiss, a refresh that cleared it), focus moves to the first listed element that
+  can take it instead of the page body, without scrolling the page
 
 ---
 
 ### HeaderSettingsMenu
 
-Cogwheel dropdown menu for the header bar. Contains theme toggle, edit dashboard (admin-only), and GitHub link.
+Cogwheel dropdown menu for the header bar. Contains theme toggle, edit and reset dashboard (admin-only), the keyboard shortcuts item, and the help and GitHub links. The keyboard shortcuts item opens the cheat sheet (`KeyboardShortcutsModal`, mounted in the root layout) and shows its `?` key while shortcuts are on; focus returns to the cogwheel when the sheet closes.
 
 #### Props
 

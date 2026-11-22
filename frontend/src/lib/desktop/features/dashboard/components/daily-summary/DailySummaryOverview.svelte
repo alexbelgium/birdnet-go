@@ -15,16 +15,14 @@
   interface Props {
     data: DailySpeciesSummary[];
     selectedDate: string;
-    /** Optional weather stat appended to the bar (current conditions on mobile today). */
-    weatherStat?: StatItem;
   }
 
-  let { data, selectedDate, weatherStat }: Props = $props();
+  let { data, selectedDate }: Props = $props();
 
   const stats = $derived(computeOverviewStats(data, selectedDate));
 
-  // Base three stats, plus "new species" when any are new today, plus the
-  // optional weather stat. Built dynamically so absent stats leave no divider.
+  // Base three stats, plus "new species" when any are new today. Built
+  // dynamically so an absent new-species stat leaves no divider.
   const barStats = $derived.by(() => {
     const items: StatItem[] = [
       { icon: Activity, count: stats.total, label: 'detections' },
@@ -38,9 +36,6 @@
         count: stats.newSpecies,
         label: 'new',
       });
-    }
-    if (weatherStat) {
-      items.push(weatherStat);
     }
     return items;
   });

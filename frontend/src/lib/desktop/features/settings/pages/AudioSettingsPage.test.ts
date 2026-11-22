@@ -71,6 +71,7 @@ vi.mock('$lib/stores/appState.svelte', () => ({
   },
   getCsrfToken: vi.fn().mockReturnValue('test-csrf-token'),
   isSentryEnabled: () => false,
+  isGuestMode: vi.fn(() => false),
   refreshCsrfToken: vi.fn().mockResolvedValue(false),
   initApp: vi.fn().mockResolvedValue(true),
 }));
@@ -178,6 +179,7 @@ vi.mock('$lib/stores/settings', async () => {
     settingsActions,
     hasUnsavedChanges,
     defaultQuietHoursConfig,
+    setValidationIssues: vi.fn(),
   };
 });
 
@@ -486,7 +488,7 @@ describe('AudioSettingsPage - Stream Configuration', () => {
       render(AudioSettingsPage);
 
       // Simulate removing the first stream
-      const remainingStreams = [initialStreams[1]!]; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Safe: test data
+      const remainingStreams = [initialStreams[1]];
       settingsActions.updateSection('realtime', {
         rtsp: {
           streams: remainingStreams,

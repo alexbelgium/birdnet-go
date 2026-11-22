@@ -288,14 +288,7 @@ func TestNotifyRegionStaleness_EmitsPerChange(t *testing.T) {
 	// the initialized singleton never leaks into other tests. Cleanups run LIFO, so
 	// svc.Stop (registered later) runs before ResetForTest: the goroutine is stopped
 	// before the instance is cleared.
-	notification.ResetForTest()
-	t.Cleanup(notification.ResetForTest)
-	notification.Initialize(notification.DefaultServiceConfig())
-	svc := notification.GetService()
-	require.NotNil(t, svc)
-	// Stop the service's cleanup goroutine so the package goleak check stays clean;
-	// this test is the only one that starts the process-global notification service.
-	t.Cleanup(svc.Stop)
+	svc := setupTestNotification(t)
 
 	NotifyRegionStaleness([]RegionStalenessChange{
 		{CatalogID: "perch-v2", ModelName: "Perch v2", OldRegion: "Nordic", NewRegion: "Andes"},

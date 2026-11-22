@@ -16,7 +16,12 @@ const TAB_TO_SEGMENT: Record<string, string> = {
   quality: 'review',
 };
 
-function stripTrailingSlash(path: string): string {
+/**
+ * Strips a single trailing slash from a path while preserving the root "/".
+ * The navigation store already canonicalizes UI paths, so this only serves
+ * callers that receive a raw pathname.
+ */
+export function stripTrailingSlash(path: string): string {
   return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
 }
 

@@ -12,19 +12,21 @@ import (
 
 var (
 	// telemetryWorker is the singleton telemetry worker
-	telemetryWorker     *TelemetryWorker
+	telemetryWorker     atomic.Pointer[TelemetryWorker]
 	telemetryWorkerOnce sync.Once
 	errWorkerInit       error // Stores worker initialization error
 )
 
 // InitializeEventBusIntegration sets up the telemetry worker as an event consumer
 // This should be called after both Sentry and event bus are initialized
-// Thread-safe: uses sync.Once to ensure single initialization
+// Thread-safe: uses sync.Once to ensure single initialization. It returns before
+// consuming the Once while Sentry is disabled, so ReconfigureSentry can call it
+// again to register the worker when the user enables Error Tracking at runtime.
 func InitializeEventBusIntegration() error {
 	log := GetLogger()
 
 	// Check if Sentry is enabled (skip check in test mode)
-	if atomic.LoadInt32(&testMode) == 0 {
+	if testMode.Load() == testModeDisabled {
 		settings := conf.GetSettings()
 		if settings == nil || !settings.Sentry.Enabled {
 			log.Info("Sentry telemetry disabled, skipping event bus integration")
@@ -44,7 +46,7 @@ func InitializeEventBusIntegration() error {
 		// Uses shared constants from worker.go and system_init_manager.go
 		config := DefaultWorkerConfig()
 
-		worker, err := NewTelemetryWorker(true, config)
+		worker, err := NewTelemetryWorker(reportingActive, config)
 		if err != nil {
 			errWorkerInit = fmt.Errorf("failed to create telemetry worker: %w", err)
 			return
@@ -64,7 +66,7 @@ func InitializeEventBusIntegration() error {
 		}
 
 		// Store reference for stats/monitoring
-		telemetryWorker = worker
+		telemetryWorker.Store(worker)
 
 		// Log registration details
 		GetLogger().Info("telemetry worker registered with event bus",
@@ -84,25 +86,27 @@ func InitializeEventBusIntegration() error {
 
 // GetTelemetryWorker returns the telemetry worker instance
 func GetTelemetryWorker() *TelemetryWorker {
-	return telemetryWorker
+	return telemetryWorker.Load()
 }
 
 // GetWorkerStats returns telemetry worker statistics
 func GetWorkerStats() *WorkerStats {
-	if telemetryWorker == nil {
+	worker := telemetryWorker.Load()
+	if worker == nil {
 		return nil
 	}
-	stats := telemetryWorker.GetStats()
+	stats := worker.GetStats()
 	return &stats
 }
 
 // UpdateSamplingRate allows dynamic adjustment of sampling rate
 func UpdateSamplingRate(rate float64) error {
-	if telemetryWorker == nil {
+	worker := telemetryWorker.Load()
+	if worker == nil {
 		return fmt.Errorf("telemetry worker not initialized")
 	}
 
-	if err := telemetryWorker.SetSamplingRate(rate); err != nil {
+	if err := worker.SetSamplingRate(rate); err != nil {
 		return err
 	}
 

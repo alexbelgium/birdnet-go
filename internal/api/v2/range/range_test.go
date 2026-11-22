@@ -17,37 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
-	"github.com/tphakala/birdnet-go/internal/classifier"
 	"github.com/tphakala/birdnet-go/internal/conf"
 	"github.com/tphakala/birdnet-go/internal/datastore/mocks"
 )
-
-// MockBirdNET is a mock implementation of BirdNET for testing
-type MockBirdNET struct {
-	GetProbableSpeciesFunc func(date time.Time, week float32) ([]classifier.SpeciesScore, error)
-}
-
-func (m *MockBirdNET) GetProbableSpecies(date time.Time, week float32) ([]classifier.SpeciesScore, error) {
-	if m.GetProbableSpeciesFunc != nil {
-		return m.GetProbableSpeciesFunc(date, week)
-	}
-	// Default mock response
-	return []classifier.SpeciesScore{
-		{Label: "Turdus merula_Eurasian Blackbird", Score: 0.85},
-		{Label: "Parus major_Great Tit", Score: 0.72},
-	}, nil
-}
-
-// MockProcessor is a mock implementation of the processor for testing
-type MockProcessor struct {
-	BirdNETInstance *MockBirdNET
-}
-
-func (m *MockProcessor) GetBirdNET() *classifier.Orchestrator {
-	// Since we can't easily mock the actual BirdNET struct, we'll return nil
-	// and handle this in the test setup
-	return nil
-}
 
 // setupRangeTestEnvironment creates a test environment with Echo, a mock
 // datastore, and a range Handler built from a *apicore.Core via apitest. The
@@ -174,6 +146,37 @@ func TestTestRangeFilterWithoutProcessor(t *testing.T) {
 	var response apicore.ErrorResponse
 	err = json.Unmarshal(rec.Body.Bytes(), &response)
 	require.NoError(t, err)
+	assert.Contains(t, response.Message, "BirdNET service not available")
+}
+
+// TestGetRangeFilterSpeciesScoresWithoutProcessor covers the raw-score endpoint's
+// instance-availability guard. Like the other range endpoints, its happy path needs
+// a live *classifier.Orchestrator (a real model), which this API-package harness
+// cannot inject, so the native-vs-synthetic score filtering the endpoint applies is
+// unit-tested at the helper level instead (see TestNativeSpeciesScores). This test
+// pins the handler's own guard: a missing BirdNET instance must return 500, not panic.
+func TestGetRangeFilterSpeciesScoresWithoutProcessor(t *testing.T) {
+	// Setup
+	e, _, controller := setupRangeTestEnvironment(t)
+
+	// Ensure no BirdNET instance is reachable.
+	controller.Processor = nil
+
+	// Create request
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/range/species/scores?lat=60.1699&lon=24.9384", http.NoBody)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v2/range/species/scores")
+
+	// Test
+	require.NoError(t, controller.GetRangeFilterSpeciesScores(c))
+
+	// Check response code (should be 500 due to missing processor)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+
+	// Parse error response
+	var response apicore.ErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 	assert.Contains(t, response.Message, "BirdNET service not available")
 }
 

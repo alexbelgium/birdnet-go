@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { getStepsForFlow } from './wizardRegistry';
+import type { InstalledModelContext } from './types';
 
-describe('wizardRegistry — getStepsForFlow()', () => {
+describe('wizardRegistry: getStepsForFlow()', () => {
   describe('onboarding flow', () => {
     it('returns 6 steps for onboarding flow', () => {
       const steps = getStepsForFlow('onboarding');
@@ -24,6 +25,20 @@ describe('wizardRegistry — getStepsForFlow()', () => {
     it('first onboarding step is welcome', () => {
       const steps = getStepsForFlow('onboarding');
       expect(steps[0].id).toBe('welcome');
+    });
+
+    it('gives the audio source step its own unfinished save message', () => {
+      const steps = getStepsForFlow('onboarding');
+      expect(steps.find(step => step.id === 'audio-source')).toMatchObject({
+        unfinishedSaveKey: 'wizard.errors.audioSourceSaveUnfinished',
+      });
+    });
+
+    it('only the location step uses the wide width', () => {
+      const steps = getStepsForFlow('onboarding');
+      expect(steps.filter(s => s.type === 'component' && s.size === 'wide').map(s => s.id)).toEqual(
+        ['location-language']
+      );
     });
 
     it('last onboarding step is responsible-use', () => {
@@ -66,6 +81,31 @@ describe('wizardRegistry — getStepsForFlow()', () => {
         currentVersion: undefined,
       });
       expect(steps).toEqual([]);
+    });
+  });
+
+  describe('model-next-steps flow', () => {
+    const classifier = {
+      catalogId: 'perch-v2',
+      name: 'Perch v2',
+      category: 'bird',
+      registryId: 'Perch_V2',
+    } satisfies InstalledModelContext;
+
+    it('offers the enable on sources step for a classifier', () => {
+      const steps = getStepsForFlow('model-next-steps', { model: classifier });
+      expect(steps.map(s => s.id)).toEqual(['enable-on-sources']);
+    });
+
+    it('offers nothing for an entry without a registry ID', () => {
+      const steps = getStepsForFlow('model-next-steps', {
+        model: { catalogId: 'birdnet-geomodel-v3', name: 'Geomodel', category: 'geomodel' },
+      });
+      expect(steps).toEqual([]);
+    });
+
+    it('offers nothing without a model', () => {
+      expect(getStepsForFlow('model-next-steps')).toEqual([]);
     });
   });
 });

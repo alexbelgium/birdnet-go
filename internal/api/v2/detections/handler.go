@@ -1,7 +1,9 @@
 // Package detections is the api/v2 detections domain handler. It owns the
 // /api/v2/detections/* CRUD, review, lock, ignore, and batch endpoints plus the
 // POST /api/v2/search endpoint (detection search lives in this domain because it
-// queries the same datastore and shares the detection response types).
+// queries the same datastore and shares the detection response types) and
+// GET /api/v2/species/stats (single species statistics, served here because it
+// reads the detection store).
 //
 // The Handler embeds *apicore.Core by pointer so the shared dependencies and
 // helpers (DS, Processor, SunCalc, BirdImageCache, DetectionCache, SFS,
@@ -10,7 +12,7 @@
 //
 // Eight members are injected from the facade because they live on facade-owned
 // subsystems that have not been extracted into their own domains yet:
-//   - settingsMutex / getSettingsOrFallback / publishAndSaveSettings /
+//   - settingsMutex / getSettingsOrFallback / updateAndSaveSettings /
 //     handleSettingsChanges: the facade settings-save machinery, used by the
 //     review/ignore exclude-list mutation (toggleSpeciesInIgnoredList,
 //     addSpeciesToIgnoredList). settingsMutex MUST be the same *sync.RWMutex the
@@ -30,9 +32,12 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/tphakala/birdnet-go/internal/api/v2/apicore"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	datastoreV2 "github.com/tphakala/birdnet-go/internal/datastore/v2"
+	"github.com/tphakala/birdnet-go/internal/datastore/v2/repository"
 )
 
 // queryValueTrue is the canonical "true" query-parameter value parsed by the
@@ -65,12 +70,38 @@ type Handler struct {
 
 	settingsMutex             *sync.RWMutex
 	getSettingsOrFallback     func() *conf.Settings
-	publishAndSaveSettings    func(current, updated *conf.Settings) error
+	updateAndSaveSettings     apicore.SettingsUpdater
 	handleSettingsChanges     func(oldSettings, currentSettings *conf.Settings) error
 	isClientAuthenticated     func(ctx echo.Context) bool
 	loadCommonNameMap         func() map[string]string
 	loadFoldedCommonNameMap   func() map[string]string
 	loadCommonToScientificMap func() map[string]string
+
+	// probeClipRate reads a clip's sample rate from its header for the lazy fill
+	// (clip_rate_fill.go). New sets the production probe; tests replace it.
+	probeClipRate clipRateProbe
+	// clipRateWait is how long GetDetection waits for the lazy fill. New sets
+	// clipRateResponseBudget; tests replace it.
+	clipRateWait time.Duration
+	// clipRateGroup de-duplicates the lazy fill per row while it is in flight. It
+	// holds no result afterwards, so the fill is stateless.
+	clipRateGroup singleflight.Group
+
+	// contributions reads stored model contributions for the detection responses.
+	// It is nil unless the enhanced v2 database is active; see RegisterDetectionRoutes.
+	contributions modelContributionReader
+
+	// speciesChanger changes the species of a detection. It is nil unless the
+	// enhanced v2 database is active; see RegisterDetectionRoutes.
+	speciesChanger speciesChanger
+
+	// neighbors finds the detections next to a detection. It is nil unless the
+	// enhanced v2 database is active; see RegisterDetectionRoutes.
+	neighbors neighborReader
+
+	// speciesStats reads the statistics of one species. It is nil unless the
+	// enhanced v2 database is active; see RegisterDetectionRoutes.
+	speciesStats speciesStatsReader
 }
 
 // New constructs the detections domain handler around the shared core and the
@@ -84,7 +115,7 @@ func New(
 	core *apicore.Core,
 	settingsMutex *sync.RWMutex,
 	getSettingsOrFallback func() *conf.Settings,
-	publishAndSaveSettings func(current, updated *conf.Settings) error,
+	updateAndSaveSettings apicore.SettingsUpdater,
 	handleSettingsChanges func(oldSettings, currentSettings *conf.Settings) error,
 	isClientAuthenticated func(ctx echo.Context) bool,
 	loadCommonNameMap func() map[string]string,
@@ -95,12 +126,14 @@ func New(
 		Core:                      core,
 		settingsMutex:             settingsMutex,
 		getSettingsOrFallback:     getSettingsOrFallback,
-		publishAndSaveSettings:    publishAndSaveSettings,
+		updateAndSaveSettings:     updateAndSaveSettings,
 		handleSettingsChanges:     handleSettingsChanges,
 		isClientAuthenticated:     isClientAuthenticated,
 		loadCommonNameMap:         loadCommonNameMap,
 		loadFoldedCommonNameMap:   loadFoldedCommonNameMap,
 		loadCommonToScientificMap: loadCommonToScientificMap,
+		probeClipRate:             probeClipFileRate,
+		clipRateWait:              clipRateResponseBudget,
 	}
 }
 
@@ -129,16 +162,30 @@ func (c *Handler) RegisterSearchRoutes(g *echo.Group) {
 // supplied group. It preserves the facade's previous initDetectionRoutes entry,
 // including the datastore-disabled guard.
 func (c *Handler) RegisterDetectionRoutes(g *echo.Group) {
-	// Detection handlers dereference c.DS. Honor the constructor's "datastore disabled"
-	// mode (NewWithOptions permits a nil datastore) by not registering this route group
-	// when there is no datastore, instead of registering handlers that would panic.
-	if c.DS == nil {
+	// Detection handlers dereference c.DS and c.Repo. Honor the constructor's "datastore
+	// disabled" mode (NewWithOptions permits a nil datastore) by not registering this route
+	// group when either is missing, instead of registering handlers that would panic.
+	if c.DS == nil || c.Repo == nil {
 		c.LogWarnIfEnabled("Skipping detection routes: datastore is not available")
 		return
 	}
 
-	// DetectionCache is already initialized by the constructor (NewWithOptions); do not
-	// re-create it here, which would orphan the constructor's cache (and its janitor).
+	// Model contributions, species changes, neighbors and species statistics read
+	// the v2 schema. In migration mode a manager exists but the notes carry legacy
+	// IDs, so the repository is built only when the enhanced database is active
+	// (c.DS and this manager then share one database). The species change, the
+	// neighbor lookup and the species statistics live on the v2 repository only,
+	// not on c.Repo, which the legacy store also implements.
+	if c.V2Manager != nil && datastoreV2.IsEnhancedDatabase() {
+		v2Repo := repository.NewDetectionRepository(c.V2Manager.DB(), nil, c.V2Manager.TablePrefix() != "", c.V2Manager.IsMySQL())
+		c.contributions = v2Repo
+		c.speciesChanger = v2Repo
+		c.neighbors = v2Repo
+		c.speciesStats = v2Repo
+	}
+
+	// DetectionCache is initialized by the constructor (NewWithOptions); do not
+	// re-create it here, which would split invalidation between two caches.
 
 	// Detection endpoints - publicly accessible
 	//
@@ -149,11 +196,17 @@ func (c *Handler) RegisterDetectionRoutes(g *echo.Group) {
 	g.GET("/detections/:id", c.GetDetection)
 	g.GET("/detections/recent", c.GetRecentDetections)
 	g.GET("/detections/:id/time-of-day", c.GetDetectionTimeOfDay)
+	g.GET("/detections/:id/predictions", c.GetDetectionPredictions)
+	g.GET("/detections/:id/neighbors", c.GetDetectionNeighbors)
+	// Species statistics sit under /species but read the detection store, so this
+	// domain serves them.
+	g.GET("/species/stats", c.GetSpeciesStats)
 
 	// Protected detection management endpoints
 	detectionGroup := g.Group("/detections", c.AuthMiddleware)
 	detectionGroup.DELETE("/:id", c.DeleteDetection)
 	detectionGroup.POST("/:id/review", c.ReviewDetection)
+	detectionGroup.PUT("/:id/species", c.ChangeDetectionSpecies)
 	detectionGroup.POST("/:id/lock", c.LockDetection)
 	detectionGroup.POST("/ignore", c.IgnoreSpecies)
 	detectionGroup.GET("/ignored", c.GetExcludedSpecies)

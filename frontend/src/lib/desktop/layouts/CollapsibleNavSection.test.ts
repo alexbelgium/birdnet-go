@@ -28,7 +28,7 @@ describe('CollapsibleNavSection', () => {
     isCollapsed: false,
     expanded: false,
     routeActive: false,
-    routeCache: { [ROUTE_KEY]: false } as Record<string, boolean>,
+    routeCache: { [ROUTE_KEY]: false } satisfies Record<string, boolean>,
     onToggleExpanded: vi.fn(),
     onNavigate: vi.fn(),
     showTooltip: vi.fn(),
@@ -69,6 +69,28 @@ describe('CollapsibleNavSection', () => {
     const button = screen.getByRole('button', { name: 'Overview' });
     expect(button).not.toHaveAttribute('aria-current');
   });
+
+  // -------------------------------------------------------------------------
+  // Active section header
+  // -------------------------------------------------------------------------
+
+  // menu-item-active draws the tint and the --text-primary text, the same as an active flat
+  // item, so the header reads as active in every scheme (jsdom cannot render the colours)
+  it.each([
+    ['expanded', false, true],
+    ['collapsed', true, true],
+    ['expanded', false, false],
+    ['collapsed', true, false],
+  ])(
+    'the %s header has the active item style only for the active section (%s, %s)',
+    (_mode, isCollapsed, routeActive) => {
+      sectionTest.render({ ...baseProps, isCollapsed, routeActive });
+
+      const header = screen.getByRole('button', { name: 'System' });
+      expect(header.classList.contains('menu-item-active')).toBe(routeActive);
+      expect(header.classList.contains('hover:menu-hover')).toBe(!routeActive);
+    }
+  );
 
   // -------------------------------------------------------------------------
   // aria-current: flyout mode

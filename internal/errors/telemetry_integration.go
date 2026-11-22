@@ -49,45 +49,34 @@ var ResourceSnapshotFunc func() map[string]any
 // future RTSP code paths reaching Sentry when they shouldn't be suppressed.
 const rtspSilenceTimeoutSignature = "stream stopped producing data for 90 seconds"
 
-var (
-	lastDiskFullReport atomic.Int64                           // Unix timestamp of last disk-full report
-	diskFullCooldown   = int64(5 * time.Minute / time.Second) // 5 minutes between disk-full reports
+// diskFullCooldown is the minimum time between disk-full reports.
+const diskFullCooldown = 5 * time.Minute
 
-	// networkNoisePatterns are environmental network errors that indicate
-	// user infrastructure issues, not code bugs.
-	networkNoisePatterns = []string{
-		"no route to host",
-		"connection refused",
-		"connection reset by peer",
-		"server misbehaving",    // DNS failure
-		"no such host",          // DNS failure
-		"dns resolution failed", // DNS failure (BirdWeather wrapper)
-		"network is unreachable",
-		"i/o timeout",
-		"context deadline exceeded", // Upload/request timeout
-		"tls handshake timeout",
-		"eof", // Connection lost (e.g., MQTT broker disconnect)
+// errorOriginEnvironment is the error_origin tag of errors caused by the
+// user's environment.
+const errorOriginEnvironment = "environment"
 
-		// imageprovider Wikipedia rate-limit / circuit-breaker noise.
-		// Wikipedia rate-limits the image fetcher (HTTP 429) and the circuit
-		// breaker then throttles further calls, so forwarding a Sentry event for
-		// each rejected request is pure noise. These are built with CategoryNetwork
-		// in internal/imageprovider/wikipedia.go. The patterns are Wikipedia-specific
-		// full signatures (not loose substrings like "rate limit exceeded") so
-		// network-category errors from other components are never collaterally
-		// suppressed, matching the rtspSilenceTimeoutSignature approach above.
-		// HTTP 429 is purely environmental throttling so every occurrence is
-		// suppressed; 403/500/503 still report at least the first event because
-		// those can indicate a real problem (policy violation, server fault).
-		// Lowercase substrings of the real messages produced there:
-		//   - handleHTTPStatusError: "Wikipedia API returned status 429: <body>"
-		//   - checkCircuitBreaker:   "Wikipedia API circuit breaker open: <reason>"
-		//   - diagnostic path:       "Wikipedia rate limit exceeded: <message>"
-		"wikipedia api returned status 429",  // direct HTTP 429 from the API
-		"wikipedia api circuit breaker open", // repeated rejection while breaker is open
-		"wikipedia rate limit exceeded",      // diagnostic rate-limit error
+// diskFullLimiter holds the window of the last disk-full report.
+var diskFullLimiter = reportCooldown{window: diskFullCooldown}
+
+// reportCooldown lets one event through per window. It is used by the
+// disk-full limiter.
+type reportCooldown struct {
+	last   atomic.Int64 // Unix time of the last allowed event
+	window time.Duration
+}
+
+// Allow reports whether an event at now may be sent and, if so, starts a new
+// window. CompareAndSwap keeps concurrent errors from bypassing the window
+// (TOCTOU race): the loser of the swap is suppressed.
+func (c *reportCooldown) Allow(now time.Time) bool {
+	nowUnix := now.Unix()
+	last := c.last.Load()
+	if nowUnix-last < int64(c.window/time.Second) {
+		return false
 	}
-)
+	return c.last.CompareAndSwap(last, nowUnix)
+}
 
 // categoryOriginMap classifies error categories by their origin for telemetry tagging.
 var categoryOriginMap = map[ErrorCategory]string{
@@ -114,22 +103,22 @@ var categoryOriginMap = map[ErrorCategory]string{
 	CategoryPolicyConfig:     "code",
 	CategoryConflict:         "code",
 	CategoryBroadcast:        "code",
-	CategoryImageFetch:       "environment",
-	CategoryNetwork:          "environment",
-	CategoryDatabase:         "environment",
-	CategoryFileIO:           "environment",
-	CategoryConfiguration:    "environment",
-	CategoryRTSP:             "environment",
-	CategoryMQTTConnection:   "environment",
-	CategoryMQTTPublish:      "environment",
-	CategoryMQTTAuth:         "environment",
-	CategoryHTTP:             "environment",
-	CategoryDiskUsage:        "environment",
-	CategoryDiskCleanup:      "environment",
-	CategoryAudioSource:      "environment",
-	CategoryResource:         "environment",
-	CategorySystem:           "environment",
-	CategoryCommandExecution: "environment",
+	CategoryImageFetch:       errorOriginEnvironment,
+	CategoryNetwork:          errorOriginEnvironment,
+	CategoryDatabase:         errorOriginEnvironment,
+	CategoryFileIO:           errorOriginEnvironment,
+	CategoryConfiguration:    errorOriginEnvironment,
+	CategoryRTSP:             errorOriginEnvironment,
+	CategoryMQTTConnection:   errorOriginEnvironment,
+	CategoryMQTTPublish:      errorOriginEnvironment,
+	CategoryMQTTAuth:         errorOriginEnvironment,
+	CategoryHTTP:             errorOriginEnvironment,
+	CategoryDiskUsage:        errorOriginEnvironment,
+	CategoryDiskCleanup:      errorOriginEnvironment,
+	CategoryAudioSource:      errorOriginEnvironment,
+	CategoryResource:         errorOriginEnvironment,
+	CategorySystem:           errorOriginEnvironment,
+	CategoryCommandExecution: errorOriginEnvironment,
 	CategoryIntegration:      "external",
 }
 
@@ -156,19 +145,22 @@ type TelemetryReporter interface {
 
 // SentryReporter implements TelemetryReporter for Sentry
 type SentryReporter struct {
-	enabled bool
+	allowed func() bool
 }
 
-// NewSentryReporter creates a new Sentry telemetry reporter
-func NewSentryReporter(enabled bool) *SentryReporter {
+// NewSentryReporter creates a new Sentry telemetry reporter. allowed is called
+// per report so a settings change takes effect without a restart; a nil allowed
+// never reports.
+func NewSentryReporter(allowed func() bool) *SentryReporter {
 	return &SentryReporter{
-		enabled: enabled,
+		allowed: allowed,
 	}
 }
 
-// IsEnabled returns whether Sentry telemetry is enabled
+// IsEnabled returns whether Sentry telemetry is currently allowed. The answer
+// is evaluated live on every call.
 func (sr *SentryReporter) IsEnabled() bool {
-	return sr.enabled
+	return sr.allowed != nil && sr.allowed()
 }
 
 // isContextCancellation reports whether err (or any wrapped error in its
@@ -190,18 +182,17 @@ func IsContextCancellation(err error) bool {
 // isSuppressibleOperationalError reports whether ee is an expected operational
 // interruption that should not be forwarded to Sentry. Such interruptions arise
 // routinely during graceful shutdown, client disconnects, and request timeouts
-// (e.g. an HTTP client disconnects mid-query, or Sox/FFmpeg is killed when the
-// requesting client navigates away).
+// (e.g. an HTTP client disconnects mid-query, or a spectrogram render is canceled
+// when the requesting client navigates away).
 //
 // Two signals qualify:
 //   - A context sentinel (context.Canceled / context.DeadlineExceeded) anywhere in
 //     the chain, for either CategoryDatabase or CategorySystem. Database and system
 //     operations observe these directly when interrupted.
-//   - PriorityLow, but ONLY for CategorySystem. An external OS process killed by a
-//     cancelled context does not surface a context sentinel (on Windows it exits with
-//     status 1, on Linux a mid-run kill surfaces as "signal: killed"), so the producer
-//     (the spectrogram generator) tags the CategorySystem error PriorityLow using the
-//     governing context, which is the only platform-independent signal. PriorityLow is
+//   - PriorityLow, but ONLY for CategorySystem. A context-driven interruption need not
+//     surface a context sentinel in its error chain, so a producer (the spectrogram
+//     renderer) tags the CategorySystem error PriorityLow when its governing context is
+//     done, which is the only platform-independent signal. PriorityLow is
 //     deliberately NOT honored for CategoryDatabase: the datastore tags genuine
 //     query/scan/cleanup failures PriorityLow to control user-notification routing, not
 //     to mark them expected, and a real DB fault (corruption, lock contention) during
@@ -230,7 +221,8 @@ func IsSuppressibleOperationalError(ee *EnhancedError) bool {
 }
 
 // shouldReportToSentry determines if an error should be sent to Sentry
-// It filters out operational/configuration errors that aren't code bugs
+// It filters out operational/configuration errors that aren't code bugs and
+// drops connectivity failures (see isConnectivityNoise).
 func shouldReportToSentry(ee *EnhancedError) bool {
 	if ee.Err == nil {
 		return true
@@ -314,17 +306,11 @@ func shouldReportToSentry(ee *EnhancedError) bool {
 		}
 	}
 
-	// Filter out network infrastructure errors (user's network/DNS issues).
-	// Filter network infrastructure noise. CategoryIntegration is deliberately excluded
-	// to avoid suppressing legitimate non-transient integration errors; transient network
-	// failures in integrations should use CategoryNetwork instead.
-	switch ee.Category { //nolint:exhaustive // only network-related categories need this filter
-	case CategoryNetwork, CategoryMQTTConnection, CategoryMQTTPublish, CategoryRTSP, CategoryHTTP:
-		for _, pattern := range networkNoisePatterns {
-			if strings.Contains(errorMsg, pattern) {
-				return false
-			}
-		}
+	// Drop connectivity failures (user's network, DNS, broker or database host
+	// problems). CategoryIntegration is excluded from the text rule; see
+	// isNetworkCategory.
+	if isConnectivityNoise(ee, errorMsg) {
+		return false
 	}
 
 	// RTSP silence timeouts are most often transient network glitches
@@ -343,15 +329,8 @@ func shouldReportToSentry(ee *EnhancedError) bool {
 	// errors across many subsystems (database, FFmpeg, alerting, etc.)
 	if strings.Contains(errorMsg, "disk is full") ||
 		strings.Contains(errorMsg, "no space left on device") {
-		now := time.Now().Unix()
-		last := lastDiskFullReport.Load()
-		if now-last < diskFullCooldown {
-			return false // Suppress during cooldown
-		}
-		// Use CompareAndSwap to prevent concurrent errors from
-		// bypassing the cooldown (TOCTOU race)
-		if !lastDiskFullReport.CompareAndSwap(last, now) {
-			return false // Another goroutine won the race
+		if !diskFullLimiter.Allow(time.Now()) {
+			return false // Suppress during cooldown, or another goroutine won the race
 		}
 		// Allow this one through
 	}
@@ -361,7 +340,7 @@ func shouldReportToSentry(ee *EnhancedError) bool {
 
 // ReportError reports an enhanced error to Sentry with privacy protection
 func (sr *SentryReporter) ReportError(ee *EnhancedError) {
-	if !sr.enabled || ee.IsReported() {
+	if !sr.IsEnabled() || ee.IsReported() {
 		return
 	}
 
@@ -491,16 +470,25 @@ func NormalizeErrorType(errMsg string) string {
 		{"permission denied", "permission_denied"},
 		{"dns resolution", "dns_error"},
 		{"no such host", "dns_error"},
+		{"dial tcp: lookup", "dns_error"}, // the lookup may end in "i/o timeout"
+		{"server misbehaving", "dns_error"},
+		{"no route to host", "host_unreachable"},
+		{"network is unreachable", "network_unreachable"},
+		{"invalid connection", "invalid_connection"},
+		{"bad connection", "bad_connection"},
+		{"lock wait timeout", "lock_wait_timeout"},
+		{"deadlock found", "deadlock"},
+		{"unknown database", "unknown_database"},
 		{"signal: killed", "signal_killed"},
 		{"ringbuffer is full", "buffer_full"},
 		{"not initialized", "not_initialized"},
 		{"scientific name cannot be empty", "empty_scientific_name"},
 		{"not found", "not_found"},
 		{"is locked", "resource_locked"},
+		{"i/o timeout", "io_timeout"},
 		{"timed out", "timeout"}, //nolint:goconst // normalized error token, not the CategoryTimeout enum value
 		{"timeout", "timeout"},
 		{"disk is full", "disk_full"},
-		{"i/o timeout", "io_timeout"},
 		{"broken pipe", "broken_pipe"},
 		{"exit status", "process_exit"},
 	}
@@ -693,6 +681,13 @@ func updateActiveReportingStatus() {
 
 	telemetryActive := globalTelemetryReporter != nil && globalTelemetryReporter.IsEnabled()
 	hasActiveReporting.Store(hooksExist || telemetryActive)
+}
+
+// RefreshActiveReporting recomputes the cached flag that lets Build skip all
+// reporting work. Call it after anything that changes the reporter's IsEnabled
+// result (a settings change, or a Sentry client being bound or unbound).
+func RefreshActiveReporting() {
+	updateActiveReportingStatus()
 }
 
 // reportToTelemetry reports an error to the configured telemetry system

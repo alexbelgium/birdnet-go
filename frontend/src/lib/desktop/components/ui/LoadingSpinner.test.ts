@@ -22,7 +22,7 @@ describe('LoadingSpinner', () => {
     // Default size is lg (w-10 h-10 border-2)
     expect(spinnerElement).toHaveClass('w-10', 'h-10', 'border-2');
     // Default color uses CSS variable
-    expect(spinnerElement?.className).toContain('text-[var(--color-primary)]');
+    expect(spinnerElement?.className).toContain('text-[var(--text-primary)]');
   });
 
   it('renders with custom size', () => {
@@ -63,5 +63,30 @@ describe('LoadingSpinner', () => {
     const spinnerElement = spinner.querySelector('span.animate-spin');
     // xl size uses w-14 h-14 border-[3px]
     expect(spinnerElement).toHaveClass('w-14', 'h-14', 'text-error');
+  });
+
+  it('stops spinning when the user prefers reduced motion', () => {
+    renderLoadingSpinner();
+
+    const spinnerElement = screen.getByRole('status').querySelector('span.animate-spin');
+    expect(spinnerElement).toHaveClass('motion-reduce:animate-none');
+  });
+
+  it('is decorative when aria-hidden is set', () => {
+    const { container } = renderLoadingSpinner({ 'aria-hidden': 'true', label: 'Saving' });
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saving')).not.toBeInTheDocument();
+    const root = container.querySelector('[aria-hidden="true"]');
+    expect(root).toBeInTheDocument();
+    expect(root).not.toHaveAttribute('aria-label');
+    expect(root?.querySelector('span.animate-spin')).toBeInTheDocument();
+  });
+
+  it('is decorative when aria-hidden is the boolean true', () => {
+    renderLoadingSpinner({ 'aria-hidden': true, label: 'Saving' });
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saving')).not.toBeInTheDocument();
   });
 });

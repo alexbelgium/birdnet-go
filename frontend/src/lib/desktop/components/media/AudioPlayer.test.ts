@@ -8,6 +8,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { safeGet } from '$lib/utils/security';
 import { MAX_AUDIO_LOAD_RETRIES, AUDIO_RETRY_DELAY_MS } from '$lib/utils/audio';
+import { OVERLAY_ONLY } from '../../../../test/audioPlayerQueries';
 import AudioPlayer from './AudioPlayer.svelte';
 
 // Mock the i18n function
@@ -20,7 +21,6 @@ vi.mock('$lib/i18n', () => ({
       'media.audio.download': 'Download audio file',
       'media.audio.volume': 'Volume control',
       'media.audio.filterControl': 'Filter control',
-      'media.audio.seekProgress': 'Seek audio progress',
       'media.audio.volumeGain': `Volume gain: ${params?.value ?? 0} dB`,
       'media.audio.highPassFilter': `High-pass filter: ${params?.freq ?? 20} Hz`,
     };
@@ -54,8 +54,6 @@ vi.mock('$lib/utils/logger', () => ({
     timeEnd: vi.fn(),
   })),
 }));
-
-/* global Audio */
 
 describe('AudioPlayer', () => {
   let mockPlay: ReturnType<typeof vi.fn>;
@@ -115,11 +113,11 @@ describe('AudioPlayer', () => {
     });
 
     // Mock Audio constructor (audio elements are now created dynamically)
-    mockAudioInstance = document.createElement('audio') as HTMLAudioElement;
+    mockAudioInstance = document.createElement('audio');
     // Use a class mock that returns our controlled instance
     vi.spyOn(window, 'Audio').mockImplementation(function (this: HTMLAudioElement) {
       return mockAudioInstance;
-    } as unknown as typeof Audio);
+    });
   });
 
   afterEach(() => {
@@ -379,7 +377,7 @@ describe('AudioPlayer', () => {
     progressBar.focus();
 
     // Test space (play/pause) - this should work with the play button
-    const playButton = screen.getByLabelText('Play') as HTMLElement;
+    const playButton = screen.getByLabelText('Play');
     playButton.focus();
     await user.keyboard(' ');
     expect(mockPlay).toHaveBeenCalled();
@@ -498,7 +496,9 @@ describe('AudioPlayer', () => {
 
     // After all retries are exhausted, error state should be shown
     // The component shows i18n key when translation is not mocked for this key
-    expect(screen.getByText('components.audio.spectrogramUnavailable')).toBeInTheDocument();
+    expect(
+      screen.getByText('components.audio.spectrogramUnavailable', OVERLAY_ONLY)
+    ).toBeInTheDocument();
   });
 
   it('shows controls when rendered', () => {

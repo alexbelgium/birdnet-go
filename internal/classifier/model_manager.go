@@ -25,9 +25,16 @@ import (
 	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
-// permanentRegistryID is the registry ID for the built-in BirdNET model
-// that cannot be uninstalled.
-const permanentRegistryID = "BirdNET_V2.4"
+// RegistryIDBirdNETV24 is the registry ID of the built-in BirdNET v2.4 model, the
+// canonical exported name for its slot. It is the model that cannot be uninstalled
+// while embedded.
+const RegistryIDBirdNETV24 = "BirdNET_V2.4"
+
+// sharedDirName is the gallery subdirectory that holds files shared across a
+// family's variants (the bat embedding extractor, the geomodel range filter).
+// Named once so the layout is not spelled out as a literal at every join and
+// parent-directory check.
+const sharedDirName = "shared"
 
 // Download status constants used in DownloadState.Status and SSE progress events.
 const (
@@ -36,11 +43,14 @@ const (
 	StatusLoading     = "loading"
 	StatusComplete    = "complete"
 	StatusFailed      = "failed"
-	StatusRemoved     = "removed"
+	// StatusCancelled marks a download the user cancelled. It is terminal and, unlike
+	// StatusFailed, carries no error: the previous state of the model is unchanged.
+	StatusCancelled = "cancelled"
+	StatusRemoved   = "removed"
 )
 
-// failedStateRetention is how long a failed download state is kept in the
-// downloading map so SSE pollers can observe the failure before cleanup.
+// failedStateRetention is how long a failed or cancelled download state is kept in
+// the downloading map so SSE pollers can observe the outcome before cleanup.
 const failedStateRetention = 30 * time.Second
 
 // diskSpaceMarginBytes is the free-space headroom required beyond a download's
@@ -53,11 +63,38 @@ const diskSpaceMarginBytes int64 = 64 << 20 // 64 MiB
 type ModelManager struct {
 	modelsDir    string
 	orchestrator *Orchestrator
-	settings     *conf.Settings // nil sentinel: non-nil means config sync is enabled
-	mu           sync.RWMutex
-	settingsMu   sync.Mutex // serializes clone-mutate-publish cycles on settings
-	installed    map[string]InstalledModel
-	downloading  map[string]*DownloadState
+
+	// documents serves verified licence and policy text and keeps the recorded
+	// agreements. Set once by NewModelManager; never touched by the install paths.
+	documents *ModelDocuments
+
+	// unloadFn, when non-nil, replaces the direct orchestrator UnloadModel call so
+	// tests can force the unload-failure rollback branches of Uninstall and
+	// Reinstall. Those branches are reachable in production only via a
+	// concurrent unload/delete racing the loaded-check, so restoring their coverage
+	// needs an injected failure. Nil in production; same test-seam shape as freeSpaceFn.
+	unloadFn func(registryID string) error
+
+	// reloadRangeFilterFn, when non-nil, replaces the orchestrator ReloadRangeFilter
+	// call so tests can observe when a range-filter reload runs and force its failure.
+	// There is otherwise no seam: the orchestrator's reload is a nil-safe no-op without
+	// a range filter service. Nil in production; same test-seam shape as unloadFn.
+	reloadRangeFilterFn func() error
+
+	settings    *conf.Settings // nil sentinel: non-nil means config sync is enabled
+	mu          sync.RWMutex
+	installed   map[string]InstalledModel
+	downloading map[string]*DownloadState
+
+	// opMu guards activeOp. It is separate from mu so the slot stays readable while
+	// an operation (Uninstall) holds mu, and a request made meanwhile is refused at
+	// once instead of waiting on mu. Lock order: mu before opMu when both are held.
+	opMu sync.Mutex
+	// activeOp is the single model operation slot: the lease of the install, swap,
+	// reinstall or uninstall in flight, or nil. Guarded by opMu. It is in-memory only
+	// and never taken by ScanInstalled, so a restart always starts with a free slot
+	// and startup is never refused.
+	activeOp *OperationLease
 
 	// freeSpaceFn reports the bytes available on the filesystem holding a given
 	// path. It is a field so tests can force the insufficient-space branch of the
@@ -121,6 +158,24 @@ type DownloadState struct {
 	Error           string `json:"error,omitempty"`
 }
 
+// IsActive reports whether this download state means the model is genuinely
+// mid-acquisition (downloading, verifying, or loading). A FAILED or CANCELLED state
+// is retained for failedStateRetention so SSE pollers can still observe the outcome,
+// but during that window the model is NOT analyzing, so callers deciding whether to
+// suppress a "not analyzing" alarm must treat failed and cancelled (and the terminal
+// complete/removed) as inactive rather than as an in-progress download.
+func (s *DownloadState) IsActive() bool {
+	if s == nil {
+		return false
+	}
+	switch s.Status {
+	case StatusDownloading, StatusVerifying, StatusLoading:
+		return true
+	default:
+		return false
+	}
+}
+
 // NewModelManager creates a ModelManager that manages downloadable models
 // stored under modelsDir. The orchestrator is used for coordinating with
 // running model instances during install/uninstall operations. The settings
@@ -130,7 +185,7 @@ func NewModelManager(modelsDir string, orchestrator *Orchestrator, settings *con
 	if orchestrator != nil {
 		orchestrator.SetModelsDir(modelsDir)
 	}
-	return &ModelManager{
+	mm := &ModelManager{
 		modelsDir:    modelsDir,
 		orchestrator: orchestrator,
 		settings:     settings,
@@ -138,7 +193,16 @@ func NewModelManager(modelsDir string, orchestrator *Orchestrator, settings *con
 		downloading:  make(map[string]*DownloadState),
 		freeSpaceFn:  diskmanager.GetAvailableSpace,
 	}
+	mm.documents = newModelDocuments(
+		func() []string { return mm.orderedDownloadEndpoints(mm.configuredHuggingFaceEndpoint()) },
+		mm.noteWorkingEndpoint,
+	)
+	return mm
 }
+
+// Documents returns the service that serves verified licence and policy text and
+// records agreements. It is never nil.
+func (mm *ModelManager) Documents() *ModelDocuments { return mm.documents }
 
 // ModelInfos returns ModelInfo for all currently loaded models.
 func (mm *ModelManager) ModelInfos() []ModelInfo {
@@ -160,6 +224,17 @@ func (mm *ModelManager) SetTopologyChangedCallback(cb func()) {
 	mm.topologyChangedCb.Store(&cb)
 }
 
+// SetInferenceHealthChangedCallback registers cb with the orchestrator, called
+// whenever the set of loaded models failing every analysis window changes (see
+// Orchestrator.SetInferenceHealthChangedCallback). A nil cb disables it; a
+// manager without an orchestrator ignores it.
+func (mm *ModelManager) SetInferenceHealthChangedCallback(cb func()) {
+	if mm.orchestrator == nil {
+		return
+	}
+	mm.orchestrator.SetInferenceHealthChangedCallback(cb)
+}
+
 // notifyTopologyChanged invokes the registered topology-changed callback if one
 // is set. It must be called outside any held lock, since the callback may run
 // arbitrary observer code. The load is atomic, so it is safe to call
@@ -173,7 +248,9 @@ func (mm *ModelManager) notifyTopologyChanged() {
 // ScanInstalled scans modelsDir for subdirectories matching catalog IDs. For
 // each matching subdirectory, it checks whether the ONNX model file (the
 // CatalogFile with Role "model") exists on disk. If found, the model is
-// recorded as installed.
+// recorded as installed. It never takes the operation slot, so startup is never
+// refused, and it keeps in-flight entries as described below. Once the scan is done
+// it evaluates the "no acoustic model" and "BirdNET Geomodel missing" bell notices.
 func (mm *ModelManager) ScanInstalled() {
 	log := GetLogger()
 
@@ -184,6 +261,17 @@ func (mm *ModelManager) ScanInstalled() {
 	// Snapshot settings once for the variant tie-break (which variant a family's
 	// recorded model path points at). GetSettings returns an atomic snapshot.
 	settings := conf.GetSettings()
+
+	// Snapshot the resolved path each loaded instance is actually running, BEFORE
+	// taking mm.mu. installedModelBasenameHint prefers this over the configured path
+	// so the scan reports the RUNNING variant after a stale-path recovery, not the
+	// stale configured one. Snapshotting here keeps o.mu (taken
+	// briefly by LoadedModelPaths) from ever nesting under mm.mu. Nil when no
+	// orchestrator is wired (tests), which leaves the hint on its settings fallback.
+	var loadedPaths map[string]string
+	if mm.orchestrator != nil {
+		loadedPaths = mm.orchestrator.LoadedModelPaths()
+	}
 
 	// Phase 1: scan the filesystem under mm.mu.
 	mm.mu.Lock()
@@ -217,7 +305,7 @@ func (mm *ModelManager) ScanInstalled() {
 		// file, so a variant entry is never shared-only and never needs the
 		// shared-only fall-through below.
 		if len(entry.Variants) > 0 {
-			if im, ok := scanVariantEntry(entry, subdir, installedModelBasenameHint(settings, entry.RegistryID)); ok {
+			if im, ok := scanVariantEntry(entry, subdir, installedModelBasenameHint(settings, entry.RegistryID, loadedPaths)); ok {
 				mm.installed[entry.ID] = im
 				log.Debug("Found installed model variant",
 					logger.String("catalog_id", entry.ID),
@@ -262,28 +350,66 @@ func (mm *ModelManager) ScanInstalled() {
 	}
 
 	installedIDs := slices.Collect(maps.Keys(mm.installed))
+	// Sort so the one-shot auto-enable capture below appends aliases in a deterministic order
+	// and the startup load order (loadInstalledModels) is stable across scans.
+	slices.Sort(installedIDs)
 	log.Info("Model scan complete",
 		logger.Int("installed_count", len(mm.installed)))
 	mm.mu.Unlock()
 
 	// Phase 2: sync Models.Enabled and load models (lock-free).
 	if mm.settings != nil {
-		mm.settingsMu.Lock()
-		updated := conf.CloneSettings(conf.GetSettings())
-		changed := false
+		mm.captureLegacyAutoEnableOnce(log, installedIDs)
+
+		mm.loadInstalledModels(log, installedIDs)
+
+		// After loading models, check if any installed model has geomodel
+		// companion files on disk. If so, ensure the range filter config is
+		// up to date and reload the filter, unless the range filter is custom
+		// (see rangeFilterReplaceableByGeomodel). This handles the upgrade case
+		// where a new binary adds geomodel support to existing models.
+		mm.ensureGeomodelConfig(log, installedIDs)
+
+		// Startup loading is complete and the notification service is up by now, so evaluate
+		// the persistent "no acoustic model" and "BirdNET Geomodel missing" notices.
+		// NewOrchestrator's earlier syncs latched nothing if the notification service was not
+		// yet initialized at construction.
+		if mm.orchestrator != nil {
+			mm.orchestrator.SyncAcousticModelsNotice()
+			mm.orchestrator.SyncGeomodelNotice()
+		}
+	}
+}
+
+// captureLegacyAutoEnableOnce runs the one-shot pre-Phase-4 auto-enable capture exactly once
+// per config file. Before Phase 4 the orchestrator enabled BirdNET v2.4 implicitly and
+// auto-enabled every installed gallery model on each scan; models.enabled is now authoritative,
+// so this reproduces that behavior a single time, gated on the AutoEnableMigrated companion
+// marker. It is NOT gated on ConfigVersion: this runs after conf.Load(), where Part A
+// (MigrateModelsEnabledAuthoritative) already raised ConfigVersion past 1, so a ConfigVersion gate
+// would be a permanent no-op. After the capture, a downloaded-but-disabled model is no longer
+// auto-loaded (loadInstalledModels honors the enabled set). On a read-only config the marker
+// never persists, so the capture re-runs in memory each start, reproducing the pre-Phase-4
+// behavior. installedIDs must be sorted so the appended aliases are deterministic.
+func (mm *ModelManager) captureLegacyAutoEnableOnce(log logger.Logger, installedIDs []string) {
+	// A missing snapshot should not happen at startup (ScanInstalled runs after conf.Load
+	// publishes the global snapshot); UpdateSettings reports it and this degrades to a no-op
+	// instead of panicking.
+	_, _, err := conf.UpdateSettings(func(_, updated *conf.Settings) error {
+		if updated.Models.AutoEnableMigrated {
+			return conf.ErrSettingsUnchanged
+		}
 
 		if !slices.ContainsFunc(updated.Models.Enabled, func(id string) bool {
 			return strings.EqualFold(id, conf.ModelIDBirdNET)
 		}) {
 			updated.Models.Enabled = append([]string{conf.ModelIDBirdNET}, updated.Models.Enabled...)
-			changed = true
 		}
 		addIfMissing := func(alias string) {
 			if alias != "" && !slices.ContainsFunc(updated.Models.Enabled, func(id string) bool {
 				return strings.EqualFold(id, alias)
 			}) {
 				updated.Models.Enabled = append(updated.Models.Enabled, alias)
-				changed = true
 			}
 		}
 
@@ -305,22 +431,18 @@ func (mm *ModelManager) ScanInstalled() {
 			addIfMissing(conf.ModelIDBSG)
 		}
 
-		if changed {
-			conf.StoreSettings(updated)
-			if err := conf.SaveSettings(); err != nil {
-				log.Warn("Failed to persist Models.Enabled sync",
-					logger.Error(err))
-			}
-		}
-		mm.settingsMu.Unlock()
-
-		mm.loadInstalledModels(log, installedIDs)
-
-		// After loading models, check if any installed model has geomodel
-		// companion files on disk. If so, ensure the range filter config is
-		// up to date and reload the filter. This handles the upgrade case
-		// where a new binary adds geomodel support to existing models.
-		mm.ensureGeomodelConfig(log, installedIDs)
+		// Record that the capture has run so it never re-runs on a writable config. The marker
+		// change is itself a change, so this always persists. On a read-only config SaveSettings
+		// fails and the capture re-runs in memory on the next start.
+		updated.Models.AutoEnableMigrated = true
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	if err := conf.SaveSettings(); err != nil {
+		log.Warn("Failed to persist the one-shot models.enabled auto-enable capture; it will re-run in memory next start",
+			logger.Error(err))
 	}
 }
 
@@ -345,8 +467,8 @@ func modelAndLabelsFiles(files []CatalogFile) (modelFile, labelsFile string) {
 // variant whose model file matches it is preferred, so an ambiguous on-disk state
 // (e.g. both files present after a crashed replace) resolves to the variant the
 // loader will actually open. It then falls back to the default variant, then the
-// remaining variants in catalog order. ok is false when no variant's model file
-// is present on disk.
+// remaining live variants in catalog order, then the Legacy ones. ok is false
+// when no variant's model file is present on disk.
 func scanVariantEntry(entry *CatalogEntry, subdir, modelBasenameHint string) (InstalledModel, bool) {
 	// Permanent entry with a BuiltIn baseline (BirdNET v2.4): the model is ALWAYS
 	// installed, but which variant is active is decided by the settings hint alone,
@@ -389,8 +511,8 @@ func scanVariantEntry(entry *CatalogEntry, subdir, modelBasenameHint string) (In
 			return im, true
 		}
 	}
-	for i := range entry.Variants {
-		v := &entry.Variants[i]
+	// The remaining variants, live ones first (see liveFirstVariants).
+	for v := range liveFirstVariants(entry.Variants) {
 		if def != nil && v.ID == def.ID {
 			continue
 		}
@@ -424,39 +546,131 @@ func variantByModelHint(entry *CatalogEntry, subdir, modelBasenameHint string) (
 	return InstalledModel{}, false
 }
 
+// familyFieldSet is the set of settings fields one model family owns. A nil
+// pointer means the family has no such field and callers must NOT read or write
+// it. It replaces the four-return familyPathFields so the threshold, override and
+// locale fields can be reached through the same single mapping (Phase 2 builds the
+// orchestrator-owned services on this seam).
+type familyFieldSet struct {
+	Model             *string
+	Labels            *string
+	Embeddings        *string
+	Threshold         *float64
+	OverrideThreshold *bool
+	Locale            *string
+}
+
+// familyFields is the single family-to-settings-field mapping. It returns pointers
+// into s so callers can read or write a family's fields without naming the conf
+// struct; a nil pointer means the family has no such field and it must NOT be
+// written. ok is false for a nil settings pointer or an unknown registry ID.
+// The BirdNET v3.0 preview and BirdNET+ v3.0 map to separate settings sections, so
+// one family never rewrites the other's paths or threshold.
+//
+// The primary's Labels pointer is &s.BirdNET.LabelPath like every other family:
+// the "a variant swap must not disturb a user-configured label path" rule lives in
+// applyConfigForVariantSwap (which writes the model field alone), not in this
+// accessor. planPathCorrection never rewrites the primary's label path because
+// resolvePrimaryModelPath only ever resolves a model path, so its fc.resolved == ""
+// guard skips the label field.
+func familyFields(s *conf.Settings, registryID string) (familyFieldSet, bool) {
+	if s == nil {
+		return familyFieldSet{}, false
+	}
+	switch registryID {
+	case RegistryIDBirdNETV24:
+		return familyFieldSet{
+			Model:     &s.BirdNET.ModelPath,
+			Labels:    &s.BirdNET.LabelPath,
+			Threshold: &s.BirdNET.Threshold,
+			Locale:    &s.BirdNET.Locale,
+		}, true
+	case RegistryIDPerchV2:
+		return familyFieldSet{
+			Model:             &s.Perch.ModelPath,
+			Labels:            &s.Perch.LabelPath,
+			Threshold:         &s.Perch.Threshold,
+			OverrideThreshold: &s.Perch.OverrideThreshold,
+			Locale:            &s.Perch.Locale,
+		}, true
+	case RegistryIDBirdNETV3:
+		return familyFieldSet{
+			Model:             &s.BirdNETV3.ModelPath,
+			Labels:            &s.BirdNETV3.LabelPath,
+			Threshold:         &s.BirdNETV3.Threshold,
+			OverrideThreshold: &s.BirdNETV3.OverrideThreshold,
+			Locale:            &s.BirdNETV3.Locale,
+		}, true
+	case RegistryIDBirdNETPlusV3:
+		return familyFieldSet{
+			Model:             &s.BirdNETPlus.ModelPath,
+			Labels:            &s.BirdNETPlus.LabelPath,
+			Threshold:         &s.BirdNETPlus.Threshold,
+			OverrideThreshold: &s.BirdNETPlus.OverrideThreshold,
+			Locale:            &s.BirdNETPlus.Locale,
+		}, true
+	case RegistryIDBSG:
+		return familyFieldSet{
+			Model:  &s.BSG.ModelPath,
+			Labels: &s.BSG.LabelPath,
+			Locale: &s.BSG.Locale,
+		}, true
+	case RegistryIDBSGBat:
+		return familyFieldSet{
+			Model:     &s.BSGBat.ModelPath,
+			Labels:    &s.BSGBat.LabelPath,
+			Threshold: &s.BSGBat.Threshold,
+		}, true
+	case RegistryIDBat:
+		return familyFieldSet{
+			Model:      &s.Bat.ClassifierModel,
+			Labels:     &s.Bat.LabelPath,
+			Embeddings: &s.Bat.EmbeddingModel,
+			Threshold:  &s.Bat.Threshold,
+			Locale:     &s.Bat.Locale,
+		}, true
+	default:
+		return familyFieldSet{}, false
+	}
+}
+
 // installedModelBasenameHint returns the basename of the model path recorded in
 // settings for the given registry ID, or "" when settings are absent or the
 // family carries no path. It is the tie-break scanVariantEntry uses to resolve an
 // ambiguous multi-variant on-disk state to the variant the loader actually opens.
-func installedModelBasenameHint(settings *conf.Settings, registryID string) string {
-	if settings == nil {
+func installedModelBasenameHint(settings *conf.Settings, registryID string, loadedPaths map[string]string) string {
+	// Prefer the file the LOADED instance is actually running. After a stale-path
+	// recovery the settings field still names the pre-recovery file, so keying the
+	// gallery scan off it would report a variant that is not loaded and offer to
+	// "optimize" a build the process is already running. A family
+	// PRESENT in loadedPaths is authoritative even when its value is empty: empty
+	// means the built-in/default source is running, so returning "" (which
+	// scanVariantEntry maps to the BuiltIn record) is the correct answer, not a
+	// reason to fall back to config. Fall back to the configured field only when no
+	// instance is loaded for the family: the startup scan before models load, or a
+	// nil orchestrator in tests, both leave the family absent from loadedPaths.
+	if p, loaded := loadedPaths[registryID]; loaded {
+		if p == "" {
+			return ""
+		}
+		return filepath.Base(p)
+	}
+
+	// No loaded instance for this family: fall back to the configured model path.
+	// The permanent BirdNET v2.4 slot records its selected DFT-truncated file in
+	// BirdNET.ModelPath (empty means the embedded BuiltIn baseline); each secondary
+	// records its own. familyFields is the single source of that mapping.
+	fs, ok := familyFields(settings, registryID)
+	if !ok || *fs.Model == "" {
 		return ""
 	}
-	var p string
-	switch registryID {
-	case permanentRegistryID:
-		// The permanent BirdNET v2.4 classifier: its selected DFT-truncated file
-		// (if any) is recorded in BirdNET.ModelPath. An empty path means the
-		// embedded BuiltIn baseline is active.
-		p = settings.BirdNET.ModelPath
-	case RegistryIDBirdNETV3:
-		p = settings.BirdNETV3.ModelPath
-	case RegistryIDPerchV2:
-		p = settings.Perch.ModelPath
-	case RegistryIDBSG:
-		p = settings.BSG.ModelPath
-	case RegistryIDBat:
-		p = settings.Bat.ClassifierModel
-	}
-	if p == "" {
-		return ""
-	}
-	return filepath.Base(p)
+	return filepath.Base(*fs.Model)
 }
 
 // installedFromVariant builds the InstalledModel for a specific variant if its
-// model file exists on disk under subdir. ok is false when the variant carries
-// no model role or its model file is absent.
+// model file exists on disk under subdir; its Version is the variant's release
+// (variantVersion). ok is false when the variant carries no model role or its
+// model file is absent.
 func installedFromVariant(entry *CatalogEntry, v *CatalogVariant, subdir string) (InstalledModel, bool) {
 	modelFile, labelsFile := modelAndLabelsFiles(v.Files)
 	if modelFile == "" {
@@ -476,7 +690,7 @@ func installedFromVariant(entry *CatalogEntry, v *CatalogVariant, subdir string)
 		ModelPath:   modelPath,
 		LabelsPath:  labelsPath,
 		InstalledAt: fileModTime(modelPath),
-		Version:     entry.Version,
+		Version:     variantRelease(entry, v),
 	}, true
 }
 
@@ -527,7 +741,8 @@ func decideGeomodelOrphanAction(rf *conf.RangeFilterSettings, expectedModelPath,
 
 // ensureGeomodelConfig checks if any installed model has geomodel companion
 // files on disk and, if the range filter config doesn't already reflect them,
-// updates the config and reloads the range filter. When NO installed
+// updates the config and reloads the range filter, unless
+// rangeFilterReplaceableByGeomodel keeps the range filter as it is (no reload then). When NO installed
 // geomodel-capable model is matched, it runs the orphan self-heal so a persisted
 // config that references the gallery shared geomodel paths stays consistent with
 // reality (promote when the shared files exist, clear when they are absent).
@@ -548,7 +763,7 @@ func (mm *ModelManager) ensureGeomodelConfig(log logger.Logger, installedIDs []s
 			if !isGeomodelRole(f.Role) {
 				continue
 			}
-			path := filepath.Join(mm.modelsDir, "shared", f.LocalName)
+			path := filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
 			if _, err := os.Stat(path); err != nil {
 				allPresent = false
 				break
@@ -571,7 +786,8 @@ func (mm *ModelManager) ensureGeomodelConfig(log logger.Logger, installedIDs []s
 
 // applyInstalledGeomodelConfig promotes the range filter config to match an
 // installed geomodel-capable model whose shared files are present on disk. It is
-// a no-op when the config already matches the expected paths and version.
+// a no-op when the config already matches the expected paths and version, and for
+// a range filter that rangeFilterReplaceableByGeomodel keeps.
 func (mm *ModelManager) applyInstalledGeomodelConfig(log logger.Logger, entry *CatalogEntry, catalogID string) {
 	// Build expected paths from catalog entry.
 	expectedModelPath := ""
@@ -579,43 +795,54 @@ func (mm *ModelManager) applyInstalledGeomodelConfig(log logger.Logger, entry *C
 	for _, f := range entry.Files {
 		switch f.Role {
 		case RoleGeomodelModel:
-			expectedModelPath = filepath.Join(mm.modelsDir, "shared", f.LocalName)
+			expectedModelPath = filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
 		case RoleGeomodelLabels:
-			expectedLabelsPath = filepath.Join(mm.modelsDir, "shared", f.LocalName)
+			expectedLabelsPath = filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
 		}
 	}
 
-	// Decide and write under settingsMu so the already-matches check and the
-	// store operate on one consistent snapshot. Reading outside the lock would
-	// let a concurrent install/uninstall publish a newer config between the
+	// Decide and write inside conf.UpdateSettings so the already-matches check and the
+	// store operate on one consistent snapshot. Reading outside it would let a
+	// concurrent install/uninstall or settings save publish a newer config between the
 	// check and the store, overwriting it with stale data.
-	mm.settingsMu.Lock()
-	current := conf.GetSettings()
-	rf := current.BirdNET.RangeFilter
-	if rf.Model == entry.GeomodelVersion &&
-		rf.ModelPath == expectedModelPath &&
-		rf.LabelsPath == expectedLabelsPath {
-		// Config already set; initializeMetaModel handled it at startup.
-		mm.settingsMu.Unlock()
+	customRangeFilter := false
+	_, _, err := conf.UpdateSettings(func(_, updated *conf.Settings) error {
+		urf := updated.RangeFilterConfig()
+		if !mm.rangeFilterReplaceableByGeomodel(urf) {
+			// A custom range filter is the user's choice; never replace it.
+			customRangeFilter = true
+			return conf.ErrSettingsUnchanged
+		}
+		if urf.Model == entry.GeomodelVersion &&
+			urf.ModelPath == expectedModelPath &&
+			urf.LabelsPath == expectedLabelsPath {
+			// Config already set; initializeMetaModel handled it at startup.
+			return conf.ErrSettingsUnchanged
+		}
+
+		// Config is stale or missing; update it.
+		log.Info("Applying geomodel config for installed model",
+			logger.String("catalog_id", catalogID),
+			logger.String("geomodel_version", entry.GeomodelVersion),
+			logger.String("previous_model_path", urf.ModelPath))
+
+		urf.Model = entry.GeomodelVersion
+		urf.ModelPath = expectedModelPath
+		urf.LabelsPath = expectedLabelsPath
+		return nil
+	})
+	if err != nil {
+		if customRangeFilter {
+			log.Debug("Keeping custom range filter model path",
+				logger.String("catalog_id", catalogID))
+		}
 		return
 	}
-
-	// Config is stale or missing; update it.
-	log.Info("Applying geomodel config for installed model",
-		logger.String("catalog_id", catalogID),
-		logger.String("geomodel_version", entry.GeomodelVersion))
-
-	updated := conf.CloneSettings(current)
-	updated.BirdNET.RangeFilter.Model = entry.GeomodelVersion
-	updated.BirdNET.RangeFilter.ModelPath = expectedModelPath
-	updated.BirdNET.RangeFilter.LabelsPath = expectedLabelsPath
-	conf.StoreSettings(updated)
 	if err := conf.SaveSettings(); err != nil {
 		log.Warn("Failed to persist geomodel config",
 			logger.String("catalog_id", catalogID),
 			logger.Error(err))
 	}
-	mm.settingsMu.Unlock()
 
 	if err := mm.orchestrator.ReloadRangeFilter(); err != nil {
 		log.Warn("Failed to reload range filter after geomodel config update",
@@ -638,8 +865,8 @@ func (mm *ModelManager) applyInstalledGeomodelConfig(log logger.Logger, entry *C
 // orchestrator and to cover cases where the config migration did not persist
 // (e.g. no config file on disk).
 func (mm *ModelManager) healOrphanGeomodelConfig(log logger.Logger) {
-	expectedModelPath := filepath.Join(mm.modelsDir, "shared", conf.GeomodelONNXLocalName)
-	expectedLabelsPath := filepath.Join(mm.modelsDir, "shared", conf.GeomodelLabelsLocalName)
+	expectedModelPath := filepath.Join(mm.modelsDir, sharedDirName, conf.GeomodelONNXLocalName)
+	expectedLabelsPath := filepath.Join(mm.modelsDir, sharedDirName, conf.GeomodelLabelsLocalName)
 
 	filesPresent := true
 	for _, path := range []string{expectedModelPath, expectedLabelsPath} {
@@ -649,40 +876,36 @@ func (mm *ModelManager) healOrphanGeomodelConfig(log logger.Logger) {
 		}
 	}
 
-	// Decide and write under settingsMu so the decision and the store operate on
-	// one consistent snapshot. Reading the config outside the lock would let a
+	// Decide and write inside conf.UpdateSettings so the decision and the store operate on
+	// one consistent snapshot. Reading the config outside it would let a
 	// concurrent install publish a valid geomodel config between the decision
 	// and the store, after which a stale "clear" would wipe it. The filesystem
-	// check above is independent of settings, so it stays outside the lock.
-	mm.settingsMu.Lock()
-	current := conf.GetSettings()
-	rf := current.BirdNET.RangeFilter
-	action := decideGeomodelOrphanAction(&rf, expectedModelPath, expectedLabelsPath, filesPresent)
-	if action == geomodelOrphanNone {
-		mm.settingsMu.Unlock()
+	// check above is independent of settings, so it stays outside.
+	_, _, err := conf.UpdateSettings(func(_, updated *conf.Settings) error {
+		urf := updated.RangeFilterConfig()
+		action := decideGeomodelOrphanAction(urf, expectedModelPath, expectedLabelsPath, filesPresent)
+		switch action {
+		case geomodelOrphanPromote:
+			log.Info("Promoting orphaned geomodel range filter config to v3 (shared files present)")
+			urf.Model = geomodelRangeFilterVersion
+		case geomodelOrphanClear:
+			log.Info("Clearing orphaned geomodel range filter config (shared files absent)")
+			urf.Model = ""
+			urf.ModelPath = ""
+			urf.LabelsPath = ""
+			urf.PassUnmappedSpecies = false
+		case geomodelOrphanNone:
+			return conf.ErrSettingsUnchanged
+		}
+		return nil
+	})
+	if err != nil {
 		return
 	}
-
-	updated := conf.CloneSettings(current)
-	switch action {
-	case geomodelOrphanPromote:
-		log.Info("Promoting orphaned geomodel range filter config to v3 (shared files present)")
-		updated.BirdNET.RangeFilter.Model = geomodelRangeFilterVersion
-	case geomodelOrphanClear:
-		log.Info("Clearing orphaned geomodel range filter config (shared files absent)")
-		updated.BirdNET.RangeFilter.Model = ""
-		updated.BirdNET.RangeFilter.ModelPath = ""
-		updated.BirdNET.RangeFilter.LabelsPath = ""
-		updated.BirdNET.RangeFilter.PassUnmappedSpecies = false
-	case geomodelOrphanNone:
-		// Unreachable: handled by the early return above.
-	}
-	conf.StoreSettings(updated)
 	if err := conf.SaveSettings(); err != nil {
 		log.Warn("Failed to persist orphan geomodel config self-heal",
 			logger.Error(err))
 	}
-	mm.settingsMu.Unlock()
 
 	if err := mm.orchestrator.ReloadRangeFilter(); err != nil {
 		log.Warn("Failed to reload range filter after orphan geomodel self-heal",
@@ -703,14 +926,20 @@ func (mm *ModelManager) loadInstalledModels(log logger.Logger, installedIDs []st
 		if !found || entry.RegistryID == "" {
 			continue
 		}
-		// The permanent BirdNET v2.4 classifier is the primary model, resolved at
-		// startup by NewBirdNET, not loaded through the orchestrator's secondary
-		// loaders. It has no ModelLoaders entry, so calling LoadModel would only log
-		// a spurious "failed to load" warning. Skip it: it is always "installed" but
-		// never hot-loaded here.
-		if entry.RegistryID == permanentRegistryID {
+		// models.enabled is authoritative (Phase 4): only hot-load an installed model the user
+		// has enabled. A downloaded-but-disabled gallery model stays on disk, unloaded, until it
+		// is enabled. This is the behavior change the one-shot capture (ScanInstalled Phase 2)
+		// makes safe: after the capture, the enabled set reflects the user's choices.
+		if !mm.orchestrator.modelIDEnabled(entry.RegistryID) {
+			log.Debug("skipping installed model not in models.enabled",
+				logger.String("catalog_id", catalogID),
+				logger.String("registry_id", entry.RegistryID))
 			continue
 		}
+		// BirdNET v2.4 loads during NewOrchestrator (when enabled), before ScanInstalled runs,
+		// so on the normal path the IsModelLoaded guard below skips it here. If its construction
+		// load failed (now non-fatal), it is enabled, and it is installed, this loop retries it
+		// via LoadModel like any other enabled installed model.
 		if mm.orchestrator.IsModelLoaded(entry.RegistryID) {
 			continue
 		}
@@ -752,40 +981,18 @@ func (mm *ModelManager) InstalledVariantID(catalogID string) (variantID string, 
 }
 
 // scanSharedOnlyEntry checks whether a catalog entry whose files all live in
-// models/shared/ (e.g. geomodels) is installed. If all shared files exist on
+// models/shared/ (e.g. geomodels, a taxonomy component) is installed. If all shared files exist on
 // disk, it registers the entry in mm.installed and returns true. The caller
 // must hold mm.mu.
 func (mm *ModelManager) scanSharedOnlyEntry(log logger.Logger, entry *CatalogEntry) bool {
-	if !IsSharedOnly(entry) {
+	rec, ok := sharedOnlyRecord(entry, filepath.Join(mm.modelsDir, sharedDirName))
+	if !ok {
 		return false
 	}
-	sharedDir := filepath.Join(mm.modelsDir, "shared")
-	var modelPath, labelsPath string
-	for _, f := range entry.Files {
-		p := filepath.Join(sharedDir, f.LocalName)
-		if _, err := os.Stat(p); err != nil {
-			return false
-		}
-		switch f.Role {
-		case RoleGeomodelModel:
-			modelPath = p
-		case RoleGeomodelLabels:
-			labelsPath = p
-		}
-	}
-	if modelPath == "" {
-		return false
-	}
-	mm.installed[entry.ID] = InstalledModel{
-		CatalogID:   entry.ID,
-		ModelPath:   modelPath,
-		LabelsPath:  labelsPath,
-		InstalledAt: fileModTime(modelPath),
-		Version:     entry.Version,
-	}
+	mm.installed[entry.ID] = rec
 	log.Debug("Found installed shared-only model",
 		logger.String("catalog_id", entry.ID),
-		logger.String("path", modelPath))
+		logger.String("path", rec.ModelPath))
 	return true
 }
 
@@ -805,20 +1012,59 @@ func (mm *ModelManager) ListInstalled() []InstalledModel {
 func (mm *ModelManager) GetDownloadState(catalogID string) *DownloadState {
 	mm.mu.RLock()
 	defer mm.mu.RUnlock()
+	return mm.downloadStateLocked(catalogID)
+}
 
+// downloadStateLocked returns a copy of the entry's download state, nil when there
+// is none. The copy keeps callers from racing on the shared state. The caller must
+// hold mm.mu.
+func (mm *ModelManager) downloadStateLocked(catalogID string) *DownloadState {
 	state, ok := mm.downloading[catalogID]
 	if !ok {
 		return nil
 	}
-	// Return a copy to avoid races on the caller side.
 	cp := *state
 	return &cp
 }
 
-// Uninstall removes a downloaded model from disk and the installed map.
-// It refuses to uninstall the permanent built-in model (BirdNET v2.4).
-// Label files are retained on disk; shared embeddings files are only deleted
-// when no other bat models remain installed.
+// unloadModel unloads registryID through the injected test seam when one is set,
+// otherwise through the live orchestrator. The seam exists only so tests can force
+// the unload-failure branches of Uninstall and Reinstall; production always
+// takes the orchestrator path. Callers must have already
+// confirmed mm.orchestrator != nil (the guard preceding every unload site).
+func (mm *ModelManager) unloadModel(registryID string) error {
+	if mm.unloadFn != nil {
+		return mm.unloadFn(registryID)
+	}
+	return mm.orchestrator.UnloadModel(registryID)
+}
+
+// reloadRangeFilter reloads the range filter after a geomodel config change. It
+// runs the test seam when set, returns nil without an orchestrator (nothing to
+// reload), and otherwise delegates to the orchestrator. The caller holds no
+// settings lock.
+func (mm *ModelManager) reloadRangeFilter() error {
+	if mm.reloadRangeFilterFn != nil {
+		return mm.reloadRangeFilterFn()
+	}
+	if mm.orchestrator == nil {
+		return nil
+	}
+	return mm.orchestrator.ReloadRangeFilter()
+}
+
+// Uninstall removes a downloaded model from disk and the installed map. It is
+// refused while a download or variant switch for the entry is active; a retained
+// failed or cancelled download state does not block it.
+// It refuses to uninstall the permanent built-in model (BirdNET v2.4), and returns a
+// *DependentsError, changing nothing, while another installed or actively downloading
+// model depends on the entry (see CatalogEntry.DependsOn). Label files are retained on
+// disk. Shared files (embeddings, geomodel, taxonomy) are deleted per file, and only
+// when no other installed or actively downloading model reaches that file; a hidden
+// Component dependency that nothing needs any more is removed with its last dependent.
+// It holds the operation slot for its whole body and returns an
+// *OperationInProgressError, changing nothing, while another model operation runs,
+// and any other operation requested during an uninstall is refused the same way.
 func (mm *ModelManager) Uninstall(catalogID string) error {
 	log := GetLogger()
 
@@ -833,7 +1079,7 @@ func (mm *ModelManager) Uninstall(catalogID string) error {
 	}
 
 	// Reject uninstall of the permanent model.
-	if entry.RegistryID == permanentRegistryID {
+	if entry.RegistryID == RegistryIDBirdNETV24 {
 		return errors.Newf("cannot uninstall the built-in %s model", entry.Name).
 			Component("classifier.model_manager").
 			Category(errors.CategoryValidation).
@@ -845,6 +1091,14 @@ func (mm *ModelManager) Uninstall(catalogID string) error {
 	// topologyChanged is set when a model is unloaded below. The deferred notify
 	// is registered BEFORE the unlock defer so it runs AFTER the lock is released
 	// (deferred calls run LIFO), keeping notifyTopologyChanged outside the lock.
+	// Take the operation slot before any state decision. The release is registered
+	// before the unlock defer, so it runs after mm.mu is released (Release takes mu).
+	lease, err := mm.BeginOperation(OperationUninstall, catalogID)
+	if err != nil {
+		return err
+	}
+	defer lease.Release()
+
 	topologyChanged := false
 	defer func() {
 		if topologyChanged {
@@ -868,12 +1122,18 @@ func (mm *ModelManager) Uninstall(catalogID string) error {
 	// concurrent replaceVariant swaps mm.installed and writes files after its own
 	// unlock; uninstalling in that window would delete the old files and clear
 	// config only for the switch to resurrect the entry as a zombie install.
-	if _, downloading := mm.downloading[catalogID]; downloading {
+	if mm.downloading[catalogID].IsActive() {
 		return errors.Newf("model %s is being downloaded; cannot uninstall", catalogID).
 			Component("classifier.model_manager").
 			Category(errors.CategoryValidation).
 			Context("catalog_id", catalogID).
 			Build()
+	}
+
+	// Refuse while another model needs this one: removing it would leave that model
+	// without files it was installed with. Nothing has changed at this point.
+	if err := mm.dependentsError(&entry); err != nil {
+		return err
 	}
 
 	// Unload from orchestrator BEFORE deleting files to avoid crashes.
@@ -882,7 +1142,7 @@ func (mm *ModelManager) Uninstall(catalogID string) error {
 	// If unload fails, abort: the model may still be memory-mapped by a
 	// running inference engine, so deleting the file could cause a segfault.
 	if mm.orchestrator != nil && entry.RegistryID != "" && mm.orchestrator.IsModelLoaded(entry.RegistryID) {
-		if err := mm.orchestrator.UnloadModel(entry.RegistryID); err != nil {
+		if err := mm.unloadModel(entry.RegistryID); err != nil {
 			log.Warn("Uninstall refused: model could not be unloaded (still in use)",
 				logger.String("catalog_id", catalogID),
 				logger.String("registry_id", entry.RegistryID),
@@ -944,15 +1204,17 @@ func (mm *ModelManager) Uninstall(catalogID string) error {
 	}
 
 	// Update installed map and config BEFORE reloading range filter so the
-	// reload sees the cleared geomodel path and does not re-acquire the handle.
+	// reload sees the cleared or re-pointed geomodel path and does not re-acquire
+	// the handle. A custom range filter (judged by its model path) is kept as is.
 	delete(mm.installed, catalogID)
 	mm.applyConfigForUninstall(&entry)
 
-	// Reload range filter with updated config (geomodel cleared), then delete files.
+	// Reload range filter with updated config (geomodel cleared or re-pointed, or a
+	// kept custom filter), then delete files.
 	// Skip geomodel file deletion if reload fails (session may still hold handles).
 	geomodelReloadOK := true
-	if mm.orchestrator != nil && HasGeomodelFiles(&entry) {
-		if err := mm.orchestrator.ReloadRangeFilter(); err != nil {
+	if HasGeomodelFiles(&entry) {
+		if err := mm.reloadRangeFilter(); err != nil {
 			geomodelReloadOK = false
 			log.Warn("Range filter reload failed after geomodel uninstall, retaining geomodel files",
 				logger.String("catalog_id", catalogID),
@@ -960,12 +1222,10 @@ func (mm *ModelManager) Uninstall(catalogID string) error {
 		}
 	}
 
-	// Clean up shared embeddings, geomodel, and taxonomy files if no other dependent models remain.
-	mm.cleanupSharedFiles(log, catalogID, &entry, HasEmbeddingsFiles, isEmbeddingsRole, "embeddings")
-	if geomodelReloadOK {
-		mm.cleanupSharedFiles(log, catalogID, &entry, HasGeomodelFiles, isGeomodelRole, "geomodel")
-	}
-	mm.cleanupSharedFiles(log, catalogID, &entry, HasTaxonomyFiles, isTaxonomyRole, "taxonomy")
+	// Clean up shared embeddings, geomodel, and taxonomy files that no other model
+	// reaches, then remove any hidden component this uninstall leaves unused.
+	mm.cleanupSharedFilesLocked(log, &entry, im.VariantID, !geomodelReloadOK)
+	mm.autoremoveComponentsLocked(log, &entry, !geomodelReloadOK)
 
 	// Remove the per-model subdirectory if it is now empty (labels are retained,
 	// so Remove will fail with ENOTEMPTY if any remain, which is the desired behavior).
@@ -997,62 +1257,30 @@ func (mm *ModelManager) Uninstall(catalogID string) error {
 	return nil
 }
 
-// cleanupSharedFiles removes shared files of a given kind when uninstalling
-// a model, but only if no other installed or currently-downloading model
-// depends on the same files.
-// hasFiles checks whether a catalog entry depends on this kind of shared file.
-// matchRole checks whether a CatalogFile belongs to this kind.
-// The caller must hold mm.mu.
-func (mm *ModelManager) cleanupSharedFiles(log logger.Logger, catalogID string, entry *CatalogEntry, hasFiles func(*CatalogEntry) bool, matchRole func(string) bool, label string) {
-	if !hasFiles(entry) {
-		return
-	}
-	for id := range mm.installed {
-		if id == catalogID {
-			continue
-		}
-		other, found := GetCatalogEntry(id)
-		if found && hasFiles(&other) {
-			log.Debug("Retaining shared "+label+" files; other dependent models still installed",
-				logger.String("catalog_id", catalogID))
-			return
-		}
-	}
-	for id := range mm.downloading {
-		if id == catalogID {
-			continue
-		}
-		other, found := GetCatalogEntry(id)
-		if found && hasFiles(&other) {
-			log.Debug("Retaining shared "+label+" files; another model is downloading",
-				logger.String("catalog_id", catalogID),
-				logger.String("downloading_id", id))
-			return
-		}
-	}
-	for _, f := range entry.Files {
-		if matchRole(f.Role) {
-			path := filepath.Join(mm.modelsDir, "shared", f.LocalName)
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				log.Warn("Failed to remove "+label+" file",
-					logger.String("path", path),
-					logger.Error(err))
-			} else if err == nil {
-				log.Info("Removed shared "+label+" file",
-					logger.String("path", path))
-			}
-		}
-	}
-}
-
 // Install downloads the selected variant's files for a catalog entry and records
 // it as installed. variantID selects the hardware variant to install; an empty
 // string installs the entry's default variant, and an unknown variant id is
 // rejected before any download starts. The baseURL parameter overrides the
 // HuggingFace URL for testing; pass an empty string to use the default
 // HuggingFace URL constructed from the entry's repo. Progress is reported via the
-// channel if non-nil.
+// channel if non-nil. It holds the operation slot for the whole install and
+// returns an *OperationInProgressError, changing nothing, while another model
+// operation runs. The install runs under a context CancelOperation can cancel once
+// its download is registered, until activation starts; a cancelled install returns
+// an error that Is ErrOperationCancelled and leaves nothing behind.
 func (mm *ModelManager) Install(ctx context.Context, entry *CatalogEntry, variantID, baseURL string, progress chan<- DownloadState) error {
+	lease, err := mm.BeginOperation(OperationInstall, entry.ID)
+	if err != nil {
+		return err
+	}
+	defer lease.Release()
+	ctx, cancel := lease.cancellableContext(ctx)
+	defer cancel(nil)
+	return mm.install(ctx, entry, variantID, baseURL, progress)
+}
+
+// install is Install's body, run under the caller's operation slot.
+func (mm *ModelManager) install(ctx context.Context, entry *CatalogEntry, variantID, baseURL string, progress chan<- DownloadState) error {
 	// Reject an unknown variant selection before taking any lock or registering a
 	// download, so a bad selection cannot leave a lingering in-progress state.
 	if _, ok := variantFilesByID(entry, variantID); !ok {
@@ -1066,6 +1294,7 @@ func (mm *ModelManager) Install(ctx context.Context, entry *CatalogEntry, varian
 
 	// Check if already installed or already downloading.
 	mm.mu.Lock()
+	mm.dropRetainedStateLocked(entry.ID)
 	if _, ok := mm.installed[entry.ID]; ok {
 		mm.mu.Unlock()
 		return errors.Newf("model %s is already installed", entry.ID).
@@ -1074,7 +1303,7 @@ func (mm *ModelManager) Install(ctx context.Context, entry *CatalogEntry, varian
 			Context("catalog_id", entry.ID).
 			Build()
 	}
-	if _, downloading := mm.downloading[entry.ID]; downloading {
+	if mm.downloading[entry.ID].IsActive() {
 		mm.mu.Unlock()
 		return errors.Newf("model %s is already being downloaded", entry.ID).
 			Component("classifier.model_manager").
@@ -1088,13 +1317,11 @@ func (mm *ModelManager) Install(ctx context.Context, entry *CatalogEntry, varian
 		CatalogID: entry.ID,
 		Status:    StatusDownloading,
 	}
+	mm.markCancellable(entry.ID) // opMu is taken after mu, the order releaseLocked uses
 	mm.mu.Unlock()
 
 	if err := mm.downloadModelFiles(ctx, entry, variantID, baseURL, progress, true); err != nil {
-		// Keep failed state briefly for SSE pollers, then clean up.
-		time.AfterFunc(failedStateRetention, func() {
-			mm.removeDownloading(entry.ID)
-		})
+		mm.retainTerminalState(entry.ID)
 		return err
 	}
 
@@ -1104,10 +1331,23 @@ func (mm *ModelManager) Install(ctx context.Context, entry *CatalogEntry, varian
 // Reinstall re-downloads missing or corrupt files for an already-installed model.
 // Files that pass SHA256 validation are skipped. The baseURL parameter overrides
 // the HuggingFace URL for testing; pass an empty string to use the default.
-// Progress is reported via the channel if non-nil.
+// Progress is reported via the channel if non-nil. It holds the operation slot for
+// the whole reinstall and returns an *OperationInProgressError, changing nothing,
+// while another model operation runs.
 func (mm *ModelManager) Reinstall(ctx context.Context, entry *CatalogEntry, baseURL string, progress chan<- DownloadState) error {
+	lease, err := mm.BeginOperation(OperationReinstall, entry.ID)
+	if err != nil {
+		return err
+	}
+	defer lease.Release()
+	return mm.reinstall(ctx, entry, baseURL, progress)
+}
+
+// reinstall is Reinstall's body, run under the caller's operation slot.
+func (mm *ModelManager) reinstall(ctx context.Context, entry *CatalogEntry, baseURL string, progress chan<- DownloadState) error {
 	// Check that the model IS installed (opposite of Install's guard).
 	mm.mu.Lock()
+	mm.dropRetainedStateLocked(entry.ID)
 	im, ok := mm.installed[entry.ID]
 	if !ok {
 		mm.mu.Unlock()
@@ -1117,7 +1357,7 @@ func (mm *ModelManager) Reinstall(ctx context.Context, entry *CatalogEntry, base
 			Context("catalog_id", entry.ID).
 			Build()
 	}
-	if _, downloading := mm.downloading[entry.ID]; downloading {
+	if mm.downloading[entry.ID].IsActive() {
 		mm.mu.Unlock()
 		return errors.Newf("model %s is already being downloaded", entry.ID).
 			Component("classifier.model_manager").
@@ -1132,20 +1372,21 @@ func (mm *ModelManager) Reinstall(ctx context.Context, entry *CatalogEntry, base
 	// would strand the running model unloaded until a restart.
 	reinstallVariantID := im.VariantID
 	if _, resolvable := variantFilesByID(entry, reinstallVariantID); !resolvable {
-		mm.mu.Unlock()
-		return errors.Newf("cannot reinstall %s: installed variant %q is no longer in the catalog", entry.ID, reinstallVariantID).
+		err := errors.Newf("cannot reinstall %s: installed variant %q is no longer in the catalog", entry.ID, reinstallVariantID).
 			Component("classifier.model_manager").
 			Category(errors.CategoryValidation).
 			Context("catalog_id", entry.ID).
 			Context("variant_id", reinstallVariantID).
 			Build()
+		mm.recordEarlyFailureLocked(entry.ID, err)
+		mm.mu.Unlock()
+		return err
 	}
 
 	// Unload from orchestrator BEFORE overwriting files to avoid crashes.
 	unloaded := false
 	if mm.orchestrator != nil && entry.RegistryID != "" && mm.orchestrator.IsModelLoaded(entry.RegistryID) {
-		if err := mm.orchestrator.UnloadModel(entry.RegistryID); err != nil {
-			mm.mu.Unlock()
+		if err := mm.unloadModel(entry.RegistryID); err != nil {
 			// Reinstall runs asynchronously, so the HTTP caller cannot surface
 			// this. Log at the always-on manager logger; the API logger that the
 			// handler uses may be disabled, which would otherwise leave a refused
@@ -1154,13 +1395,16 @@ func (mm *ModelManager) Reinstall(ctx context.Context, entry *CatalogEntry, base
 				logger.String("catalog_id", entry.ID),
 				logger.String("registry_id", entry.RegistryID),
 				logger.Error(err))
-			return errors.Newf("cannot reinstall %s: model still in use", entry.ID).
+			inUseErr := errors.Newf("cannot reinstall %s: model still in use", entry.ID).
 				Component("classifier.model_manager").
 				Category(errors.CategorySystem).
 				Context("catalog_id", entry.ID).
 				Context("registry_id", entry.RegistryID).
 				Context("unload_error", err.Error()).
 				Build()
+			mm.recordEarlyFailureLocked(entry.ID, inUseErr)
+			mm.mu.Unlock()
+			return inUseErr
 		}
 		unloaded = true
 	}
@@ -1178,10 +1422,7 @@ func (mm *ModelManager) Reinstall(ctx context.Context, entry *CatalogEntry, base
 	}
 
 	if err := mm.downloadModelFiles(ctx, entry, reinstallVariantID, baseURL, progress, false); err != nil {
-		// Keep failed state briefly for SSE pollers, then clean up.
-		time.AfterFunc(failedStateRetention, func() {
-			mm.removeDownloading(entry.ID)
-		})
+		mm.retainTerminalState(entry.ID)
 		return err
 	}
 
@@ -1195,8 +1436,25 @@ func (mm *ModelManager) Reinstall(ctx context.Context, entry *CatalogEntry, base
 // (which refuses while a download is in progress) cannot race between the check
 // and the act. An empty variantID selects the entry's default variant; an unknown
 // variant id is rejected. Re-selecting the already-installed variant is a no-op.
-// The baseURL parameter overrides the HuggingFace URL for testing.
+// The baseURL parameter overrides the HuggingFace URL for testing. It holds the
+// operation slot for the whole call, the same-variant no-op included, and returns
+// an *OperationInProgressError, changing nothing, while another model operation
+// runs. Like Install it is cancellable (CancelOperation) from the registration of
+// its download until activation starts; a cancelled swap leaves the previous variant
+// installed and loaded.
 func (mm *ModelManager) InstallOrReplace(ctx context.Context, entry *CatalogEntry, variantID, baseURL string, progress chan<- DownloadState) error {
+	lease, err := mm.BeginOperation(OperationInstall, entry.ID)
+	if err != nil {
+		return err
+	}
+	defer lease.Release()
+	ctx, cancel := lease.cancellableContext(ctx)
+	defer cancel(nil)
+	return mm.installOrReplace(ctx, entry, variantID, baseURL, progress)
+}
+
+// installOrReplace is InstallOrReplace's body, run under the caller's operation slot.
+func (mm *ModelManager) installOrReplace(ctx context.Context, entry *CatalogEntry, variantID, baseURL string, progress chan<- DownloadState) error {
 	// Reject an unknown variant selection before any lock or state change.
 	if _, ok := variantFilesByID(entry, variantID); !ok {
 		return errors.Newf("unknown variant %q for model %s", variantID, entry.ID).
@@ -1217,7 +1475,7 @@ func (mm *ModelManager) InstallOrReplace(ctx context.Context, entry *CatalogEntr
 	}
 
 	mm.mu.Lock()
-	if _, downloading := mm.downloading[entry.ID]; downloading {
+	if mm.downloading[entry.ID].IsActive() {
 		mm.mu.Unlock()
 		return errors.Newf("model %s is already being downloaded", entry.ID).
 			Component("classifier.model_manager").
@@ -1225,12 +1483,14 @@ func (mm *ModelManager) InstallOrReplace(ctx context.Context, entry *CatalogEntr
 			Context("catalog_id", entry.ID).
 			Build()
 	}
+	mm.dropRetainedStateLocked(entry.ID)
 	current, installed := mm.installed[entry.ID]
 
-	// Permanent primary model (BirdNET v2.4): always "installed", and its variant is
-	// swapped through the dedicated primary-reload path, never the generic
-	// orchestrator unload/load. If ScanInstalled has not run yet, treat the current
-	// state as the embedded BuiltIn baseline so the swap still has a rollback target.
+	// Permanent primary model (BirdNET v2.4): always "installed". Its variant swap runs
+	// through the unified replaceVariant like every other family; the v2.4 anchor is
+	// always loaded, so it takes the gapless build-then-swap path. If ScanInstalled has
+	// not run yet, treat the current state as the embedded BuiltIn baseline so the swap
+	// still has a rollback target.
 	if IsPermanentEntry(entry) {
 		if !installed {
 			current = InstalledModel{CatalogID: entry.ID, Version: entry.Version}
@@ -1246,8 +1506,9 @@ func (mm *ModelManager) InstallOrReplace(ctx context.Context, entry *CatalogEntr
 			CatalogID: entry.ID,
 			Status:    StatusDownloading,
 		}
+		mm.markCancellable(entry.ID) // opMu is taken after mu, the order releaseLocked uses
 		mm.mu.Unlock()
-		return mm.replacePrimaryVariant(ctx, entry, &current, target, baseURL, progress)
+		return mm.replaceVariant(ctx, entry, &current, target, baseURL, progress)
 	}
 
 	if installed && current.VariantID == target {
@@ -1256,11 +1517,11 @@ func (mm *ModelManager) InstallOrReplace(ctx context.Context, entry *CatalogEntr
 		return nil
 	}
 	if !installed {
-		// Fresh install: delegate to Install, which registers the download and owns
-		// its failure cleanup. There is no installed entry for a concurrent Uninstall
-		// to race, so releasing the lock before Install re-acquires it is safe.
+		// Fresh install: delegate to install, which registers the download and owns
+		// its failure cleanup. The caller's operation slot is already held, so this
+		// calls the unexported body rather than Install, which would refuse itself.
 		mm.mu.Unlock()
-		return mm.Install(ctx, entry, variantID, baseURL, progress)
+		return mm.install(ctx, entry, variantID, baseURL, progress)
 	}
 	// Variant switch: register the switch atomically with the installed-state
 	// decision, so a concurrent Uninstall (which refuses while downloading) cannot
@@ -1269,6 +1530,7 @@ func (mm *ModelManager) InstallOrReplace(ctx context.Context, entry *CatalogEntr
 		CatalogID: entry.ID,
 		Status:    StatusDownloading,
 	}
+	mm.markCancellable(entry.ID) // opMu is taken after mu, the order releaseLocked uses
 	mm.mu.Unlock()
 
 	return mm.replaceVariant(ctx, entry, &current, target, baseURL, progress)
@@ -1276,64 +1538,57 @@ func (mm *ModelManager) InstallOrReplace(ctx context.Context, entry *CatalogEntr
 
 // replaceVariant switches an installed model to newVariantID using a
 // download-before-delete strategy: the new variant's files are downloaded and
-// verified first (the old model keeps running), then the old model is unloaded,
-// the install record and config are swapped to the new variant, the new model is
-// loaded, and only then are the old variant's superseded files removed. Any
-// failure before the swap leaves the old variant installed and loaded, so a
-// failed switch never strands the working model. The caller must have registered
-// entry.ID in mm.downloading; replaceVariant keeps it registered until the
-// superseded files are gone (so a concurrent ScanInstalled treats the switch as
-// in-flight) and clears it (or schedules cleanup on failure) before returning.
+// verified first (the old model keeps running), the install record (the new
+// variant and its release) and config are swapped, and the new variant is activated. A LOADED family activates GAPLESSLY via
+// reloadEntry (the old instance keeps serving until the new one is built and swapped
+// in under entry.mu, then closed); a not-loaded family is fresh-loaded via
+// hotLoadAfterInstall. Only after a successful activation are the old variant's
+// superseded files removed. Any failure before the swap leaves the old variant
+// installed and loaded, so a failed switch never strands the working model. The
+// caller must have registered entry.ID in mm.downloading; replaceVariant keeps it
+// registered until the superseded files are gone (so a concurrent ScanInstalled
+// treats the switch as in-flight) and clears it (or schedules cleanup on failure)
+// before returning. A user cancel (ErrOperationCancelled as the context's cause)
+// ends the call before the swap, with the state cancelled and the old variant
+// untouched.
 func (mm *ModelManager) replaceVariant(ctx context.Context, entry *CatalogEntry, old *InstalledModel, newVariantID, baseURL string, progress chan<- DownloadState) error {
 	log := GetLogger()
 
-	// 1. Download the NEW variant's files (they coexist with the old on disk
-	//    because a family's variants use distinct model LocalNames).
-	//    cleanupOnFailure=true so a failed switch leaves no partial new files.
-	_, modelPath, labelsPath, embeddingsPath, err := mm.downloadVariantFiles(ctx, entry, newVariantID, baseURL, progress, true)
-	if err != nil {
-		// downloadVariantFiles already marked the state failed; retain it briefly
-		// for SSE pollers, then clear. The old variant is untouched and loaded.
-		time.AfterFunc(failedStateRetention, func() {
-			mm.removeDownloading(entry.ID)
-		})
+	// 1. Acquire the new variant's files: its own plus its dependencies' (EffectiveFiles).
+	//    The embedded BuiltIn baseline (only the permanent BirdNET v2.4 entry has one)
+	//    owns no files, so nothing is fetched for it unless it declares dependencies, and
+	//    its model and labels paths stay empty (the embedded model is loaded). A downloaded
+	//    target's files coexist with the old on disk (a family's variants use distinct
+	//    model LocalNames), and the old variant keeps serving during the download.
+	targetIsBuiltIn := false
+	if v := resolveVariant(entry, newVariantID); v != nil {
+		targetIsBuiltIn = v.BuiltIn
+	}
+	var modelPath, labelsPath, embeddingsPath string
+	if effective, _ := EffectiveFiles(entry, newVariantID); len(effective) > 0 {
+		_, mp, lp, ep, err := mm.downloadVariantFiles(ctx, entry, newVariantID, baseURL, progress, true)
+		if err != nil {
+			// downloadVariantFiles already marked the state failed or cancelled; retain
+			// it briefly for SSE pollers, then clear. The old variant is untouched and
+			// loaded.
+			mm.retainTerminalState(entry.ID)
+			return err
+		}
+		if !targetIsBuiltIn {
+			modelPath, labelsPath, embeddingsPath = mp, lp, ep
+		}
+	} else if err := mm.enterActivation(ctx, entry.ID); err != nil {
+		// No files to download (the BuiltIn baseline), so activation starts here. The
+		// record is untouched; end the operation cancelled instead of leaving the
+		// still-active state for releaseLocked to report as ended unexpectedly.
+		mm.markCancelled(entry.ID, progress)
+		mm.retainTerminalState(entry.ID)
 		return err
 	}
 
-	// 2. Unload the old model before activating the new one. The new files are
-	//    already on disk, so an unload failure aborts cleanly with the old variant
-	//    still installed and loaded.
-	if mm.orchestrator != nil && entry.RegistryID != "" && mm.orchestrator.IsModelLoaded(entry.RegistryID) {
-		if unloadErr := mm.orchestrator.UnloadModel(entry.RegistryID); unloadErr != nil {
-			log.Warn("Variant switch refused: model could not be unloaded (still in use)",
-				logger.String("catalog_id", entry.ID),
-				logger.String("registry_id", entry.RegistryID),
-				logger.Error(unloadErr))
-			switchErr := errors.Newf("cannot switch %s to variant %q: model still in use", entry.ID, newVariantID).
-				Component("classifier.model_manager").
-				Category(errors.CategorySystem).
-				Context("catalog_id", entry.ID).
-				Context("registry_id", entry.RegistryID).
-				Context("unload_error", unloadErr.Error()).
-				Build()
-			// The new variant's files were downloaded but never activated; remove
-			// them (keeping shared companions) so the aborted switch strands no model
-			// file. The old variant stays installed and loaded.
-			mm.removeSupersededVariantFiles(log, entry, newVariantID, old.VariantID)
-			// Report the failure over SSE: a bare removeDownloading would leave the
-			// stream to read nil-state + IsInstalled as a false success.
-			mm.markFailed(entry.ID, switchErr, progress)
-			time.AfterFunc(failedStateRetention, func() {
-				mm.removeDownloading(entry.ID)
-			})
-			return switchErr
-		}
-		mm.notifyTopologyChanged()
-	}
-
-	// 3. Swap the install record to the new variant. entry.ID stays in
-	//    mm.downloading (cleared only in step 7) so a concurrent ScanInstalled
-	//    treats the switch as in-flight until the superseded files are removed.
+	// 2. Swap the install record to the new variant. entry.ID stays in mm.downloading
+	//    (cleared only in step 6) so a concurrent ScanInstalled treats the switch as
+	//    in-flight until the superseded files are removed.
 	mm.mu.Lock()
 	mm.installed[entry.ID] = InstalledModel{
 		CatalogID:   entry.ID,
@@ -1341,32 +1596,63 @@ func (mm *ModelManager) replaceVariant(ctx context.Context, entry *CatalogEntry,
 		ModelPath:   modelPath,
 		LabelsPath:  labelsPath,
 		InstalledAt: time.Now(),
-		Version:     entry.Version,
+		Version:     variantVersion(entry, newVariantID),
 	}
+	mm.recordDependenciesLocked(entry)
 	mm.mu.Unlock()
 
-	// 4. Persist the new variant's paths BEFORE loading, so buildPerch /
-	//    buildBirdNETV3 (which read settings.<family>.ModelPath first) load the new
-	//    file, and a crash/restart before step 6 still resolves the new variant.
-	mm.applyConfigForInstall(entry, modelPath, labelsPath, embeddingsPath)
+	// 3. Persist the new variant's paths BEFORE activating, so the family builder resolves
+	//    the new file (buildPerch / buildBirdNETV3 read settings.<family>.ModelPath, and the
+	//    v2.4 builder reads BirdNET.ModelPath) and a crash/restart before step 4 still
+	//    resolves the new variant. Config writers stay per family: the permanent v2.4 entry
+	//    writes only its model field (a variant swap must never touch a user's custom
+	//    LabelPath, and its label set is embedded), while every other family writes
+	//    model/labels/embeddings, re-points the range-filter config at the geomodel (see
+	//    rangeFilterReplaceableByGeomodel), and re-appends the Models.Enabled alias. A downloaded
+	//    variant's geomodel dependency also re-points the range filter, for the permanent
+	//    entry too.
+	mm.persistVariantConfig(entry, modelPath, labelsPath, embeddingsPath)
 
-	// 5. Load the new variant (the old one was unloaded in step 2).
-	mm.hotLoadAfterInstall(log, entry)
-
-	// hotLoadAfterInstall only logs a load failure. If the new variant did not
-	// load, the old model is already unloaded, so completing the switch (deleting
-	// the old files and reporting success) would leave the family with no
-	// classifier loaded while the API reported success. Roll back to the previous
-	// variant instead, extending the download-before-delete guarantee to a LOAD
-	// failure. Skipped when there is no orchestrator to verify against.
-	if mm.orchestrator != nil && entry.RegistryID != "" && !mm.orchestrator.IsModelLoaded(entry.RegistryID) {
-		return mm.rollbackVariantSwitch(log, entry, old, newVariantID, progress)
+	// 4. Activate the new variant.
+	if mm.orchestrator != nil && entry.RegistryID != "" && mm.orchestrator.IsModelLoaded(entry.RegistryID) {
+		// GAPLESS build-then-swap: the old instance keeps serving inference while the new
+		// one is built, then reloadEntry swaps it in under entry.mu. A failed build leaves
+		// the old variant serving (nothing swapped, nothing unloaded), so rollback only
+		// restores the record and config.
+		if reloadErr := mm.orchestrator.ReloadForVariantSwap(entry.RegistryID); reloadErr != nil {
+			return mm.rollbackVariant(log, entry, old, newVariantID, reloadErr, false, progress)
+		}
+		// A target that brings a geomodel (through its birdnet-geomodel-v3 dependency, or inline
+		// in a hand-edited catalog) had its range filter re-pointed in step 3 (see
+		// rangeFilterReplaceableByGeomodel); reload it, exactly as hotLoadAfterInstall does after an install. The v2.4
+		// anchor reloads its own range filter inside reloadEntry; that is separate from the
+		// geomodel reload here, which only runs for a target that supplies a geomodel.
+		if ProvidesGeomodel(entry, newVariantID) {
+			if rfErr := mm.reloadRangeFilter(); rfErr != nil {
+				log.Warn("Failed to hot-reload range filter after geomodel variant swap",
+					logger.String("catalog_id", entry.ID),
+					logger.Error(rfErr))
+			}
+		}
+		mm.notifyTopologyChanged()
+	} else {
+		// Not loaded (installed but disabled, or no orchestrator in tests): load the new
+		// variant fresh, exactly as an install does. hotLoadAfterInstall returns nil without
+		// an orchestrator or RegistryID, so the rollback fires only when the new variant was
+		// actually attempted and did not load, extending download-before-delete to a LOAD
+		// failure. The load error becomes the rollback's activation cause.
+		if loadErr := mm.hotLoadAfterInstall(log, entry, newVariantID); loadErr != nil {
+			return mm.rollbackVariant(log, entry, old, newVariantID, loadErr, true, progress)
+		}
 	}
 
-	// 6. Remove the OLD variant's superseded files (never shared companions).
+	// 5. Remove the OLD variant's superseded files (never shared companions). Safe for
+	//    builtin ids: the BuiltIn baseline carries no files, so nothing is targeted when
+	//    the old variant was the baseline, and the old DFT build's files are removed when
+	//    the baseline supersedes it.
 	mm.removeSupersededVariantFiles(log, entry, old.VariantID, newVariantID)
 
-	// 7. The switch is complete: clear the in-flight marker and report success.
+	// 6. The switch is complete: clear the in-flight marker and report success.
 	mm.removeDownloading(entry.ID)
 	sendProgress(progress, entry.ID, StatusComplete)
 
@@ -1379,200 +1665,191 @@ func (mm *ModelManager) replaceVariant(ctx context.Context, entry *CatalogEntry,
 	return nil
 }
 
-// rollbackVariantSwitch restores the previously-installed variant after the new
-// variant was written and activated but failed to load. It re-records the old
-// variant, re-persists its paths, reloads it, and removes the new variant's
-// now-unused files, so a load failure during a switch leaves the family running
-// its previous working variant rather than nothing. It reports the switch as
-// failed over the progress stream. The caller must have registered entry.ID in
-// mm.downloading; rollbackVariantSwitch schedules its cleanup.
-func (mm *ModelManager) rollbackVariantSwitch(log logger.Logger, entry *CatalogEntry, old *InstalledModel, newVariantID string, progress chan<- DownloadState) error {
-	log.Warn("New variant failed to load; rolling back to the previous variant",
+// rollbackVariant restores the previously-active variant after a failed swap to
+// newVariantID, re-persists its config and (optionally) reloads it, removes the new
+// variant's now-unused files, and reports the failure. It is the shared rollback for both
+// replaceVariant failure modes:
+//
+//   - reload=false: a GAPLESS build failure (ReloadForVariantSwap). reloadEntry only swaps
+//     entry.instance on a successful build, so the old model never stopped serving and
+//     nothing is reloaded. cause is the build error.
+//   - reload=true: the not-loaded path activated the new variant fresh but it failed to
+//     load, so the old variant is reloaded via hotLoadAfterInstall. cause is that fresh-load
+//     failure. If reloading the old variant ALSO fails, the model is left unloaded until
+//     restart and the returned error says so instead of claiming a successful restore.
+//
+// cause (the activating failure: build error or fresh-load failure) is recorded as
+// activation_error; a failed old-variant reload is recorded as restore_error. It serves
+// every family; the "failed to load" phrasing is kept stable for the API/SSE surface and
+// the tests that match on it.
+func (mm *ModelManager) rollbackVariant(log logger.Logger, entry *CatalogEntry, old *InstalledModel, newVariantID string, cause error, reload bool, progress chan<- DownloadState) error {
+	warnFields := make([]logger.Field, 0, 4)
+	warnFields = append(warnFields,
 		logger.String("catalog_id", entry.ID),
 		logger.String("failed_variant", newVariantID),
 		logger.String("restored_variant", old.VariantID))
+	if cause != nil {
+		// Scrub the underlying failure text: a model-load error can carry filesystem paths.
+		warnFields = append(warnFields, logger.SanitizedError(cause))
+	}
+	log.Warn("New variant failed to activate; rolling back to the previous variant", warnFields...)
 
-	// Restore the install record to the old variant.
+	// Restore the install record to the old variant. On the gapless path the running model
+	// is already the old one; on the not-loaded path it is reloaded below.
 	mm.mu.Lock()
 	mm.installed[entry.ID] = *old
 	mm.mu.Unlock()
 
-	// Re-persist the old variant's paths (step 4 wrote the new ones) and reload it.
-	// Companion files are identical across a family's variants, so the old variant's
-	// embeddings path (bat only) is derived from its own file list for completeness.
-	oldEmbeddings := ""
-	if oldFiles, ok := variantFilesByID(entry, old.VariantID); ok {
-		for _, f := range oldFiles {
-			if f.Role == RoleEmbeddings {
-				oldEmbeddings = filepath.Join(mm.modelsDir, "shared", f.LocalName)
-				break
-			}
+	// Re-persist the old variant's config, per family (step 3 wrote the new one; the
+	// permanent v2.4 entry writes only its model field and clears it for the embedded
+	// baseline). Companion files are identical across a family's variants.
+	mm.persistVariantConfig(entry, old.ModelPath, old.LabelsPath, mm.variantEmbeddingsPath(entry, old.VariantID))
+
+	// The not-loaded path activated the new variant fresh, so the old one must be reloaded;
+	// the gapless path never stopped serving and must not reload. A failed reload here means
+	// the previous variant did not come back: log it at the always-on manager logger (the
+	// returned error alone may only reach a disabled API logger) and report it honestly below.
+	var restoreErr error
+	if reload {
+		if restoreErr = mm.hotLoadAfterInstall(log, entry, old.VariantID); restoreErr != nil {
+			log.Warn("Previous variant failed to reload after a failed swap; model is unloaded until restart",
+				logger.String("catalog_id", entry.ID),
+				logger.String("failed_variant", newVariantID),
+				logger.String("restored_variant", old.VariantID),
+				logger.SanitizedString("restore_error", restoreErr.Error()))
 		}
 	}
-	mm.applyConfigForInstall(entry, old.ModelPath, old.LabelsPath, oldEmbeddings)
-	mm.hotLoadAfterInstall(log, entry)
 
-	// The new variant is unusable on this host: remove its files (keeping shared
-	// companions) so disk state matches the restored record.
+	// The new variant is unusable on this host: remove its files (none for a BuiltIn
+	// target), keeping shared companions, so disk state matches the restored record.
 	mm.removeSupersededVariantFiles(log, entry, newVariantID, old.VariantID)
 
-	switchErr := errors.Newf("switched %s to variant %q but it failed to load; restored previous variant %q", entry.ID, newVariantID, old.VariantID).
+	// Wrap the underlying failure(s) with %w so callers can still inspect them with
+	// errors.Is / errors.As after rollback, while the activation_error / restore_error
+	// context fields keep them readable in logs and telemetry.
+	var eb *errors.ErrorBuilder
+	switch {
+	case restoreErr != nil:
+		// Reloading the previous variant failed too: it is not actually restored at runtime.
+		eb = errors.Newf("switched %s to variant %q but it failed to load; the previous variant %q also failed to reload (model unloaded until restart): %w",
+			entry.ID, newVariantID, old.VariantID, errors.Join(cause, restoreErr))
+	case cause != nil:
+		eb = errors.Newf("switched %s to variant %q but it failed to load; restored previous variant %q: %w",
+			entry.ID, newVariantID, old.VariantID, cause)
+	default:
+		eb = errors.Newf("switched %s to variant %q but it failed to load; restored previous variant %q",
+			entry.ID, newVariantID, old.VariantID)
+	}
+	eb = eb.
 		Component("classifier.model_manager").
 		Category(errors.CategoryModelInit).
 		Context("catalog_id", entry.ID).
 		Context("failed_variant", newVariantID).
-		Context("restored_variant", old.VariantID).
-		Build()
+		Context("restored_variant", old.VariantID)
+	if cause != nil {
+		eb = eb.Context("activation_error", cause.Error())
+	}
+	if restoreErr != nil {
+		eb = eb.Context("restore_error", restoreErr.Error())
+	}
+	switchErr := eb.Build()
 	mm.markFailed(entry.ID, switchErr, progress)
-	time.AfterFunc(failedStateRetention, func() {
-		mm.removeDownloading(entry.ID)
-	})
+	mm.retainTerminalState(entry.ID)
 	return switchErr
 }
 
-// replacePrimaryVariant swaps the permanent primary classifier (BirdNET v2.4)
-// between its embedded BuiltIn baseline and a DFT-truncated ONNX build, in place,
-// without a pipeline restart. It mirrors replaceVariant's download-before-delete and
-// rollback discipline, but the primary cannot be orchestrator-unloaded/loaded, so it
-// activates through the dedicated primary-reload path
-// (Orchestrator.ReloadPrimaryForVariantSwap). The target's files (none for the
-// BuiltIn baseline) are fetched first while the old model keeps running, then
-// BirdNET.ModelPath is set (or cleared for the baseline) and the primary is reloaded.
-// A reload failure restores the previous variant's config and record; the running
-// model was already kept alive by reloadModelInternal's transactional rollback, so a
-// failed swap never strands the classifier. The caller must have registered entry.ID
-// in mm.downloading; replacePrimaryVariant clears it (or schedules cleanup on
-// failure) before returning.
-func (mm *ModelManager) replacePrimaryVariant(ctx context.Context, entry *CatalogEntry, old *InstalledModel, newVariantID, baseURL string, progress chan<- DownloadState) error {
-	log := GetLogger()
-
-	targetIsBuiltIn := false
-	if v := resolveVariant(entry, newVariantID); v != nil {
-		targetIsBuiltIn = v.BuiltIn
-	}
-
-	// 1. Acquire the new variant's model file. The BuiltIn baseline is embedded, so
-	//    there is nothing to download; a DFT build is fetched (the old model keeps
-	//    running) and removed on a failed switch.
-	newModelPath := ""
-	if !targetIsBuiltIn {
-		_, modelPath, _, _, err := mm.downloadVariantFiles(ctx, entry, newVariantID, baseURL, progress, true)
-		if err != nil {
-			// downloadVariantFiles already marked the state failed; retain it briefly
-			// for SSE pollers, then clear. The old variant is untouched and running.
-			time.AfterFunc(failedStateRetention, func() {
-				mm.removeDownloading(entry.ID)
-			})
-			return err
+// persistVariantConfig writes the given variant's paths for entry, choosing the config
+// writer by family: the permanent BirdNET v2.4 entry writes ONLY its model field (and
+// clears it for the embedded baseline), because a variant swap must never touch a user's
+// custom LabelPath and its label set is embedded; every other family writes
+// model/labels/embeddings, re-points the range-filter config at the geomodel (see
+// rangeFilterReplaceableByGeomodel), and re-appends the Models.Enabled alias. A
+// downloaded variant's geomodel dependency re-points the range filter in both branches.
+// Shared by the swap and both rollback paths so config is persisted and restored
+// identically.
+func (mm *ModelManager) persistVariantConfig(entry *CatalogEntry, modelPath, labelsPath, embeddingsPath string) {
+	if IsPermanentEntry(entry) {
+		var rangeFilter *CatalogEntry
+		if dep, ok := geomodelDependency(entry); ok {
+			rangeFilter = dep
 		}
-		newModelPath = modelPath
+		mm.applyConfigForVariantSwap(RegistryIDBirdNETV24, modelPath, rangeFilter)
+		return
 	}
-
-	// 2. Swap the install record to the new variant. entry.ID stays in
-	//    mm.downloading (cleared in step 6) so a concurrent ScanInstalled treats the
-	//    switch as in-flight until the superseded files are removed.
-	mm.mu.Lock()
-	mm.installed[entry.ID] = InstalledModel{
-		CatalogID:   entry.ID,
-		VariantID:   newVariantID,
-		ModelPath:   newModelPath,
-		InstalledAt: time.Now(),
-		Version:     entry.Version,
-	}
-	mm.mu.Unlock()
-
-	// 3. Persist BirdNET.ModelPath (set for a DFT build, cleared for the baseline)
-	//    BEFORE reloading, so the primary loader resolves the new file and a
-	//    crash/restart before step 4 still resolves the new variant.
-	mm.applyConfigForPrimarySwap(newModelPath)
-
-	// 4. Activate the new variant by reloading the primary in place. A reload failure
-	//    rolls back (the running model was already kept alive transactionally).
-	if mm.orchestrator != nil {
-		if reloadErr := mm.orchestrator.ReloadPrimaryForVariantSwap(); reloadErr != nil {
-			return mm.rollbackPrimaryVariantSwap(log, entry, old, newVariantID, reloadErr, progress)
-		}
-		mm.notifyTopologyChanged()
-	}
-
-	// 5. Remove the OLD variant's superseded files. Safe for builtin ids: the
-	//    BuiltIn baseline carries no files, so nothing is targeted when the old
-	//    variant was the baseline, and its files are removed when the old variant was
-	//    a DFT build superseded by the baseline.
-	mm.removeSupersededVariantFiles(log, entry, old.VariantID, newVariantID)
-
-	// 6. The switch is complete: clear the in-flight marker and report success.
-	mm.removeDownloading(entry.ID)
-	sendProgress(progress, entry.ID, StatusComplete)
-
-	log.Info("Primary model variant switched",
-		logger.String("catalog_id", entry.ID),
-		logger.String("from_variant", old.VariantID),
-		logger.String("to_variant", newVariantID),
-		logger.String("model_path", newModelPath))
-
-	return nil
+	mm.applyConfigForInstall(entry, modelPath, labelsPath, embeddingsPath)
 }
 
-// rollbackPrimaryVariantSwap restores the previously-active primary variant after a
-// failed reload of the new one. reloadModelInternal already kept the previous model
-// serving via its transactional rollback, so this only re-records the old variant,
-// re-persists its config, and removes the new variant's now-unused files; it does
-// NOT reload again (that would put a working model at risk for no gain). It reports
-// the swap as failed over the progress stream. The caller must have registered
-// entry.ID in mm.downloading; rollbackPrimaryVariantSwap schedules its cleanup.
-func (mm *ModelManager) rollbackPrimaryVariantSwap(log logger.Logger, entry *CatalogEntry, old *InstalledModel, newVariantID string, cause error, progress chan<- DownloadState) error {
-	log.Warn("New primary variant failed to reload; rolled back to the previous variant",
-		logger.String("catalog_id", entry.ID),
-		logger.String("failed_variant", newVariantID),
-		logger.String("restored_variant", old.VariantID),
-		logger.Error(cause))
-
-	// Restore the install record and re-persist the old variant's config (step 3
-	// wrote the new path). The running model is already the old one.
-	mm.mu.Lock()
-	mm.installed[entry.ID] = *old
-	mm.mu.Unlock()
-	mm.applyConfigForPrimarySwap(old.ModelPath)
-
-	// The new variant is unusable on this host: remove its downloaded files (none for
-	// the BuiltIn baseline) so disk state matches the restored record.
-	mm.removeSupersededVariantFiles(log, entry, newVariantID, old.VariantID)
-
-	switchErr := errors.Newf("switched %s to variant %q but it failed to load; restored previous variant %q", entry.ID, newVariantID, old.VariantID).
-		Component("classifier.model_manager").
-		Category(errors.CategoryModelInit).
-		Context("catalog_id", entry.ID).
-		Context("failed_variant", newVariantID).
-		Context("restored_variant", old.VariantID).
-		Context("reload_error", cause.Error()).
-		Build()
-	mm.markFailed(entry.ID, switchErr, progress)
-	time.AfterFunc(failedStateRetention, func() {
-		mm.removeDownloading(entry.ID)
-	})
-	return switchErr
+// variantEmbeddingsPath returns the shared embeddings companion path for the given
+// variant of entry ("" for a family with no embeddings role, i.e. everything but bat),
+// used when re-persisting a rolled-back variant's config.
+func (mm *ModelManager) variantEmbeddingsPath(entry *CatalogEntry, variantID string) string {
+	files, ok := variantFilesByID(entry, variantID)
+	if !ok {
+		return ""
+	}
+	for _, f := range files {
+		if f.Role == RoleEmbeddings {
+			return filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
+		}
+	}
+	return ""
 }
 
-// applyConfigForPrimarySwap persists the primary classifier's selected model file
-// path for a within-model BirdNET v2.4 variant swap: it sets BirdNET.ModelPath to
-// the new DFT-truncated file, or clears it (empty modelPath) to revert to the
-// embedded BuiltIn baseline. It never touches BirdNET.LabelPath: the v2.4 label set
-// is embedded and identical across variants, so a swap must not disturb a
-// user-configured custom label path. Uses clone-mutate-publish + SaveSettings so the
-// change survives restarts and is visible to concurrent readers.
-func (mm *ModelManager) applyConfigForPrimarySwap(modelPath string) {
+// ensureModelEnabled adds registryID's config alias to s.Models.Enabled when it is not
+// already present (case-insensitive), so an installed or variant-swapped model is loaded on
+// the next reload. Returns true when it added the alias. Shared by applyConfigForInstall and
+// applyConfigForVariantSwap so both install paths keep the enabled set authoritative.
+func ensureModelEnabled(s *conf.Settings, registryID string) bool {
+	alias := ConfigAliasForRegistry(registryID)
+	if alias == "" {
+		return false
+	}
+	if slices.ContainsFunc(s.Models.Enabled, func(id string) bool {
+		return strings.EqualFold(id, alias)
+	}) {
+		return false
+	}
+	s.Models.Enabled = append(s.Models.Enabled, alias)
+	return true
+}
+
+// applyConfigForVariantSwap persists the selected model file for a within-family
+// variant swap. It writes ONLY the family's model field: a family's label set is
+// identical across its variants (embedded for BirdNET v2.4), so a swap must never
+// disturb a user-configured label path. An empty modelPath reverts to the family's
+// built-in/default source (for BirdNET v2.4, the embedded BuiltIn baseline). When
+// rangeFilter is non-nil (the geomodel dependency of the new variant) the range-filter
+// config is re-pointed at its files in the same clone and save, as
+// rangeFilterReplaceableByGeomodel allows. It publishes through conf.UpdateSettings,
+// then saves. A nil settings receiver or an unknown registry ID is a no-op (nothing
+// stored, nothing saved).
+func (mm *ModelManager) applyConfigForVariantSwap(registryID, modelPath string, rangeFilter *CatalogEntry) {
 	if mm.settings == nil {
 		return
 	}
-	mm.settingsMu.Lock()
-	defer mm.settingsMu.Unlock()
-
-	updated := conf.CloneSettings(conf.GetSettings())
-	updated.BirdNET.ModelPath = modelPath
-	conf.StoreSettings(updated)
+	_, _, err := conf.UpdateSettings(func(_, updated *conf.Settings) error {
+		fs, ok := familyFields(updated, registryID)
+		if !ok {
+			return conf.ErrSettingsUnchanged
+		}
+		*fs.Model = modelPath
+		if rangeFilter != nil {
+			mm.applyRangeFilterConfigForInstall(updated, rangeFilter)
+		}
+		// Since models.enabled became authoritative (Phase 4), a variant install on an instance
+		// where the model is not enabled (reachable at N=0) must persist the enable, or the
+		// freshly installed variant would not load. This also runs on the rollback path
+		// (persistVariantConfig), which is intended: a rollback restores the model the user asked
+		// for, so it must stay enabled.
+		ensureModelEnabled(updated, registryID)
+		return nil
+	})
+	if err != nil {
+		return
+	}
 	if err := conf.SaveSettings(); err != nil {
-		GetLogger().Warn("Failed to persist settings after primary variant swap",
+		GetLogger().Warn("Failed to persist settings after variant swap",
+			logger.String("registry_id", registryID),
 			logger.Error(err))
 	}
 }
@@ -1653,25 +1930,78 @@ func (mm *ModelManager) preflightDiskSpace(entry *CatalogEntry, filesToDownload 
 		Build()
 }
 
+// downloadedFile is one file a downloadVariantFiles call wrote, kept so a failed
+// call can remove what it downloaded.
+type downloadedFile struct {
+	path, localName string
+	shared          bool
+}
+
+// removeFailedDownloadFiles removes the files a failed download of entry wrote. A
+// shared file that another installed or actively downloading entry still reaches is
+// kept: a dependency recorded installed (or another install that adopted the file
+// meanwhile) must not lose a file because this call failed after refetching it. So
+// is a shared file the entry's own current install still reaches, since a failed
+// variant swap leaves the previous variant installed. It takes mm.mu, so the caller
+// must not hold it.
+func (mm *ModelManager) removeFailedDownloadFiles(log logger.Logger, entry *CatalogEntry, files []downloadedFile) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	for _, d := range files {
+		if d.shared && (mm.sharedFileInUseLocked(entry.ID, d.localName) || mm.installedRecordUsesSharedFileLocked(entry, d.localName)) {
+			log.Debug("Keeping shared file after failed download; an installed or downloading model still needs it",
+				logger.String("catalog_id", entry.ID),
+				logger.String("file", d.localName))
+			continue
+		}
+		_ = os.Remove(d.path)
+	}
+}
+
 // downloadVariantFiles downloads and verifies the files for the selected variant
 // of entry into the models directory, reporting progress and returning the
 // resolved model, labels, and embeddings paths. variantID selects the variant
-// (empty = the entry's default). It deliberately does NOT record the install,
-// apply config, hot-load, or clear mm.downloading; the caller owns that lifecycle
+// (empty = the entry's default). The files are the variant's own plus those of the
+// entry's dependencies (EffectiveFiles), so progress, the SHA-256 pre-pass, the
+// disk-space preflight and the failure cleanup all cover the dependencies too. It
+// deliberately does NOT record the install, apply config, hot-load, or clear
+// mm.downloading; the caller owns that lifecycle
 // so both the install path (downloadModelFiles) and the variant-replace path
 // (replaceVariant) can share the download while differing in how they activate
-// the result. The caller must have registered the entry in mm.downloading. On
-// failure it calls markFailed, and when cleanupOnFailure is true it removes the
-// files it downloaded this call (Install); when false, partial progress is kept
-// (Reinstall).
+// the result. The caller must have registered the entry in mm.downloading and must
+// not hold mm.mu. On failure it marks the state failed, or cancelled when the user
+// cancelled the operation (ErrOperationCancelled as the context's cause, in which case
+// it returns an error wrapping that cause). When every file is on disk it calls
+// enterActivation, the last point at which a cancel can still end the operation, and
+// marks the state loading. When cleanupOnFailure is true
+// it removes the files it downloaded this call (Install, variant swap) through
+// removeFailedDownloadFiles, which keeps a shared file another installed or actively
+// downloading entry, or the entry's own current install, still reaches; when false,
+// partial progress is kept (Reinstall).
 func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *CatalogEntry, variantID, baseURL string, progress chan<- DownloadState, cleanupOnFailure bool) (files []CatalogFile, modelPath, labelsPath, embeddingsPath string, err error) {
 	log := GetLogger()
 
-	// Resolve the files for the requested variant (empty selection = default).
-	// An unknown variant should already have been rejected by the caller; treat
-	// it as a failure here too, as a backstop, rather than silently installing the
-	// default variant's files.
-	files, okVariant := variantFilesByID(entry, variantID)
+	// Resolve the files for the requested variant (empty selection = default),
+	// including its dependencies' files. An unknown variant should already have been
+	// rejected by the caller; treat it as a failure here too, as a backstop, rather
+	// than silently installing the default variant's files.
+	files, okVariant := EffectiveFiles(entry, variantID)
+
+	// Track files we downloaded so we can clean up on failure.
+	var downloadedFiles []downloadedFile
+
+	cleanup := func() { mm.removeFailedDownloadFiles(log, entry, downloadedFiles) }
+
+	// fail ends the attempt: it removes what this call wrote (when asked to), then
+	// settles the state, cancelled when the user cancelled and failed otherwise.
+	// Cleanup comes first so a reader that sees the terminal state sees no leftovers.
+	fail := func(failure error) error {
+		if cleanupOnFailure {
+			cleanup()
+		}
+		return mm.settleDownloadFailure(ctx, entry.ID, failure, progress)
+	}
+
 	if !okVariant {
 		vErr := errors.Newf("unknown variant %q for model %s", variantID, entry.ID).
 			Component("classifier.model_manager").
@@ -1679,8 +2009,7 @@ func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *Catalog
 			Context("catalog_id", entry.ID).
 			Context("variant_id", variantID).
 			Build()
-		mm.markFailed(entry.ID, vErr, progress)
-		return nil, "", "", "", vErr
+		return nil, "", "", "", fail(vErr)
 	}
 
 	// Create model subdirectory only if the entry has non-shared files.
@@ -1694,17 +2023,7 @@ func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *Catalog
 				Context("catalog_id", entry.ID).
 				Context("directory", subdir).
 				Build()
-			mm.markFailed(entry.ID, mkdirErr, progress)
-			return nil, "", "", "", mkdirErr
-		}
-	}
-
-	// Track files we downloaded so we can clean up on failure.
-	var downloadedFiles []string
-
-	cleanup := func() {
-		for _, f := range downloadedFiles {
-			_ = os.Remove(f)
+			return nil, "", "", "", fail(mkdirErr)
 		}
 	}
 
@@ -1712,7 +2031,7 @@ func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *Catalog
 	// Shared files (embeddings, geomodel, taxonomy) are stored in a common directory.
 	fileDestPath := func(f CatalogFile) string {
 		if isSharedRole(f.Role) {
-			return filepath.Join(mm.modelsDir, "shared", f.LocalName)
+			return filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
 		}
 		return filepath.Join(subdir, f.LocalName)
 	}
@@ -1743,8 +2062,7 @@ func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *Catalog
 	// downloaded yet (the subdirectory may already exist), so no cleanup is needed
 	// on the reject path.
 	if pfErr := mm.preflightDiskSpace(entry, filesToDownload, totalAllBytes); pfErr != nil {
-		mm.markFailed(entry.ID, pfErr, progress)
-		return nil, "", "", "", pfErr
+		return nil, "", "", "", fail(pfErr)
 	}
 
 	// Resolve the endpoint override once per install, for logging and for the
@@ -1814,20 +2132,22 @@ func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *Catalog
 			dlErr = mm.downloadModelFile(ctx, entry.ID, repo, f.RemotePath, destPath, f.SHA256, completedBytes, configured)
 		}
 		if dlErr != nil {
-			log.Error("Failed to download file",
-				logger.String("catalog_id", entry.ID),
-				logger.String("repo", repo),
-				logger.String("remote_path", f.RemotePath),
-				logger.Error(dlErr))
-			mm.markFailed(entry.ID, dlErr, progress)
-			if cleanupOnFailure {
-				cleanup()
+			if errors.Is(context.Cause(ctx), ErrOperationCancelled) {
+				log.Info("Model download cancelled",
+					logger.String("catalog_id", entry.ID),
+					logger.String("remote_path", f.RemotePath))
+			} else {
+				log.Error("Failed to download file",
+					logger.String("catalog_id", entry.ID),
+					logger.String("repo", repo),
+					logger.String("remote_path", f.RemotePath),
+					logger.Error(dlErr))
 			}
-			return nil, "", "", "", dlErr
+			return nil, "", "", "", fail(dlErr)
 		}
 
 		completedBytes += f.SizeBytes
-		downloadedFiles = append(downloadedFiles, destPath)
+		downloadedFiles = append(downloadedFiles, downloadedFile{path: destPath, localName: f.LocalName, shared: isSharedRole(f.Role)})
 
 		if f.Role == RoleModel {
 			modelPath = destPath
@@ -1837,13 +2157,20 @@ func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *Catalog
 		}
 	}
 
+	// Every file is on disk: activation starts here, the point of no return of a
+	// cancel. A cancel that arrived before it ends the operation cancelled and
+	// removes what this call wrote.
+	if actErr := mm.enterActivation(ctx, entry.ID); actErr != nil {
+		return nil, "", "", "", fail(actErr)
+	}
+
 	// For shared-only entries (e.g. geomodels), derive paths from shared files.
 	modelPath, labelsPath = resolveSharedPaths(files, modelPath, labelsPath, fileDestPath)
 
 	// Find embeddings path for bat models.
 	for _, f := range files {
 		if f.Role == RoleEmbeddings {
-			embeddingsPath = filepath.Join(mm.modelsDir, "shared", f.LocalName)
+			embeddingsPath = filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
 			break
 		}
 	}
@@ -1853,7 +2180,7 @@ func (mm *ModelManager) downloadVariantFiles(ctx context.Context, entry *Catalog
 
 // downloadModelFiles installs a catalog entry's selected variant: it delegates
 // the file download and verification to downloadVariantFiles, then records the
-// install, applies config, and hot-loads the model. It is the install/reinstall
+// install (the variant and its release), applies config, and hot-loads the model. It is the install/reinstall
 // entry point; the variant-switch path (replaceVariant) uses downloadVariantFiles
 // directly so it can interpose an unload between download and load. The caller
 // must have registered the entry in mm.downloading. cleanupOnFailure is passed
@@ -1885,14 +2212,22 @@ func (mm *ModelManager) downloadModelFiles(ctx context.Context, entry *CatalogEn
 		ModelPath:   modelPath,
 		LabelsPath:  labelsPath,
 		InstalledAt: time.Now(),
-		Version:     entry.Version,
+		Version:     variantVersion(entry, recordedVariant),
 	}
+	mm.recordDependenciesLocked(entry)
 	delete(mm.downloading, entry.ID)
 	mm.mu.Unlock()
 
 	mm.applyConfigForInstall(entry, modelPath, labelsPath, embeddingsPath)
 
-	mm.hotLoadAfterInstall(log, entry)
+	// A failed hot-load is not an install failure: the files are on disk and load on the next
+	// restart, so report the install complete and only warn about the deferred load.
+	if loadErr := mm.hotLoadAfterInstall(log, entry, recordedVariant); loadErr != nil {
+		log.Warn("Model installed but hot-load failed; a restart will retry loading it",
+			logger.String("catalog_id", entry.ID),
+			logger.String("registry_id", entry.RegistryID),
+			logger.Error(loadErr))
+	}
 	sendProgress(progress, entry.ID, StatusComplete)
 
 	log.Info("Model installed",
@@ -1902,33 +2237,40 @@ func (mm *ModelManager) downloadModelFiles(ctx context.Context, entry *CatalogEn
 	return nil
 }
 
-// hotLoadAfterInstall hot-loads the classifier model and, if the entry
-// includes geomodel companion files, reloads the range filter.
-func (mm *ModelManager) hotLoadAfterInstall(log logger.Logger, entry *CatalogEntry) {
-	if mm.orchestrator == nil {
-		return
-	}
-	if entry.RegistryID != "" {
+// hotLoadAfterInstall hot-loads the classifier model and, if installing variantID
+// brings geomodel files (inline or through a dependency), reloads the range filter. It
+// returns the LoadModel error (nil on success, or when there is no orchestrator or
+// RegistryID) so callers decide how to react: an install treats a failed hot-load as
+// non-fatal (the files are on disk and load after a restart), while a variant swap rolls
+// back. The range-filter reload failure stays a non-fatal warning and never affects the
+// returned error.
+func (mm *ModelManager) hotLoadAfterInstall(log logger.Logger, entry *CatalogEntry, variantID string) error {
+	var loadErr error
+	if mm.orchestrator != nil && entry.RegistryID != "" {
 		if err := mm.orchestrator.LoadModel(entry.RegistryID); err != nil {
-			log.Warn("Failed to hot-load model (will be available after restart)",
-				logger.String("catalog_id", entry.ID),
-				logger.Error(err))
+			// Let the caller decide whether this is fatal, and log accordingly, rather than
+			// emit a fixed "available after restart" line that is untrue on the rollback path
+			// (where the failed variant is removed and does not persist).
+			loadErr = err
 		} else {
 			// Model hot-loaded: topology changed (no lock held here).
 			mm.notifyTopologyChanged()
 		}
 	}
-	if HasGeomodelFiles(entry) {
-		if err := mm.orchestrator.ReloadRangeFilter(); err != nil {
+	if ProvidesGeomodel(entry, variantID) {
+		if err := mm.reloadRangeFilter(); err != nil {
 			log.Warn("Failed to hot-reload range filter after geomodel install",
 				logger.String("catalog_id", entry.ID),
 				logger.Error(err))
 		}
 	}
+	return loadErr
 }
 
 // resolveSharedPaths fills in modelPath and labelsPath for shared-only entries
-// (e.g. geomodels) that have no RoleModel or RoleLabels files. It takes the
+// (e.g. geomodels, taxonomy) that have no RoleModel or RoleLabels files: the
+// geomodel paths when present, else, when every file is shared, the first file's path
+// as the model path (the same rule as sharedOnlyRecord, so the record matches a rescan). It takes the
 // resolved variant file list rather than the entry so no default-variant Files
 // reference leaks into the download path.
 func resolveSharedPaths(files []CatalogFile, modelPath, labelsPath string, destPath func(CatalogFile) string) (resolvedModel, resolvedLabels string) {
@@ -1942,6 +2284,9 @@ func resolveSharedPaths(files []CatalogFile, modelPath, labelsPath string, destP
 		case RoleGeomodelLabels:
 			labelsPath = destPath(f)
 		}
+	}
+	if modelPath == "" && len(files) > 0 && !slices.ContainsFunc(files, func(f CatalogFile) bool { return !isSharedRole(f.Role) }) {
+		modelPath = destPath(files[0])
 	}
 	return modelPath, labelsPath
 }
@@ -1963,22 +2308,106 @@ func sendProgress(progress chan<- DownloadState, catalogID, status string) {
 // markFailed sets the download state to StatusFailed so SSE pollers can
 // observe the failure before the entry is cleaned up.
 func (mm *ModelManager) markFailed(catalogID string, err error, progress chan<- DownloadState) {
+	mm.markTerminal(catalogID, StatusFailed, err.Error(), progress)
+}
+
+// markTerminal sets the entry's download state to a terminal status with its
+// error text and sends the same state to progress without blocking.
+func (mm *ModelManager) markTerminal(catalogID, status, errText string, progress chan<- DownloadState) {
 	mm.mu.Lock()
 	if state, ok := mm.downloading[catalogID]; ok {
-		state.Status = StatusFailed
-		state.Error = err.Error()
+		state.Status = status
+		state.Error = errText
 	}
 	mm.mu.Unlock()
 
 	if progress != nil {
 		select {
-		case progress <- DownloadState{
-			CatalogID: catalogID,
-			Status:    StatusFailed,
-			Error:     err.Error(),
-		}:
+		case progress <- DownloadState{CatalogID: catalogID, Status: status, Error: errText}:
 		default:
 		}
+	}
+}
+
+// markCancelled sets the download state to StatusCancelled, the terminal state of
+// a user cancel, so SSE pollers can observe it. It carries no error: a cancel is
+// not a failure.
+func (mm *ModelManager) markCancelled(catalogID string, progress chan<- DownloadState) {
+	mm.markTerminal(catalogID, StatusCancelled, "", progress)
+}
+
+// settleDownloadFailure ends a download attempt that returned err: it marks the
+// entry's state cancelled and returns the cancellation error when the user
+// cancelled the operation (whatever the failure looked like, a cancel racing
+// another failure still reads as a cancel), else marks it failed and returns err.
+// It also closes the lease's cancel window, so a cancel arriving once the outcome is
+// failed is refused.
+func (mm *ModelManager) settleDownloadFailure(ctx context.Context, catalogID string, err error, progress chan<- DownloadState) error {
+	// Decide and close the cancel window in one step under opMu: a cancel accepted
+	// before this point ends the operation cancelled, and one that arrives after it
+	// is refused instead of being answered 202 for an operation that ends failed.
+	mm.opMu.Lock()
+	cancelled := errors.Is(context.Cause(ctx), ErrOperationCancelled)
+	if l := mm.activeOp; !cancelled && l != nil && l.catalogID == catalogID {
+		l.cancellable = false
+	}
+	mm.opMu.Unlock()
+
+	if cancelled {
+		mm.markCancelled(catalogID, progress)
+		return newCancelledError(catalogID)
+	}
+	mm.markFailed(catalogID, err, progress)
+	return err
+}
+
+// dropRetainedStateLocked removes a terminal (failed or cancelled) download state an
+// earlier attempt left for the entry, when a new attempt begins. Without it an
+// attempt that ends before writing a state of its own, a same-variant no-op or an
+// early refusal, would have the old outcome replayed to its progress stream. The
+// caller must hold mm.mu.
+func (mm *ModelManager) dropRetainedStateLocked(catalogID string) {
+	if state := mm.downloading[catalogID]; state != nil && !state.IsActive() {
+		delete(mm.downloading, catalogID)
+	}
+}
+
+// recordEarlyFailureLocked records a failed download state for an operation that
+// gave up before it registered one, so its progress stream reports the failure,
+// and retains it like any failed state. The caller must hold mm.mu.
+func (mm *ModelManager) recordEarlyFailureLocked(catalogID string, err error) {
+	mm.downloading[catalogID] = &DownloadState{CatalogID: catalogID, Status: StatusFailed, Error: err.Error()}
+	mm.retainTerminalStateLocked(catalogID)
+}
+
+// retainTerminalState keeps the entry's terminal (failed or cancelled) download
+// state in the map for failedStateRetention so SSE pollers can observe it, then
+// removes it. The removal only runs if the map still holds that same state, so it
+// never deletes the state of an operation started in the meantime.
+func (mm *ModelManager) retainTerminalState(catalogID string) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	mm.retainTerminalStateLocked(catalogID)
+}
+
+// retainTerminalStateLocked is retainTerminalState for a caller holding mm.mu.
+func (mm *ModelManager) retainTerminalStateLocked(catalogID string) {
+	state := mm.downloading[catalogID]
+	if state == nil {
+		return
+	}
+	time.AfterFunc(failedStateRetention, func() {
+		mm.expireDownloadState(catalogID, state)
+	})
+}
+
+// expireDownloadState removes the download state of catalogID when it is still
+// state, and leaves a newer state alone.
+func (mm *ModelManager) expireDownloadState(catalogID string, state *DownloadState) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if mm.downloading[catalogID] == state {
+		delete(mm.downloading, catalogID)
 	}
 }
 
@@ -1989,78 +2418,197 @@ func (mm *ModelManager) removeDownloading(catalogID string) {
 	delete(mm.downloading, catalogID)
 }
 
+// rangeFilterGalleryManaged reports whether the range filter's model path belongs to
+// the gallery, so install, startup promote and uninstall may rewrite it: an empty
+// path, or a geomodel file name of the active catalog in a "shared" directory under a
+// directory named like the models directory (the same layout test, and rationale, as
+// Orchestrator.isGalleryManagedPath). Uninstall leaves any other path untouched.
+// Reads only the catalog snapshot, so it is safe inside a conf.UpdateSettings mutate
+// function and under mm.mu.
+func (mm *ModelManager) rangeFilterGalleryManaged(rf *conf.RangeFilterSettings) bool {
+	if rf.ModelPath == "" {
+		return true
+	}
+	dir := filepath.Dir(rf.ModelPath)
+	if filepath.Base(dir) != sharedDirName {
+		return false
+	}
+	// Compare resolved names so a relative models directory such as "." still
+	// matches an absolute path under it.
+	parent, err := filepath.Abs(filepath.Dir(dir))
+	if err != nil {
+		return false
+	}
+	modelsDir, err := filepath.Abs(mm.modelsDir)
+	if err != nil || filepath.Base(parent) != filepath.Base(modelsDir) {
+		return false
+	}
+	return isCatalogGeomodelName(filepath.Base(rf.ModelPath))
+}
+
+// rangeFilterReplaceableByGeomodel reports whether installing or promoting a geomodel
+// may rewrite the range filter config: a gallery-managed path (rangeFilterGalleryManaged)
+// or a stock MData model in any directory (isStockMDataRangeFilterPath), so an installed
+// geomodel always takes precedence over stock MData. It ignores rf.Model, so a legacy pin
+// is replaced too. Uninstall keeps the strict rangeFilterGalleryManaged test, so it never
+// clears a stock MData path it cannot replace. Safe inside a conf.UpdateSettings mutate
+// function and under mm.mu.
+func (mm *ModelManager) rangeFilterReplaceableByGeomodel(rf *conf.RangeFilterSettings) bool {
+	return mm.rangeFilterGalleryManaged(rf) || isStockMDataRangeFilterPath(rf.ModelPath)
+}
+
+// isCatalogGeomodelName reports whether name is the LocalName of a geomodel-role
+// file in any entry or variant of the active catalog.
+func isCatalogGeomodelName(name string) bool {
+	isGeomodelFile := func(f CatalogFile) bool { return isGeomodelRole(f.Role) && f.LocalName == name }
+	catalog := ActiveCatalog()
+	for i := range catalog {
+		for _, files := range entryFileSets(&catalog[i]) {
+			if slices.ContainsFunc(files, isGeomodelFile) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// applyRangeFilterConfigForInstall points the range filter at entry's geomodel
+// companion files under {modelsDir}/shared when the entry carries them. It writes
+// into updated (a settings clone); the caller stores and saves. A no-op for an
+// entry without geomodel files and for a range filter that
+// rangeFilterReplaceableByGeomodel keeps. Both role paths are cleared before the entry's
+// files are written, so a half-tuple entry (only one geomodel role) leaves the
+// omitted role's path empty rather than at a stale earlier value.
+func (mm *ModelManager) applyRangeFilterConfigForInstall(updated *conf.Settings, entry *CatalogEntry) {
+	if !HasGeomodelFiles(entry) || entry.GeomodelVersion == "" {
+		return
+	}
+	rf := updated.RangeFilterConfig()
+	if !mm.rangeFilterReplaceableByGeomodel(rf) {
+		return
+	}
+	rf.Model = entry.GeomodelVersion
+	// Clear both role paths before the loop so a half-tuple entry (only one geomodel
+	// role, reachable only via a hand-edited catalog) cannot leave the opposite path at
+	// a stale value from an earlier config. The shipped catalog always pairs both roles,
+	// so this is byte-identical there; survivingGeomodelEntry guarantees a full tuple on
+	// the uninstall re-point path.
+	rf.ModelPath = ""
+	rf.LabelsPath = ""
+	for _, f := range entry.Files {
+		switch f.Role {
+		case RoleGeomodelModel:
+			rf.ModelPath = filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
+		case RoleGeomodelLabels:
+			rf.LabelsPath = filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
+		}
+	}
+}
+
+// applyRangeFilterConfigForUninstall keeps the shared geomodel range-filter config
+// pointing at files that exist after an uninstall. When another installed entry still
+// carries a full geomodel tuple it re-points the config at that survivor's files (via
+// applyRangeFilterConfigForInstall); otherwise it clears the config. A range filter
+// that is not gallery-managed (see rangeFilterGalleryManaged), custom or stock MData,
+// is neither re-pointed nor cleared. mm.installed must no longer
+// contain the uninstalled entry; caller holds mm.mu. It writes into updated (a settings
+// clone), and is a no-op for an entry without geomodel files.
+func (mm *ModelManager) applyRangeFilterConfigForUninstall(updated *conf.Settings, entry *CatalogEntry) {
+	if !HasGeomodelFiles(entry) || !mm.rangeFilterGalleryManaged(updated.RangeFilterConfig()) {
+		return
+	}
+	// The geomodel range filter is a shared service, not a per-family setting:
+	// applyRangeFilterConfigForInstall points the config at one specific installed entry's
+	// shared files. If that entry is the one being uninstalled and a survivor declares a
+	// different geomodel tuple, retaining the config alone would leave it pointing at the
+	// removed entry's now-absent files. So re-point at a deterministically chosen surviving
+	// geomodel entry's present files instead of only retaining; this recomputes identical
+	// paths for the shipped catalog, where every geomodel entry shares one canonical v3
+	// tuple, and self-corrects a hand-edited catalog that mixes tuples. Only clear when the
+	// last usable geomodel-bearing model is removed.
+	if survivor, found := mm.survivingGeomodelEntry(); found {
+		mm.applyRangeFilterConfigForInstall(updated, &survivor)
+		return
+	}
+	rf := updated.RangeFilterConfig()
+	rf.Model = ""
+	rf.ModelPath = ""
+	rf.LabelsPath = ""
+	rf.PassUnmappedSpecies = false
+}
+
+// survivingGeomodelEntry returns a deterministically chosen installed catalog entry that
+// still carries a usable geomodel tuple: BOTH geomodel role files (model and labels) plus a
+// non-empty GeomodelVersion. Both roles are required because applyRangeFilterConfigForInstall
+// sets ModelPath and LabelsPath independently, so re-pointing to a half-tuple survivor would
+// leave the other path at the uninstalled entry's absent file; a non-empty version is required
+// because that function refuses an empty one. Selection is by sorted catalog ID for
+// determinism, matching replacementInstall. mm.installed no longer contains the uninstalled
+// entry when this runs (deleted by the caller).
+func (mm *ModelManager) survivingGeomodelEntry() (CatalogEntry, bool) {
+	candidates := make([]string, 0, len(mm.installed))
+	for id := range mm.installed {
+		other, found := GetCatalogEntry(id)
+		if found && hasGeomodelTuple(&other) && other.GeomodelVersion != "" {
+			candidates = append(candidates, id)
+		}
+	}
+	if len(candidates) == 0 {
+		return CatalogEntry{}, false
+	}
+	slices.Sort(candidates)
+	survivor, _ := GetCatalogEntry(candidates[0])
+	return survivor, true
+}
+
 // applyConfigForInstall updates settings to reflect a newly installed model.
 // Only fields with non-empty paths are set. The caller must hold no locks
-// other than mm.settingsMu (acquired internally).
-// Uses clone-mutate-publish so the shared settings snapshot is never mutated
-// in place. Settings are persisted to disk via conf.SaveSettings so changes
-// survive restarts and are visible to concurrent readers through conf.Setting().
+// (the settings writer lock is acquired inside conf.UpdateSettings).
+// It publishes through conf.UpdateSettings, then saves.
 func (mm *ModelManager) applyConfigForInstall(entry *CatalogEntry, modelPath, labelsPath, embeddingsPath string) {
 	if mm.settings == nil {
 		return
 	}
 
-	mm.settingsMu.Lock()
-	defer mm.settingsMu.Unlock()
-
-	updated := conf.CloneSettings(conf.GetSettings())
-
-	switch entry.RegistryID {
-	case RegistryIDBirdNETV3:
-		if modelPath != "" {
-			updated.BirdNETV3.ModelPath = modelPath
-		}
-		if labelsPath != "" {
-			updated.BirdNETV3.LabelPath = labelsPath
-		}
-	case RegistryIDPerchV2:
-		if modelPath != "" {
-			updated.Perch.ModelPath = modelPath
-		}
-		if labelsPath != "" {
-			updated.Perch.LabelPath = labelsPath
-		}
-	case RegistryIDBSG:
-		if modelPath != "" {
-			updated.BSG.ModelPath = modelPath
-		}
-		if labelsPath != "" {
-			updated.BSG.LabelPath = labelsPath
-		}
-	case RegistryIDBat:
-		if modelPath != "" {
-			updated.Bat.ClassifierModel = modelPath
-		}
-		if labelsPath != "" {
-			updated.Bat.LabelPath = labelsPath
-		}
-		if embeddingsPath != "" {
-			updated.Bat.EmbeddingModel = embeddingsPath
-		}
-	}
-
-	// Apply geomodel range filter config if this entry includes geomodel files.
-	if HasGeomodelFiles(entry) && entry.GeomodelVersion != "" {
-		updated.BirdNET.RangeFilter.Model = entry.GeomodelVersion
-		for _, f := range entry.Files {
-			switch f.Role {
-			case RoleGeomodelModel:
-				updated.BirdNET.RangeFilter.ModelPath = filepath.Join(mm.modelsDir, "shared", f.LocalName)
-			case RoleGeomodelLabels:
-				updated.BirdNET.RangeFilter.LabelsPath = filepath.Join(mm.modelsDir, "shared", f.LocalName)
+	_, _, err := conf.UpdateSettings(func(_, updated *conf.Settings) error {
+		// Set only the non-empty paths, and only fields the family actually carries
+		// (familyFields yields a nil pointer for a family's absent labels/embeddings). The
+		// primary reaches this path only via Reinstall; InstallOrReplace routes its variant
+		// swap to replaceVariant, which writes the primary's config via applyConfigForVariantSwap
+		// (model-only) instead. The primary's label set is embedded, so a
+		// primary variant never ships a labels file (labelsPath is always "" for it), but
+		// familyFields now exposes the primary's Labels pointer, so guard the Labels write
+		// on RegistryIDBirdNETV24 as well to keep a user's custom BirdNET.LabelPath
+		// structurally protected even if that ever changes.
+		if fs, ok := familyFields(updated, entry.RegistryID); ok {
+			if modelPath != "" {
+				*fs.Model = modelPath
+			}
+			if fs.Labels != nil && labelsPath != "" && entry.RegistryID != RegistryIDBirdNETV24 {
+				*fs.Labels = labelsPath
+			}
+			if fs.Embeddings != nil && embeddingsPath != "" {
+				*fs.Embeddings = embeddingsPath
 			}
 		}
-	}
 
-	// Add config alias to Models.Enabled so the model appears in source config.
-	alias := ConfigAliasForRegistry(entry.RegistryID)
-	if alias != "" && !slices.ContainsFunc(updated.Models.Enabled, func(id string) bool {
-		return strings.EqualFold(id, alias)
-	}) {
-		updated.Models.Enabled = append(updated.Models.Enabled, alias)
-	}
+		// Apply geomodel range filter config if this entry includes geomodel files and
+		// rangeFilterReplaceableByGeomodel allows it. An entry without inline geomodel files takes it from
+		// its geomodel dependency, if the installed variant has one.
+		mm.applyRangeFilterConfigForInstall(updated, entry)
+		if !hasGeomodelTuple(entry) {
+			if dep, ok := geomodelDependency(entry); ok {
+				mm.applyRangeFilterConfigForInstall(updated, dep)
+			}
+		}
 
-	conf.StoreSettings(updated)
+		// Add the config alias to Models.Enabled so the installed model is loaded.
+		ensureModelEnabled(updated, entry.RegistryID)
+		return nil
+	})
+	if err != nil {
+		return
+	}
 	if err := conf.SaveSettings(); err != nil {
 		GetLogger().Warn("Failed to persist settings after model install",
 			logger.String("catalog_id", entry.ID),
@@ -2068,116 +2616,123 @@ func (mm *ModelManager) applyConfigForInstall(entry *CatalogEntry, modelPath, la
 	}
 }
 
+// replacementInstall returns another installed catalog entry that writes the SAME
+// settings family as entry (same RegistryID and Category), choosing the lowest
+// catalog ID so the pick is deterministic. mm.installed must no longer contain
+// entry; caller holds mm.mu. The Category match is belt and braces: a catalog
+// invariant test pins that entries sharing a RegistryID share a Category.
+func (mm *ModelManager) replacementInstall(entry *CatalogEntry) (InstalledModel, CatalogEntry, bool) {
+	candidates := make([]string, 0, len(mm.installed))
+	for id := range mm.installed {
+		other, found := GetCatalogEntry(id)
+		if found && other.RegistryID == entry.RegistryID && other.Category == entry.Category {
+			candidates = append(candidates, id)
+		}
+	}
+	if len(candidates) == 0 {
+		return InstalledModel{}, CatalogEntry{}, false
+	}
+	slices.Sort(candidates)
+	id := candidates[0]
+	replEntry, _ := GetCatalogEntry(id)
+	return mm.installed[id], replEntry, true
+}
+
+// sharedFilePathForRole returns {modelsDir}/shared/{LocalName} for entry's first
+// file with the given shared role, or "" when the entry carries no such file.
+func (mm *ModelManager) sharedFilePathForRole(entry *CatalogEntry, role string) string {
+	for _, f := range entry.Files {
+		if f.Role == role {
+			return filepath.Join(mm.modelsDir, sharedDirName, f.LocalName)
+		}
+	}
+	return ""
+}
+
 // applyConfigForUninstall updates settings to reflect a removed model.
 // For bat models, Enabled is only set to false when no other bat models
 // remain installed; if another bat model exists, config is re-pointed to it.
 // The caller must hold mm.mu for writing; the uninstalled entry must already
-// be deleted from mm.installed so the geomodel and bat searches skip it.
-// Uses clone-mutate-publish so the shared settings snapshot is never mutated
-// in place. Settings are persisted to disk via conf.SaveSettings so changes
-// survive restarts and are visible to concurrent readers through conf.Setting().
+// be deleted from mm.installed so the geomodel and bat searches skip it. That is
+// the permitted lock order: mm.mu is taken before the settings writer lock that
+// conf.UpdateSettings acquires, and the mutate function reads mm.installed
+// without locking because the caller already holds mm.mu.
+// It publishes through conf.UpdateSettings, then saves.
 func (mm *ModelManager) applyConfigForUninstall(entry *CatalogEntry) {
 	if mm.settings == nil {
 		return
 	}
 
-	mm.settingsMu.Lock()
-	defer mm.settingsMu.Unlock()
+	_, _, err := conf.UpdateSettings(func(_, updated *conf.Settings) error {
+		retainAlias := false
 
-	updated := conf.CloneSettings(conf.GetSettings())
-	retainAlias := false
-
-	switch entry.RegistryID {
-	case RegistryIDBirdNETV3:
-		updated.BirdNETV3.ModelPath = ""
-		updated.BirdNETV3.LabelPath = ""
-	case RegistryIDPerchV2:
-		updated.Perch.ModelPath = ""
-		updated.Perch.LabelPath = ""
-	case RegistryIDBSG:
-		updated.BSG.ModelPath = ""
-		updated.BSG.LabelPath = ""
-	case RegistryIDBat:
-		// Find another installed bat model to re-point config to.
-		var replacement *InstalledModel
-		var replacementEntry CatalogEntry
-		for id, inst := range mm.installed {
-			other, found := GetCatalogEntry(id)
-			if found && other.Category == CategoryBat {
-				replacement = &inst
-				replacementEntry = other
-				break
-			}
-		}
-		if replacement == nil {
-			updated.Bat.ClassifierModel = ""
-			updated.Bat.LabelPath = ""
-			updated.Bat.EmbeddingModel = ""
-		} else {
-			retainAlias = true
-			updated.Bat.ClassifierModel = replacement.ModelPath
-			updated.Bat.LabelPath = replacement.LabelsPath
-			updated.Bat.EmbeddingModel = ""
-			for _, f := range replacementEntry.Files {
-				if f.Role == RoleEmbeddings {
-					updated.Bat.EmbeddingModel = filepath.Join(mm.modelsDir, "shared", f.LocalName)
-					break
+		// Re-point or clear the uninstalled family's settings. familyFields is the
+		// single family-to-settings-field mapping. When another installed catalog entry
+		// writes the SAME family (same RegistryID) it takes over the paths and the config
+		// alias is retained; otherwise the family's fields are cleared. Keying on
+		// RegistryID (not Category) is required: birdnet-v3.0 and perch-v2 are both
+		// CategoryWildlife but write different families, so a category-keyed rule would
+		// re-point one family's config onto the other. Today the only multi-entry family
+		// is bat, so for every other family this degenerates to "clear". The primary is
+		// never uninstalled (Uninstall refuses RegistryIDBirdNETV24) and an unknown
+		// registry ID yields ok=false, so both are safe no-ops here.
+		if fs, ok := familyFields(updated, entry.RegistryID); ok {
+			if repl, replEntry, found := mm.replacementInstall(entry); found {
+				retainAlias = true
+				*fs.Model = repl.ModelPath
+				if fs.Labels != nil {
+					*fs.Labels = repl.LabelsPath
+				}
+				if fs.Embeddings != nil {
+					*fs.Embeddings = mm.sharedFilePathForRole(&replEntry, RoleEmbeddings)
+				}
+			} else {
+				*fs.Model = ""
+				if fs.Labels != nil {
+					*fs.Labels = ""
+				}
+				if fs.Embeddings != nil {
+					*fs.Embeddings = ""
 				}
 			}
 		}
-	}
 
-	// Reset geomodel range filter config if no other geomodel-dependent model remains.
-	// mm.installed no longer contains the uninstalled entry (deleted by caller).
-	if HasGeomodelFiles(entry) {
-		otherGeomodel := false
-		for id := range mm.installed {
-			other, found := GetCatalogEntry(id)
-			if found && HasGeomodelFiles(&other) {
-				otherGeomodel = true
-				break
-			}
-		}
-		if !otherGeomodel {
-			updated.BirdNET.RangeFilter.Model = ""
-			updated.BirdNET.RangeFilter.ModelPath = ""
-			updated.BirdNET.RangeFilter.LabelsPath = ""
-			updated.BirdNET.RangeFilter.PassUnmappedSpecies = false
-		}
-	}
+		// Re-point or reset a gallery-managed geomodel range filter config (a custom or stock
+		// MData one is kept); it is reset only when no other geomodel-dependent model remains.
+		// mm.installed no longer contains the uninstalled entry (deleted by caller).
+		mm.applyRangeFilterConfigForUninstall(updated, entry)
 
-	// Remove config alias from Models.Enabled and from any source/stream that
-	// references it, but only when no replacement model of the same category exists.
-	alias := ConfigAliasForRegistry(entry.RegistryID)
-	if alias != "" && !retainAlias {
-		updated.Models.Enabled = slices.DeleteFunc(updated.Models.Enabled, func(id string) bool {
-			return strings.EqualFold(id, alias)
-		})
-
-		// Remove from sound card sources.
-		for i := range updated.Realtime.Audio.Sources {
-			src := &updated.Realtime.Audio.Sources[i]
-			src.Models = slices.DeleteFunc(src.Models, func(id string) bool {
+		// Remove the config alias from Models.Enabled and from every source and stream
+		// that names it, but only when no replacement model of the same category exists. A
+		// list left empty by this removal means the orchestrator's default targets
+		// (DefaultTargets); it is not re-pinned to birdnet (model de-privilege epic, Phase 4).
+		alias := ConfigAliasForRegistry(entry.RegistryID)
+		if alias != "" && !retainAlias {
+			updated.Models.Enabled = slices.DeleteFunc(updated.Models.Enabled, func(id string) bool {
 				return strings.EqualFold(id, alias)
 			})
-			if len(src.Models) == 0 {
-				src.Models = []string{conf.ModelIDBirdNET}
-			}
-		}
 
-		// Remove from RTSP/stream sources.
-		for i := range updated.Realtime.RTSP.Streams {
-			stream := &updated.Realtime.RTSP.Streams[i]
-			stream.Models = slices.DeleteFunc(stream.Models, func(id string) bool {
-				return strings.EqualFold(id, alias)
-			})
-			if len(stream.Models) == 0 {
-				stream.Models = []string{conf.ModelIDBirdNET}
+			// Remove from sound card sources. An emptied list means the default targets.
+			for i := range updated.Realtime.Audio.Sources {
+				src := &updated.Realtime.Audio.Sources[i]
+				src.Models = slices.DeleteFunc(src.Models, func(id string) bool {
+					return strings.EqualFold(id, alias)
+				})
+			}
+
+			// Remove from RTSP/stream sources. An emptied list means the default targets.
+			for i := range updated.Realtime.RTSP.Streams {
+				stream := &updated.Realtime.RTSP.Streams[i]
+				stream.Models = slices.DeleteFunc(stream.Models, func(id string) bool {
+					return strings.EqualFold(id, alias)
+				})
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return
 	}
-
-	conf.StoreSettings(updated)
 	if err := conf.SaveSettings(); err != nil {
 		GetLogger().Warn("Failed to persist settings after model uninstall",
 			logger.String("catalog_id", entry.ID),
@@ -2242,8 +2797,8 @@ func (e *endpointAttemptError) Unwrap() error { return e.err }
 // shouldFailover reports whether err came from a reachability failure that a
 // different endpoint might not have.
 func shouldFailover(err error) bool {
-	var ae *endpointAttemptError
-	return errors.As(err, &ae) && ae.retryable
+	ae, ok := errors.AsType[*endpointAttemptError](err)
+	return ok && ae.retryable
 }
 
 // downloadModelFile downloads one catalog file, trying each endpoint in the
@@ -2255,7 +2810,8 @@ func shouldFailover(err error) bool {
 //
 // The endpoint chain is resolved per file, not once per install, so a file that
 // established the mirror as sticky lets every subsequent file start there
-// instead of re-paying the blocked host's connect timeout.
+// instead of re-paying the blocked host's connect timeout. A cancelled context (a user
+// cancel or shutdown) never fails over, whatever the error looked like.
 func (mm *ModelManager) downloadModelFile(ctx context.Context, catalogID, repo, remotePath, destPath, expectedSHA256 string, completedBytes int64, configured string) error {
 	endpoints := mm.orderedDownloadEndpoints(configured)
 	for i, endpoint := range endpoints {
@@ -2267,7 +2823,9 @@ func (mm *ModelManager) downloadModelFile(ctx context.Context, catalogID, repo, 
 		}
 		// Surface the error (no failover) on the last endpoint or when the
 		// failure is not a reachability problem another host could avoid.
-		if i == len(endpoints)-1 || !shouldFailover(err) {
+		// A cancelled context (a user cancel, shutdown) never fails over, even when the
+		// error looks retryable (a 503 or a dropped connection racing the cancel).
+		if i == len(endpoints)-1 || !shouldFailover(err) || contextCancelled(ctx) {
 			return err
 		}
 		GetLogger().Warn("HuggingFace host unreachable, trying next endpoint",
@@ -2284,11 +2842,107 @@ func (mm *ModelManager) downloadModelFile(ctx context.Context, catalogID, repo, 
 		Build()
 }
 
+// downloadInterrupted reports whether err came from the download's own context
+// ending (a user cancel or shutdown) rather than from the host.
+func downloadInterrupted(ctx context.Context, err error) bool {
+	return contextCancelled(ctx) || errors.Is(err, context.Canceled)
+}
+
+// contextCancelled reports whether ctx ended by cancellation (a user cancel or
+// shutdown). A deadline that ended it, such as the per-attempt timeout of a
+// document fetch, is not a cancellation: the host stalled, so another endpoint
+// may still serve the file.
+func contextCancelled(ctx context.Context) bool {
+	return errors.Is(ctx.Err(), context.Canceled)
+}
+
+// newDownloadInterruptedError builds the error for a download whose context ended.
+// It wraps the context's cause (a %w chain, so errors.Is still finds the cancel)
+// and carries CategorySystem, so telemetry suppresses it as an expected
+// interruption: every EnhancedError is reported when built, and a network-category
+// error would reach Sentry. It names no network failure, so the frontend shows no
+// mirror hint.
+func newDownloadInterruptedError(ctx context.Context, err error, url string) error {
+	cause := context.Cause(ctx)
+	if cause == nil {
+		cause = err
+	}
+	return errors.Newf("download of %s interrupted: %w", url, cause).
+		Component("classifier.model_manager").
+		Category(errors.CategorySystem).
+		Context("operation", "model_download_interrupted").
+		Context("url", url).
+		Build()
+}
+
+// getHuggingFace issues a GET for url and returns the response when the host
+// answers 200; the caller closes the body. A transport failure and a non-200
+// status come back as an endpointAttemptError that records whether another
+// endpoint might serve the file, so downloadFile and the document fetch fail
+// over the same way. The "HTTP request failed for" and "HTTP <status> for"
+// texts are matched by the frontend and must not change. When ctx was cancelled (a user
+// cancel or shutdown), whether the failure is a transport error or a status that arrived
+// with the cancel, the error is a non-retryable system-category interruption that
+// wraps the context's cause instead, so it is neither retried on a mirror nor
+// reported to telemetry.
+func getHuggingFace(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, errors.Newf("failed to create request for %s: %v", url, err).
+			Component("classifier.model_manager").
+			Category(errors.CategoryValidation).
+			Context("operation", "build_huggingface_request").
+			Context("url", url).
+			Build()
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		if downloadInterrupted(ctx, err) {
+			return nil, &endpointAttemptError{err: newDownloadInterruptedError(ctx, err, url)}
+		}
+		// A transport failure (unreachable host, reset, timeout) is retryable on
+		// the next endpoint; a cancelled context is not (IsUnreachable handles the
+		// distinction).
+		return nil, &endpointAttemptError{
+			retryable: conf.IsUnreachable(err),
+			err: errors.Newf("HTTP request failed for %s: %v", url, err).
+				Component("classifier.model_manager").
+				Category(errors.CategoryNetwork).
+				Context("operation", "huggingface_request").
+				Context("url", url).
+				Build(),
+		}
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		// A status that arrives with a cancel is part of the interruption: building
+		// the network error below would report it, and a gateway status would fail over.
+		if contextCancelled(ctx) {
+			return nil, &endpointAttemptError{err: newDownloadInterruptedError(ctx, nil, url)}
+		}
+		// A gateway status (502/503/504) means the origin is down and a mirror
+		// may still serve the file, so it is retryable; any other status (404,
+		// 403, 500, ...) means the host answered and failover would mask it.
+		return nil, &endpointAttemptError{
+			retryable: conf.IsGatewayStatus(resp.StatusCode),
+			err: errors.Newf("HTTP %d for %s", resp.StatusCode, url).
+				Component("classifier.model_manager").
+				Category(errors.CategoryNetwork).
+				Context("operation", "huggingface_status").
+				Context("url", url).
+				Context("status", fmt.Sprintf("%d", resp.StatusCode)).
+				Build(),
+		}
+	}
+	return resp, nil
+}
+
 // downloadFile downloads a file from url to destPath, verifying the SHA256
 // checksum. The catalogID is used to update shared download state for SSE
 // polling. completedBytes is the cumulative size of previously downloaded
 // files, used so progress reflects total download, not just the current file.
-// On failure, any temporary file is cleaned up.
+// On failure, any temporary file is cleaned up. A read interrupted by ctx ending
+// returns the same non-retryable interruption error as getHuggingFace.
 func (mm *ModelManager) downloadFile(ctx context.Context, catalogID, url, destPath, expectedSHA256 string, completedBytes int64) error {
 	// Ensure parent directory exists.
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
@@ -2320,44 +2974,11 @@ func (mm *ModelManager) downloadFile(ctx context.Context, catalogID, url, destPa
 		}
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	resp, err := getHuggingFace(ctx, downloadHTTPClient, url)
 	if err != nil {
-		return errors.Newf("failed to create request for %s: %v", url, err).
-			Component("classifier.model_manager").
-			Category(errors.CategoryValidation).
-			Context("url", url).
-			Build()
-	}
-	resp, err := downloadHTTPClient.Do(req)
-	if err != nil {
-		// A transport failure (unreachable host, reset, timeout) is retryable on
-		// the next endpoint; a cancelled context is not (IsUnreachable handles the
-		// distinction).
-		return &endpointAttemptError{
-			retryable: conf.IsUnreachable(err),
-			err: errors.Newf("HTTP request failed for %s: %v", url, err).
-				Component("classifier.model_manager").
-				Category(errors.CategoryNetwork).
-				Context("url", url).
-				Build(),
-		}
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		// A gateway status (502/503/504) means the origin is down and a mirror
-		// may still serve the file, so it is retryable; any other status (404,
-		// 403, 500, ...) means the host answered and failover would mask it.
-		return &endpointAttemptError{
-			retryable: conf.IsGatewayStatus(resp.StatusCode),
-			err: errors.Newf("HTTP %d for %s", resp.StatusCode, url).
-				Component("classifier.model_manager").
-				Category(errors.CategoryNetwork).
-				Context("url", url).
-				Context("status", fmt.Sprintf("%d", resp.StatusCode)).
-				Build(),
-		}
-	}
 
 	var hasher hash.Hash
 	var reader io.Reader
@@ -2401,6 +3022,9 @@ func (mm *ModelManager) downloadFile(ctx context.Context, catalogID, url, destPa
 			break
 		}
 		if readErr != nil {
+			if downloadInterrupted(ctx, readErr) {
+				return &endpointAttemptError{err: newDownloadInterruptedError(ctx, readErr, url)}
+			}
 			// A connection dropped mid-stream (a common Great-Firewall symptom) is
 			// retryable on the next endpoint.
 			return &endpointAttemptError{
@@ -2450,15 +3074,24 @@ func (mm *ModelManager) downloadFile(ctx context.Context, catalogID, url, destPa
 	return nil
 }
 
-// huggingFaceResolveMainPath is the HuggingFace file-resolve path segment for a
-// repository's main revision, sitting between the repo id and the file path.
-const huggingFaceResolveMainPath = "/resolve/main/"
+// huggingFaceResolvePath is the HuggingFace file-resolve path segment between the
+// repo id and the revision.
+const huggingFaceResolvePath = "/resolve/"
+
+// huggingFaceMainRevision is the revision model files are downloaded from.
+const huggingFaceMainRevision = "main"
 
 // buildHuggingFaceURL constructs the download URL for a file in a HuggingFace
 // repo. The endpoint is one host from the resolved download chain (see
 // orderedDownloadEndpoints / downloadModelFile) and must not end in a slash.
 func buildHuggingFaceURL(endpoint, repo, filePath string) string {
-	return endpoint + "/" + repo + huggingFaceResolveMainPath + filePath
+	return buildHuggingFaceRevisionURL(endpoint, repo, huggingFaceMainRevision, filePath)
+}
+
+// buildHuggingFaceRevisionURL constructs the URL of a file in a HuggingFace repo
+// at a pinned revision (a commit hash), for content that must not move with main.
+func buildHuggingFaceRevisionURL(endpoint, repo, revision, filePath string) string {
+	return endpoint + "/" + repo + huggingFaceResolvePath + revision + "/" + filePath
 }
 
 // huggingFaceEndpoint resolves the single primary HuggingFace host from the

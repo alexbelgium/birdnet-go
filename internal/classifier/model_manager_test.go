@@ -127,7 +127,7 @@ func writeVariantModelFile(t *testing.T, modelsDir string, entry *CatalogEntry, 
 	subdir := filepath.Join(modelsDir, entry.ID)
 	require.NoError(t, os.MkdirAll(subdir, 0o755))
 	modelPath := filepath.Join(subdir, modelName)
-	require.NoError(t, os.WriteFile(modelPath, []byte("fake-onnx-data"), 0o644))
+	require.NoError(t, os.WriteFile(modelPath, []byte("fake-onnx-data"), 0o600))
 	return modelPath
 }
 
@@ -168,6 +168,58 @@ func TestModelManager_ScanInstalled_DetectsNonDefaultVariant(t *testing.T) {
 	got := installedByID(t, mm, entry.ID)
 	assert.Equal(t, "int8-arm", got.VariantID, "installed variant id should be the on-disk variant")
 	assert.Equal(t, modelPath, got.ModelPath, "model path should point at the installed variant file")
+}
+
+// TestScanVariantEntry_BirdNETPlusReleases walks the on-disk states a BirdNET+
+// 3.0 install passes through on its way to 3.0.1: a file name identifies one
+// build (3.0 files keep reporting the 3.0 variant and release), the settings path
+// decides when both builds are present, and with no path a live build wins over a
+// Legacy one even when the Legacy variant is listed first or its region sorts
+// earlier.
+func TestScanVariantEntry_BirdNETPlusReleases(t *testing.T) {
+	t.Parallel()
+
+	entry, ok := GetCatalogEntry("birdnet-plus-v3.0")
+	require.True(t, ok)
+
+	tests := []struct {
+		name string
+		// onDisk lists the variants whose model files are written.
+		onDisk []string
+		// hintVariant names the variant whose model file the settings path points
+		// at; empty means no path is configured.
+		hintVariant string
+		wantID      string
+		wantVersion string
+	}{
+		{name: "only the 3.0 global file", onDisk: []string{"fp32"}, wantID: "fp32", wantVersion: "3.0"},
+		{name: "only a 3.0 tile file", onDisk: []string{"fp32@nordic"}, wantID: "fp32@nordic", wantVersion: "3.0"},
+		{name: "only the 3.0.1 global file", onDisk: []string{"fp32-3.0.1"}, wantID: "fp32-3.0.1", wantVersion: "3.0.1"},
+		{name: "both global files and no path", onDisk: []string{"fp32", "fp32-3.0.1"}, wantID: "fp32-3.0.1", wantVersion: "3.0.1"},
+		{name: "both global files and the path on 3.0", onDisk: []string{"fp32", "fp32-3.0.1"}, hintVariant: "fp32", wantID: "fp32", wantVersion: "3.0"},
+		{name: "3.0 global file next to a 3.0.1 tile and no path", onDisk: []string{"fp32", "fp32-3.0.1-b2@nordic"}, wantID: "fp32-3.0.1-b2@nordic", wantVersion: "3.0.1"},
+		{name: "3.0 tile of an earlier region next to a 3.0.1 tile and no path", onDisk: []string{"fp32@amazonia", "fp32-3.0.1-b2@nordic"}, wantID: "fp32-3.0.1-b2@nordic", wantVersion: "3.0.1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			modelsDir := t.TempDir()
+			for _, id := range tt.onDisk {
+				writeVariantModelFile(t, modelsDir, &entry, id)
+			}
+			hint := ""
+			if tt.hintVariant != "" {
+				hint = modelRoleLocalName(t, variantByID(t, &entry, tt.hintVariant).Files)
+			}
+
+			got, found := scanVariantEntry(&entry, filepath.Join(modelsDir, entry.ID), hint)
+
+			require.True(t, found)
+			assert.Equal(t, tt.wantID, got.VariantID)
+			assert.Equal(t, tt.wantVersion, got.Version)
+		})
+	}
 }
 
 func TestModelManager_ScanInstalled_ZeroVariantEntryHasEmptyVariantID(t *testing.T) {
@@ -549,9 +601,7 @@ func TestModelManager_ReinstallStaleVariantValidatesBeforeUnload(t *testing.T) {
 	// model is never stranded.
 	primaryBN := &BirdNET{ModelInfo: ModelInfo{ID: entry.RegistryID}}
 	orch := &Orchestrator{
-		ModelInfo: primaryBN.ModelInfo,
-		models:    map[string]*modelEntry{entry.RegistryID: {instance: primaryBN}},
-		primary:   primaryBN,
+		models: map[string]*modelEntry{entry.RegistryID: {instance: primaryBN}},
 	}
 	mm := NewModelManager(t.TempDir(), orch, nil)
 	// Simulate an install whose variant was later dropped from the catalog.
@@ -640,7 +690,7 @@ func TestModelManager_UninstallRejectsPermanent(t *testing.T) {
 	// variant may be swapped, never removed.
 	entry, ok := GetCatalogEntry("birdnet-v2.4")
 	require.True(t, ok, "birdnet-v2.4 must be present in the catalog")
-	require.Equal(t, permanentRegistryID, entry.RegistryID, "birdnet-v2.4 must carry the permanent registry id")
+	require.Equal(t, RegistryIDBirdNETV24, entry.RegistryID, "birdnet-v2.4 must carry the permanent registry id")
 
 	mm := NewModelManager(t.TempDir(), nil, nil)
 	mm.ScanInstalled()
@@ -688,18 +738,11 @@ func TestModelManager_UninstallRemovesModelRetainsLabels(t *testing.T) {
 	mm.ScanInstalled()
 	require.True(t, mm.IsInstalled(entry.ID))
 
-	// The standalone geomodel entry also gets detected as installed because
-	// its shared files exist. Uninstall it first so that shared geomodel
-	// files are not retained by the standalone entry.
-	if mm.IsInstalled("birdnet-geomodel-v3") {
-		require.NoError(t, mm.Uninstall("birdnet-geomodel-v3"))
-	}
-
 	require.NoError(t, mm.Uninstall(entry.ID))
 	assert.False(t, mm.IsInstalled(entry.ID))
 
-	// Model file should be gone, labels should remain,
-	// shared geomodel files should be gone (no other dependent model installed).
+	// Model file should be gone, labels should remain, shared files should be
+	// gone (no other dependent model installed).
 	for _, f := range entry.Files {
 		var path string
 		if isSharedRole(f.Role) {
@@ -708,16 +751,14 @@ func TestModelManager_UninstallRemovesModelRetainsLabels(t *testing.T) {
 			path = filepath.Join(subdir, f.LocalName)
 		}
 		_, err := os.Stat(path)
-		switch {
-		case f.Role == RoleModel:
+		switch f.Role {
+		case RoleModel:
 			assert.True(t, os.IsNotExist(err), "model file %s should be deleted", f.LocalName)
-		case f.Role == RoleLabels:
+		case RoleLabels:
 			require.NoError(t, err, "labels file %s should be retained", f.LocalName)
-		case isGeomodelRole(f.Role):
-			assert.True(t, os.IsNotExist(err), "geomodel file %s should be deleted when no dependents remain", f.LocalName)
-		case f.Role == RoleEmbeddings:
+		case RoleEmbeddings:
 			assert.True(t, os.IsNotExist(err), "embeddings file %s should be deleted when no dependents remain", f.LocalName)
-		case f.Role == RoleTaxonomy:
+		case RoleTaxonomy:
 			assert.True(t, os.IsNotExist(err), "taxonomy file %s should be deleted when no dependents remain", f.LocalName)
 		}
 	}
@@ -1047,11 +1088,6 @@ func TestModelManager_UninstallSucceedsWhenModelNotLoaded(t *testing.T) {
 	mm.ScanInstalled()
 	require.True(t, mm.IsInstalled(entry.ID), "model must be installed before uninstall")
 
-	// Remove standalone geomodel entry so shared files are not retained.
-	if mm.IsInstalled("birdnet-geomodel-v3") {
-		require.NoError(t, mm.Uninstall("birdnet-geomodel-v3"))
-	}
-
 	err := mm.Uninstall(entry.ID)
 	require.NoError(t, err, "Uninstall must succeed when model is not loaded")
 	assert.False(t, mm.IsInstalled(entry.ID), "model must be removed from installed map")
@@ -1065,20 +1101,27 @@ func TestModelManager_UninstallSucceedsWhenModelNotLoaded(t *testing.T) {
 			path = filepath.Join(subdir, f.LocalName)
 		}
 		_, statErr := os.Stat(path)
-		switch {
-		case f.Role == RoleModel || f.Role == RoleData:
+		switch f.Role {
+		case RoleModel, RoleData:
 			assert.True(t, os.IsNotExist(statErr), "%s file %s must be deleted after uninstall", f.Role, f.LocalName)
-		case f.Role == RoleLabels:
+		case RoleLabels:
 			require.NoError(t, statErr, "labels file %s must be retained after uninstall", f.LocalName)
-		case isGeomodelRole(f.Role):
-			assert.True(t, os.IsNotExist(statErr), "geomodel file %s must be deleted when no dependents remain", f.LocalName)
-		case f.Role == RoleEmbeddings:
+		case RoleEmbeddings:
 			assert.True(t, os.IsNotExist(statErr), "embeddings file %s must be deleted when no dependents remain", f.LocalName)
-		case f.Role == RoleTaxonomy:
+		case RoleTaxonomy:
 			assert.True(t, os.IsNotExist(statErr), "taxonomy file %s must be deleted when no dependents remain", f.LocalName)
 		}
 	}
 }
+
+// errInjectedUnloadFailure is the injected unload error the tests feed through the
+// ModelManager.unloadFn seam to force the unload-failure rollback branches of
+// Uninstall, Reinstall, and replaceVariant (unreachable after Phase 3 removed the
+// primary-model unload refusal, but still reachable in production via a concurrent
+// unload/delete racing the loaded-check). Its text is deliberately distinct from the
+// callers' "model still in use" wrapper so a test asserting that phrase proves the
+// caller built its own abort error rather than returning this verbatim.
+var errInjectedUnloadFailure = errors.Newf("injected unload failure").Build()
 
 func TestModelManager_UninstallAbortsOnUnloadFailure(t *testing.T) {
 	t.Parallel()
@@ -1102,19 +1145,17 @@ func TestModelManager_UninstallAbortsOnUnloadFailure(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, f.LocalName), []byte("data"), 0o644))
 	}
 
-	// Orchestrator with the model present in the models map AND set as
-	// primary. IsModelLoaded returns true, but UnloadModel refuses to
-	// unload the primary model, simulating a "model still in use" failure.
-	primaryBN := &BirdNET{ModelInfo: ModelInfo{ID: entry.RegistryID}}
+	// The model is present in the orchestrator's map so IsModelLoaded returns true and
+	// Uninstall enters its unload step; the injected seam then fails that unload,
+	// exercising the abort branch.
 	orch := &Orchestrator{
-		ModelInfo: primaryBN.ModelInfo, // mirror the primary, as NewOrchestrator does
 		models: map[string]*modelEntry{
-			entry.RegistryID: {instance: primaryBN},
+			entry.RegistryID: {},
 		},
-		primary: primaryBN,
 	}
 
 	mm := NewModelManager(modelsDir, orch, nil)
+	mm.unloadFn = func(_ string) error { return errInjectedUnloadFailure }
 	mm.ScanInstalled()
 	require.True(t, mm.IsInstalled(entry.ID), "model must be installed before uninstall attempt")
 
@@ -1176,12 +1217,6 @@ func TestModelManager_UninstallDeregistersWhenFileDeletionFails(t *testing.T) {
 	mm.ScanInstalled()
 	require.True(t, mm.IsInstalled(entry.ID), "model must be installed before uninstall")
 
-	// Remove the standalone geomodel entry so shared files are not retained,
-	// mirroring TestModelManager_UninstallSucceedsWhenModelNotLoaded.
-	if mm.IsInstalled("birdnet-geomodel-v3") {
-		require.NoError(t, mm.Uninstall("birdnet-geomodel-v3"))
-	}
-
 	// Sabotage one model/data file so os.Remove fails with a non-ENOENT error:
 	// replace the file with a non-empty directory (os.Remove returns ENOTEMPTY).
 	var sabotaged string
@@ -1205,13 +1240,12 @@ func TestModelManager_UninstallDeregistersWhenFileDeletionFails(t *testing.T) {
 		"model must be de-registered even when some files could not be deleted")
 }
 
-// TestModelManager_ReinstallRefusesLoadedPrimary documents and guards the
-// behavior of the new pre-overwrite unload step in Reinstall: when the target
-// is the loaded primary model (which UnloadModel refuses to unload), Reinstall
-// aborts with "model still in use" before touching any files, and the model
-// stays installed. This is a deliberate behavior change from the prior code,
-// which overwrote files in place even while the primary was loaded.
-func TestModelManager_ReinstallRefusesLoadedPrimary(t *testing.T) {
+// TestModelManager_ReinstallAbortsOnUnloadFailure documents and guards the
+// pre-overwrite unload step in Reinstall: when the loaded model cannot be unloaded,
+// Reinstall aborts with "model still in use" before touching any files, and the
+// model stays installed. The unload failure is injected via the unloadFn seam
+// (production reaches this only via a concurrent unload/delete race).
+func TestModelManager_ReinstallAbortsOnUnloadFailure(t *testing.T) {
 	t.Parallel()
 
 	entry, ok := GetCatalogEntry("perch-v2")
@@ -1232,25 +1266,23 @@ func TestModelManager_ReinstallRefusesLoadedPrimary(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, f.LocalName), []byte("data"), 0o644))
 	}
 
-	// Model loaded AND set as primary: UnloadModel refuses the primary, so the
-	// new pre-overwrite guard must abort the reinstall.
-	primaryBN := &BirdNET{ModelInfo: ModelInfo{ID: entry.RegistryID}}
+	// The model is loaded (present in the orchestrator map) so Reinstall enters its
+	// pre-overwrite unload step; the injected seam then fails it.
 	orch := &Orchestrator{
-		ModelInfo: primaryBN.ModelInfo, // mirror the primary, as NewOrchestrator does
 		models: map[string]*modelEntry{
-			entry.RegistryID: {instance: primaryBN},
+			entry.RegistryID: {},
 		},
-		primary: primaryBN,
 	}
 
 	mm := NewModelManager(modelsDir, orch, nil)
+	mm.unloadFn = func(_ string) error { return errInjectedUnloadFailure }
 	mm.ScanInstalled()
 	require.True(t, mm.IsInstalled(entry.ID), "model must be installed before reinstall attempt")
 
 	entryCopy := entry
 	// baseURL is never reached: the unload guard aborts before any download.
 	err := mm.Reinstall(t.Context(), &entryCopy, "http://unused.invalid", nil)
-	require.Error(t, err, "Reinstall must abort when the loaded primary cannot be unloaded")
+	require.Error(t, err, "Reinstall must abort when the loaded model cannot be unloaded")
 	assert.Contains(t, err.Error(), "model still in use")
 	assert.True(t, mm.IsInstalled(entry.ID), "model must remain installed after a refused reinstall")
 }
@@ -1372,67 +1404,6 @@ func TestModelManager_Install_GeomodelSkipsExisting(t *testing.T) {
 	assert.Equal(t, geomodelContent, got)
 }
 
-func TestModelManager_Uninstall_GeomodelRetainedWhenDependentExists(t *testing.T) {
-	t.Parallel()
-
-	// Use real catalog entries: both perch-v2 and birdnet-v3.0 have geomodel files.
-	entryPerch, ok := GetCatalogEntry("perch-v2")
-	require.True(t, ok)
-	entryV3, ok := GetCatalogEntry("birdnet-v3.0")
-	require.True(t, ok)
-
-	modelsDir := t.TempDir()
-	sharedDir := filepath.Join(modelsDir, "shared")
-	require.NoError(t, os.MkdirAll(sharedDir, 0o755))
-
-	// Set up files on disk for both entries.
-	for _, entry := range []CatalogEntry{entryPerch, entryV3} {
-		subdir := filepath.Join(modelsDir, entry.ID)
-		require.NoError(t, os.MkdirAll(subdir, 0o755))
-		for _, f := range entry.Files {
-			var dir string
-			if isSharedRole(f.Role) {
-				dir = sharedDir
-			} else {
-				dir = subdir
-			}
-			require.NoError(t, os.WriteFile(filepath.Join(dir, f.LocalName), []byte("data"), 0o644))
-		}
-	}
-
-	mm := NewModelManager(modelsDir, nil, nil)
-	mm.ScanInstalled()
-	require.True(t, mm.IsInstalled("perch-v2"))
-	require.True(t, mm.IsInstalled("birdnet-v3.0"))
-
-	// Uninstall perch-v2; birdnet-v3.0 still depends on the geomodel.
-	require.NoError(t, mm.Uninstall("perch-v2"))
-
-	// Shared geomodel files should be retained.
-	for _, f := range entryPerch.Files {
-		if isGeomodelRole(f.Role) {
-			path := filepath.Join(sharedDir, f.LocalName)
-			_, err := os.Stat(path)
-			require.NoError(t, err, "geomodel file %s must be retained while birdnet-v3.0 is installed", f.LocalName)
-		}
-	}
-
-	// Now uninstall birdnet-v3.0 and the standalone geomodel entry.
-	require.NoError(t, mm.Uninstall("birdnet-v3.0"))
-	if mm.IsInstalled("birdnet-geomodel-v3") {
-		require.NoError(t, mm.Uninstall("birdnet-geomodel-v3"))
-	}
-
-	// Shared geomodel files should now be deleted.
-	for _, f := range entryV3.Files {
-		if isGeomodelRole(f.Role) {
-			path := filepath.Join(sharedDir, f.LocalName)
-			_, err := os.Stat(path)
-			assert.True(t, os.IsNotExist(err), "geomodel file %s must be deleted when no dependents remain", f.LocalName)
-		}
-	}
-}
-
 func TestModelManager_Uninstall_SharedFilesRetainedWhileDownloading(t *testing.T) {
 	t.Parallel()
 
@@ -1459,21 +1430,25 @@ func TestModelManager_Uninstall_SharedFilesRetainedWhileDownloading(t *testing.T
 	mm.ScanInstalled()
 	require.True(t, mm.IsInstalled("perch-v2"))
 
-	// Simulate another geomodel-dependent model downloading concurrently.
+	// Simulate another model that shares the taxonomy file downloading concurrently.
 	mm.mu.Lock()
 	mm.downloading["birdnet-v3.0"] = &DownloadState{CatalogID: "birdnet-v3.0", Status: StatusDownloading}
 	mm.mu.Unlock()
 
 	require.NoError(t, mm.Uninstall("perch-v2"))
 
-	// Shared geomodel files must be retained because birdnet-v3.0 is downloading.
+	// Shared files (the taxonomy both entries carry) must be retained because
+	// birdnet-v3.0 is downloading.
+	var checked int
 	for _, f := range entryPerch.Files {
-		if isGeomodelRole(f.Role) {
+		if isSharedRole(f.Role) {
+			checked++
 			path := filepath.Join(sharedDir, f.LocalName)
 			_, err := os.Stat(path)
-			require.NoError(t, err, "geomodel file %s must be retained while another dependent model is downloading", f.LocalName)
+			require.NoError(t, err, "shared file %s must be retained while another entry using it is downloading", f.LocalName)
 		}
 	}
+	require.Positive(t, checked, "perch-v2 must carry at least one shared file for this test to check anything")
 }
 
 func TestModelManager_Install_PerFileHuggingFaceRepo(t *testing.T) {
@@ -1685,19 +1660,77 @@ func TestHasGeomodelFiles(t *testing.T) {
 	}
 }
 
-func TestCatalog_GeomodelFilesOnPerchAndBirdNET(t *testing.T) {
+func TestHasGeomodelTuple(t *testing.T) {
 	t.Parallel()
 
-	for _, id := range []string{"perch-v2", "birdnet-v3.0"} {
+	assert.False(t, hasGeomodelTuple(nil), "a nil entry carries no tuple")
+
+	tests := []struct {
+		name  string
+		entry CatalogEntry
+		want  bool
+	}{
+		{
+			name:  "no files",
+			entry: CatalogEntry{Files: nil},
+			want:  false,
+		},
+		{
+			name: "geomodel model role only",
+			entry: CatalogEntry{Files: []CatalogFile{
+				{Role: RoleModel},
+				{Role: RoleGeomodelModel},
+			}},
+			want: false,
+		},
+		{
+			name: "geomodel labels role only",
+			entry: CatalogEntry{Files: []CatalogFile{
+				{Role: RoleGeomodelLabels},
+			}},
+			want: false,
+		},
+		{
+			name: "both geomodel roles",
+			entry: CatalogEntry{Files: []CatalogFile{
+				{Role: RoleGeomodelModel},
+				{Role: RoleGeomodelLabels},
+			}},
+			want: true,
+		},
+		{
+			name: "both geomodel roles plus unrelated files",
+			entry: CatalogEntry{Files: []CatalogFile{
+				{Role: RoleModel},
+				{Role: RoleGeomodelLabels},
+				{Role: RoleLabels},
+				{Role: RoleGeomodelModel},
+			}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, hasGeomodelTuple(&tt.entry))
+		})
+	}
+}
+
+func TestCatalog_GeomodelFilesReachDependentsFromGeomodelRepo(t *testing.T) {
+	t.Parallel()
+
+	for _, id := range []string{"perch-v2", "birdnet-v3.0", "birdnet-plus-v3.0"} {
 		t.Run(id, func(t *testing.T) {
 			t.Parallel()
 			entry, ok := GetCatalogEntry(id)
 			require.True(t, ok, "expected %s catalog entry to exist", id)
 
-			assert.True(t, HasGeomodelFiles(&entry), "%s should have geomodel files", id)
-
+			files, ok := EffectiveFiles(&entry, "")
+			require.True(t, ok)
 			var geoFileCount int
-			for _, f := range entry.Files {
+			for _, f := range files {
 				if isGeomodelRole(f.Role) {
 					geoFileCount++
 					assert.NotEmpty(t, f.SHA256, "geomodel file %s must have a SHA256 checksum", f.LocalName)

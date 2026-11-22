@@ -4,33 +4,43 @@ package audio
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	hls "github.com/tphakala/go-hls"
+	"github.com/tphakala/go-hls/aachls"
+
 	"github.com/tphakala/birdnet-go/internal/api/v2/apitest"
-	"github.com/tphakala/birdnet-go/internal/audiocore/hlsmux"
+	"github.com/tphakala/birdnet-go/internal/audiocore/engine"
 	"github.com/tphakala/birdnet-go/internal/conf"
+	"github.com/tphakala/birdnet-go/internal/testutil"
 )
 
 const (
 	nativeTestRate     = 48000
 	nativeTestChannels = 1
+
+	// feedHoldTime is how long the fake feed holds the muxer before its last
+	// write, in the fake time of a synctest bubble.
+	feedHoldTime = 50 * time.Millisecond
 )
 
 // newNativeMux builds a muxer with the production codec and releases it through
 // t.Cleanup, so a require failure mid-test cannot leak the encoder.
-func newNativeMux(t *testing.T) *hlsmux.Stream {
+func newNativeMux(t *testing.T) *hls.Stream {
 	t.Helper()
 
-	mux, err := hlsmux.New(&hlsmux.Config{
-		Codec:       hlsmux.AACLC(),
+	mux, err := hls.New(&hls.Config{
+		Codec:       aachls.AACLC(),
 		SampleRate:  nativeTestRate,
 		Channels:    nativeTestChannels,
 		BitrateKbps: 128,
@@ -83,18 +93,8 @@ func newNativeTestHandler(t *testing.T, opts ...apitest.CoreOption) (*Handler, *
 	return &Handler{Core: apitest.NewCore(t, append([]apitest.CoreOption{apitest.WithEcho(e)}, opts...)...)}, e
 }
 
-func TestIsNativeDiscriminatesThePaths(t *testing.T) {
-	assert.False(t, (*HLSStreamInfo)(nil).isNative(), "a nil stream is not native")
-	assert.False(t, (&HLSStreamInfo{OutputDir: "/tmp/x"}).isNative(),
-		"an FFmpeg-path stream has no muxer")
-
-	stream := newNativeTestStream(t, 1)
-	assert.True(t, stream.isNative())
-}
-
-// TestEffectiveBitrateAppliesLimits pins the resolution both encoders share.
-// Since buildFFmpegArgs now resolves through this same helper, a change here
-// cannot silently move the two paths apart.
+// TestEffectiveBitrateAppliesLimits pins how the configured live-stream bitrate
+// is defaulted and clamped before it reaches the muxer.
 //
 // No t.Parallel: each case publishes a setting into the process-global snapshot.
 func TestEffectiveBitrateAppliesLimits(t *testing.T) {
@@ -173,7 +173,7 @@ func TestServeNativeContentServesInitSegment(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", http.NoBody), rec)
-	require.NoError(t, h.serveNativeContent(ctx, stream, hlsmux.InitSegmentName))
+	require.NoError(t, h.serveNativeContent(ctx, stream, hls.InitSegmentName))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "audio/mp4", rec.Header().Get("Content-Type"))
@@ -190,7 +190,7 @@ func TestServeNativeContentServesMediaSegment(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", http.NoBody), rec)
-	require.NoError(t, h.serveNativeContent(ctx, stream, hlsmux.SegmentName(0)))
+	require.NoError(t, h.serveNativeContent(ctx, stream, hls.SegmentName(0)))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "video/iso.segment", rec.Header().Get("Content-Type"))
@@ -207,7 +207,7 @@ func TestServeNativeContentReportsEvictedSegmentAsGone(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/", http.NoBody), rec)
-	_ = h.serveNativeContent(ctx, stream, hlsmux.SegmentName(9999))
+	_ = h.serveNativeContent(ctx, stream, hls.SegmentName(9999))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -225,8 +225,8 @@ func TestServeNativePlaylistRendersFromMemory(t *testing.T) {
 
 	body := rec.Body.String()
 	assert.Contains(t, body, "#EXTM3U")
-	assert.Contains(t, body, `#EXT-X-MAP:URI="`+hlsmux.InitSegmentName+`"`)
-	assert.Contains(t, body, hlsmux.SegmentName(0))
+	assert.Contains(t, body, `#EXT-X-MAP:URI="`+hls.InitSegmentName+`"`)
+	assert.Contains(t, body, hls.SegmentName(0))
 	assert.Contains(t, body, "#EXT-X-PROGRAM-DATE-TIME:2026-07-23T09:00:00.000Z",
 		"PDT must be anchored to the capture timestamp, not to when the playlist was rendered")
 	assert.Empty(t, rec.Header().Get("Retry-After"), "a ready stream needs no retry hint")
@@ -237,14 +237,14 @@ func TestServeNativePlaylistRendersFromMemory(t *testing.T) {
 // the init segment, plus a hint for when to come back.
 func TestServeNativePlaylistHintsRetryBeforeFirstSegment(t *testing.T) {
 	h, e := newNativeTestHandler(t)
-	mux, err := hlsmux.New(&hlsmux.Config{
-		Codec:       hlsmux.AACLC(),
+	mux, err := hls.New(&hls.Config{
+		Codec:       aachls.AACLC(),
 		SampleRate:  nativeTestRate,
 		Channels:    nativeTestChannels,
 		BitrateKbps: 128,
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = mux.Close() })
+	t.Cleanup(func() { assert.NoError(t, mux.Close()) })
 	stream := &HLSStreamInfo{SourceID: "native_src", mux: mux}
 
 	rec := httptest.NewRecorder()
@@ -254,7 +254,7 @@ func TestServeNativePlaylistHintsRetryBeforeFirstSegment(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 	assert.Contains(t, body, "#EXTM3U")
-	assert.Contains(t, body, `#EXT-X-MAP:URI="`+hlsmux.InitSegmentName+`"`,
+	assert.Contains(t, body, `#EXT-X-MAP:URI="`+hls.InitSegmentName+`"`,
 		"the init segment must be advertised before any media exists so a player can prefetch it")
 	assert.NotContains(t, body, "#EXTINF")
 	assert.Equal(t, strconv.Itoa(h.getEffectiveSegmentLength()), rec.Header().Get("Retry-After"),
@@ -363,8 +363,8 @@ func TestNativeFeedLoopStopsOnContextCancel(t *testing.T) {
 // cleanup path calls, including the ones that bypass performHLSCleanup.
 func TestCloseNativeMuxIsSafeOnBothPaths(t *testing.T) {
 	assert.NotPanics(t, func() {
-		closeNativeMux("src", &HLSStreamInfo{OutputDir: "/tmp/x"})
-	}, "an FFmpeg-path stream has no muxer to close")
+		closeNativeMux("src", &HLSStreamInfo{SourceID: "src"})
+	}, "a stream with no muxer must be a safe no-op to close")
 
 	stream := newNativeTestStream(t, 1)
 	assert.NotPanics(t, func() {
@@ -385,49 +385,66 @@ func TestCloseNativeMuxIsSafeOnBothPaths(t *testing.T) {
 //
 // Cancelling only makes the feed's ctx.Done() arm ready; Go picks uniformly
 // among ready arms, so without this wait a queued chunk lets the feed write to a
-// muxer that teardown just closed. hlsmux rejects that write through
+// muxer that teardown just closed. go-hls rejects that write through
 // internal/errors, whose Build() forwards to telemetry, so the race would fire a
 // spurious Sentry event on roughly half of all clean stops.
 func TestCloseNativeMuxWaitsForTheFeed(t *testing.T) {
-	stream := newEmptyNativeStream(t)
-	stream.feedDone = make(chan struct{})
+	synctest.Test(t, func(t *testing.T) {
+		stream := newEmptyNativeStream(t)
+		stream.feedDone = make(chan struct{})
 
-	released := make(chan struct{})
-	go func() {
-		// Hold the muxer briefly, as a feed goroutine mid-write would.
-		time.Sleep(50 * time.Millisecond)
-		close(stream.feedDone)
-		close(released)
-	}()
+		// writeErr is read only after feedDone is closed, which happens after
+		// the write, so the read is ordered after the store.
+		var writeErr error
+		go func() {
+			// Hold the muxer briefly, as a feed goroutine mid-write would, then
+			// land one last write before announcing that the feed has stopped.
+			time.Sleep(feedHoldTime)
+			writeErr = stream.mux.Write(make([]byte, 2), time.Now())
+			close(stream.feedDone)
+		}()
 
-	closeNativeMux("src", stream)
+		closeNativeMux("src", stream)
 
-	select {
-	case <-released:
-	default:
-		t.Fatal("closeNativeMux returned before the feed signalled it had stopped")
-	}
+		select {
+		case <-stream.feedDone:
+		default:
+			require.FailNow(t, "closeNativeMux returned before the feed signalled it had stopped")
+		}
+		require.NoError(t, writeErr,
+			"the feed's last write must land before the muxer closes")
+		require.Error(t, stream.mux.Write(make([]byte, 2), time.Now()),
+			"the muxer must be closed once closeNativeMux returns")
+	})
 }
 
 // TestCloseNativeMuxGivesUpOnAWedgedFeed proves the wait is bounded, so a feed
-// goroutine that never returns cannot block shutdown forever.
+// goroutine that never returns cannot block shutdown forever, and that it lasts
+// the full drain timeout, so a slow feed is not cut off early.
 func TestCloseNativeMuxGivesUpOnAWedgedFeed(t *testing.T) {
-	stream := newEmptyNativeStream(t)
-	stream.feedDone = make(chan struct{}) // never closed
+	synctest.Test(t, func(t *testing.T) {
+		stream := newEmptyNativeStream(t)
+		stream.feedDone = make(chan struct{}) // never closed
 
-	done := make(chan struct{})
-	go func() {
-		closeNativeMux("src", stream)
-		close(done)
-	}()
+		start := time.Now()
+		done := make(chan struct{})
+		go func() {
+			closeNativeMux("src", stream)
+			close(done)
+		}()
 
-	select {
-	case <-done:
-	case <-time.After(nativeFeedDrainTimeout + 5*time.Second):
-		t.Fatal("closeNativeMux blocked past its drain timeout on a wedged feed")
-	}
-	require.Error(t, stream.mux.Write(make([]byte, 2), time.Now()),
-		"the muxer must still be closed after the drain timeout expires")
+		select {
+		case <-done:
+		case <-time.After(nativeFeedDrainTimeout + 5*time.Second):
+			require.FailNow(t, "closeNativeMux blocked past its drain timeout on a wedged feed")
+		}
+		// The bubble's clock advances only when every goroutine is blocked, so the
+		// elapsed time is exactly how long closeNativeMux waited.
+		require.GreaterOrEqual(t, time.Since(start), nativeFeedDrainTimeout,
+			"closeNativeMux must wait the full drain timeout before giving up on the feed")
+		require.Error(t, stream.mux.Write(make([]byte, 2), time.Now()),
+			"the muxer must still be closed after the drain timeout expires")
+	})
 }
 
 // TestNativeFeedLoopAccumulatesSubSampleChunks is the assertion with teeth.
@@ -449,8 +466,8 @@ func TestNativeFeedLoopAccumulatesSubSampleChunks(t *testing.T) {
 	// Short segments so half a second of audio still cuts one. Feeding the
 	// default 2 s target byte by byte would need a multi-megabyte channel, on a
 	// project that targets 512 MB boards and runs this in CI.
-	mux, err := hlsmux.New(&hlsmux.Config{
-		Codec:           hlsmux.AACLC(),
+	mux, err := hls.New(&hls.Config{
+		Codec:           aachls.AACLC(),
 		SampleRate:      nativeTestRate,
 		Channels:        nativeTestChannels,
 		BitrateKbps:     128,
@@ -481,44 +498,12 @@ func TestNativeFeedLoopAccumulatesSubSampleChunks(t *testing.T) {
 		"single-byte chunks must accumulate into samples; if no segment exists, the remainder was discarded instead of carried")
 }
 
-// TestNativeFeedLoopSurvivesAlternatingOddChunks covers the shape a real pipe
-// read produces: lengths that vary rather than being uniformly odd.
-func TestNativeFeedLoopSurvivesAlternatingOddChunks(t *testing.T) {
-	h, _ := newNativeTestHandler(t)
-	stream := &HLSStreamInfo{SourceID: "native_src", mux: newNativeMux(t)}
+// The tests below exercise the isNative() guard on the readiness and cleanup
+// entry points, so a stream that never obtained a muxer is handled without
+// dereferencing a nil one.
 
-	epoch := time.Date(2026, 7, 23, 9, 0, 0, 0, time.UTC)
-	ch := make(chan audioChunk, 4096)
-	// Sizes sum to 3413 bytes per cycle; 1200 chunks is about six seconds of
-	// mono 16-bit, comfortably several segments rather than borderline one.
-	sizes := []int{1, 3, 1201, 2, 999, 1200, 7}
-	pcm := make([]byte, 2048)
-	var sent int
-	for range 1200 {
-		n := sizes[sent%len(sizes)]
-		ch <- audioChunk{data: pcm[:n], timestamp: epoch.Add(time.Duration(sent) * time.Millisecond)}
-		sent++
-	}
-	close(ch)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
-	defer cancel()
-	h.runNativeAudioFeedLoop(ctx, "native_src", stream, &audioFeedResources{
-		feed: &audioFeed{ch: ch}, cleanup: func() {},
-	})
-
-	assert.False(t, stream.mux.Stats().Failed,
-		"ragged chunk lengths are a producer reality, not an encoder failure")
-	assert.True(t, stream.mux.Ready(1), "the stream must still have produced segments")
-}
-
-// The tests below exercise the isNative() dispatch itself rather than the
-// helpers behind it. Without them, deleting any branch point leaves the suite
-// green while the native path silently falls through to the FFmpeg code, which
-// then looks at a PlaylistPath this path never sets.
-
-// TestCheckHLSPlaylistReadyDispatchesOnNative proves the readiness gate does not
-// fall through to the disk check.
+// TestCheckHLSPlaylistReadyDispatchesOnNative proves the readiness gate reads the
+// muxer and is nil-safe for a stream that has none.
 func TestCheckHLSPlaylistReadyDispatchesOnNative(t *testing.T) {
 	h, _ := newNativeTestHandler(t)
 
@@ -530,10 +515,10 @@ func TestCheckHLSPlaylistReadyDispatchesOnNative(t *testing.T) {
 		"a native stream with no segments is not ready")
 	assert.False(t, h.checkHLSPlaylistReady(nil), "a nil stream is never ready")
 
-	// An FFmpeg-path stream must still take the disk branch, which reports not
-	// ready for an unset PlaylistPath rather than consulting a nil muxer.
-	assert.False(t, h.checkHLSPlaylistReady(&HLSStreamInfo{OutputDir: "/tmp/x"}),
-		"the FFmpeg branch must still be reachable")
+	// A stream with no muxer reports not ready rather than dereferencing a nil
+	// muxer.
+	assert.False(t, h.checkHLSPlaylistReady(&HLSStreamInfo{SourceID: "x"}),
+		"a stream without a muxer is not ready")
 }
 
 // TestPerformHLSCleanupClosesTheNativeMuxer covers the teardown branch. The
@@ -554,18 +539,66 @@ func TestPerformHLSCleanupClosesTheNativeMuxer(t *testing.T) {
 	assert.Error(t, ctx.Err(), "cleanup must cancel the stream context")
 }
 
-// TestPerformHLSCleanupLeavesFFmpegPathAlone is the other half: the native
-// branch must not swallow the FFmpeg cleanup.
-func TestPerformHLSCleanupLeavesFFmpegPathAlone(t *testing.T) {
+// TestPerformHLSCleanupHandlesStreamWithoutMuxer covers cleanup of a stream that
+// failed before its muxer was attached: it must cancel the context without
+// dereferencing a nil muxer.
+func TestPerformHLSCleanupHandlesStreamWithoutMuxer(t *testing.T) {
 	h, _ := newNativeTestHandler(t)
 
 	ctx, cancel := context.WithCancel(t.Context())
-	stream := &HLSStreamInfo{SourceID: "ffmpeg_src", ctx: ctx, cancel: cancel}
+	stream := &HLSStreamInfo{SourceID: "no_mux_src", ctx: ctx, cancel: cancel}
 
 	assert.NotPanics(t, func() {
-		h.performHLSCleanup("ffmpeg_src", stream, "test")
-	}, "an FFmpeg stream has no muxer; cleanup must not dereference one")
+		h.performHLSCleanup("no_mux_src", stream, "test")
+	}, "a stream with no muxer must not be dereferenced during cleanup")
 	assert.Error(t, ctx.Err())
+}
+
+// TestHandleNativeWriteError covers the feed loop's write-error classifier: the
+// two clean-stop branches (a cancelled context and a muxer already closed under
+// us) must stop the feed WITHOUT counting a rejected chunk, and a plain
+// per-chunk rejection against a healthy muxer must drop the chunk and continue.
+// This is the code that exists to keep a normal stream stop from firing a
+// spurious telemetry event, so leaving it untested would let that regress green.
+func TestHandleNativeWriteError(t *testing.T) {
+	h, _ := newNativeTestHandler(t)
+
+	t.Run("cancelled context stops cleanly, not as a rejection", func(t *testing.T) {
+		stream := newEmptyNativeStream(t) // healthy muxer, Stats().Failed == false
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel() // teardown in flight
+
+		var rejected int64
+		var lastLog time.Time
+		stop := h.handleNativeWriteError(ctx, "src", stream, fmt.Errorf("write during teardown"), &rejected, &lastLog)
+
+		assert.True(t, stop, "a cancelled context must stop the feed")
+		assert.Zero(t, rejected, "a clean teardown must not be counted as a rejected chunk")
+	})
+
+	t.Run("hls.ErrClosed stops cleanly, not as a rejection", func(t *testing.T) {
+		stream := newEmptyNativeStream(t)
+
+		var rejected int64
+		var lastLog time.Time
+		// Live context, but the muxer was closed under the feed loop: the classic
+		// teardown race the ErrClosed branch exists to absorb.
+		stop := h.handleNativeWriteError(t.Context(), "src", stream, hls.ErrClosed, &rejected, &lastLog)
+
+		assert.True(t, stop, "hls.ErrClosed must stop the feed")
+		assert.Zero(t, rejected, "a close under the feed must not be counted as a rejected chunk")
+	})
+
+	t.Run("non-latching rejection drops the chunk and continues", func(t *testing.T) {
+		stream := newEmptyNativeStream(t) // healthy muxer: not latched failed
+
+		var rejected int64
+		var lastLog time.Time
+		stop := h.handleNativeWriteError(t.Context(), "src", stream, fmt.Errorf("malformed chunk"), &rejected, &lastLog)
+
+		assert.False(t, stop, "a non-latching rejection must not stop the feed")
+		assert.Equal(t, int64(1), rejected, "the dropped chunk must be counted")
+	})
 }
 
 // TestWaitForHLSPlaylistDispatchesOnNative pins that /start does not block on a
@@ -593,4 +626,35 @@ func TestWaitForHLSPlaylistDispatchesOnNative(t *testing.T) {
 	assert.True(t, ok, "a native stream with segments must be reported ready")
 	assert.Less(t, elapsed, hlsPlaylistWaitTimeout,
 		"readiness must come from the muxer, not from waiting out the file-poll timeout")
+}
+
+// TestNativeStreamIsDroppedWhenRouterRemovesRoutes is the end-to-end form of
+// #5255: a source restart makes the engine remove the source's routes, and the
+// live stream built on them must be cancelled and unregistered instead of
+// serving stale segments until the container restarts.
+func TestNativeStreamIsDroppedWhenRouterRemovesRoutes(t *testing.T) {
+	h, _ := newNativeTestHandler(t)
+	eng := engine.New(t.Context(), &engine.Config{}, nil)
+	t.Cleanup(eng.Stop)
+	h.Engine.Store(eng)
+	const sourceID = "native_restart_src"
+
+	stream, err := h.createNativeHLSStream(sourceID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		stream.cancel()
+		_ = removeStreamFromManager(sourceID)
+	})
+	require.True(t, eng.Router().HasConsumers(sourceID), "the stream must have registered its route")
+
+	eng.Router().RemoveAllRoutes(sourceID)
+
+	testutil.WaitForChannel(t, stream.ctx.Done(), testutil.DefaultTestTimeout,
+		"the stream must be cancelled once the router removes its route")
+	require.Eventually(t, func() bool {
+		hlsMgr.streamsMu.RLock()
+		defer hlsMgr.streamsMu.RUnlock()
+		_, registered := hlsMgr.streams[sourceID]
+		return !registered
+	}, testutil.DefaultTestTimeout, 10*time.Millisecond, "the cancelled stream must be unregistered")
 }

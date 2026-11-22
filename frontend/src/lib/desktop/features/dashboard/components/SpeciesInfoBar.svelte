@@ -42,7 +42,7 @@
   const isFalsePositive = $derived(detection.verified === 'false_positive');
   const isUnlikely = $derived(detection.unlikely === true);
 
-  // Thumbnail URL — buildAppUrl prepends the configured base path so the
+  // Thumbnail URL: buildAppUrl prepends the configured base path so the
   // image resolves correctly behind reverse proxies (e.g. /birdnet/...).
   const thumbnailUrl = $derived(
     buildAppUrl(`/api/v2/media/species-image?name=${encodeURIComponent(detection.scientificName)}`)
@@ -83,23 +83,26 @@
           class="false-positive-badge"
           role="status"
           aria-label={t('dashboard.recentDetections.status.false')}
-          >{t('dashboard.recentDetections.status.false')}</span
         >
+          {t('dashboard.recentDetections.status.false')}
+        </span>
       {:else}
         <span
           class="unverified-badge"
           role="status"
           aria-label={t('dashboard.recentDetections.status.unverified')}
-          >{t('dashboard.recentDetections.status.unverified')}</span
         >
+          {t('dashboard.recentDetections.status.unverified')}
+        </span>
       {/if}
       {#if isUnlikely}
         <span
           class="unlikely-badge"
           role="status"
           aria-label={t('dashboard.recentDetections.status.unlikely')}
-          ><CircleHelp class="size-2.5" />{t('dashboard.recentDetections.status.unlikely')}</span
         >
+          <CircleHelp class="size-2.5" />{t('dashboard.recentDetections.status.unlikely')}
+        </span>
       {/if}
     </div>
 
@@ -212,7 +215,7 @@
     height: 1rem;
     border-radius: 9999px;
     background-color: color-mix(in srgb, var(--color-warning) 90%, transparent);
-    color: white;
+    color: var(--color-warning-content);
     font-size: 0.625rem;
     font-weight: 500;
   }

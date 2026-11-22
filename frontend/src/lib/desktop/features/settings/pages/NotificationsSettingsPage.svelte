@@ -8,6 +8,8 @@
 
   Features:
   - Push notification provider management (add/edit/delete)
+  - Rules notice in place of the legacy detection filters while the alert
+    engine is active (the filters only apply when it is not)
   - Notification template customization
   - Alert rule list with toggle, test, edit, delete
   - Inline rule editor (AlertRuleEditor component)
@@ -19,13 +21,15 @@
   @component
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { downloadBlob } from '$lib/utils/fileHelpers';
   import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import TextInput from '$lib/desktop/components/forms/TextInput.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import SettingsButton from '$lib/desktop/features/settings/components/SettingsButton.svelte';
@@ -38,7 +42,6 @@
     Pencil,
     Trash2,
     ExternalLink,
-    History,
     Zap,
     Shield,
     Play,
@@ -52,6 +55,8 @@
     Globe,
     Clock,
     Wifi,
+    FileText,
+    RotateCcwClock,
   } from '@lucide/svelte';
   import StatusBanner from '$lib/desktop/components/ui/StatusBanner.svelte';
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
@@ -80,6 +85,7 @@
     fetchAlertHistory,
     clearAlertHistory,
     fetchAlertSchema,
+    fetchAlertStatus,
     exportAlertRules,
     importAlertRules,
   } from '$lib/api/alerts';
@@ -87,7 +93,10 @@
   import { formatLocalDateTime } from '$lib/utils/date';
   import { schemaObjectTypeLabel } from '$lib/utils/alertSchema';
   import { translateField } from '$lib/utils/notifications';
-  import { navigation } from '$lib/stores/navigation.svelte';
+  import { handleAppLinkClick } from '$lib/stores/navigation.svelte';
+  import { useUnsavedChangesGuard } from '$lib/utils/useUnsavedChangesGuard.svelte';
+  import { buildAppUrl } from '$lib/utils/urlHelpers';
+  import { SETTINGS_ROUTES } from '$lib/utils/settingsRoutes';
 
   const logger = loggers.settings;
 
@@ -158,7 +167,7 @@
     ntfyUsername: string;
     ntfyPassword: string;
     ntfyCheckHost: string;
-    ntfyCheckStatus: 'idle' | 'checking' | 'https' | 'http' | 'unreachable';
+    ntfyCheckStatus: 'idle' | 'checking' | 'https' | 'http' | 'unreachable' | 'checkError';
     gotifyServer: string;
     gotifyToken: string;
     gotifyProtocol: 'https' | 'http';
@@ -258,6 +267,27 @@
     originalPushSettings !== null &&
       JSON.stringify(pushSettings) !== JSON.stringify(originalPushSettings)
   );
+
+  // What the provider form holds that the user can change. The ntfy connection probe fields
+  // are left out: Test Connection and the delayed auto-check write them without any user edit.
+  function providerFormSnapshot(): string {
+    const editable: Partial<ServiceFormData> = { ...serviceFormData };
+    delete editable.ntfyCheckHost;
+    delete editable.ntfyCheckStatus;
+    return JSON.stringify({ selectedService, providerFormData, editable });
+  }
+
+  // Set when the add or edit form opens; the form is dirty once it differs.
+  let providerFormInitial = $state<string | null>(null);
+  let providerFormDirty = $derived(
+    showProviderForm &&
+      providerFormInitial !== null &&
+      providerFormInitial !== providerFormSnapshot()
+  );
+
+  // Template, push and provider state are page level, so tab switches keep them: only a route
+  // change asks.
+  useUnsavedChangesGuard(() => hasTemplateChanges || hasPushChanges || providerFormDirty);
 
   const templateFieldKeys = [
     'commonName',
@@ -402,6 +432,12 @@
   let loadingRules = $state(false);
   let schema = $state<AlertSchema | null>(null);
   let v2Available = $state(true);
+  // Whether the alert engine handles detection notifications; null while unknown.
+  // When true, the legacy detection filters on the Channels tab have no effect.
+  let alertEngineActive = $state<boolean | null>(null);
+  let legacyMinConfidence = $derived(pushSettings.minConfidenceThreshold ?? 0);
+  let legacyCooldownMinutes = $derived(pushSettings.speciesCooldownMinutes ?? 0);
+  let hasLegacyFilterValues = $derived(legacyMinConfidence > 0 || legacyCooldownMinutes > 0);
 
   let historyData = $state<AlertHistoryType[]>([]);
   let historyTotal = $state(0);
@@ -445,7 +481,7 @@
     {
       id: 'history',
       label: t('settings.notifications.tabs.history'),
-      icon: History,
+      icon: RotateCcwClock,
       content: historyContent,
       hasChanges: false,
     },
@@ -582,19 +618,23 @@
     savingTemplate = true;
     templateStatusMessage = '';
 
+    // What goes out is what counts as saved: text typed while the request is pending is not.
+    const submittedTitle = editedTitle;
+    const submittedMessage = editedMessage;
+
     try {
       await api.patch('/api/v2/settings/notification', {
         templates: {
           newSpecies: {
-            title: editedTitle,
-            message: editedMessage,
+            title: submittedTitle,
+            message: submittedMessage,
           },
         },
       });
 
       if (templateConfig) {
-        templateConfig.title = editedTitle;
-        templateConfig.message = editedMessage;
+        templateConfig.title = submittedTitle;
+        templateConfig.message = submittedMessage;
       }
 
       templateStatusMessage = t('settings.notifications.templates.saveSuccess');
@@ -761,8 +801,8 @@
         const ntfyPattern =
           /^ntfy:\/\/(?:([^:@/?]+)(?::([^@/?]*))?@)?([^/?]+)(?:\/([^?]*))?(?:\?(.*))?$/;
         /* eslint-enable security/detect-unsafe-regex */
-        if (safeRegexTest(ntfyPattern, url, 500)) {
-          const match = url.match(ntfyPattern)!;
+        const match = safeRegexTest(ntfyPattern, url, 500) ? url.match(ntfyPattern) : null;
+        if (match) {
           const [, user, pass, hostOrTopic, pathPart, queryString] = match;
 
           serviceFormData.ntfyUsername = user ? decodeURIComponent(user) : '';
@@ -788,8 +828,8 @@
         /* eslint-disable security/detect-unsafe-regex -- no nested quantifiers; each segment is bounded by literal anchors */
         const gotifyPattern = /^gotify:\/\/([^/?]+)(?:\/([^?]*))?(?:\?(.*))?$/;
         /* eslint-enable security/detect-unsafe-regex */
-        if (safeRegexTest(gotifyPattern, url, 500)) {
-          const match = url.match(gotifyPattern)!;
+        const match = safeRegexTest(gotifyPattern, url, 500) ? url.match(gotifyPattern) : null;
+        if (match) {
           const [, host, token, queryString] = match;
 
           serviceFormData.gotifyServer = host || '';
@@ -820,6 +860,7 @@
       enabled: true,
       filterTypes: ['detection', 'warning'],
     };
+    providerFormInitial = providerFormSnapshot();
     showProviderForm = true;
   }
 
@@ -854,11 +895,13 @@
       enabled: provider.enabled,
       filterTypes: provider.filter?.types || ['detection'],
     };
+    providerFormInitial = providerFormSnapshot();
     showProviderForm = true;
   }
 
   function closeProviderForm() {
     showProviderForm = false;
+    providerFormInitial = null;
     editingProviderIndex = null;
   }
 
@@ -949,12 +992,15 @@
     savingPush = true;
     pushStatusMessage = '';
 
+    // What is sent becomes the saved baseline, so an edit made while the request is pending
+    // (provider toggles stay enabled) stays unsaved.
+    const submitted = JSON.parse(JSON.stringify(pushSettings));
     try {
       await api.patch('/api/v2/settings/notification', {
-        push: pushSettings,
+        push: submitted,
       });
 
-      originalPushSettings = JSON.parse(JSON.stringify(pushSettings));
+      originalPushSettings = submitted;
 
       pushStatusMessage = t('settings.notifications.templates.saveSuccess');
       pushStatusType = 'success';
@@ -1021,8 +1067,11 @@
     serviceFormData.ntfyCheckStatus = 'checking';
 
     try {
-      const result = await api.get<{ recommended: string; https: boolean; http: boolean }>(
-        `/api/v2/notifications/check-ntfy-server?host=${encodeURIComponent(host)}`
+      // POST (not GET) so the request carries the CSRF token: the endpoint runs a
+      // side-effecting outbound probe and must not be a CSRF-exempt safe GET.
+      const result = await api.post<{ recommended: string; https: boolean; http: boolean }>(
+        '/api/v2/notifications/check-ntfy-server',
+        { host }
       );
 
       if (serviceFormData.ntfyCheckHost !== host) return;
@@ -1031,13 +1080,23 @@
       if (rec === 'https' || rec === 'http') {
         serviceFormData.ntfyProtocol = rec;
         serviceFormData.ntfyCheckStatus = rec;
+        // The probe picks the protocol without a user edit, so only the baseline's protocol moves
+        // with it: other edits stay edits, and undoing them leaves the form clean.
+        if (providerFormInitial !== null) {
+          const baseline = JSON.parse(providerFormInitial);
+          baseline.editable.ntfyProtocol = rec;
+          providerFormInitial = JSON.stringify(baseline);
+        }
       } else {
         serviceFormData.ntfyCheckStatus = 'unreachable';
       }
-    } catch {
-      if (serviceFormData.ntfyCheckHost === host) {
-        serviceFormData.ntfyCheckStatus = 'unreachable';
-      }
+    } catch (error) {
+      if (serviceFormData.ntfyCheckHost !== host) return;
+      // A genuine network/timeout failure means the server is unreachable. An HTTP
+      // error (an invalid host rejected by the API, or a session/CSRF problem) means
+      // the check could not be completed - a distinct state, not "unreachable".
+      serviceFormData.ntfyCheckStatus =
+        error instanceof ApiError && !error.isNetworkError ? 'checkError' : 'unreachable';
     }
   }
 
@@ -1115,6 +1174,33 @@
       }
       logger.error('Failed to load alert schema', err, { component: 'NotificationsSettingsPage' });
     }
+  }
+
+  async function loadAlertStatus() {
+    try {
+      const status = await fetchAlertStatus();
+      alertEngineActive = status.engine_active;
+    } catch (err) {
+      // Fall back to showing the filters: they are live whenever the engine is
+      // not, so hiding them on an unknown state could hide working settings.
+      alertEngineActive = false;
+      if (err instanceof ApiError && err.status === 409) {
+        v2Available = false;
+        return;
+      }
+      logger.error('Failed to load alert engine status', err, {
+        component: 'NotificationsSettingsPage',
+      });
+    }
+  }
+
+  // The link switches tabs, which unmounts the Channels panel and the link with
+  // it; move focus to the Rules tab so it does not fall back to the page body.
+  async function openRulesTab(event: MouseEvent) {
+    handleAppLinkClick(event);
+    if (!event.defaultPrevented) return;
+    await tick();
+    document.getElementById('settings-tab-rules')?.focus();
   }
 
   async function loadHistory() {
@@ -1312,20 +1398,20 @@
     const colors: Record<string, { bg: string; text: string }> = {
       detection: {
         bg: 'bg-[color-mix(in_srgb,var(--color-success)_10%,transparent)]',
-        text: 'text-[var(--color-success)]',
+        text: 'text-[var(--text-success)]',
       },
       stream: {
         bg: 'bg-[color-mix(in_srgb,var(--color-info)_10%,transparent)]',
-        text: 'text-[var(--color-info)]',
+        text: 'text-[var(--text-info)]',
       },
       device: { bg: 'bg-violet-500/10', text: 'text-violet-500' },
       system: {
         bg: 'bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)]',
-        text: 'text-[var(--color-error)]',
+        text: 'text-[var(--text-error)]',
       },
       integration: {
         bg: 'bg-[color-mix(in_srgb,var(--color-warning)_10%,transparent)]',
-        text: 'text-[var(--color-warning)]',
+        text: 'text-[var(--text-warning)]',
       },
     };
     return (
@@ -1352,6 +1438,9 @@
   // onMount
   // ============================================================
   onMount(async () => {
+    // Rules and history do not depend on the engine status, so a slow status
+    // call must not hold them back.
+    loadAlertStatus();
     await Promise.all([loadNotificationSettings(), loadSchema()]);
     // Load rules and history after schema is ready
     loadRules();
@@ -1374,12 +1463,9 @@
       {#snippet children()}
         {t('settings.alerts.v2Required')}
         <a
-          href="/ui/system/database"
-          class="underline font-medium ml-1 hover:opacity-80"
-          onclick={(e: MouseEvent) => {
-            e.preventDefault();
-            navigation.navigate('/ui/system/database');
-          }}
+          href={buildAppUrl('/ui/system/database')}
+          class="underline font-medium ml-1 hover:decoration-2"
+          onclick={handleAppLinkClick}
         >
           {t('settings.alerts.v2RequiredLink')}
         </a>
@@ -1395,6 +1481,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.notifications.tabs.channels')}
+      icon={Send}
       description={t('settings.notifications.push.description')}
       defaultOpen={true}
     >
@@ -1407,25 +1494,48 @@
       {:else}
         <div class="space-y-4">
           <!-- Master Enable Toggle -->
-          <Checkbox
-            checked={pushSettings.enabled}
+          <ToggleField
+            value={pushSettings.enabled}
             label={t('settings.notifications.push.enable')}
+            description={pushSettings.enabled
+              ? t('settings.notifications.push.enabledDescription')
+              : t('settings.notifications.push.disabled')}
             disabled={savingPush}
-            onchange={togglePushEnabled}
+            onUpdate={togglePushEnabled}
           />
 
-          {#if pushSettings.enabled}
-            <p class="text-sm text-[var(--color-base-content)]/70">
-              {t('settings.notifications.push.enabledDescription')}
-            </p>
-          {:else}
-            <p class="text-sm text-[var(--color-base-content)]/50">
-              {t('settings.notifications.push.disabled')}
-            </p>
-          {/if}
-
-          <!-- Detection Filters Section -->
-          {#if pushSettings.enabled}
+          <!-- Detection Filters Section: replaced by a pointer to the Rules tab
+               while the alert engine is active, since the filters are unused then -->
+          {#if pushSettings.enabled && alertEngineActive}
+            <ErrorAlert type="info" role="note">
+              {#snippet children()}
+                <div class="space-y-2">
+                  <p>
+                    {t('settings.notifications.push.rulesNotice.message', {
+                      pushAction: t('settings.alerts.editor.actionPush'),
+                      ruleName: t('settings.alerts.builtInRules.newSpecies.name'),
+                      eventName: t('settings.alerts.schema.events.detection_occurred'),
+                    })}
+                  </p>
+                  {#if hasLegacyFilterValues}
+                    <p>
+                      {t('settings.notifications.push.rulesNotice.previousFilters', {
+                        confidence: Math.round(legacyMinConfidence * 100),
+                        minutes: legacyCooldownMinutes,
+                      })}
+                    </p>
+                  {/if}
+                  <a
+                    href={buildAppUrl(SETTINGS_ROUTES.notificationsRules)}
+                    onclick={openRulesTab}
+                    class="inline-block font-medium underline hover:decoration-2"
+                  >
+                    {t('settings.notifications.push.rulesNotice.openRules')}
+                  </a>
+                </div>
+              {/snippet}
+            </ErrorAlert>
+          {:else if pushSettings.enabled && alertEngineActive === false}
             <div class="rounded-lg bg-[var(--color-base-200)]">
               <div class="p-6">
                 <h3 class="text-base font-semibold mb-4">
@@ -1461,8 +1571,9 @@
                       />
                       <span
                         class="inline-flex items-center justify-center px-3 text-sm bg-[var(--color-base-300)] border border-l-0 border-[var(--color-base-300)] rounded-r-lg"
-                        >%</span
                       >
+                        %
+                      </span>
                     </div>
                     <p class="text-xs text-[var(--color-base-content)]/60 mt-1">
                       {t('settings.notifications.push.filters.minConfidence.helpText')}
@@ -1496,8 +1607,9 @@
                       />
                       <span
                         class="inline-flex items-center justify-center px-3 text-sm bg-[var(--color-base-300)] border border-l-0 border-[var(--color-base-300)] rounded-r-lg"
-                        >{t('settings.notifications.push.filters.speciesCooldown.unit')}</span
                       >
+                        {t('settings.notifications.push.filters.speciesCooldown.unit')}
+                      </span>
                     </div>
                     <p class="text-xs text-[var(--color-base-content)]/60 mt-1">
                       {t('settings.notifications.push.filters.speciesCooldown.helpText')}
@@ -1611,6 +1723,7 @@
                         <SelectDropdown
                           bind:value={serviceFormData.ntfyProtocol}
                           options={protocolOptions}
+                          aria-label={t('settings.notifications.push.services.ntfy.protocol.label')}
                           variant="select"
                           size="sm"
                           menuSize="sm"
@@ -1630,21 +1743,21 @@
                           {t('settings.notifications.push.services.ntfy.testConnection')}
                         </button>
                         {#if serviceFormData.ntfyCheckStatus === 'https'}
-                          <span class="text-xs text-[var(--color-success)]"
-                            >{t(
-                              'settings.notifications.push.services.ntfy.connectionOk.https'
-                            )}</span
-                          >
+                          <span class="text-xs text-[var(--text-success)]">
+                            {t('settings.notifications.push.services.ntfy.connectionOk.https')}
+                          </span>
                         {:else if serviceFormData.ntfyCheckStatus === 'http'}
-                          <span class="text-xs text-[var(--color-warning)]"
-                            >{t(
-                              'settings.notifications.push.services.ntfy.connectionOk.http'
-                            )}</span
-                          >
+                          <span class="text-xs text-[var(--text-warning)]">
+                            {t('settings.notifications.push.services.ntfy.connectionOk.http')}
+                          </span>
                         {:else if serviceFormData.ntfyCheckStatus === 'unreachable'}
-                          <span class="text-xs text-[var(--color-error)]"
-                            >{t('settings.notifications.push.services.ntfy.connectionFailed')}</span
-                          >
+                          <span class="text-xs text-[var(--text-error)]">
+                            {t('settings.notifications.push.services.ntfy.connectionFailed')}
+                          </span>
+                        {:else if serviceFormData.ntfyCheckStatus === 'checkError'}
+                          <span class="text-xs text-[var(--text-warning)]">
+                            {t('settings.notifications.push.services.ntfy.checkError')}
+                          </span>
                         {/if}
                       </div>
 
@@ -1724,6 +1837,7 @@
                       <SelectDropdown
                         bind:value={serviceFormData.gotifyProtocol}
                         options={protocolOptions}
+                        aria-label={t('settings.notifications.push.services.gotify.protocol.label')}
                         variant="select"
                         size="sm"
                         menuSize="sm"
@@ -1900,15 +2014,15 @@
                         class="mt-2 pl-2 space-y-1 font-mono text-[var(--color-base-content)]/70"
                       >
                         <p>
-                          <strong
-                            >{t('settings.notifications.push.form.urlFormats.discord')}:</strong
-                          >
+                          <strong>
+                            {t('settings.notifications.push.form.urlFormats.discord')}:
+                          </strong>
                           {t('settings.notifications.push.form.urlFormats.discordFormat')}
                         </p>
                         <p>
-                          <strong
-                            >{t('settings.notifications.push.form.urlFormats.telegram')}:</strong
-                          >
+                          <strong>
+                            {t('settings.notifications.push.form.urlFormats.telegram')}:
+                          </strong>
                           {t('settings.notifications.push.form.urlFormats.telegramFormat')}
                         </p>
                         <p>
@@ -1916,14 +2030,15 @@
                           {t('settings.notifications.push.form.urlFormats.slackFormat')}
                         </p>
                         <p>
-                          <strong
-                            >{t('settings.notifications.push.form.urlFormats.pushover')}:</strong
-                          >
+                          <strong>
+                            {t('settings.notifications.push.form.urlFormats.pushover')}:
+                          </strong>
                           {t('settings.notifications.push.form.urlFormats.pushoverFormat')}
                         </p>
                         <p>
-                          <strong>{t('settings.notifications.push.form.urlFormats.gotify')}:</strong
-                          >
+                          <strong>
+                            {t('settings.notifications.push.form.urlFormats.gotify')}:
+                          </strong>
                           {t('settings.notifications.push.form.urlFormats.gotifyFormat')}
                         </p>
                         <p>
@@ -1934,7 +2049,7 @@
                           href={t('settings.notifications.push.form.urlFormats.shoutrrrDocs')}
                           target="_blank"
                           rel="noopener noreferrer"
-                          class="inline-flex items-center gap-1 mt-2 text-[var(--color-primary)] hover:underline"
+                          class="inline-flex items-center gap-1 mt-2 text-[var(--text-primary)] underline hover:decoration-2"
                         >
                           {t('settings.notifications.push.form.urlFormats.moreServices')}
                           <ExternalLink class="size-3" />
@@ -1945,7 +2060,7 @@
 
                   <!-- Service Validation Error -->
                   {#if serviceValidationError}
-                    <p class="text-xs text-[var(--color-error)]">{serviceValidationError}</p>
+                    <p class="text-xs text-[var(--text-error)]">{serviceValidationError}</p>
                   {/if}
 
                   <!-- Provider Name -->
@@ -1998,26 +2113,32 @@
                   </fieldset>
 
                   <!-- Enable Provider -->
-                  <Checkbox
-                    checked={providerFormData.enabled}
+                  <ToggleField
+                    value={providerFormData.enabled}
                     label={t('settings.notifications.push.providers.enableToggle')}
-                    onchange={checked => (providerFormData.enabled = checked)}
+                    onUpdate={checked => (providerFormData.enabled = checked)}
                   />
 
                   <!-- Form Actions -->
                   <div class="flex gap-2 justify-end">
                     <button
+                      type="button"
                       onclick={closeProviderForm}
                       class="inline-flex items-center justify-center h-8 px-3 text-sm font-medium rounded-lg bg-transparent hover:bg-black/5 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-base-content)] focus-visible:ring-offset-2 transition-colors"
                     >
                       {t('settings.notifications.push.form.cancelButton')}
                     </button>
                     <button
+                      type="button"
                       onclick={saveProvider}
-                      class="inline-flex items-center justify-center h-8 px-3 text-sm font-medium rounded-lg bg-[var(--color-primary)] text-[var(--color-primary-content)] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      class="inline-flex items-center justify-center h-8 px-3 text-sm font-medium rounded-lg bg-[var(--color-primary)] text-[var(--color-primary-content)] hover:not-disabled:bg-[var(--color-primary-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       disabled={!isServiceFormValid ||
                         (selectedService === 'ntfy' &&
                           (serviceFormData.ntfyCheckStatus === 'checking' || !!ntfyCheckPromise))}
+                      title={selectedService === 'ntfy' &&
+                      (serviceFormData.ntfyCheckStatus === 'checking' || !!ntfyCheckPromise)
+                        ? t('settings.notifications.push.form.saveWaitingNtfyCheck')
+                        : undefined}
                     >
                       {t('settings.notifications.push.form.saveButton')}
                     </button>
@@ -2030,13 +2151,14 @@
           <!-- Providers List -->
           <div class="space-y-3">
             <div class="flex items-center justify-between">
-              <h3 class="font-semibold text-sm">
+              <SettingsGroupLabel as="h3">
                 {t('settings.notifications.push.providers.title')}
-              </h3>
+              </SettingsGroupLabel>
               {#if !showProviderForm}
                 <button
+                  type="button"
                   onclick={openAddProviderForm}
-                  class="inline-flex items-center justify-center gap-1 h-8 px-3 text-sm font-medium rounded-lg bg-[var(--color-primary)] text-[var(--color-primary-content)] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 transition-colors"
+                  class="inline-flex items-center justify-center gap-1 h-8 px-3 text-sm font-medium rounded-lg bg-[var(--color-primary)] text-[var(--color-primary-content)] hover:bg-[var(--color-primary-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 transition-colors"
                 >
                   <Plus class="size-4" />
                   {t('settings.notifications.push.providers.addButton')}
@@ -2084,6 +2206,7 @@
                               : t('settings.notifications.push.providers.typeBadge.shoutrrr')}
                           </span>
                           <button
+                            type="button"
                             onclick={() => openEditProviderForm(index)}
                             class="inline-flex items-center justify-center w-6 h-6 rounded bg-transparent hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title={t('settings.notifications.push.providers.editButton')}
@@ -2093,8 +2216,9 @@
                             <Pencil class="size-3.5" />
                           </button>
                           <button
+                            type="button"
                             onclick={() => deleteProvider(index)}
-                            class="inline-flex items-center justify-center w-6 h-6 rounded bg-transparent hover:bg-black/5 dark:hover:bg-white/10 text-[var(--color-error)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            class="inline-flex items-center justify-center w-6 h-6 rounded bg-transparent hover:bg-black/5 dark:hover:bg-white/10 text-[var(--text-error)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title={t('settings.notifications.push.providers.deleteButton')}
                             aria-label={t('settings.notifications.push.providers.deleteButton')}
                             disabled={showProviderForm}
@@ -2158,6 +2282,7 @@
     <!-- Templates Section (collapsible) -->
     <SettingsSection
       title={t('settings.notifications.templates.title')}
+      icon={FileText}
       description={t('settings.notifications.templates.description')}
       defaultOpen={false}
     >
@@ -2178,9 +2303,9 @@
               <div class="space-y-4">
                 <div>
                   <label for="template-title" class="block mb-1">
-                    <span class="text-sm font-semibold text-[var(--color-base-content)]"
-                      >{t('settings.notifications.templates.titleLabel')}</span
-                    >
+                    <span class="text-sm font-semibold text-[var(--color-base-content)]">
+                      {t('settings.notifications.templates.titleLabel')}
+                    </span>
                   </label>
                   <input
                     id="template-title"
@@ -2193,9 +2318,9 @@
 
                 <div>
                   <label for="template-message" class="block mb-1">
-                    <span class="text-sm font-semibold text-[var(--color-base-content)]"
-                      >{t('settings.notifications.templates.messageLabel')}</span
-                    >
+                    <span class="text-sm font-semibold text-[var(--color-base-content)]">
+                      {t('settings.notifications.templates.messageLabel')}
+                    </span>
                   </label>
                   <textarea
                     id="template-message"
@@ -2216,6 +2341,7 @@
 
                 <div class="flex gap-2 justify-end">
                   <button
+                    type="button"
                     onclick={resetTemplates}
                     class="inline-flex items-center justify-center h-8 px-3 text-sm font-medium rounded-lg bg-transparent hover:bg-black/5 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-base-content)] focus-visible:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={savingTemplate || generating}
@@ -2223,9 +2349,10 @@
                     {t('settings.notifications.templates.resetButton')}
                   </button>
                   <button
+                    type="button"
                     onclick={saveTemplateConfig}
                     class="inline-flex items-center justify-center gap-2 h-8 px-3 text-sm font-medium rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed {hasTemplateChanges
-                      ? 'bg-[var(--color-primary)] text-[var(--color-primary-content)] hover:opacity-90 focus-visible:ring-[var(--color-primary)]'
+                      ? 'bg-[var(--color-primary)] text-[var(--color-primary-content)] hover:not-disabled:bg-[var(--color-primary-hover)] focus-visible:ring-[var(--color-primary)]'
                       : 'bg-transparent hover:bg-black/5 dark:hover:bg-white/10 focus-visible:ring-[var(--color-base-content)]'}"
                     disabled={savingTemplate || generating || !hasTemplateChanges}
                   >
@@ -2235,14 +2362,15 @@
                       ></span>
                       <span>{t('settings.notifications.templates.savingButton')}</span>
                     {:else}
-                      <span
-                        >{hasTemplateChanges
+                      <span>
+                        {hasTemplateChanges
                           ? t('settings.notifications.templates.saveButtonUnsaved')
-                          : t('settings.notifications.templates.saveButton')}</span
-                      >
+                          : t('settings.notifications.templates.saveButton')}
+                      </span>
                     {/if}
                   </button>
                   <button
+                    type="button"
                     onclick={sendTestNewSpeciesNotification}
                     disabled={generating || savingTemplate}
                     class="inline-flex items-center justify-center gap-2 h-8 px-3 text-sm font-medium rounded-lg bg-[var(--color-secondary)] text-[var(--color-secondary-content)] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-secondary)] focus-visible:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -2274,17 +2402,17 @@
               </h3>
               <p class="text-sm text-[var(--color-base-content)]/80 mb-3">
                 {t('settings.notifications.templates.variablesDescription')}
-                <code class="bg-[var(--color-base-300)] px-1 rounded-sm"
-                  >&#123;&#123;.VariableName&#125;&#125;</code
-                >
+                <code class="bg-[var(--color-base-300)] px-1 rounded-sm">
+                  &#123;&#123;.VariableName&#125;&#125;
+                </code>
               </p>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs">
                 {#each templateFields as field (field.name)}
                   <div class="flex items-baseline gap-2">
-                    <code class="font-mono text-[var(--color-primary)] shrink-0"
-                      >&#123;&#123;.{field.name}&#125;&#125;</code
-                    >
+                    <code class="font-mono text-[var(--text-primary)] shrink-0">
+                      &#123;&#123;.{field.name}&#125;&#125;
+                    </code>
                     <span class="text-[var(--color-base-content)]/70">{field.description}</span>
                   </div>
                 {/each}
@@ -2323,7 +2451,7 @@
     stats={[
       {
         icon: Zap,
-        iconClass: 'text-[var(--color-primary)]',
+        iconClass: 'text-[var(--text-primary)]',
         count: activeCount,
         label: t('settings.notifications.rules.summary.active'),
       },
@@ -2438,8 +2566,9 @@
           <!-- Content -->
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-sm font-medium" class:opacity-50={!rule.enabled}>{displayName}</span
-              >
+              <span class="text-sm font-medium" class:opacity-50={!rule.enabled}>
+                {displayName}
+              </span>
               {#if rule.built_in}
                 <span
                   class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--color-base-200)] text-[var(--color-base-content)]/70"
@@ -2478,7 +2607,7 @@
                   <span
                     class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium {action.target ===
                     'bell'
-                      ? 'bg-[color-mix(in_srgb,var(--color-info)_10%,transparent)] text-[var(--color-info)]'
+                      ? 'bg-[color-mix(in_srgb,var(--color-info)_10%,transparent)] text-[var(--text-info)]'
                       : 'bg-violet-500/10 text-violet-500'}"
                   >
                     {#if action.target === 'bell'}
@@ -2505,6 +2634,7 @@
           <!-- Action buttons -->
           <div class="flex items-center gap-1 flex-shrink-0">
             <button
+              type="button"
               class="inline-flex items-center justify-center size-7 rounded-md text-[var(--color-base-content)]/70 hover:bg-[var(--color-base-200)] hover:text-[var(--color-base-content)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title={t('settings.alerts.actionLabels.test')}
               aria-label={t('settings.alerts.actionLabels.test')}
@@ -2514,6 +2644,7 @@
               <Play class="size-3.5" />
             </button>
             <button
+              type="button"
               class="inline-flex items-center justify-center size-7 rounded-md text-[var(--color-base-content)]/70 hover:bg-[var(--color-base-200)] hover:text-[var(--color-base-content)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title={t('settings.alerts.actionLabels.edit')}
               aria-label={t('settings.alerts.actionLabels.edit')}
@@ -2537,6 +2668,7 @@
   {@render ruleStatusBanner()}
   <SettingsSection
     title={t('settings.alerts.sections.history.title')}
+    icon={RotateCcwClock}
     description={t('settings.alerts.sections.history.description')}
     defaultOpen={true}
   >

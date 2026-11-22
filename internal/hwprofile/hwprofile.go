@@ -87,8 +87,15 @@ type Profile struct {
 	// not a known hybrid part.
 	PerfCores int
 	// TotalRAMBytes is the effective memory ceiling: host RAM clamped by any
-	// cgroup limit. 0 when unknown.
+	// cgroup limit. 0 when unknown, including when a cgroup limit exists but
+	// could not be read.
 	TotalRAMBytes int64
+	// RAMUpperBoundBytes is the tightest known upper bound on the memory
+	// ceiling. It equals TotalRAMBytes when that is known; when the cgroup
+	// limit could not be read it holds host RAM clamped by any readable cgroup
+	// level; 0 when nothing is known. Use it only for "is the host at most N"
+	// checks.
+	RAMUpperBoundBytes int64
 	// HasNativeF16 reports native half-precision SIMD (ASIMDHP on arm64).
 	HasNativeF16 bool
 	// SIMD lists the SIMD extensions relevant to inference ("avx2", "avx512",
@@ -172,13 +179,16 @@ type BackendStatus struct {
 	Version string
 }
 
-// OpenVINOStatus is the OpenVINO backend status plus the devices it enumerates.
+// OpenVINOStatus is the OpenVINO backend status plus the device request names
+// that the runtime reports available.
 type OpenVINOStatus struct {
 	// Supported reports that this binary links the OpenVINO backend.
 	Supported bool
 	// Active reports that at least one classifier is currently running on it.
 	Active bool
-	// Devices lists the OpenVINO device names available ("CPU", "GPU").
+	// Devices lists the OpenVINO request names ("CPU", "GPU") that
+	// inference.OpenVINOHasDevice reports available. A GPU request matches any
+	// enumerated GPU or GPU.<n>.
 	Devices []string
 }
 
@@ -273,6 +283,9 @@ func hardwareProfile(force bool) Profile {
 // probeHardware collects everything that cannot change while the process runs.
 // root parameterizes the filesystem-backed probes (board, accelerators,
 // memory); the architecture and CPU probes always describe the running process.
+// When a cgroup memory limit exists but cannot be read, TotalRAMBytes stays 0,
+// RAMUpperBoundBytes holds the best known bound, and a ReasonReadFailed issue is
+// recorded for the memory probe.
 // The returned accelerators carry hardware facts only: whether inference can
 // run on them depends on the backends and is decided in evaluateBackends.
 func probeHardware(root string) Profile {
@@ -287,9 +300,14 @@ func probeHardware(root string) Profile {
 	}
 	p.Environment, _ = sysinfo.GetEnvironment()
 
-	p.TotalRAMBytes = mempolicy.DetectTotalMemoryAt(root)
-	if p.TotalRAMBytes <= 0 {
-		p.TotalRAMBytes = 0
+	total, exact := mempolicy.DetectTotalMemoryAt(root)
+	p.RAMUpperBoundBytes = total
+	switch {
+	case !exact:
+		p.Issues = append(p.Issues, Issue{Probe: ProbeMemory, Reason: ReasonReadFailed})
+	case total > 0:
+		p.TotalRAMBytes = total
+	default:
 		p.Issues = append(p.Issues, Issue{Probe: ProbeMemory, Reason: ReasonUnavailable})
 	}
 

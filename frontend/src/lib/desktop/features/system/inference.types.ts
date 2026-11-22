@@ -9,6 +9,8 @@
  * omitempty.
  */
 
+import type { AcousticModelsStateWire } from '$lib/types/models';
+
 /**
  * Single-board computer the host runs on, as named by its device tree. Absent
  * on hosts with no device tree, which is every PC.
@@ -67,7 +69,7 @@ export interface InferenceHardware {
   fp16: boolean;
   board?: InferenceBoard;
   accelerators?: InferenceAccelerator[];
-  /** Effective memory ceiling: host RAM clamped by any cgroup limit. */
+  /** Effective memory ceiling: host RAM clamped by any cgroup limit. Omitted when the limit could not be read. */
   totalRamBytes?: number;
   physicalCores?: number;
   /**
@@ -90,11 +92,28 @@ export interface BackendStatus {
   version?: string;
 }
 
+/**
+ * One GPU the OpenVINO device probe enumerated. `id` is the OpenVINO device name
+ * ("GPU" on a single-GPU host, "GPU.0", "GPU.1" with several). With several GPUs
+ * it is the value `birdnet.openVinoDevice` stores to select this adapter; the
+ * lone "GPU" is selected with the keyword "gpu", since "GPU" is not a valid value.
+ */
+export interface OpenVINOGPU {
+  id: string;
+  /** Adapter name (FULL_DEVICE_NAME); absent when the probe could not read it. */
+  name?: string;
+  /** DEVICE_TYPE, "integrated" or "discrete" for Intel GPUs; absent or any other value means unknown. */
+  type?: string;
+}
+
 /** OpenVINO backend status, including the devices it can target. */
 export interface OpenVINOBackendStatus {
   supported: boolean;
   active: boolean;
+  /** Device classes the host can target ("CPU", "GPU"); several GPUs still give one "GPU". */
   devices?: string[];
+  /** Each enumerated GPU; absent without a GPU, before the probe completes, or when it failed. */
+  gpus?: OpenVINOGPU[];
 }
 
 /** Status for each supported inference backend. */
@@ -132,6 +151,13 @@ export interface ModelSource {
   name: string;
   type?: string;
   fallback?: boolean;
+  /**
+   * True when settings assign this source to the model but the audio router is
+   * not actually feeding it, so the model produces no detections for it. The
+   * status used to report attachment from configuration alone, which showed a
+   * model as running while it analyzed nothing.
+   */
+  notRunning?: boolean;
 }
 
 /** Ring-buffer metric keys used to look up per-model time series. */
@@ -184,7 +210,7 @@ export interface InferenceModel {
   sources: ModelSource[];
   metricKeys: ModelMetricKeys;
   lastDetection?: InferenceLastDetection;
-  /** Compute device the model's inference runs on ("CPU", "GPU", "NPU", or "Unknown"). */
+  /** Compute device the model's inference runs on ("CPU", "GPU", a concrete "GPU.<n>", "NPU", or "Unknown"). */
   device?: string;
   /** True when the model is currently paused by a schedule (e.g. bat night schedule). */
   paused?: boolean;
@@ -192,7 +218,36 @@ export interface InferenceModel {
   scheduleLabel?: string;
   /** Most recent above-threshold predictions, newest first (up to 20). */
   recentDetections?: InferenceLastDetection[];
+  /** Current inference health; absent when the server has no orchestrator wired. */
+  health?: InferenceModelHealth;
 }
+
+/**
+ * Live inference health of one loaded model (backend ModelHealthInfo): a current
+ * state, unlike the lifetime `stats.errorRate`.
+ */
+export interface InferenceModelHealth {
+  /** "ok", "failing" (the last failureThreshold+ windows all failed) or "idle" (none run yet). */
+  state: 'ok' | 'failing' | 'idle';
+  /** Current run of failed analysis windows. */
+  consecutiveFailures: number;
+  /** Run length at which the state becomes "failing". */
+  failureThreshold: number;
+  /** Analysis windows run by the loaded instance, succeeded or failed. */
+  inferenceCount: number;
+  /** Unix seconds of the last finished window; absent when none has run. */
+  lastInferenceAtUnix?: number;
+  /** Unix seconds of the last successful window; absent when none has. */
+  lastSuccessAtUnix?: number;
+  /** Class of the latest failure ("non_finite_output", "inference_error"). */
+  errorClass?: string;
+}
+
+/** Model health state for a model that fails every analysis window. */
+export const MODEL_HEALTH_FAILING = 'failing';
+
+/** errorClass of a failure run caused by NaN or infinite scores (backend InferenceErrorClassNonFinite). */
+export const ERROR_CLASS_NON_FINITE = 'non_finite_output';
 
 /** Ring-buffer metric keys used to look up audio pipeline time series. */
 export interface InferenceAudioMetricKeys {
@@ -237,8 +292,8 @@ export interface InferenceVAD {
   enabled: boolean;
   /**
    * Whether a model source resolves (an embedded model is present, or a modelpath
-   * override is set). When false the gate is inert even if enabled (e.g. a noembed
-   * build with no modelpath).
+   * override is set). The embedded model ships in every build, so this is
+   * effectively always true; it is false only if no model source resolves at all.
    */
   available: boolean;
   /** True when a detector is currently held (loaded and scoring). */
@@ -261,6 +316,65 @@ export interface InferenceVAD {
   recentHits?: InferenceVADHit[];
 }
 
+/** Planned analysis cadence status (backend cadence.Status). */
+export type AnalysisCadenceStatus = 'ok' | 'capped' | 'overloaded' | 'filterOff';
+
+/** One model's cadence under the effective overlap (backend CadenceModelInfo). */
+export interface AnalysisCadenceModel {
+  /** Model registry ID. */
+  id: string;
+  /** Model display name. */
+  name: string;
+  /**
+   * Broad group the model detects ('bird' or 'bat'); absent from a server that predates the
+   * field, and for a model the registry does not know.
+   */
+  taxonGroup?: string;
+  /** Model clip length in milliseconds. */
+  clipMs: number;
+  /** How often a new analysis window is produced, in milliseconds. */
+  stepMs: number;
+  /** Measured inference latency the plan was solved with; absent when unknown. Not kept by the store. */
+  probeLatencyMs?: number;
+  /** Analysis windows within the reference window that must agree. */
+  confirmations: number;
+  /** Analysis windows that fit in the reference window (may be fractional). */
+  windowsInReference: number;
+}
+
+/**
+ * Planned analysis cadence (backend AnalysisCadenceInfo). The configured overlap
+ * (birdnet.overlap) is never modified; the effective overlap is what the analysis
+ * buffers use, held below the configured one when the false positive filter is
+ * on and the hardware cannot sustain it.
+ */
+export interface AnalysisCadenceInfo {
+  status: AnalysisCadenceStatus;
+  /**
+   * False positive filter level the bird models' confirmations were computed for
+   * (the bat model follows the bat filter level), read by the server at request
+   * time.
+   */
+  filterLevel: number;
+  /** birdnet.overlap in seconds on the 3 s base clip. */
+  configuredOverlapSec: number;
+  /** Overlap in use, in seconds on the 3 s base clip. */
+  effectiveOverlapSec: number;
+  /** Smallest sustainable base step in ms; 0 = unknown, not applicable or overloaded. */
+  minBaseStepMs: number;
+  /** Estimated inference duty at the configured overlap. Not kept by the store. */
+  estimatedDutyConfigured?: number;
+  /** Estimated inference duty at the effective overlap. Not kept by the store. */
+  estimatedDutyEffective?: number;
+  /** Duty the planner keeps the load under. Not kept by the store. */
+  dutyCeiling?: number;
+  sourceCount: number;
+  modelCount: number;
+  /** Models whose latency could not be measured; never null on the wire. */
+  unknownLatencyModels: string[];
+  models: AnalysisCadenceModel[];
+}
+
 /** Full inference status snapshot. `models` is the single source of truth. */
 export interface InferenceStatusResponse {
   hardware: InferenceHardware;
@@ -271,4 +385,18 @@ export interface InferenceStatusResponse {
   vad?: InferenceVAD;
   runtimeBaselineBytes?: number;
   snapshotAtUnix: number;
+  /**
+   * Classifier REGISTRY IDs (e.g. "BirdNET_V2.4", never config aliases) that a
+   * source with an empty model list analyzes with, in DefaultTargets order
+   * (BirdNET v2.4 first when present). Always an array: empty at N=0 and on
+   * load failure.
+   */
+  defaultTargets: string[];
+  /**
+   * Classifier verdict on the acoustic model set ("ok" | "none_installed" |
+   * "load_failed"); "" is the API-only "no verdict yet" sentinel.
+   */
+  acousticModelsState: AcousticModelsStateWire;
+  /** Planned analysis cadence; absent until the audio pipeline publishes a plan, and on older servers. */
+  analysisCadence?: AnalysisCadenceInfo;
 }

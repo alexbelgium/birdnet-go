@@ -25,7 +25,6 @@ var (
 	ErrSessionNotFound    = errors.NewStd("session not found or expired")
 	ErrLogoutFailed       = errors.NewStd("logout operation failed")
 	ErrBasicAuthDisabled  = errors.NewStd("basic authentication is disabled")
-	ErrAuthCodeGeneration = errors.NewStd("failed to generate authorization code")
 )
 
 //go:generate go run golang.org/x/tools/cmd/stringer -type=AuthMethod
@@ -66,8 +65,9 @@ type Service interface {
 	ValidateToken(token string) error
 
 	// AuthenticateBasic handles basic authentication with username/password.
+	// remember is the "Remember this browser" choice made at sign-in.
 	// Returns the auth code on success, or error on failure.
-	AuthenticateBasic(c echo.Context, username, password string) (string, error)
+	AuthenticateBasic(c echo.Context, username, password string, remember bool) (string, error)
 
 	// Logout invalidates the current session/token.
 	// Returns nil on success, or ErrLogoutFailed on failure.
@@ -77,8 +77,8 @@ type Service interface {
 	// Returns the access token on success, or error on failure.
 	ExchangeAuthCode(ctx context.Context, code string) (string, error)
 
-	// EstablishSession creates a new session with the given access token.
-	// Handles session fixation mitigation by clearing old session first.
+	// EstablishSession starts the browser session for the given access token.
+	// It revokes the browser's previous session first (session fixation mitigation).
 	EstablishSession(c echo.Context, accessToken string) error
 
 	// IsAuthenticated checks if a request is authenticated via any supported method.
@@ -87,5 +87,5 @@ type Service interface {
 
 	// GetProviderLogoutURL returns the provider's end-session URL for RP-Initiated Logout.
 	// Returns empty string if the provider doesn't support it or no OIDC session exists.
-	GetProviderLogoutURL(c echo.Context, postLogoutRedirectURI string) string
+	GetProviderLogoutURL(c echo.Context) string
 }

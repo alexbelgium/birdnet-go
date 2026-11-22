@@ -91,11 +91,13 @@ All frames are dispatched through the `AudioRouter`, which fans out each frame t
 
 ### Sample Rates by Model
 
-| Model | Inference Rate | Source Capture Rate | Resampling |
-|-------|---------------|-------------------|------------|
-| BirdNET v2.4 | 48 kHz | 48 kHz | None (or resample from source) |
-| Perch v2 | 32 kHz | 48 kHz | Downsampled by router |
-| BattyBirdNET | 48 kHz (pretend) | 96-256 kHz | None (the slow-down trick) |
+| Model         | Inference Rate   | Source Capture Rate | Resampling                     |
+| ------------- | ---------------- | ------------------- | ------------------------------ |
+| BirdNET v2.4  | 48 kHz           | 48 kHz              | None (or resample from source) |
+| BirdNET+ v3.0 | 32 kHz           | 48 kHz              | Downsampled by router          |
+| Perch v2      | 32 kHz           | 48 kHz              | Downsampled by router          |
+| BattyBirdNET  | 48 kHz (pretend) | 96-384 kHz          | None (the slow-down trick)     |
+| BSG-BAT       | 384 kHz          | 192-384 kHz         | Upsampled if below 384 kHz     |
 
 ## Stage 2: Buffering
 
@@ -152,6 +154,7 @@ flowchart LR
 **Perch v2**: Runs ONNX, produces 14795 multi-taxa species probabilities (birds, insects, amphibians, mammals). Larger model, needs more CPU and RAM.
 
 **BattyBirdNET** (two-stage):
+
 1. The BirdNET v2.4 ONNX model (patched to expose embeddings) extracts a 1024-dimensional embedding vector from the `GLOBAL_AVG_POOL` layer
 2. A lightweight regional bat classifier (e.g., Europe, Americas) takes the embedding as input and outputs bat species probabilities
 3. Results are filtered by the bat confidence threshold
@@ -162,7 +165,13 @@ The `Orchestrator` divides the configured thread count across all loaded models 
 
 ### Nighttime Scheduling
 
-Bat models support a nighttime-only mode. When `settings.Bat.NighttimeOnly=true`, the `analysisBufferMonitor` checks `orchestrator.IsModelActive("Bat")` before calling `ProcessData()`. The nighttime scheduler uses solar position calculations to determine sunrise/sunset.
+Bat models support a nighttime-only mode. When `settings.Bat.NighttimeOnly=true`, the `analysisBufferMonitor` checks `orchestrator.IsModelActive` for each bat model (Bat and BSG-BAT) before calling `ProcessData()`. The nighttime scheduler uses solar position calculations to determine sunrise/sunset.
+
+### BSG-BAT Analysis Step
+
+BSG-BAT scores a 512-frame window (1.0247 s at 384 kHz) and advances it by a configurable step, `bsgbat.stepframes`, counted in mel frames of 768 samples (2 ms each). The accepted range is 100 to 512 frames (0.2 s to 1.024 s) and 0 means the default of 250 frames (0.5 s). The minimum is twice the 100 ms buffer poll, because the monitor reads at most one window per poll. A larger step cuts the number of inferences per second, at the cost of fewer windows per detection. Changing the step restarts audio capture, but does not reload the model.
+
+The bat false positive filter count follows the step as `ceil(6 / step seconds * level fraction)`. At level 2 it is 4 windows at 250 frames and 2 at 512 frames; at level 5 it is 9 at 250 frames and 5 at 512 frames. At 512 frames a 6 s span holds only 5 or 6 windows, so level 5 needs all of them in the worst case. Unlike the other models, the BSG-BAT analysis ring holds two windows, so a step close to the window length does not overwrite audio that has not been read yet.
 
 ## Stage 4: Detection Processing
 
@@ -196,14 +205,15 @@ A single goroutine reads from `ResultsQueue` and processes each batch of results
 2. **Species exclusion**: Skips species on the user's ignore list
 3. **Confidence threshold**: Per-species custom thresholds, or global minimum. Dynamic threshold learning adjusts over time per model.
 4. **Range filter**: Location-based species filtering (see below)
-5. **Ultrasonic validation** (bat only): Computes temporal variability of ultrasonic energy via STFT. Low variability flags detections as "unlikely" (ambient noise, not echolocation)
+5. **Ultrasonic validation** (bat only): Computes temporal variability of ultrasonic energy via STFT. Low variability flags detections as "unlikely" (ambient noise, not echolocation). Variability that comes from broadband events is discounted first: short frames where the energy from 0.6 to 0.8 of the split (12 to 16 kHz by default) jumps together with the ultrasonic band (clicks, rustling), and short frames where every band of a twentieth of the split from 0.7 to 1.2 of the split (1 kHz bands from 14 to 24 kHz by default) is raised together with it (rain; this second check is skipped at FFT sizes where such a band is narrower than one bin of the short frame, 1024 and below at 256 kHz). With `bat.ultrasonicfilter.discardunlikely` on, a detection still tagged unlikely at flush is discarded instead of saved
 
 ### Cross-Model Detection Consensus
 
-Detections from different models for the **same species on the same source** are merged into a single `PendingDetection`. The key is `sourceID:commonName` (no model ID in the key).
+Detections from different models for the **same species on the same source** are merged into a single `PendingDetection`. The key is `sourceID:scientificName`, with the scientific name lower-cased (no model ID in the key).
 
 Each pending detection tracks:
-- `ModelContributions`: a map from model ID to `{HitCount, MaxConfidence, LastHitAt}`
+
+- `ModelContributions`: a map from model ID to `{HitCount, MaxConfidence, MinConfidence, ConfidenceSum, FirstHitAt, LastHitAt}`
 - `BestModelID`: which model produced the single highest confidence score
 - `FlushDeadline`: when to evaluate the detection for approval
 
@@ -235,11 +245,18 @@ sequenceDiagram
 
 Each `PendingDetection` stores a `ModelContributions` map tracking per-model statistics:
 
-| Field | Purpose |
-|-------|---------|
-| `HitCount` | Number of analysis windows where this model detected the species |
-| `MaxConfidence` | Highest single-detection confidence from this model |
-| `LastHitAt` | Timestamp of the most recent hit from this model |
+| Field           | Purpose                                                          |
+| --------------- | ---------------------------------------------------------------- |
+| `HitCount`      | Number of analysis windows where this model detected the species |
+| `MaxConfidence` | Highest single-detection confidence from this model              |
+| `MinConfidence` | Lowest single-detection confidence from this model               |
+| `ConfidenceSum` | Sum of the confidences of this model's hits (mean = sum / hits)  |
+| `FirstHitAt`    | Audio capture time of the end of this model's first hit window   |
+| `LastHitAt`     | Audio capture time of the end of this model's latest hit window  |
+
+When the audio source supplies no capture time, the hit times use the time of processing instead.
+
+When a detection is approved, these per-model statistics are saved with it in the `DetectionModelContribution` table. `MinConfidence`, `ConfidenceSum`, `FirstHitAt` and `LastHitAt` are stored together or not at all: a contribution that lacks them (for example when two entries of one model are merged and only one of them has them) is stored with NULL in all four. Models that were active on the detection's source when it was approved but recorded no hit are saved too, with a hit count of 0 and no statistics; like all contributions they are written best-effort and can be missing.
 
 At flush time, the total hit count is the **sum across all models**. This means:
 
@@ -247,18 +264,22 @@ At flush time, the total hit count is the **sum across all models**. This means:
 - **Two models**: BirdNET (2 hits) + Perch (1 hit) = 3 total, threshold met
 - **Cross-model agreement**: When both models independently identify the same species, the combined evidence is stronger, reducing false positives from single-model artifacts
 
-The `BestModelID` field tracks which model produced the highest individual confidence score. This model is credited as the primary detector in the database record, while per-model contributions are stored separately in the `DetectionModelContribution` table.
+The `BestModelID` field tracks which model produced the highest individual confidence score. This model is credited as the top-scoring model in the database record, while per-model contributions are stored separately in the `DetectionModelContribution` table.
+
+### Model Consensus Filter
+
+The optional model consensus filter (`realtime.modelconsensus`, off by default) is the last discard check when a pending detection is flushed. It discards the detection unless at least `minmodels` distinct models of its taxon group contributed hits to it. Only eligible models count towards the requirement: a model must be able to classify the species, pass the range filter for it, and have scored all the audio the agreeing models heard without a gap. A model that is still behind in processing is not counted as eligible until it catches up. The requirement is capped at the number of eligible models, so a species that only one model can detect always passes, and so does a detection whose source gives no capture timestamps. Bird and bat models are never counted towards each other. See the [guide](guide.md) for the settings.
 
 ### Range Filter (BirdNET Geomodel v3.0)
 
 The range filter limits detections to species that are geographically plausible at the configured location and time of year.
 
-| Model | Range Filtered? | Reason |
-|-------|----------------|--------|
-| BirdNET v2.4 | Always | BirdNET species are in the geomodel |
-| Perch v2 | Only with BirdNET Geomodel v3.0 | v3 covers Perch's expanded label set |
-| BattyBirdNET | Never | Bat species have independent range data |
-| BSG | Never | Independent species set |
+| Model        | Range Filtered?                 | Reason                                  |
+| ------------ | ------------------------------- | --------------------------------------- |
+| BirdNET v2.4 | Always                          | BirdNET species are in the geomodel     |
+| Perch v2     | Only with BirdNET Geomodel v3.0 | v3 covers Perch's expanded label set    |
+| BattyBirdNET | Never                           | Bat species have independent range data |
+| BSG          | Never                           | Independent species set                 |
 
 At startup, `BuildRangeFilter()` runs `PredictSpeciesScores(lat, lon, week, threshold)` on the geomodel to build a list of included species. Per-detection, `shouldFilterDetection()` checks `settings.IsSpeciesIncluded(species)` for applicable models.
 
@@ -275,7 +296,7 @@ flowchart LR
 
     COMP --> DBA[DatabaseAction\nSave to SQLite/MySQL]
     COMP --> SSEA[SSE Broadcast\nLive web feed]
-    COMP --> MQTTA[MQTT Publish\nHome Assistant discovery]
+    COMP -->|enqueues after save| MQTTA[MQTT Publish job\nretried by the queue]
 
     DBA -->|DetectionEvent| EB[Event Bus]
     EB --> ALRT[Alert Engine\nPush notifications\nWebhooks]
@@ -285,24 +306,24 @@ flowchart LR
     GA --> CMDA[Custom Command]
 ```
 
-**CompositeAction** wraps Database, SSE, and MQTT as sequential steps. `SaveAudioAction` runs separately to avoid slow FFmpeg encoding blocking the real-time broadcast.
+**CompositeAction** runs the database save, a step that enqueues the MQTT publish as its own job, and the SSE broadcast, in that order. MQTT is a separate job so that `realtime.mqtt.retrysettings` applies to it, and it still starts after the save so the payload carries the database id; the composite is retried only while the database save has stored nothing. If the database is unreachable (connection refused, host unreachable, a connection that dropped before the commit was sent), the save is retried for about five minutes before the detection is dropped, and MQTT and SSE then run once after the save that lands. Database lock and deadlock errors that happen before the commit are retried the same way. The composite also stays pending while an earlier attempt is still saving or still running the steps after the save, and the next attempt then continues from the stored row instead of saving again. A save that finishes only after the last attempt has ended keeps its row, but MQTT and SSE do not run for it; the log says so. A failure whose commit outcome is unknown, such as a connection lost while the commit was in flight, is logged and not retried, because the row may already be stored. Without a database, SSE and MQTT are queued as independent actions. `SaveAudioAction` is queued as a separate job that runs alongside it, so slow clip encoding never blocks the real-time broadcast. A client can therefore request a clip before its file exists; the media API waits briefly for it and answers 503 with `Retry-After` while the export is still pending.
 
 ### Audio Export
 
-- **Bird detections** at high sample rates (192kHz, 256kHz from shared bat sources) are downsampled to 48kHz before encoding
-- **Bat detections** export at native rate (256kHz). If the configured format (MP3, Opus, AAC) cannot handle rates above 48kHz, the format silently falls back to WAV
+- **Bird detections** at high sample rates (96-384 kHz from shared ultrasonic sources) are downsampled to 48 kHz before encoding using `realtime.audio.export.type` (`aac`, `opus`, `flac`, `wav`, or `mp3`; see [Audio Formats](audio-formats.md))
+- **Bat detections** captured above 48 kHz always export losslessly at their native capture rate using `realtime.audio.export.ultrasonictype` (`flac` by default, or `wav`). Lossy formats (AAC, Opus, MP3) cannot store ultrasonic content and are never used for bat captures above 48 kHz
 - Audio is read from the `CaptureBuffer` ring buffer, which stores raw PCM at the original source rate
 
 ### JobQueue
 
-The `JobQueue` is a bounded queue with retry/backoff support. BirdWeather and MQTT actions have configurable retry policies. `SaveAudioAction` for Extended Capture uses exponential backoff (1s to 30s, up to ~20 minutes for long captures).
+The `JobQueue` is a bounded queue with retry/backoff support. BirdWeather and MQTT actions have configurable retry policies, and the database save composite retries for about five minutes while the database is unreachable. `SaveAudioAction` for Extended Capture uses exponential backoff (1s to 30s, up to ~20 minutes for long captures).
 
 ## Complete Data Flow Summary
 
 ```mermaid
 flowchart TB
     subgraph Sources["Audio Sources"]
-        SC["Sound Card\n48-256 kHz"]
+        SC["Sound Card\n48-384 kHz"]
         RTSP["RTSP Stream\n48 kHz"]
     end
 

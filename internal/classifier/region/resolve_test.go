@@ -8,13 +8,14 @@ import (
 )
 
 const (
-	perchRepo   = "tphakala/Perch-v2-Models"
-	birdnetRepo = "tphakala/BirdNET-v3.0-Models"
+	perchRepo       = "tphakala/Perch-v2-Models"
+	birdnetRepo     = "tphakala/BirdNET-v3.0-Models"
+	birdnetPlusRepo = "tphakala/BirdNET-Plus-V3.0"
 )
 
 // perchTable loads the embedded Perch v2 region table, the shared geometry the
-// resolver tests exercise (all families carry identical geometry; see
-// TestCrossFamilyGeometryIdentity).
+// resolver tests exercise (a slug shared by families has identical geometry; see
+// TestCrossFamilyGeometryIdentity_SharedSlugs).
 func perchTable(t *testing.T) *Table {
 	t.Helper()
 	tbl, ok := TableForRepo(perchRepo)
@@ -67,6 +68,20 @@ func TestResolve(t *testing.T) {
 			// the border band, so the resolution is ambiguous.
 			name: "border overlap is ambiguous", lat: 2.0, lon: -71.0,
 			wantTop: "andes", wantTier: TierRegional, ambiguous: true, runnerUp: "amazonia",
+		},
+		{
+			// The three tropical Africa tiles: a capital inside each one
+			// resolves to it.
+			name: "accra resolves to west-africa", lat: 5.6, lon: -0.19,
+			wantTop: "west-africa", wantTier: TierRegional,
+		},
+		{
+			name: "kinshasa resolves to central-africa", lat: -4.32, lon: 15.31,
+			wantTop: "central-africa", wantTier: TierRegional,
+		},
+		{
+			name: "nairobi resolves to east-africa", lat: -1.29, lon: 36.82,
+			wantTop: "east-africa", wantTier: TierRegional,
 		},
 		{
 			name: "null island resolves to nothing", lat: 0, lon: 0,

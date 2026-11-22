@@ -7,7 +7,7 @@ The API v2 provides comprehensive access to BirdNET-Go's bird detection and moni
 ## Endpoint Registration Pattern
 
 > Architecture and the "add a new endpoint / add a new domain" recipes live in
-> `internal/api/v2/CLAUDE.md`. The summary below is the registration mechanics.
+> `internal/api/v2/AGENTS.md`. The summary below is the registration mechanics.
 
 ### Per-domain registration
 
@@ -29,9 +29,11 @@ func (c *Handler) RegisterRoutes(g *echo.Group) {
     // Rate-limited endpoints (typically for streams)
     rateLimiterConfig := middleware.RateLimiterConfig{
         Skipper: middleware.DefaultSkipper,
-        Store: middleware.NewRateLimiterMemoryStoreWithConfig(
+        Store: apicore.NewRateLimiterStore(
             middleware.RateLimiterMemoryStoreConfig{Rate: rate.Limit(1), Burst: 5},
         ),
+        // One bucket per client (per /64 for IPv6)
+        IdentifierExtractor: c.RateLimitKey,
     }
     g.GET("/stream", c.StreamHandler, middleware.RateLimiterWithConfig(rateLimiterConfig))
 }
@@ -88,34 +90,36 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | POST   | `/auth/logout`   | `Logout`        | ✅   | End user session            |
 | GET    | `/auth/status`   | `GetAuthStatus` | ✅   | Check authentication status |
 
+`POST /auth/login` accepts an optional boolean `rememberBrowser`: true gives a persistent `birdnet_session` cookie that is re-sent whenever the session is renewed and a server-side expiry of 30 days that slides with use, false or omitted a browser-session cookie with an 8 hour idle limit. For social sign-in the same choice is the `remember=1` query parameter of `GET /auth/:provider`.
+
 ### Analytics (`analytics/analytics.go`)
 
-| Method | Route                                 | Handler                    | Auth | Description                        |
-| ------ | ------------------------------------- | -------------------------- | ---- | ---------------------------------- |
-| GET    | `/analytics/species/daily`            | `GetDailySpeciesSummary`   | ❌   | Daily species detection summary    |
-| GET    | `/analytics/species/summary`          | `GetSpeciesSummary`        | ❌   | Overall species statistics         |
-| GET    | `/analytics/species/detections/new`   | `GetNewSpeciesDetections`  | ❌   | Recently detected new species      |
-| GET    | `/analytics/species/thumbnails`       | `GetSpeciesThumbnails`     | ❌   | Species thumbnail images           |
-| GET    | `/analytics/species/accumulation`     | `GetSpeciesAccumulation`   | ❌   | Species accumulation curve (biodiversity collector's curve): per calendar day, the cumulative count of distinct species first detected within the range (false positives excluded; "first seen" is bounded to the window, not lifetime). All-species (no species filter). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days) |
-| GET    | `/analytics/species/phenology`        | `GetSpeciesPhenology`      | ❌   | Arrival/departure phenology (residency-bar Gantt): per species, the first and last detection date (station-local, false positives excluded) plus the in-range detection count, for the top-N species by volume. All-species top-N (no species filter). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `limit` optional (default 12, max 20) |
-| GET    | `/analytics/time/hourly`              | `GetHourlyAnalytics`       | ❌   | Hourly detection patterns          |
-| GET    | `/analytics/time/hourly/batch`        | `GetBatchHourlySpeciesData` | ❌  | Hour-of-day detection counts (24 buckets) for several species in one request, summed over the requested range. `species` required (repeatable; scientific or common name, capped at the batch limit); either `start_date`+`end_date` (both inclusive) for a range, or the legacy single `date` (equivalent to a one-day range); `min_confidence` optional |
-| GET    | `/analytics/time/daily`               | `GetDailyAnalytics`        | ❌   | Daily detection patterns           |
-| GET    | `/analytics/time/distribution/hourly` | `GetTimeOfDayDistribution` | ❌   | Time-of-day detection distribution |
-| GET    | `/analytics/time/distribution/species` | `GetSpeciesHourlyDistribution` | ❌ | Who-sings-when ridgeline: per-species hour-of-day distribution. `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `species` optional (repeatable scientific-name filter; when omitted, the top N species by volume; when set, just those species, still volume-ordered and capped at `limit`); `limit` optional (default 5, max 8) |
-| GET    | `/analytics/time/heatmap`             | `GetActivityHeatmap`       | ❌   | Seasonal density heatmap (date x intra-day slot; `?format=csv`) |
-| GET    | `/analytics/time/dawn-onset`          | `GetDawnChorusOnset`       | ❌   | Dawn-chorus onset tracker: per-day onset relative to civil dawn (minutes; negative = before civil dawn). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `species` optional |
-| GET    | `/analytics/time/succession`          | `GetAcousticSuccession`    | ❌   | Acoustic succession streamgraph: per species, the raw hour-of-day detection counts (24 buckets, false positives excluded), stacked into a streamgraph showing the diel acoustic handover. `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `species` optional (repeatable scientific-name filter; when omitted, the top-N species by volume; when set, just those species, still volume-ordered and capped at `limit`); `limit` optional (default 6, max 10) |
-| GET    | `/analytics/time/year-over-year`      | `GetYearOverYear`          | ❌   | Year-over-year tracker: current year-to-date cumulative detection counts versus the same calendar span one year earlier (false positives excluded), one point per current-year day with a per-day delta, aligned by calendar (month, day) with leap-day Feb 29 handled. All-species (no species filter). `date` optional (station-local YYYY-MM-DD; defaults to today) sets the inclusive end of both windows. Returns `{currentYear, previousYear, points[]}` |
-| GET    | `/analytics/sun`                      | `GetAnalyticsSun`          | ❌   | Sun times for the nocturnal activity clock's day/night shading: sunrise/sunset/civil-dawn/civil-dusk as minute-of-day in server-local time. `date` for a single day, or `start_date`/`end_date` for a range (collapsed to its midpoint); defaults to today. Returns `available:false` (not an error) on polar day/night or when SunCalc is unconfigured |
-| GET    | `/analytics/confidence/distribution`  | `GetConfidenceDistribution` | ❌  | Confidence distribution per species: per-species normalized histogram of detection confidence scores (Review & Accuracy tab). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `species` optional (single species filter; default is the top-N species by volume); `bins` optional (default 20, clamped to 5-50); `limit` optional (default 5, max 8) |
-| GET    | `/analytics/sources`                  | `GetAnalyticsSources`      | ❌   | Audio sources that have detections in range, powering the analytics hub's source/mic filter: each source's opaque id (string), display label, and in-range detection count (false positives excluded), most active first. `start_date`/`end_date` optional (omit both for all history). v2only (the legacy schema does not persist a detection's source; legacy returns an empty list). Source names are anonymized for unauthenticated clients; the opaque id is safe to expose. Returns `{sources[]}` (never null) |
+| Method | Route                                  | Handler                        | Auth | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------ | -------------------------------------- | ------------------------------ | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/analytics/species/daily`             | `GetDailySpeciesSummary`       | ❌   | Daily species detection summary (`first_heard` earliest, `latest_heard` latest call of the day)                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| GET    | `/analytics/species/summary`           | `GetSpeciesSummary`            | ❌   | Overall species statistics                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| GET    | `/analytics/species/detections/new`    | `GetNewSpeciesDetections`      | ❌   | Recently detected new species, with the non-false-positive detection count in `count_in_period`                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| GET    | `/analytics/species/thumbnails`        | `GetSpeciesThumbnails`         | ❌   | Species thumbnail images                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| GET    | `/analytics/species/accumulation`      | `GetSpeciesAccumulation`       | ❌   | Species accumulation curve (biodiversity collector's curve): per calendar day, the cumulative count of distinct species first detected within the range (false positives excluded; "first seen" is bounded to the window, not lifetime). All-species (no species filter). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days)                                                                                                                                                             |
+| GET    | `/analytics/species/phenology`         | `GetSpeciesPhenology`          | ❌   | Arrival/departure phenology (residency-bar Gantt): per species, the first and last detection date (station-local, false positives excluded) plus the in-range detection count, for the top-N species by volume. All-species top-N (no species filter). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `limit` optional (default 12, max 20). Rows carry `commonName`                                                                                                                |
+| GET    | `/analytics/time/hourly`               | `GetHourlyAnalytics`           | ❌   | Hourly detection patterns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| GET    | `/analytics/time/hourly/batch`         | `GetBatchHourlySpeciesData`    | ❌   | Hour-of-day detection counts (24 buckets) for several species in one request, summed over the requested range. `species` required (repeatable; scientific or common name, capped at the batch limit); either `start_date`+`end_date` (both inclusive) for a range, or the legacy single `date` (equivalent to a one-day range); `min_confidence` optional                                                                                                                                                             |
+| GET    | `/analytics/time/daily`                | `GetDailyAnalytics`            | ❌   | Daily detection patterns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| GET    | `/analytics/time/distribution/hourly`  | `GetTimeOfDayDistribution`     | ❌   | Time-of-day detection distribution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| GET    | `/analytics/time/distribution/species` | `GetSpeciesHourlyDistribution` | ❌   | Who-sings-when ridgeline: per-species hour-of-day distribution. `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `species` optional (repeatable scientific-name filter; when omitted, the top N species by volume; when set, just those species, still volume-ordered and capped at `limit`); `limit` optional (default 5, max 10). Rows carry `commonName`                                                                                                                           |
+| GET    | `/analytics/time/heatmap`              | `GetActivityHeatmap`           | ❌   | Seasonal density heatmap (date x intra-day slot; `?format=csv`)                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| GET    | `/analytics/time/dawn-onset`           | `GetDawnChorusOnset`           | ❌   | Dawn-chorus onset tracker: per-day onset relative to civil dawn (minutes; negative = before civil dawn). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `species` optional                                                                                                                                                                                                                                                                                                          |
+| GET    | `/analytics/time/succession`           | `GetAcousticSuccession`        | ❌   | Acoustic succession streamgraph: per species, the raw hour-of-day detection counts (24 buckets, false positives excluded), stacked into a streamgraph showing the diel acoustic handover. `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `species` optional (repeatable scientific-name filter; when omitted, the top-N species by volume; when set, just those species, still volume-ordered and capped at `limit`); `limit` optional (default 6, max 10). Rows carry `commonName` |
+| GET    | `/analytics/time/year-over-year`       | `GetYearOverYear`              | ❌   | Year-over-year tracker: current year-to-date cumulative detection counts versus the same calendar span one year earlier (false positives excluded), one point per current-year day with a per-day delta, aligned by calendar (month, day) with leap-day Feb 29 handled. All-species (no species filter). `date` optional (station-local YYYY-MM-DD; defaults to today) sets the inclusive end of both windows. Returns `{currentYear, previousYear, points[]}`                                                        |
+| GET    | `/analytics/sun`                       | `GetAnalyticsSun`              | ❌   | Sun times for the nocturnal activity clock's day/night shading: sunrise/sunset/civil-dawn/civil-dusk as minute-of-day in server-local time. `date` for a single day, or `start_date`/`end_date` for a range (collapsed to its midpoint); defaults to today. Returns `available:false` (not an error) on polar day/night or when SunCalc is unconfigured                                                                                                                                                               |
+| GET    | `/analytics/confidence/distribution`   | `GetConfidenceDistribution`    | ❌   | Confidence distribution per species: per-species normalized histogram of detection confidence scores (Review & Accuracy tab). `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); `species` optional (single species filter; default is the top-N species by volume); `bins` optional (default 20, clamped to 5-50); `limit` optional (default 5, max 10). Rows carry `commonName`                                                                                                       |
+| GET    | `/analytics/sources`                   | `GetAnalyticsSources`          | ❌   | Audio sources that have detections in range, powering the analytics hub's source/mic filter: each source's opaque id (string), display label, and in-range detection count (false positives excluded), most active first. `start_date`/`end_date` optional (omit both for all history). v2only (the legacy schema does not persist a detection's source; legacy returns an empty list). Source names are anonymized for unauthenticated clients; the opaque id is safe to expose. Returns `{sources[]}` (never null)  |
 
 ### Control Operations (`control/control.go`)
 
 | Method | Route                         | Handler               | Auth | Description                            |
 | ------ | ----------------------------- | --------------------- | ---- | -------------------------------------- |
-| POST   | `/control/restart`            | `RestartAnalysis`     | ✅   | Restart analysis engine                |
+| POST   | `/control/restart`            | `RestartAnalysis`     | ✅   | Restart audio capture and analysis     |
 | POST   | `/control/reload`             | `ReloadModel`         | ✅   | Reload BirdNET model                   |
 | POST   | `/control/rebuild-filter`     | `RebuildFilter`       | ✅   | Rebuild range filter                   |
 | POST   | `/control/restart-server`     | `RestartServer`       | ✅   | Restart the server binary              |
@@ -133,21 +137,24 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 
 ### Detections (`detections/detections.go`)
 
-| Method | Route                         | Handler                 | Auth | Description                                |
-| ------ | ----------------------------- | ----------------------- | ---- | ------------------------------------------ |
-| GET    | `/detections`                 | `GetDetections`         | ❌   | List bird detections                       |
-| GET    | `/detections/:id`             | `GetDetection`          | ❌   | Get specific detection                     |
-| GET    | `/detections/recent`          | `GetRecentDetections`   | ❌   | Recent detections                          |
-| GET    | `/detections/:id/time-of-day` | `GetDetectionTimeOfDay` | ❌   | Detection time context                     |
-| DELETE | `/detections/:id`             | `DeleteDetection`       | ✅   | Delete detection record                    |
-| POST   | `/detections/:id/review`      | `ReviewDetection`       | ✅   | Review/verify detection                    |
-| POST   | `/detections/:id/lock`        | `LockDetection`         | ✅   | Lock detection from changes                |
-| POST   | `/detections/ignore`          | `IgnoreSpecies`         | ✅   | Toggle species in ignore list (add/remove) |
-| GET    | `/detections/ignored`         | `GetExcludedSpecies`    | ✅   | Get list of excluded species               |
-| POST   | `/detections/batch/delete`    | `BatchDeleteDetections` | ✅   | Bulk delete detections by ID               |
-| POST   | `/detections/batch/review`    | `BatchReviewDetections` | ✅   | Bulk set verification status               |
-| POST   | `/detections/batch/lock`      | `BatchLockDetections`   | ✅   | Bulk lock or unlock detections             |
-| POST   | `/detections/batch/resolve`   | `BatchResolveDetections`| ✅   | Resolve query params to detection IDs      |
+| Method | Route                         | Handler                   | Auth | Description                                                                                                                |
+| ------ | ----------------------------- | ------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/detections`                 | `GetDetections`           | ❌   | List bird detections; `source` (id from `/analytics/sources`, display name, node name or URI) restricts to an audio source |
+| GET    | `/detections/:id`             | `GetDetection`            | ❌   | Get specific detection                                                                                                     |
+| GET    | `/detections/recent`          | `GetRecentDetections`     | ❌   | Recent detections; `limit` defaults to 10 and is capped at 1000                                                            |
+| GET    | `/detections/:id/time-of-day` | `GetDetectionTimeOfDay`   | ❌   | Detection time context                                                                                                     |
+| GET    | `/detections/:id/predictions` | `GetDetectionPredictions` | ❌   | Alternate species the detecting model scored (enhanced database only)                                                      |
+| GET    | `/detections/:id/neighbors`   | `GetDetectionNeighbors`   | ❌   | Previous and next detection ids, overall and of the same species (enhanced database only)                                  |
+| DELETE | `/detections/:id`             | `DeleteDetection`         | ✅   | Delete detection record                                                                                                    |
+| POST   | `/detections/:id/review`      | `ReviewDetection`         | ✅   | Review/verify detection                                                                                                    |
+| PUT    | `/detections/:id/species`     | `ChangeDetectionSpecies`  | ✅   | Set the species as a reviewer's correction (enhanced database only)                                                        |
+| POST   | `/detections/:id/lock`        | `LockDetection`           | ✅   | Lock detection from changes                                                                                                |
+| POST   | `/detections/ignore`          | `IgnoreSpecies`           | ✅   | Toggle species in ignore list (add/remove)                                                                                 |
+| GET    | `/detections/ignored`         | `GetExcludedSpecies`      | ✅   | Get list of excluded species                                                                                               |
+| POST   | `/detections/batch/delete`    | `BatchDeleteDetections`   | ✅   | Bulk delete detections by ID                                                                                               |
+| POST   | `/detections/batch/review`    | `BatchReviewDetections`   | ✅   | Bulk set verification status                                                                                               |
+| POST   | `/detections/batch/lock`      | `BatchLockDetections`     | ✅   | Bulk lock or unlock detections                                                                                             |
+| POST   | `/detections/batch/resolve`   | `BatchResolveDetections`  | ✅   | Resolve query params to detection IDs                                                                                      |
 
 ### Integrations (`integrations/integrations.go`)
 
@@ -164,22 +171,110 @@ Lightweight connectivity check. Returns a minimal response with no database quer
 | POST   | `/integrations/weather/test`                 | `TestWeatherConnection`         | ✅   | Test weather provider connection               |
 | POST   | `/integrations/ebird/test`                   | `TestEBirdConnection`           | ✅   | Test eBird API connectivity and authentication |
 
+The MQTT and BirdWeather test endpoints stream one JSON object per line: the stage results in the order they occur, then a final `{"state":"completed","elapsed_time_ms":N}` line when the test finishes before its timeout and the client is still connected. No completed line is written after a timeout or a client disconnect.
+
 ### Media (`media/media.go`)
 
-| Method | Route                                | Handler                  | Auth | Description                        |
-| ------ | ------------------------------------ | ------------------------ | ---- | ---------------------------------- |
-| GET    | `/media/audio/:filename`             | `ServeAudioClip`         | ❌   | Serve audio file                   |
-| GET    | `/media/spectrogram/:filename`       | `ServeSpectrogram`       | ❌   | Serve spectrogram image            |
-| GET    | `/media/audio`                       | `ServeAudioByQueryID`    | ❌   | Serve audio by detection ID        |
-| GET    | `/media/species-image`               | `GetSpeciesImage`        | ❌   | Get species thumbnail image        |
-| GET    | `/media/species-image/info`          | `GetSpeciesImageInfo`    | ❌   | Get species image attribution      |
-| GET    | `/media/image/:scientific_name`      | `ServeSpeciesImageProxy` | ❌   | Serve cached bird image (proxy)    |
-| GET    | `/media/bird-image/:scientific_name` | `ServeSpeciesImageProxy` | ❌   | Alias for image proxy endpoint     |
-| GET    | `/audio/:id`                         | `ServeAudioByID`         | ❌   | Serve detection audio clip by ID   |
-| GET    | `/spectrogram/:id`                   | `ServeSpectrogramByID`   | ❌   | Serve detection spectrogram by ID  |
-| POST   | `/spectrogram/:id/generate`          | `GenerateSpectrogramByID` | ❌   | Trigger spectrogram generation     |
-| GET    | `/spectrogram/:id/status`            | `GetSpectrogramStatus`   | ❌   | Get spectrogram generation status  |
-| POST   | `/audio/:id/clip`                    | `ExtractAudioClipByID`   | ✅   | Extract audio clip from time range |
+| Method | Route                                | Handler                    | Auth | Description                             |
+| ------ | ------------------------------------ | -------------------------- | ---- | --------------------------------------- |
+| GET    | `/media/audio/:filename`             | `ServeAudioClip`           | ❌   | Serve audio file                        |
+| GET    | `/media/spectrogram/:filename`       | `ServeSpectrogram`         | ❌   | Serve spectrogram image                 |
+| GET    | `/media/audio`                       | `ServeAudioByQueryID`      | ❌   | Serve audio by detection ID             |
+| GET    | `/media/species-image`               | `GetSpeciesImage`          | ❌   | Get species thumbnail image             |
+| GET    | `/media/species-image/info`          | `GetSpeciesImageInfo`      | ❌   | Get species image attribution           |
+| GET    | `/media/image/:scientific_name`      | `ServeSpeciesImageProxy`   | ❌   | Serve cached bird image (proxy)         |
+| GET    | `/media/bird-image/:scientific_name` | `ServeSpeciesImageProxy`   | ❌   | Alias for image proxy endpoint          |
+| GET    | `/audio/:id`                         | `ServeAudioByID`           | ❌   | Serve detection audio clip by ID        |
+| GET    | `/spectrogram/:id`                   | `ServeSpectrogramByID`     | ❌   | Serve detection spectrogram by ID       |
+| POST   | `/spectrogram/:id/generate`          | `GenerateSpectrogramByID`  | ❌   | Trigger spectrogram generation          |
+| GET    | `/spectrogram/:id/status`            | `GetSpectrogramStatus`     | ❌   | Get spectrogram generation status       |
+| POST   | `/audio/:id/clip`                    | `ExtractAudioClipByID`     | ✅   | Extract audio clip from time range      |
+| POST   | `/audio/:id/process`                 | `ProcessAudioByID`         | ✅   | Denoise, normalize or gain a clip (WAV) |
+| POST   | `/audio/:id/audible-bats`            | `AudibleBatsByID`          | ✅   | Time-expand bat clip into audible range |
+| POST   | `/spectrogram/:id/process`           | `ProcessedSpectrogramByID` | ✅   | Spectrogram of denoised/normalized clip |
+
+**On-demand clip processing.** `clip`, `process`, `audible-bats` and the processed
+spectrogram decode the stored clip and process it in Go without FFmpeg; the processed spectrogram is then rendered natively in Go by the spectrogram generator.
+`clip` accepts the formats `wav`, `flac`, `mp3`, `aac` (served as `.m4a`) and `opus`
+(served as `.ogg`); any other value answers **400**. Filters apply
+in the order denoise (`light`, `light-medium`, `medium`, `heavy`), loudness normalization, gain
+(`gain_db`, within +/-60). A source that cannot be processed answers **422**: a file
+that is not one of the clip formats (WAV, FLAC, MP3, AAC in M4A, Opus), a corrupt or truncated file, a file or range above the size limits
+(256 MiB on disk, 128 MiB of decoded audio), or a clip window that starts past the end
+of the audio. `audible-bats` takes the same optional `denoise` preset; it runs at the
+source sample rate before the time expansion, while normalization and gain run after it. An
+unknown preset answers **400**.
+
+**Denoised audio (`GET /audio/:id?denoise=<preset>`).** Without the parameter the stored
+clip is served verbatim, whatever the clip format. With `denoise` set to a preset
+(`light`, `light-medium`, `medium`, `heavy`) the response is a 16-bit WAV (`audio/wav`)
+of the whole clip denoised at that preset and at the source sample rate, with `Range`,
+`ETag` and `Last-Modified` support so players can seek. An unknown preset answers
+**400**; an empty value is the same as no parameter. The result is cached for 15 minutes
+and shares its cache entry and its job with `POST /audio/:id/process` for a denoise-only
+request, so a seek during processing does not start a second job. Processing shares the
+two-slot limit of the other processing endpoints: when both slots are busy and the
+variant is not cached, the request answers **503** with `Retry-After` and never the
+stored clip. A clip that is not on disk yet follows the pending clip handling below, or
+is denoised from its copy under another audio extension. Unauthenticated clients start a
+denoise only for the playback default (`GET /app/config` field `playbackDenoise`, the
+dashboard "denoise playback" setting, empty while it is off or export-stage denoise is on),
+read per request, and only when `denoise` equals it; otherwise they get the stored clip
+with `Cache-Control: no-store`, unless the denoised variant is already cached, which is
+served to them as to anyone.
+
+`GET /app/config` also carries the playback defaults the browser applies itself, as
+`playbackDefaults`: `gainDb` (the dashboard default gain in dB, -12 to 24) and
+`highPassHz` (the default high-pass cutoff in Hz, 0 when off). Both are read from the live
+settings per request, so guests and signed-in users start every clip the same way.
+
+**Denoised spectrogram (`GET /spectrogram/:id?denoise=<preset>`).** Without the parameter the
+stored spectrogram is served as before. With a preset the response is a PNG rendered from the
+same denoised WAV the audio GET above serves, so the spectrogram and the first play denoise the
+clip once. The render follows the frequency profile of the detection's model and the current
+Style and DynamicRange settings (a change renders fresh); it is cached for 15 minutes with the
+processed audio. An unknown preset answers **400**. The slot is held for the denoise only and
+the render runs outside it; when both slots are busy and no render is cached the request
+answers **503** with `Retry-After`. The same guest rule as for audio applies: a request that
+is not allowed to start a denoise, a clip that is not on disk, and the `user-requested`
+spectrogram mode before the stored spectrogram exists (a page load never starts a denoise
+there) get the stored-spectrogram answer with `Cache-Control: no-store`. A detection whose
+audio was removed ignores the parameter and serves the kept spectrogram.
+
+**Spectrogram status codes.** All five spectrogram endpoints (`/media/spectrogram/:filename`,
+`/spectrogram/:id`, `/spectrogram/:id/generate`, `/spectrogram/:id/status` and
+`/spectrogram/:id/process`) answer **400** for a legacy `width` query value that is an
+integer outside 100..2000 (`size` is never rejected; a `width` that is not an integer is
+ignored). The endpoints that render in the request (`/media/spectrogram/:filename`,
+`/spectrogram/:id` and `/spectrogram/:id/process`) answer **422** for a clip that cannot be
+rendered: an unsupported format or a sample rate below 8 kHz, a damaged file, a file above
+the size limits, or a clip too short for one spectrogram column. The first two also answer
+**503** with `Retry-After` while the clip is still being written, and also when the header probe
+cannot read the clip, since a half-written file looks the same; only damage found while decoding
+answers 422. A clip that changes (size, modification time or file) between the
+readiness check and the render also answers 503 and nothing is cached (one removed before the
+render starts answers 404), and a WAV or FLAC that holds fewer samples than
+its header declares answers 422 (a rerun after the file is completed renders it).
+
+**Spectrogram reasons.** The status answer (`GET /spectrogram/:id/status`, in `data`) and the
+`404` of `GET /spectrogram/:id` for a missing source clip (in `data`) carry a machine
+readable `reason` when it is known. The field is additive: status values are unchanged, and
+queued and generating answers carry no reason. A client that can read the body (a `fetch`,
+not an `<img>`) should act on it:
+
+| `reason`         | Where                                                                                                                  | What a client should do                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `not_generated`  | status `not_started`, source clip on disk                                                                              | request generation                       |
+| `source_pending` | status `not_started` or `failed`, and the image `404` after the wait; the clip may still appear                        | retry later, a bounded number of times   |
+| `source_missing` | status `not_started` or `failed`, and the fast image `404`; the clip is gone for good                                  | stop retrying, show that no audio exists |
+| `source_invalid` | status `failed`; the clip exists but cannot be rendered                                                                | stop retrying                            |
+| `busy`           | status `failed`; no generation slot in time, a deadline or a cancellation                                              | retry with backoff                       |
+| `render_failed`  | status `failed`; any other generation failure, and the image `404` when the rendered image is missing after generation | retry a bounded number of times          |
+
+A kept render of the clip can still be served by `GET /spectrogram/:id` when the audio is
+gone, so `source_missing` describes the audio, not every image request. The `Invalid audio
+path` `not_started` answer and the `404` of user-requested mode (which carries `data.mode`)
+carry no reason.
 
 **Pending species image (`503 + Retry-After`).** The image endpoints never contact an
 image provider on the request goroutine: a cold species can take minutes to resolve
@@ -198,38 +293,243 @@ broadcast are emitted before its audio clip is written, and with Extended Captur
 clip write is deferred until the capture tail is recorded (up to the capture-buffer
 size). While a clip is still legitimately pending, the by-ID audio and spectrogram
 endpoints (`GET /audio/:id`, `GET /spectrogram/:id`) return `503 Service Unavailable`
-with a `Retry-After` header sized to the remaining time, instead of `404`. Clients
-should honor `Retry-After` and retry; the clip appears once the capture completes. A
-`404` from these endpoints means the clip is genuinely absent (never produced, or purged
-by retention). These pending 503s are intentionally not logged as errors and are not
+with a `Retry-After` header, instead of `404`; for the Extended Capture window it is
+sized to the remaining time. Clients
+should honor `Retry-After` and retry; the clip appears once the capture completes. The
+same `503` answers `GET /audio/:id` for a detection that completed within the last 10
+minutes when its clip is still missing after a short grace wait, because the export may
+still be queued (its `Retry-After` is the short minimum). A `404` from `GET /audio/:id`
+means the clip is absent: never produced, or purged by retention, and for a detection
+older than 10 minutes. A request with no known completion time (a filename serve) also
+answers `404` after the grace wait. A `404` from `GET /spectrogram/:id` carries
+`data.reason`, described below: `source_pending` means the clip may still appear. These pending 503s are intentionally not logged as errors and are not
 reported to telemetry, since they are expected, self-resolving backpressure.
+
+A by-ID spectrogram request (`GET /spectrogram/:id`) for a clip that can no longer appear
+answers `404` at once, with `data.reason` set to `source_missing`, instead of first waiting
+up to 5 seconds for the file. A clip can no longer appear when its detection completed more
+than 10 minutes ago, it is past the pending window, no export temp file is present and no
+copy of it exists under another audio extension: the same condition under which
+`GET /audio/:id` answers `404` without waiting. While the clip may still be written, the
+request keeps the wait and answers `404` with `reason` `source_pending` afterwards. A
+missing source is logged at Debug (or Warn after the wait), not as an API error.
+
+**Spectrogram after retention (`GET /spectrogram/:id`).** When the retention policy
+deletes a detection's audio and the "keep spectrograms" setting is on, the detection
+keeps its spectrogram images. For such a detection (no audio clip, a kept image) the
+endpoint serves an existing render of the clip, preferring the exact size and `raw`
+variant requested and otherwise the nearest render of the same clip, and never
+generates one. It answers `404` when no image was kept. The same applies when the
+audio file is gone but the database has not caught up yet. `POST
+/spectrogram/:id/generate`, `GET /spectrogram/:id/status` and `GET /audio/:id` are
+unchanged and keep answering `404` for detections without audio. Detection and search
+responses carry `spectrogramOnly: true` for these detections (the field is omitted
+otherwise); `clipName` / `hasAudio` stay empty / false, so clients show the image but no
+player or download.
+
+**Detection timestamps.** Detection list, detail and recent responses carry `timestamp`, the stored
+instant of the detection as RFC3339 with the UTC offset in effect at that instant. `date` and `time` are the
+station-local wall clock text of the same instant, so on a v2 database the two detections in the repeated hour
+at the end of daylight saving time show the same `date` and `time` and differ in `timestamp`. The weather
+match and moon phase of a response use the same instant. A legacy database stores only offset-free date and
+time text, so there both detections get the first occurrence's offset.
+
+**Review and lock times.** On the enhanced (v2) database, `GET /detections/:id` carries `firstReviewedAt`,
+`lastReviewedAt` and `lockedAt`, each an RFC3339 time in the station zone, formatted like `timestamp`.
+`firstReviewedAt` is when the detection's review was first stored. `lastReviewedAt` is when the review was
+last saved: any save moves it, so the same status saved again and a species change both do, and it is never
+earlier than `firstReviewedAt` (they are equal for a review saved once). `lockedAt` is when the current lock
+was set; unlocking removes it and locking again starts a new time. Each is omitted without a review or lock
+and on the legacy database. List, recent and `POST /search` responses do not carry them. A review or lock
+imported from the legacy database can carry the time the migration copied or synced it rather than when it was made. On MySQL and MariaDB these times
+are stored as local wall clock without an offset, unlike `timestamp`, so one saved in the repeated hour at
+the end of daylight saving time can read back an hour early. A lock set by an earlier version was stamped in
+the database server's zone, so where the MySQL or MariaDB server zone differs from the BirdNET-Go zone its
+`lockedAt` is off by that difference; unlocking and locking again corrects it.
+
+**Spectrogram frequency range.** Bird spectrograms span 0 to 12 kHz. Bat
+spectrograms render at the clip's own sample rate and span 0 to half of it (a 384 kHz clip shows 0 to
+192 kHz, a 192 kHz clip 0 to 96 kHz). Bat renders carry the `-bat-v3` token in their file name, and a
+fresh render removes the older `-bat-v2` and `-bat` files next to it.
+
+- Detection and search responses carry `clipSampleRate` (Hz, an integer) for the detection's original
+  audio clip. The field is omitted when the rate is unknown. A spectrogram-only detection reports the
+  original clip's rate, which kept images made before the `-bat-v3` change do not match.
+- List, recent and single detection responses carry `clipDenoised: true` when the export stage denoised the saved clip.
+  The field is omitted for a clip written as captured, for a clip saved before the marker existed, and on
+  the legacy database.
+- `GET /detections/:id` fills a missing rate for an older bat detection by reading that clip's header
+  once (a few KB, never the whole clip), waiting at most 250 ms, and storing the value. If the clip is
+  unreadable, nothing is stored and the next request tries again. If the wait runs out, the field is left
+  out of that response and the read finishes in the background; once it has stored the rate, the next
+  request returns it. Lists and search never read a clip. A page from `GET /detections`, searches
+  included, can lag a stored value by its 5 minute cache; `POST /search` is not cached.
+- `sr=<Hz>` on `GET /spectrogram/:id` means the client draws its axis from that clip rate, so the
+  endpoint serves only the exact current render of the clip and answers `404` where it would otherwise
+  fall back to a nearest render. An invalid or absent `sr` is ignored.
+- `POST /spectrogram/:id/generate` and `GET /spectrogram/:id/status` answer `503` with `Retry-After` when
+  the detection's model type cannot be looked up (a database error), and so does `GET /spectrogram/:id`
+  with `sr`. Nothing is queued or written, and the request can be retried.
+
+**Model contributions.** On the enhanced (v2) database, `GET /detections`, `GET /detections/recent` and
+`GET /detections/:id` carry a read-only `modelContributions` array: one element per model that detected
+the species for this detection, largest hit count first (then highest maximum confidence), and, for
+detections saved since this version, one element with `hitCount` 0 per other model that was active on the
+source when the detection was approved (it had an analysis buffer on the source and was not paused by its
+schedule). Each element has `modelName`, `modelVersion`, `modelVariant`, `modelType` and `hitCount`. Elements
+with hits also have `maxConfidence`, plus `minConfidence`, `meanConfidence`, `firstHitAt` and `lastHitAt`; the
+last four appear together and are omitted when they were not recorded (detections recorded before these
+statistics existed) or the stored values are unusable (minimum above maximum, first hit after last hit).
+Times are RFC3339 in the server's time zone, like `beginTime`. A model missing from the list was not active
+on the source, the detection predates this recording, or its entry could not be saved (contributions are
+written best-effort).
+
+- The whole field is omitted on the legacy database, during migration, for detections with no recorded
+  contributions (including migrated ones), and when the read fails or takes longer than 1 second.
+- `POST /search` does not carry it.
+- The SSE `pending` event has its own `modelContributions` with a different element shape (`modelID`,
+  `hitCount`, `maxConfidence`, present only when more than one model contributed).
+
+**Species change.** `PUT /detections/:id/species` with `{"scientificName": "..."}` sets the species of a
+detection as a reviewer's correction, on the enhanced (v2) database only. The detection takes the detecting
+model's label for that species (by name or taxonomic alias); confidence, clip and times are unchanged, and the
+detection is marked reviewed as `correct`. The first change records the model's own pick, and later changes
+keep it. A request for the species the detection already has changes nothing and answers 200, except that a locked detection answers 409 first. The success
+body is `{"status":"success"}`.
+
+- `originalSpecies`: list, recent and single detection responses carry `originalSpecies` (`scientificName`,
+  `commonName`, `speciesCode`) once a reviewer has changed the species, also after it was changed back. Its
+  confidence is the detection's `confidence`. It is omitted when the species was never changed and on the
+  legacy database. `POST /search` does not carry it.
+- Status codes: `409` when the enhanced database is not in use and for a locked detection (checked before the species is looked up), `400` for an id
+  that is not a positive integer that fits in 32 bits, a body that cannot be read, a missing name, a name
+  without a species part and an unknown species, `404` when the detection does not exist, and `500` for a database error.
+- Limitations: the new-species flags (`isNewSpecies`, `daysSinceFirstSeen` and the yearly and seasonal ones)
+  of the changed detection and of both species can stay as they were until the species tracker next
+  re-syncs from the database. Nothing already published is retracted or sent again: MQTT, BirdWeather, SSE
+  and notifications keep the species they were sent with. The clip file name and the tags embedded in the
+  clip keep the old species. No audit event is recorded, and no history is kept: only the model's own pick
+  and the current species. Only a species that already has a label row, for any model, is accepted; any
+  other name answers 400.
+
+**Detection predictions.** On the enhanced (v2) database, `GET /detections/:id/predictions` returns the
+alternate species the detecting model scored for one detection. `modelPredictions` has one element per
+model, today at most one, with `modelName`, `modelVersion`, `modelVariant`, `modelType` and `predictions`.
+`predictions` is never empty, and `modelPredictions` is `[]` when nothing remains after filtering. Each
+prediction has `scientificName` (the current, canonical name), `commonName`, `speciesCode` and
+`confidence`, and `original` (on at most one entry, and absent when the species was never changed or was
+changed back; see below), ordered by confidence descending, then by scientific name.
+
+- Filtered out: the detected species and its aliases, human sound classes, and a dog class that scores
+  below every non-dog alternate that remains, and is kept when none remains. This is a heuristic: the classifier adds one past its top results so that
+  it stays visible, which a low dog score usually is, but a genuine low-scoring dog result goes with it.
+  The comparison is against the stored alternates, which are only those at or above
+  `birdnet.alternateminconfidence`, so a genuine dog result is hidden when it scores below every stored non-dog alternate,
+  and with fewer stored rows this happens more often.
+- Original pick: after a species change the model's own pick is listed with `original: true` and the
+  detection's confidence, unless it is the current species. It is exempt from the human sound and dog
+  filters, does not take part in the dog comparison, and a stored alternate of the same species is merged
+  into it.
+- Scope: the species the detecting model ranked in its top 10 for the analysis window that produced
+  the detection, without the detected species and, when a location is set and the model takes part in
+  range filtering, without species outside the location's range (for detections saved after the range
+  filter was applied to alternates), so fewer than 10 can remain. Other models and other windows are
+  not stored, so a species missing here may still have been scored. Alternates below
+  `birdnet.alternateminconfidence` (default 0.1, config file only, 0 stores all) are not stored either,
+  so an empty `modelPredictions` list is normal, most often for Perch; the cutoff applies to detections saved
+  after it was introduced.
+- Old rows: detections saved before this version may list species outside the location's range or alternates
+  below 0.1; detections migrated from the legacy database list only alternates at or above 0.3; Perch
+  detections saved before human class names were stored in full may list truncated human class names such
+  as Male or Child.
+- Status codes: `409` when the enhanced database is not in use, `400` for an id that is not a positive
+  integer that fits in 32 bits, `404` when the detection does not exist, and `500` for a database error.
+
+**Detection neighbors.** `GET /api/v2/detections/:id/neighbors` returns the ids of the detections next to one
+detection, for stepping through detections:
+
+```json
+{
+  "detectionId": 509253,
+  "previous": 509252,
+  "next": 509254,
+  "previousSameSpecies": 509100,
+  "nextSameSpecies": null
+}
+```
+
+Every key is always present, and a neighbor that does not exist is `null`.
+
+- Order: `previous` is the greatest id below `:id` and `next` the smallest id above it, so gaps left by deleted
+  detections are skipped. The order is record id order, which is the order detections were stored. After an
+  import it can differ from time order.
+- Same species: `previousSameSpecies` and `nextSameSpecies` walk the detections of the species of `:id`, matched by
+  scientific name across the labels of every model, including labels stored in the legacy
+  `ScientificName_CommonName` form. Two spellings of one species, such as a former and a current name, are two
+  separate chains. Refetch the neighbors after the species of the detection is changed.
+- Status codes: `409` when the enhanced database is not in use, `400` for an id that is not a positive integer
+  that fits in 32 bits, `404` when the detection does not exist, and `500` for a database error.
+
+**Species statistics.** `GET /api/v2/species/stats?scientific_name=Parus%20major` returns the all-time statistics of
+one species. The handler is `detections/species_stats.go`, because it reads the detection store.
+
+```json
+{
+  "scientificName": "Parus major",
+  "count": 1234,
+  "firstHeard": "2024-03-01T06:12:44+02:00",
+  "lastHeard": "2026-11-14T09:01:10+02:00",
+  "avgConfidence": 0.71,
+  "maxConfidence": 0.98,
+  "reviews": { "correct": 12, "falsePositive": 3 }
+}
+```
+
+Every key is always present. `firstHeard`, `lastHeard`, `avgConfidence` and `maxConfidence` are `null` when `count`
+is 0.
+
+- False positives: `count`, the two times and the two confidences leave out detections reviewed as false positive,
+  by the rule `/analytics/species/summary` uses. `reviews` counts the reviewed detections, so
+  `count + reviews.falsePositive` is every stored detection of the species and `reviews.correct` is part of `count`.
+- Scope: all time and all models. There is no date range parameter.
+- Species matching: send the scientific name as detection responses carry it, with the same spelling and letter
+  case. It is matched across the labels of every model, including labels stored in the legacy
+  `ScientificName_CommonName` form, the same labels the same-species neighbors walk. Unlike
+  `/analytics/species/summary`, which lists a species once per stored label spelling, the legacy and the bare form
+  are one result here. Two spellings of one species, such as a former and a current name, are counted separately.
+- Times: the stored instant as RFC3339 in the station zone, like a detection's `timestamp`. Confidences are 0 to 1.
+- A name no detection was ever stored under answers `200` with zeros and nulls, not `404`.
+- Status codes: `409` when the enhanced database is not in use (a client can fall back to
+  `/analytics/species/summary` there), `400` for a missing name or a name without a species part, and `500` for a
+  database error.
+- Cost: proportional to the number of detections of the species.
 
 ### Notifications (`notifications/notifications.go`)
 
-| Method | Route                              | Handler                            | Auth | Description                                                                                                         |
-| ------ | ---------------------------------- | ---------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/notifications/stream`            | `StreamNotifications`              | ❌⚡ | SSE notification & toast stream (public read-only, rate-limited). Used by dashboard NotificationBell.               |
-| GET    | `/notifications`                   | `GetNotifications`                 | ❌   | List notifications (public read-only). Used by dashboard NotificationBell.                                          |
-| GET    | `/notifications/:id`               | `GetNotification`                  | ✅   | Get specific notification                                                                                           |
-| PUT    | `/notifications/read-all`          | `MarkAllNotificationsRead`         | ✅   | Mark all unread notifications as read in one call. Returns `{"count": N}`.                                          |
-| PUT    | `/notifications/:id/read`          | `MarkNotificationRead`             | ✅   | Mark notification as read                                                                                           |
-| PUT    | `/notifications/:id/acknowledge`   | `MarkNotificationAcknowledged`     | ✅   | Acknowledge notification                                                                                            |
-| DELETE | `/notifications/:id`               | `DeleteNotification`               | ✅   | Delete notification                                                                                                 |
-| GET    | `/notifications/unread/count`      | `GetUnreadCount`                   | ❌   | Count unread notifications (public read-only). Used by dashboard NotificationBell.                                  |
-| POST   | `/notifications/test/new-species`  | `CreateTestNewSpeciesNotification` | ✅   | Create test new-species notification                                                                                |
-| GET    | `/notifications/check-ntfy-server` | `CheckNtfyServer`                  | ✅   | Probe NTFY host for HTTPS/HTTP connectivity (authenticated to prevent SSRF relay). Query: `host=<hostname[:port]>`. |
+| Method | Route                              | Handler                            | Auth | Description                                                                                                                                                                                    |
+| ------ | ---------------------------------- | ---------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/notifications/stream`            | `StreamNotifications`              | ❌⚡ | SSE notification & toast stream (public read-only, rate-limited). Used by dashboard NotificationBell.                                                                                          |
+| GET    | `/notifications`                   | `GetNotifications`                 | ❌   | List notifications (public read-only). Used by dashboard NotificationBell.                                                                                                                     |
+| GET    | `/notifications/:id`               | `GetNotification`                  | ✅   | Get specific notification                                                                                                                                                                      |
+| PUT    | `/notifications/read-all`          | `MarkAllNotificationsRead`         | ✅   | Mark all unread notifications as read in one call. Returns `{"count": N}`.                                                                                                                     |
+| PUT    | `/notifications/:id/read`          | `MarkNotificationRead`             | ✅   | Mark notification as read                                                                                                                                                                      |
+| PUT    | `/notifications/:id/acknowledge`   | `MarkNotificationAcknowledged`     | ✅   | Acknowledge notification                                                                                                                                                                       |
+| DELETE | `/notifications/:id`               | `DeleteNotification`               | ✅   | Delete notification                                                                                                                                                                            |
+| GET    | `/notifications/unread/count`      | `GetUnreadCount`                   | ❌   | Count unread notifications (public read-only). Used by dashboard NotificationBell.                                                                                                             |
+| POST   | `/notifications/test/new-species`  | `CreateTestNewSpeciesNotification` | ✅   | Create test new-species notification                                                                                                                                                           |
+| POST   | `/notifications/check-ntfy-server` | `CheckNtfyServer`                  | ✅   | Probe NTFY host for HTTPS/HTTP connectivity. POST (CSRF-protected) with JSON body `{"host":"<hostname[:port]>"}`; the probe is SSRF-guarded so it cannot relay to link-local/metadata targets. |
 
 ### Range Filter (`range/range.go`)
 
-| Method | Route                   | Handler                       | Auth | Description                                                 |
-| ------ | ----------------------- | ----------------------------- | ---- | ----------------------------------------------------------- |
-| GET    | `/range/status`         | `GetRangeFilterStatus`        | ❌   | Per-classifier geomodel coverage, auto-selection, threshold |
-| GET    | `/range/species/scores` | `GetRangeFilterSpeciesScores` | ❌   | Raw geomodel scores, primary model only; excludes always-active secondary models (e.g. bats) by design |
-| GET    | `/range/species/count`  | `GetRangeFilterSpeciesCount`  | ❌   | Species count with range filter                             |
-| GET    | `/range/species/list`   | `GetRangeFilterSpeciesList`   | ❌   | Species list with taxonomy groups                           |
-| GET    | `/range/species/csv`    | `GetRangeFilterSpeciesCSV`    | ❌   | Export species as CSV; with custom params includes always-active secondary models (matches the test endpoint); no-param export returns the persisted filter |
-| POST   | `/range/species/test`   | `TestRangeFilter`             | ❌   | Test range filter; returns the active set (range-filtered birds plus always-active secondary models) |
-| POST   | `/range/rebuild`        | `RebuildRangeFilter`          | ❌   | Rebuild range filter data                                   |
+| Method | Route                   | Handler                       | Auth | Description                                                                                                                                                                                          |
+| ------ | ----------------------- | ----------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/range/status`         | `GetRangeFilterStatus`        | ❌   | Per-classifier geomodel coverage, auto-selection, threshold, missing-geomodel diagnosis (`geomodelIssue`), `reloadFailed`                                                                            |
+| GET    | `/range/species/scores` | `GetRangeFilterSpeciesScores` | ❌   | Raw geomodel scores, primary model only; excludes always-active secondary models (e.g. bats) by design                                                                                               |
+| GET    | `/range/species/count`  | `GetRangeFilterSpeciesCount`  | ❌   | Species count with range filter                                                                                                                                                                      |
+| GET    | `/range/species/list`   | `GetRangeFilterSpeciesList`   | ❌   | Species list with taxonomy groups                                                                                                                                                                    |
+| GET    | `/range/species/csv`    | `GetRangeFilterSpeciesCSV`    | ❌   | Export species as CSV; with custom params includes always-active secondary models (matches the test endpoint); no-param export returns the persisted filter                                          |
+| POST   | `/range/species/test`   | `TestRangeFilter`             | ✅   | Test range filter; returns the active set (range-filtered birds plus always-active secondary models), `filterActive` (false at N=0, where the species list is empty), and never a null species array |
+| POST   | `/range/rebuild`        | `RebuildRangeFilter`          | ✅   | Rebuild range filter data                                                                                                                                                                            |
 
 ### Search (`detections/search.go`)
 
@@ -239,24 +539,40 @@ reported to telemetry, since they are expected, self-resolving backpressure.
 
 ### Settings (`settings.go`)
 
-| Method | Route                      | Handler                 | Auth | Description                                                         |
-| ------ | -------------------------- | ----------------------- | ---- | ------------------------------------------------------------------- |
-| GET    | `/settings`                | `GetAllSettings`        | ✅   | Get all configuration settings                                      |
-| GET    | `/settings/locales`        | `GetLocales`            | ✅   | Get available locales                                               |
-| GET    | `/settings/imageproviders` | `GetImageProviders`     | ✅   | Get image provider options                                          |
-| GET    | `/settings/systemid`       | `GetSystemID`           | ✅   | Get system identifier                                               |
-| GET    | `/settings/dashboard`      | `GetDashboardSettings`  | ❌   | Get dashboard display preferences (public, non-sensitive)           |
-| GET    | `/settings/:section`       | `GetSectionSettings`    | ✅   | Get specific settings section (other sections remain protected)     |
-| PUT    | `/settings`                | `UpdateSettings`        | ✅   | Update all settings                                                 |
-| PATCH  | `/settings/:section`       | `UpdateSectionSettings` | ✅   | Update settings section (writes to `/dashboard` still require auth) |
+| Method | Route                      | Handler                 | Auth | Description                                                               |
+| ------ | -------------------------- | ----------------------- | ---- | ------------------------------------------------------------------------- |
+| GET    | `/settings`                | `GetAllSettings`        | ✅   | Get all configuration settings                                            |
+| GET    | `/settings/locales`        | `GetLocales`            | ✅   | Get available locales                                                     |
+| GET    | `/settings/imageproviders` | `GetImageProviders`     | ✅   | Get image provider options                                                |
+| GET    | `/settings/systemid`       | `GetSystemID`           | ✅   | Get system identifier                                                     |
+| GET    | `/settings/connection`     | `GetConnectionCheck`    | ✅   | Classify the requester's own connection against `security.trustedProxies` |
+| GET    | `/settings/dashboard`      | `GetDashboardSettings`  | ❌   | Get dashboard display preferences (public, non-sensitive)                 |
+| GET    | `/settings/:section`       | `GetSectionSettings`    | ✅   | Get specific settings section (other sections remain protected)           |
+| PUT    | `/settings`                | `UpdateSettings`        | ✅   | Update all settings                                                       |
+| PATCH  | `/settings/:section`       | `UpdateSectionSettings` | ✅   | Update settings section (writes to `/dashboard` still require auth)       |
+
+Both `PUT /settings` and `PATCH /settings/:section` answer `400` while the resulting `security.oauthProviders` holds an entry whose `provider` is blank or not one of `github`, `google`, `kakao`, `line`, `microsoft` or `oidc`, whichever section was patched. The message names the entry, for example `security.oauthProviders[0].provider "gogle" is not a supported provider`, except when a `PATCH /settings/security` body itself sends such an entry: the section validation rejects it first, with the generic message `Failed to update security settings`. A client clears it by sending the list without that entry. The same two requests also answer `400` while `security.baseUrl` is set but not an absolute `http` or `https` URL with a host and no credentials; the message names `security.baseUrl`, and sending an empty or valid value clears it.
+
+The `GET /settings/connection` endpoint tells the requester how their own connection relates to the saved `security.trustedProxies` list, for the Reverse proxy card on the Security settings page. It is read-only and describes only the current request: it returns no other client's data and no raw header text; `verifiedClientAddress` is the requester's own address as the authentication decision sees it (from a verified forwarded header when one applies). It uses the same classifier (`proxytrust.Checker.Classify`) as the subnet bypass log notices, so it agrees with the authentication decision, and it reads the settings on every request, so a save applies on the next check without a restart. The response is `Cache-Control: no-store` and carries `status`, `peerAddress`, `hasForwardedHeaders`, `peerIsTrustedProxy`, `verifiedClientAddress` (the address the authentication decision uses, `""` when none could be verified), `peerIsCloudflareEdge` and `cloudflarePresetWouldVerify` (listing the peer together with the `cloudflare` preset would verify headers that currently do not verify). `status` is one of:
+
+- `direct`: no client-IP header, the peer is the client.
+- `trusted_proxy`: the peer is a listed proxy and one client address was verified.
+- `trusted_proxy_unverified`: the peer is a listed proxy but its headers could not be verified (a listed range that also holds clients, a proxy that does not append `X-Forwarded-For` or overwrite `X-Real-IP`, conflicting or repeated headers, a `Forwarded`-only header).
+- `untrusted_public_proxy`: a public peer sent client-IP headers; it is never offered for one-click trust.
+- `untrusted_proxy`: a loopback, link-local, private or CGNAT peer sent client-IP headers and listing it would verify them.
+- `untrusted_proxy_unverifiable`: client-IP headers were sent that listing the peer would not verify, or the peer address could not be parsed.
 
 The `GET /settings/dashboard` endpoint is intentionally public so that unauthenticated guests can render the SPA dashboard (species summary limit, layout, locale, thumbnails). The Dashboard section contains no secrets, tokens, or PII, and the layout is already exposed via `/app/config`. All mutations (PATCH) on the dashboard section remain auth-protected.
 
+**Optimistic concurrency:** `GET /settings` and a successful `PUT /settings` or `PATCH /settings/:section` send an `ETag` response header. The value is opaque and strong (`"<process id>-<revision>"`); it changes on every settings write, including a rollback of a failed write and writes the server makes itself (a model install, a species exclusion), and it changes after a restart. It does not change when the server rebuilds the range filter species list or stamps its update time: those fields (`birdnet.rangeFilter.species` and `lastUpdated`) are served by `GET /settings` but cannot be written through the API, so a client that missed them loses nothing, and the body of `GET /settings` can differ between two responses that carry the same `ETag`. `PUT /settings` and `PATCH /settings/:section` honour `If-Match` only when it is sent: if it does not match the current `ETag` the request answers `412 Precondition Failed` with the current `ETag`, and nothing is changed. A request without `If-Match` is applied as before (there is no `428`), but a request that sends the header with an empty value lists no tag and answers `412`. The `ETag` identifies the whole settings, not one section, so `GET /settings/:section` sends none and a `PATCH` is checked against the ETag of the whole settings. Validators are compared strongly: `*` and a list of tags are accepted, and a weak `W/"..."` tag never matches. A client behind a proxy that weakens the `ETag` should leave `If-Match` out. A proxy that rewrites the value when it compresses (Apache `mod_deflate` and Caddy append `-gzip`) makes every `If-Match` fail the same way; the 412 still names the current `ETag`, and the web UI stops sending `If-Match` for the page session once two 412s in a row name the same one.
+
 **Restart-required signal:** `PUT /settings` and `PATCH /settings/:section` responses include `restart_required` (bool) and `restart_reasons` (string[]), reflecting the global restart state also served by `GET /system/restart-status`. Settings bound once at startup that cannot hot-reload set this flag: web server / TLS settings, database (`output`), logging, and TLS certificate operations. `restart_reasons` carries i18n message keys (e.g. `restart.reasons.database`), not English text; the SPA resolves them via the translation catalog. The flag is sticky (it clears when the process actually restarts) and is not cleared by reverting the change.
+
+**Stored section in the PATCH response:** `PATCH /settings/:section` answers with `message`, `skippedFields`, `restart_required`, `restart_reasons` and `settings`, the sanitized stored section as the server now holds it (secrets redacted, server-added keys such as a source's `quietHours` present). It is the section in the shape the server keeps, not necessarily what `GET /settings/:section` serves: the `rtsp`, `privacyfilter`, `dogbarkfilter` and `telemetry` sections can be patched but have no `GET /settings/:section` endpoint. A client records `settings` as the saved value instead of its own request, which differs wherever the server adds, drops or normalizes a key. `PUT /settings` has no such field.
 
 **Blocked fields:** a set of fields can never be written through the settings API, on either write path. Both `PUT /settings` and `PATCH /settings/:section` merge the request into the current settings and then restore the blocked fields from the pre-update snapshot. Sending such a field is not an error: the rest of the request is applied normally and only the blocked values are reverted.
 
-The set covers generated credentials (`Security.SessionSecret`, `Security.BasicAuth.ClientID`/`ClientSecret`, `Diagnostics.Profiling.Token`), the session and OAuth2 lifetimes (`Security.SessionDuration`, `Security.BasicAuth.AuthCodeExp`/`AccessTokenExp`), the server-validated ffmpeg/sox tool paths and the sox format list (`Realtime.Audio.FfmpegPath`/`SoxPath`/`SoxAudioTypes`), the range-filter model selection (`BirdNET.RangeFilter.Model`), and runtime state the process populates for itself (`Version`, `BuildDate`, `SystemID`, `ValidationWarnings`, `Input`, `BirdNET.Labels`, `BirdNET.RangeFilter.Species`/`LastUpdated`). Note that several of these are ordinary `config.yaml` keys: they are settable by editing the config file, just not through the API.
+The set covers generated credentials (`Security.SessionSecret`, `Security.BasicAuth.ClientID`/`ClientSecret`, `Diagnostics.Profiling.Token`), the handshake cookie lifetime and the OAuth2 code lifetime (`Security.SessionDuration`, `Security.BasicAuth.AuthCodeExp`/`AccessTokenExp`; the first and last no longer govern how long a browser stays signed in), the server-validated ffmpeg tool path (`Realtime.Audio.FfmpegPath`), the range-filter model selection (`BirdNET.RangeFilter.Model`), and runtime state the process populates for itself (`Version`, `BuildDate`, `SystemID`, `ValidationWarnings`, `Input`, `BirdNET.Labels`, `BirdNET.RangeFilter.Species`/`LastUpdated`). Note that several of these are ordinary `config.yaml` keys: they are settable by editing the config file, just not through the API.
 
 Both verbs report identically under the `skippedFields` response key: it lists only the blocked paths whose value the request actually changed, sorted (every blocked field is reverted regardless; the list is the subset that differed), and it is an empty array (`[]`) when nothing was reverted. Do not treat a non-empty list as a request failure. Because the frontend sends the whole settings object on every save, a `PUT` that carries the blanked `Security.BasicAuth.ClientID`/`ClientSecret` reports those two whenever BasicAuth is configured; that is expected and the rest of the save still applies.
 
@@ -276,21 +592,24 @@ Both verbs report identically under the `skippedFields` response key: it lists o
 
 ### Species (`species/species.go`)
 
-| Method | Route                      | Handler               | Auth | Description                                                       |
-| ------ | -------------------------- | --------------------- | ---- | ----------------------------------------------------------------- |
-| GET    | `/species`                          | `GetSpeciesInfo`          | ❌   | Get extended species information including rarity status          |
-| GET    | `/species/all`                      | `GetAllSpecies`           | ❌   | Get all BirdNET species labels (not filtered by location)         |
-| GET    | `/species/taxonomy`                 | `GetSpeciesTaxonomy`      | ❌   | Get detailed taxonomy data with subspecies and hierarchy          |
-| GET    | `/species/:code/thumbnail`          | `GetSpeciesThumbnail`     | ❌   | Get bird thumbnail image by species code (redirects to image URL) |
-| GET    | `/species/dictionary/:locale`       | `ServeSpeciesDictionary`  | ❌   | Precompressed per-locale species name dictionary (gzip JSON)      |
+| Method | Route                         | Handler                  | Auth | Description                                                                   |
+| ------ | ----------------------------- | ------------------------ | ---- | ----------------------------------------------------------------------------- |
+| GET    | `/species`                    | `GetSpeciesInfo`         | ❌   | Get extended species information including rarity status                      |
+| GET    | `/species/all`                | `GetAllSpecies`          | ❌   | Get all BirdNET species labels (not filtered by location)                     |
+| GET    | `/species/taxonomy`           | `GetSpeciesTaxonomy`     | ❌   | Get detailed taxonomy data with subspecies and hierarchy                      |
+| GET    | `/species/:code/thumbnail`    | `GetSpeciesThumbnail`    | ❌   | Get bird thumbnail image by species code (redirects to image URL)             |
+| GET    | `/species/dictionary/:locale` | `ServeSpeciesDictionary` | ❌   | Precompressed per-locale species name dictionary (gzip JSON)                  |
+| GET    | `/species/stats`              | `GetSpeciesStats`        | ❌   | Species statistics, enhanced database only (in `detections/species_stats.go`) |
+
+**Sound classes.** `scientific_name` on `/species` and `/species/taxonomy` also accepts a sound class name as detections report it ("Dog", "Human vocal", "Church_bell"). `/species` answers with the names only, and `/species/taxonomy` with `metadata.source` set to "unresolved", a `metadata.note` saying it is a sound class, and no `taxonomy`. `GET /taxonomy/tree/:scientific_name` answers 404 "Species not found" for a sound class. Any other name that is shorter than 3 characters or has no space answers 400.
 
 ### Server-Sent Events (`sse/sse.go`)
 
-| Method | Route                 | Handler             | Auth | Description                  |
-| ------ | --------------------- | ------------------- | ---- | ---------------------------- |
+| Method | Route                 | Handler             | Auth | Description                                                                                                                                                                                                                           |
+| ------ | --------------------- | ------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/detections/stream`  | `StreamDetections`  | ❌⚡ | Real-time detection stream. Source display names are anonymized for unauthenticated clients (only the stable source id is exposed, on both the `detection` and `pending` events); authenticated clients receive the full display name |
-| GET    | `/soundlevels/stream` | `StreamSoundLevels` | ❌⚡ | Real-time audio level stream |
-| GET    | `/sse/status`         | `GetSSEStatus`      | ❌   | SSE connection status        |
+| GET    | `/soundlevels/stream` | `StreamSoundLevels` | ❌⚡ | Real-time sound level stream. The source display name is anonymized for unauthenticated clients (`name` is the stable source id); authenticated clients receive the display name                                                      |
+| GET    | `/sse/status`         | `GetSSEStatus`      | ❌   | SSE connection status                                                                                                                                                                                                                 |
 
 ### Audio Level SSE (`audio/audio_level.go`) and Stream Sources (`audio/audio_sources.go`)
 
@@ -303,7 +622,7 @@ Both verbs report identically under the `skippedFields` response key: it lists o
 
 - Real-time audio level data for UI audio indicators (0-100 with clipping detection)
 - Automatic source anonymization for unauthenticated clients
-- Connection limiting: up to 5 concurrent connections per client IP (allows multiple browser tabs)
+- Connection limiting: up to 5 concurrent connections per client (one IPv4 address or one IPv6 /64; allows multiple browser tabs)
 - Maximum connection duration: 30 minutes
 - Heartbeat interval: 10 seconds
 
@@ -338,7 +657,7 @@ Both verbs report identically under the `skippedFields` response key: it lists o
 }
 ```
 
-Returns an empty `sources` array when no sources are configured. The `type` field is one of: `rtsp`, `http`, `hls`, `rtmp`, `udp`, `audio_card`, `file`. The `state` field is one of: `inactive`, `starting`, `running`, `error`, `stopped`. The `/streams/sources` endpoint returns only stream types (excludes `audio_card` and `file`).
+Returns an empty `sources` array when no sources are configured. The `type` field is one of: `rtsp`, `http`, `hls`, `rtmp`, `udp`, `audio_card`, `file`. The `state` field is one of: `inactive`, `starting`, `running`, `error`, `stopped`; for stream sources `running` means capture has started, and connection health is on the stream health endpoints. The `/streams/sources` endpoint returns only stream types (excludes `audio_card` and `file`).
 
 ### HLS Streaming (`audio/audio_hls.go`)
 
@@ -401,13 +720,12 @@ HLS playlist and segment routes use token-based authentication instead of standa
 
 **Features:**
 
-- FFmpeg-based HLS streaming with AAC audio encoding
+- In-process HLS streaming (go-hls) with native AAC encoding, no FFmpeg process
 - Token-based auth for HLS content (no auth middleware on playlist/segment routes)
 - Automatic stream cleanup after 5 minutes of inactivity
 - Stream reuse: existing healthy streams are reused for new clients
 - Client tracking with heartbeat-based keep-alive
 - Secure file serving with path validation
-- Cross-platform support (FIFO on Unix, stdin pipe on Windows)
 - Configurable bitrate (16-320 kbps), sample rate, and segment length
 
 **Configuration (via settings):**
@@ -419,12 +737,12 @@ HLS playlist and segment routes use token-based authentication instead of standa
 
 ### Stream Health Monitoring (`audio/streams_health.go`)
 
-| Method | Route                    | Handler                   | Auth | Description                                                                          |
-| ------ | ------------------------ | ------------------------- | ---- | ------------------------------------------------------------------------------------ |
-| GET    | `/streams/health`        | `GetAllStreamsHealth`     | ✅   | Get detailed health status of all RTSP streams (settings-only; URLs sanitized)       |
-| GET    | `/streams/health/:url`   | `GetStreamHealth`         | ✅   | Get detailed health status of a specific RTSP stream (settings-only; URLs sanitized) |
-| GET    | `/streams/status`        | `GetStreamsStatusSummary` | ✅   | Get high-level summary of all stream statuses with counts (settings-only)            |
-| GET    | `/streams/health/stream` | `StreamHealthUpdates`     | ✅⚡ | Real-time stream health updates via SSE (settings page, not dashboard)               |
+| Method | Route                    | Handler                   | Auth | Description                                                                                                    |
+| ------ | ------------------------ | ------------------------- | ---- | -------------------------------------------------------------------------------------------------------------- |
+| GET    | `/streams/health`        | `GetAllStreamsHealth`     | ✅   | Get detailed health status of all RTSP streams (settings-only; URLs sanitized)                                 |
+| GET    | `/streams/health/:url`   | `GetStreamHealth`         | ✅   | Get detailed health status of a specific RTSP stream (settings-only; URLs sanitized)                           |
+| GET    | `/streams/status`        | `GetStreamsStatusSummary` | ✅   | Get high-level summary of all stream statuses with counts (settings-only)                                      |
+| GET    | `/streams/health/stream` | `StreamHealthUpdates`     | ✅⚡ | Real-time stream health updates via SSE (settings page, not dashboard)                                         |
 | POST   | `/streams/test`          | `TestStream`              | ✅   | Test a stream URL to verify connectivity and discover audio properties (sample rate, codec, bat compatibility) |
 
 ### Quiet Hours Status (`audio/quiet_hours.go`)
@@ -459,21 +777,22 @@ HLS playlist and segment routes use token-based authentication instead of standa
 
 ### System Information (`system/system.go`)
 
-| Method | Route                            | Handler                   | Auth | Description                          |
-| ------ | -------------------------------- | ------------------------- | ---- | ------------------------------------ |
-| GET    | `/system/info`                   | `GetSystemInfo`           | ✅   | General system information           |
-| GET    | `/system/resources`              | `GetResourceInfo`         | ✅   | Resource usage information           |
-| GET    | `/system/disks`                  | `GetDiskInfo`             | ✅   | Disk usage information               |
-| GET    | `/system/jobs`                   | `GetJobQueueStats`        | ✅   | Job queue statistics                 |
-| GET    | `/system/processes`              | `GetProcessInfo`          | ✅   | Process information                  |
-| GET    | `/system/temperature/cpu`        | `GetSystemCPUTemperature` | ✅   | CPU temperature                      |
-| GET    | `/system/audio/devices`          | `GetAudioDevices`         | ✅   | Available audio devices              |
-| GET    | `/system/audio/active`           | `GetActiveAudioDevice`    | ✅   | Active audio device                  |
-| GET    | `/system/audio/equalizer/config` | `GetEqualizerConfig`      | ✅   | Audio equalizer filter configuration |
-| GET    | `/system/audio/sources`          | `ListAudioSources`        | ✅   | Active audio sources (all types)     |
-| GET    | `/system/network-interfaces`     | `GetNetworkInterfaces`    | ✅   | IPv4 network interfaces for binding  |
-| GET    | `/system/models`                 | `GetActiveModels`         | ✅   | Active model metadata                |
-| GET    | `/system/inference`              | `GetInferenceStatus`      | ✅   | Read-only snapshot of the inference subsystem: hardware, backends, loaded models with stats/RAM/source attachment, audio pipeline metrics, per-model error rate, load failures, last detection, and metric key names for time-series lookups. |
+| Method | Route                              | Handler                    | Auth | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------ | ---------------------------------- | -------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/system/info`                     | `GetSystemInfo`            | ✅   | General system information                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| GET    | `/system/resources`                | `GetResourceInfo`          | ✅   | Resource usage information                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| GET    | `/system/disks`                    | `GetDiskInfo`              | ✅   | Disk usage information                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| GET    | `/system/jobs`                     | `GetJobQueueStats`         | ✅   | Job queue statistics                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| GET    | `/system/processes`                | `GetProcessInfo`           | ✅   | Process information                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| GET    | `/system/temperature/cpu`          | `GetSystemCPUTemperature`  | ✅   | CPU temperature                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| GET    | `/system/audio/devices`            | `GetAudioDevices`          | ✅   | Available audio devices                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| GET    | `/system/audio/active`             | `GetActiveAudioDevice`     | ✅   | Active audio device                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| GET    | `/system/audio/equalizer/config`   | `GetEqualizerConfig`       | ✅   | Audio equalizer filter configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| POST   | `/system/audio/equalizer/response` | `ComputeEqualizerResponse` | ✅   | Equalizer magnitude curve for an unsaved config, from the chain the audio routes build. Body: `equalizer` (required, `enabled` and `filters`, at most 64), optional `sourceId` (a registered source: curve is computed at that source's pipeline rate), `sampleRate` (8000-384000, used when `sourceId` is absent or unknown, else the configured rate), `points` (2-2048, default 512), `minHz` (default 20), `maxHz` (default min(20000, Nyquist) up to 48000 Hz, Nyquist above that; at most Nyquist). Returns `sampleRate` used, `enabled`, `minHz` and `maxHz` (the swept range), `points` (`hz`, `gainDb`, a log-spaced sweep of `points` entries plus each applied filter's center, so between `points` and `points` plus the applied filter count; gain is finite, an exact null reads -200 dB per filter section) and `skipped` (filters audio would skip, with `index`, `type`, `reason`, `message`). Disabled, empty, all-skipped or all-bypassed (every filter at `passes` 0) configs give a flat 0 dB curve, and a disabled config always reports an empty `skipped`. A filter the library rejects at the rate (corner at or above Nyquist, non-positive Q or width for the types that use them, negative or too many passes) is skipped, as in audio. A filter of a known type with `passes` 0 is off: it is left out of the curve and is not reported in `skipped`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| GET    | `/system/audio/sources`            | `ListAudioSources`         | ✅   | Active audio sources (all types)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| GET    | `/system/network-interfaces`       | `GetNetworkInterfaces`     | ✅   | IPv4 network interfaces for binding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| GET    | `/system/models`                   | `GetActiveModels`          | ✅   | Active model metadata                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| GET    | `/system/inference`                | `GetInferenceStatus`       | ✅   | Read-only snapshot of the inference subsystem: hardware, backends, loaded models with stats/RAM/source attachment, audio pipeline metrics, per-model error rate, load failures, per-model inference health (`health`: `state` ok, failing or idle, `consecutiveFailures`, `failureThreshold`, `inferenceCount`, last inference and last success timestamps, `errorClass`; omitted when no orchestrator is wired), `backends.openvino` (`supported`, `active`, `devices` as the device classes `CPU` and `GPU`, and `gpus`, one entry per enumerated GPU with `id` (the OpenVINO device name, `GPU` or `GPU.<n>`; `GPU.<n>` is a value `birdnet.openvinodevice` accepts, while the lone `GPU` is selected with `gpu`), `name` and `type` (`integrated` or `discrete`); `gpus` is omitted without a GPU, before the device probe has finished, and when it failed), last detection, metric key names for time-series lookups, the default target models (`defaultTargets`, empty at N=0) the aggregate acoustic-model state (`acousticModelsState`: ok, none_installed or load_failed, or an empty string when the inference subsystem is not yet wired), and the planned analysis cadence (`analysisCadence`, omitted until the audio pipeline publishes a plan: `status` ok, capped, overloaded or filterOff, `filterLevel` (the false positive filter level the bird models' confirmations were computed for, read at request time; the bat model follows the bat filter level), `configuredOverlapSec`, `effectiveOverlapSec`, `minBaseStepMs` (0 = unknown, not applicable or overloaded), `estimatedDutyConfigured`, `estimatedDutyEffective`, `dutyCeiling`, `sourceCount`, `modelCount`, `unknownLatencyModels` (never null), and per-model `models` with `id`, `name`, `taxonGroup` (`bird` or `bat`, omitted for a model in neither group), `clipMs`, `stepMs`, `probeLatencyMs`, `confirmations` and `windowsInReference`; the cap applies only while the false positive filter level is 1 or higher, otherwise `filterOff` and effective equals configured). |
 
 ### Events (`system/events.go`, `system/events_aggregation.go`)
 
@@ -499,6 +818,11 @@ Registered under the system route group. All endpoints require authentication.
 | GET    | `/weather/detection/:id`      | `GetWeatherForDetection`  | ❌   | Weather for detection time          |
 | GET    | `/weather/latest`             | `GetLatestWeather`        | ❌   | Latest weather data                 |
 | GET    | `/weather/sun/:date`          | `GetSunTimes`             | ❌   | Sun times (sunrise/sunset) for date |
+| GET    | `/weather/moon/:date`         | `GetMoonPhase`            | ❌   | Moon phase for date                 |
+
+`:date` on `/weather/daily/:date`, `/weather/hourly/:date` and `/weather/hourly/:date/:hour` must be a real calendar date in `YYYY-MM-DD` form. A non-empty value that is not a real date answers **400** before the database is queried, with `error_key` `errors.detection.invalidDate` and `error_params` `{paramName: "date"}`; an empty value answers **400** without an `error_key`. `/weather/sun/:date` and `/weather/moon/:date` also answer 400 for an invalid date (without an `error_key`).
+
+`/weather/hourly/:date` answers 200 with an empty `data` array and a `message` when no rows exist for the date. The message says the date is in the future when it is after the server's local date.
 
 ### Alert Rules (`alerts/alerts.go`)
 
@@ -507,6 +831,7 @@ Requires enhanced (v2) database. Returns 409 Conflict if not available.
 | Method | Route                          | Handler                  | Auth | Description              |
 | ------ | ------------------------------ | ------------------------ | ---- | ------------------------ |
 | GET    | `/alerts/schema`               | `GetAlertSchema`         | ❌   | Alert schema for UI      |
+| GET    | `/alerts/status`               | `GetAlertStatus`         | ❌   | Alert engine state       |
 | GET    | `/alerts/rules`                | `ListAlertRules`         | ❌   | List rules (filterable)  |
 | GET    | `/alerts/rules/:id`            | `GetAlertRule`           | ❌   | Get single rule          |
 | GET    | `/alerts/rules/export`         | `ExportAlertRules`       | ✅   | Export rules as JSON     |
@@ -516,9 +841,13 @@ Requires enhanced (v2) database. Returns 409 Conflict if not available.
 | PATCH  | `/alerts/rules/:id/toggle`     | `ToggleAlertRule`        | ✅   | Enable/disable rule      |
 | DELETE | `/alerts/rules/:id`            | `DeleteAlertRule`        | ✅   | Delete rule              |
 | POST   | `/alerts/rules/:id/test`       | `TestAlertRule`          | ✅   | Test-fire rule           |
-| POST   | `/alerts/rules/reset-defaults` | `ResetDefaultAlertRules` | ✅   | Re-seed built-in rules   |
+| POST   | `/alerts/rules/reset-defaults` | `ResetDefaultAlertRules` | ✅   | Restore built-in rules   |
 | POST   | `/alerts/rules/import`         | `ImportAlertRules`       | ✅   | Import rules from JSON   |
 | DELETE | `/alerts/history`              | `ClearAlertHistory`      | ✅   | Delete all history       |
+
+`PUT /alerts/rules/:id` replaces the rule, with three exceptions. `built_in` in the body is ignored and the stored flag is kept. A rule that has a `name_key` or `description_key` keeps its stored `name` or `description` while the request sends the same key, because the editor sends the translated text. Renaming a built-in rule (changing its `name_key`, or its `name` when it has no key) makes it a custom rule. An omitted, null or unchanged `escalation_steps` keeps the stored steps while the rule's object type, trigger type, metric, event and each condition's property, operator and value are unchanged, and removes them otherwise, since a rule with steps fires only at or above its lowest step. A condition's `duration_sec` does not affect this. Steps that differ from the stored ones replace them.
+
+`POST /alerts/rules/reset-defaults` deletes the built-in rules and creates each shipped default again, except a default whose `name` or `name_key` a remaining rule already has. It returns `status` (`"defaults reset"`), `created` (number of defaults created) and `skipped` (names of the defaults it did not create). `POST /alerts/rules/import` does not create a rule whose `name`, or non-empty `name_key`, matches a stored rule or a rule imported earlier in the same request, and imports the others. It returns `imported`, `total` and `skipped` (names of the rules it did not create for that reason). Startup seeding recognises a default the same way.
 
 **Query Parameters:**
 
@@ -527,43 +856,100 @@ Requires enhanced (v2) database. Returns 409 Conflict if not available.
 
 ### Insights (`analytics/insights.go`)
 
-Requires enhanced (v2) database. Returns 409 Conflict if not available.
+Requires enhanced (v2) database. Returns 409 Conflict with `error_key` `errors.insights.v2Required` if not available.
 
-| Method | Route                               | Handler                    | Auth | Description                              |
-| ------ | ----------------------------------- | -------------------------- | ---- | ---------------------------------------- |
-| GET    | `/insights/expected-today`          | `getExpectedToday`         | ❌   | Species expected today based on history  |
-| GET    | `/insights/expected-today/regional` | `getExpectedTodayRegional` | ❌   | Regional eBird observations near station |
-| GET    | `/insights/phantom-species`         | `getPhantomSpecies`        | ❌   | Frequent but low-confidence detections   |
-| GET    | `/insights/dawn-chorus`             | `getDawnChorus`            | ❌   | Dawn chorus timing analysis              |
-| GET    | `/insights/migration`               | `getMigration`             | ❌   | New arrivals and gone-quiet species      |
-| GET    | `/dashboard/kpis`                   | `getDashboardKPIs`         | ❌   | Dashboard headline metrics and streak    |
+| Method | Route                               | Handler                     | Auth | Description                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------ | ----------------------------------- | --------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/insights/expected-today`          | `getExpectedToday`          | ❌   | Species expected today based on history                                                                                                                                                                                                                                                                                                                                                                              |
+| GET    | `/insights/expected-today/regional` | `getExpectedTodayRegional`  | ❌   | Regional eBird observations near station                                                                                                                                                                                                                                                                                                                                                                             |
+| GET    | `/insights/phantom-species`         | `getPhantomSpecies`         | ❌   | Frequent but low-confidence detections                                                                                                                                                                                                                                                                                                                                                                               |
+| GET    | `/insights/dawn-chorus`             | `getDawnChorus`             | ❌   | Dawn chorus timing analysis                                                                                                                                                                                                                                                                                                                                                                                          |
+| GET    | `/insights/migration`               | `getMigration`              | ❌   | New arrivals and gone-quiet species                                                                                                                                                                                                                                                                                                                                                                                  |
+| GET    | `/insights/model-contributions`     | `getModelContributionStats` | ❌   | Per-model statistics from detection model contributions: detections contributed to, hits and hit share, sole-contributor count, confidence min/mean/max (min and mean are null when no row in range has recorded stats), review outcome counts (correct, false_positive, unreviewed) and pairwise agreement. `start_date` required; `end_date` optional (defaults to `start_date` + 30 days); range at most 366 days |
+| GET    | `/dashboard/kpis`                   | `getDashboardKPIs`          | ❌   | Dashboard headline metrics and streak                                                                                                                                                                                                                                                                                                                                                                                |
 
 **Query Parameters:**
 
-- All insights endpoints accept optional `model_id` query parameter to filter by BirdNET model
+- All insights endpoints except `/insights/model-contributions` accept optional `model_id` query parameter to filter by BirdNET model
+- `/insights/model-contributions` requires `start_date` and accepts optional `end_date` (both `YYYY-MM-DD`, station-local and inclusive; `end_date` defaults to `start_date` + 30 days; at most 366 days). It takes no `model_id`. Only contribution rows with at least one hit are counted; rows recording a model that was active without a hit are not. Counts are lower bounds: contribution rows are written best-effort and are absent for detections migrated from the legacy database
+- `/insights/dawn-chorus` also accepts `period_days` (default 30, 1 to 365) and `min_days` (default 3, clamped to `period_days`); the response echoes both as `period_days` and `min_days`
+
+### Privacy Filter Activity (`privacy/privacy.go`)
+
+Requires enhanced (v2) database. Returns 409 Conflict with `error_key` `errors.privacyFilter.v2Required` if not available. Every route requires authentication (not admin only) and is never public. The routes use the protected auth middleware, which follows the instance's own authentication settings (`IsAuthRequired` and `OAuth2Server.IsAuthenticationEnabled`): on an instance with no authentication provider configured, or for a client in an allowed bypass subnet, they pass like every other protected route.
+
+| Method | Route                      | Handler        | Auth | Description                                                                                          |
+| ------ | -------------------------- | -------------- | ---- | ---------------------------------------------------------------------------------------------------- |
+| GET    | `/privacy-filter/activity` | `GetActivity`  | ✅   | Hourly rollup of privacy filter activity per source, detector model, trigger and threshold           |
+| GET    | `/privacy-filter/discards` | `ListDiscards` | ✅   | Detections the privacy filter discarded, with the per-detector hits behind each, newest first, paged |
+
+**Query Parameters:**
+
+- Both routes require `start_date` and accept optional `end_date` (`YYYY-MM-DD`, station-local and inclusive; `end_date` defaults to `start_date` + 30 days; at most 31 days, matching the 30-day retention of both tables; years 1970 to 9998 only, counting the defaulted `end_date`, otherwise 400)
+- `/privacy-filter/discards` also accepts `limit` (default 100, 1 to 1000) and `offset` (default 0, at most 1000000). Rows are ordered by discard time descending, then id descending. The response is the same paginated envelope as the detections list (`data`, `total`, `limit`, `offset`, `current_page`, `total_pages`)
+
+**Semantics:**
+
+- Hourly rows are keyed on UTC hours and returned with a UTC `hour_start`. A row is included when its hour overlaps the requested range, so in zones with a half-hour or 45-minute offset the boundary hours belong to both of two adjacent ranges. The response echoes `range_start` and `range_end` (UTC instants, end exclusive) so a client can trim.
+- A discard's time is the wall clock of the flush that dropped the detection, while the rollup counts a discard in the hour of the hit that caused it, so per-hour counts of the two endpoints do not match exactly.
+- All counts are lower bounds. The `margin_*` fields bucket hits by how far the score is above the threshold in effect (`margin_lt_50` below 0.05, `margin_lt_100` 0.05 to 0.10, `margin_lt_200` 0.10 to 0.20, `margin_ge_200` 0.20 or more), not by absolute score. Per row, the sum of the buckets is `hits - confirmed + held`.
+- A row with an empty `model_id` and `threshold` 0 counts unscanned saves. Rows with `trigger_type` `vad` carry the voice activity threshold.
+- Sources appear as `{id, name}`: the display name with any stream URL credentials removed, or `source-<id>` when there is none. The stored source URI is never returned. A discard whose source could not be resolved has `source: null`. No transcript, audio or clip path is returned.
 
 ### Models (`models/models.go`)
 
-| Method | Route                          | Handler                 | Auth | Description                                           |
-| ------ | ------------------------------ | ----------------------- | ---- | ----------------------------------------------------- |
-| GET    | `/models`                      | `ListModels`            | ❌   | List available classifier models                      |
-| GET    | `/models/catalog`              | `GetModelCatalog`       | ❌   | Model gallery catalog with install status             |
-| GET    | `/models/regions`              | `GetModelRegions`       | ✅   | Region selector data: selectable regions, the auto-resolved region for the configured coordinates, and per-family resolution (auth-gated; never echoes raw coordinates) |
-| GET    | `/models/regions/:slug/map`    | `GetRegionCoverageMap`  | ❌   | Embedded SVG coverage map for a region slug (public static asset; strong ETag, honors If-None-Match; 404 when no map exists for the slug) |
-| GET    | `/models/installed`            | `GetInstalledModels`    | ❌   | List downloaded models                                |
-| POST   | `/models/install/:id`          | `InstallModel`          | ✅   | Download and install a catalog model                  |
-| POST   | `/models/reinstall/:id`        | `ReinstallModel`        | ✅   | Re-download missing/corrupt files for installed model |
-| DELETE | `/models/installed/:id`        | `UninstallModel`        | ✅   | Remove an installed model from disk                   |
-| GET    | `/models/install/:id/progress` | `StreamInstallProgress` | ❌   | SSE stream for install/reinstall progress             |
+| Method | Route                          | Handler                 | Auth | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------ | ------------------------------ | ----------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/models`                      | `ListModels`            | ❌   | List available classifier models                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| GET    | `/models/catalog`              | `GetModelCatalog`       | ❌   | Model gallery catalog with install status and each entry's licence and policy `documents`                                                                                                                                                                                                                                                                                                                                                                                               |
+| GET    | `/models/regions`              | `GetModelRegions`       | ✅   | Region selector data: selectable regions, the auto-resolved region for the configured coordinates, and per-family resolution (auth-gated; never echoes raw coordinates)                                                                                                                                                                                                                                                                                                                 |
+| GET    | `/models/regions/:slug/map`    | `GetRegionCoverageMap`  | ❌   | Embedded SVG coverage map for a region slug (public static asset; strong ETag, honors If-None-Match; 404 when no map exists for the slug)                                                                                                                                                                                                                                                                                                                                               |
+| GET    | `/models/documents/:sha256`    | `GetModelDocument`      | ✅   | Verified text of a hosted licence or policy document `{repo, kind, requiresAgreement, sha256, text}`; 404 for an unknown digest, 502 with `error_key` `analysis.gallery.errors.documentUnavailable` when the text cannot be fetched and verified                                                                                                                                                                                                                                        |
+| GET    | `/models/installed`            | `GetInstalledModels`    | ❌   | List downloaded models                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| POST   | `/models/install/:id`          | `InstallModel`          | ✅   | Download and install a catalog variant; body `{variantId?, allowIncompatible?, acceptedDocuments?}`. A variant incompatible with the detected hardware is rejected with 409 unless `allowIncompatible:true`. 409 with `error_key` `analysis.gallery.errors.operationInProgress` while another model operation runs. 409 with `error_key` `analysis.gallery.errors.agreementRequired` while a document of the entry's own repo has no recorded agreement and the body does not accept it |
+| POST   | `/models/reinstall/:id`        | `ReinstallModel`        | ✅   | Re-download missing/corrupt files for installed model; optional body `{acceptedDocuments?}`; 409 with `error_key` `analysis.gallery.errors.operationInProgress` while another model operation runs, or `analysis.gallery.errors.agreementRequired` while a document of the entry's own repo has no recorded agreement and the body does not accept it                                                                                                                                   |
+| DELETE | `/models/installed/:id`        | `UninstallModel`        | ✅   | Remove an installed model from disk; 409 while other models depend on it, or with `error_key` `analysis.gallery.errors.operationInProgress` while another model operation runs                                                                                                                                                                                                                                                                                                          |
+| POST   | `/models/install/:id/cancel`   | `CancelInstall`         | ✅   | Cancel the install or variant swap running for the model; 202 `{catalogId, status:"cancelling"}`, 409 with `error_key` `analysis.gallery.errors.cancelUnavailable` when nothing cancellable runs; 404 for an unknown or hidden id                                                                                                                                                                                                                                                       |
+| GET    | `/models/install/:id/progress` | `StreamInstallProgress` | ❌   | SSE stream for install/reinstall progress; ends on `complete`, `failed` or `cancelled`                                                                                                                                                                                                                                                                                                                                                                                                  |
 
-**GET /api/v2/models** - Returns all classifier models registered in the model registry. Each entry includes a config alias (used in audio source configuration) and a human-readable display name.
+**Model dependencies** - A catalog entry can depend on other entries (for example a geomodel) whose files are installed with it. `GET /api/v2/models/catalog` lists them as `dependsOn` (catalog IDs, omitted when empty; it may name hidden components that the response does not list), and `totalSizeBytes` and each variant's `sizeBytes` include the dependency files. `hasGeomodel` is true when the default variant brings a geomodel, inline or through a dependency. `DELETE /api/v2/models/installed/:id` answers `409 Conflict` while another installed or downloading model depends on the entry, and changes nothing. The body carries `error_key` `analysis.gallery.errors.removeHasDependents` and `error_params` `{name, models, dependents}`, where `models` is the dependents' display names joined with `, ` and `dependents` is a list of `{id, name}`.
+
+**Registry ID** - `GET /api/v2/models/catalog` reports `registryId` (for example `BirdNET_V2.4`) on a classifier entry. It joins against the `registryId` of the items served by `GET /api/v2/models`, whose `id` is the config alias that audio source and stream `models` lists hold. That endpoint lists enabled models only, so a classifier that is not enabled has no item to join. Several catalog entries can share one registry ID (the regional BattyBirdNET models all report `Bat`), so one item can match more than one entry. The field is omitted for an entry that is not a classifier, such as the geomodel.
+
+**Model documents** - `GET /api/v2/models/catalog` lists the licence and policy documents of an entry as `documents` (`{repo, kind, requiresAgreement, agreed, sha256?, url?}`, omitted when the repo has none). A hosted document carries its `sha256`, an external one its `url`. The list holds the documents of the entry's own repo only, not those of files installed together with it, so Perch v2 reports its own licence and none of the geomodel repo's documents even though it downloads geomodel files. `kind` is an open vocabulary (`license`, `acceptable_use`, others) that the API passes through unchanged. The documents come from a registry compiled into the binary from the acoustic-models manifests, so a hand-edited `model-catalog.json` reports them for any entry whose `hugging_face_repo` still names a known repo. Document text is plain text that the server fetches from the repo at the pinned revision (through the same endpoint chain and mirror failover as model downloads), checks against the pinned `sha256` and caches under the config directory; text that does not verify is never served. `GET /api/v2/models/documents/:sha256` returns it. `agreed` is true when an agreement is recorded for that repo, kind and `sha256`. Agreements are stored in `model-agreements.json` in the config directory, written only by the server and never through the settings API; a changed document text has a new `sha256` and is not agreed until the user agrees to it. `POST /api/v2/models/install/:id` and `POST /api/v2/models/reinstall/:id` accept an optional `acceptedDocuments` list of `sha256` values: each must be a `requiresAgreement` document of that entry's own repo, else `400`, and its text must verify, else `502` as above. The agreements are recorded once the request is accepted with `202`, never for a request that is refused. An install, variant swap or reinstall is refused with `409` and `error_key` `analysis.gallery.errors.agreementRequired` while a `requiresAgreement` document of the entry's own repo is neither agreed nor in `acceptedDocuments`; `error_params` is `{name, documents}` with `documents` a list of `{repo, kind, sha256}`. The refusal records nothing and leaves no operation slot held. A request for an entry with nothing outstanding keeps working without a body, and an entry whose repo has no registered documents has nothing to agree to. Files installed automatically with another model (the geomodel files that arrive with Perch v2 or BirdNET+ v3.0, and `dependsOn` entries) are never gated; only the entry the user installs is.
+
+**Superseded models** - `GET /api/v2/models/catalog` reports `supersededBy` (`{id, name}`) on an entry that a newer catalog entry replaces. The field is omitted when nothing replaces the entry and when the successor is hidden, so the gallery never points at a model it does not list. A superseded entry stays installable.
+
+**Model updates** - `GET /api/v2/models/catalog` reports `update` (`{variantId, fromVersion, toVersion, fromBuild, toBuild}`) on an installed entry whose installed variant is superseded by a newer release or a newer build of the same release (a Legacy variant whose successor is a live variant of a different release or of a higher build). `variantId` is the successor variant to install; `fromVersion` and `toVersion` are the two releases, `fromBuild` and `toBuild` the build numbers within them (1 or more). The field is omitted when the installed build is current, when the entry is not installed, when the entry is itself superseded by a visible entry (see above), and for a withdrawn build whose successor is of the same release and build. It depends on install state and the catalog only, so unlike the hardware recommendations it is reported to anonymous callers too. The same condition raises a persistent bell notice, which only informs: nothing is downloaded until the user chooses Update on the model card, and the update goes through the normal install request (so an outstanding agreement is still asked for).
+
+**Release notes** - `GET /api/v2/models/catalog` reports `builds` on an entry whose builds carry release notes: a list of `{version, build, date, reason?, notes?}` ordered by release string (compared as text) and then build, omitted when the entry has none. `date` is `YYYY-MM-DD`; `reason` (one sentence) and `notes` (a list of sentences) are English text from the upstream model manifest, not translated, and are plain text. Each variant reports `version` (the release of its files) and `build` (1 or more); a variant's notes are the record with the same `version` and `build`, and a build without a record has no notes. The gallery shows the notes of the build an update installs before it runs.
+
+**One model operation at a time** - The model manager runs a single operation at once: install, variant swap, reinstall and uninstall all share one slot. The install and reinstall endpoints reserve it before answering 202, so a request made while another operation runs is refused synchronously with `409 Conflict` and nothing is changed. The body carries `error_key` `analysis.gallery.errors.operationInProgress` and `error_params` `{name, operation, running}`, where `name` is the display name of the model whose operation is running, `operation` is `install`, `reinstall` or `uninstall`, and `running` is `{id, name}`. A failed operation frees the slot at once. `GET /api/v2/models/install/:id/progress` reports `complete` only after the entry's operation has released the slot (an install holds it through the hot-load that follows the download), so a client can start the next operation as soon as it sees `complete`. This includes requests made during an uninstall.
+
+**Cancelling a download** - `POST /api/v2/models/install/:id/cancel` cancels an install or variant swap, never a reinstall (a reinstall unloads the running model first, so stopping it would leave the model stopped). It answers `202 Accepted` with status `cancelling` once the download has started and activation has not: the cancel is refused with `409 Conflict` (`error_key` `analysis.gallery.errors.cancelUnavailable`, `error_params` `{name}`) when no cancellable operation runs for the entry, before the operation has registered its download, or once activation has begun (progress status `loading`), and a refused cancel changes nothing. An accepted cancel always ends the operation: the progress stream reports the terminal status `cancelled` (no `error`), the files the call wrote and its temporary files are removed, the operation slot is free at once, and an installed model keeps its previous variant installed and running. A cancel sent after activation started, or after the download ended, is refused with 409 and changes nothing; an install past that point completes and the stream reports `complete`. A `failed` or `cancelled` state is sent over the stream only after the entry's operation has released the slot, so a retry started at once is neither refused nor shown the previous attempt's outcome.
+
+**GET /api/v2/models** - Returns the enabled classifier models (those listed in `models.enabled`). Each entry includes a config alias (`id`, used in audio source configuration), a human-readable display name, and the classifier `registryId` (e.g. `BirdNET_V2.4`) that joins against the registry-ID `defaultTargets` list served by `GET /api/v2/system/inference`. The `name` is the neutral model name with no backend suffix (for example `BirdNET v2.4`, not `BirdNET v2.4 (TFLite)`). A model that is loaded also carries `backend` (the live execution backend, for example `TFLite`, `ONNX` or `OpenVINO`) and `precision` (the live runtime precision, for example `FP32` or `INT8`); both are omitted for a model that is not loaded. They describe the host, so like the catalog's recommendation fields they are omitted for an anonymous request on an instance that requires authentication. Every entry carries `state`: `loaded` (the model is loaded and can run), `failed` (enabled, not loaded, and its last load failed) or `pending` (enabled, not loaded, no load error on record). The state is not host data, so it is reported to every caller. A successful install, reinstall or uninstall also sends a topology change event on the SSE stream, so clients refetch the list.
 
 **Response:**
 
 ```json
 [
-  { "id": "birdnet", "name": "BirdNET GLOBAL 6K V2.4" },
-  { "id": "perch_v2", "name": "Google Perch V2" }
+  {
+    "id": "birdnet",
+    "name": "BirdNET v2.4",
+    "registryId": "BirdNET_V2.4",
+    "category": "bird",
+    "backend": "ONNX",
+    "precision": "INT8",
+    "state": "loaded"
+  },
+  {
+    "id": "perch_v2",
+    "name": "Google Perch v2",
+    "registryId": "Perch_V2",
+    "category": "bird",
+    "state": "pending"
+  }
 ]
 ```
 
@@ -599,28 +985,44 @@ Requires enhanced (v2) database. Returns 409 Conflict if not available.
 
 ### Diagnostics (`system/diagnostics.go`)
 
-| Method | Route                            | Handler                  | Auth | Description                    |
-| ------ | -------------------------------- | ------------------------ | ---- | ------------------------------ |
-| GET    | `/system/diagnostics/status`     | `GetDiagnosticsStatus`   | ✅   | Health summary for UI badge    |
-| POST   | `/system/diagnostics/run`        | `RunDiagnostics`         | ✅   | Run full diagnostic suite      |
-| GET    | `/system/diagnostics/report/:id` | `GetDiagnosticsReport`   | ✅   | Retrieve completed report      |
-| GET    | `/system/diagnostics/errors`     | `GetRecentErrors`        | ✅   | Recent error log entries       |
+| Method | Route                            | Handler                | Auth | Description                 |
+| ------ | -------------------------------- | ---------------------- | ---- | --------------------------- |
+| GET    | `/system/diagnostics/status`     | `GetDiagnosticsStatus` | ✅   | Health summary for UI badge |
+| POST   | `/system/diagnostics/run`        | `RunDiagnostics`       | ✅   | Run full diagnostic suite   |
+| GET    | `/system/diagnostics/report/:id` | `GetDiagnosticsReport` | ✅   | Retrieve completed report   |
+| GET    | `/system/diagnostics/errors`     | `GetRecentErrors`      | ✅   | Recent error log entries    |
+
+### Database migration (`imports/migration.go`, `imports/prerequisites.go`)
+
+Routes live under `/system/database/migration`. The prerequisite checks run as one background job per process; the client starts it with POST and polls GET.
+
+| Method | Route                | Handler            | Auth | Description                                                                               |
+| ------ | -------------------- | ------------------ | ---- | ----------------------------------------------------------------------------------------- |
+| GET    | `/prerequisites`     | `GetPrerequisites` | ✅   | Snapshot of the prerequisites run (idle, running, completed or failed); never starts work |
+| POST   | `/prerequisites/run` | `RunPrerequisites` | ✅   | Start the run, or join the one in progress; optional body `{"force": bool}`               |
+| POST   | `/start`             | `StartMigration`   | ✅   | Start the migration; needs a passing prerequisites run younger than 30 minutes            |
+
+**Prerequisites snapshot** - Both routes return the same JSON object: `status` (`idle`, `running`, `completed`, `failed`), `run_id` (increases with every run in this process), `started_at`, `checked_at` (completion time of a completed run), `checks`, `all_passed`, `can_start_migration`, `critical_failures`, `warnings`, `error` (why a `failed` run did not finish) and, only while `running`, `progress` with `completed_steps`, `total_steps`, `current_check_id`, `current_check_name` and `current_check_elapsed_ms`. While a run is in progress `checks` holds the checks finished so far and `all_passed` and `can_start_migration` are false. `failed` means the run itself did not finish (time limit, shutdown, internal error); failing checks still give `completed`.
+
+**POST /api/v2/system/database/migration/prerequisites/run** - Joins the run in progress whatever `force` says. Without `force`, a completed passing result younger than 30 minutes for the same database settings is returned as is; `force` or a failing, older or differently configured result starts a new run. A malformed body returns 400 with `errors.migration.invalidBody`.
+
+**POST /api/v2/system/database/migration/start** - Needs a completed prerequisites run that passed, is younger than 30 minutes and ran against the current database settings. The slow checks (legacy database read, integrity or table health, MySQL permissions, record count) come from that run; the cheap ones (migration state, disk space, write permission, server version, character set) run again inside a 20 second limit. Without a usable run (none, in progress, older than 30 minutes, or for other database settings) it returns 409 with `errors.migration.prerequisitesNotReady`; when the usable stored run or the re-run checks have a failed critical check it returns 400 with `errors.migration.preFlightFailed` and the check name in `error_params.check` (a stored run that failed without a named check returns 409); when the start's own work (the re-run checks, or the record count when no total is known) outlasts the 20 second limit it returns 504 with `errors.migration.startFailed`. If the client has gone away, nothing is started; if the server is stopping, it returns 503 with `errors.migration.startFailed` and nothing is started. A successful start discards the stored run.
 
 ### Import (`imports/import.go`)
 
-| Method | Route                          | Handler              | Auth | Description                              |
-| ------ | ------------------------------ | -------------------- | ---- | ---------------------------------------- |
-| GET    | `/import/sources`              | `GetImportSources`   | ✅   | List auto-detected BirdNET-Pi databases and setup guidance |
-| POST   | `/import/validate`             | `ValidateImportSource` | ✅ | Probe a manually entered BirdNET-Pi database path |
-| POST   | `/import/elevate`              | `ElevateImport`      | ✅   | Stage an unreadable source via sudo elevation and launch import |
+| Method | Route                          | Handler                | Auth | Description                                                             |
+| ------ | ------------------------------ | ---------------------- | ---- | ----------------------------------------------------------------------- |
+| GET    | `/import/sources`              | `GetImportSources`     | ✅   | List auto-detected BirdNET-Pi databases and setup guidance              |
+| POST   | `/import/validate`             | `ValidateImportSource` | ✅   | Probe a manually entered BirdNET-Pi database path                       |
+| POST   | `/import/elevate`              | `ElevateImport`        | ✅   | Stage an unreadable source via sudo elevation and launch import         |
 | POST   | `/import/birdnet-pi`           | `StartBirdNETPiImport` | ✅   | Start a BirdNET-Pi import (`db-only`, or `db-audio` to also copy clips) |
-| GET    | `/import/jobs/:jobId/progress` | `StreamImportProgress` | ✅   | SSE progress stream for import job      |
-| POST   | `/import/jobs/:jobId/cancel`   | `CancelImport`         | ✅   | Cancel a running import                 |
-| GET    | `/import/status`               | `GetImportStatus`      | ✅   | Get current import status (polling)     |
+| GET    | `/import/jobs/:jobId/progress` | `StreamImportProgress` | ✅   | SSE progress stream for import job                                      |
+| POST   | `/import/jobs/:jobId/cancel`   | `CancelImport`         | ✅   | Cancel a running import                                                 |
+| GET    | `/import/status`               | `GetImportStatus`      | ✅   | Get current import status (polling)                                     |
 
 **GET /api/v2/system/diagnostics/status** - Returns the overall health status and per-category breakdown from the most recent diagnostic run. Returns `{"status": "unknown"}` if no diagnostics have been run yet.
 
-**POST /api/v2/system/diagnostics/run** - Executes all registered health checks in parallel (31 checks across 8 categories: system, audio, analysis, streams, database, network, config, logs). Returns a full `DiagnosticsReport` with per-check results, timing, and summary.
+**POST /api/v2/system/diagnostics/run** - Executes all registered health checks in parallel (across 8 categories: system, audio, analysis, streams, database, network, config, logs). Returns a full `DiagnosticsReport` with per-check results, timing, and summary. Optional query params: `window` (analysis time window) and `refresh_integrity=true`, which clears the cached database integrity result so this run re-runs the SQLite `PRAGMA quick_check` instead of reusing a result cached up to 24h (a present but unparseable value returns 400). Leave `refresh_integrity` unset for the passive status page: `quick_check` runs on the single pinned SQLite connection and can stall writes on a large database. Forced refreshes are coalesced with a short cooldown, so repeated requests cannot re-trigger back-to-back scans.
 
 **GET /api/v2/system/diagnostics/report/:id** - Retrieves a previously completed diagnostics report by its UUID. Up to 10 reports are cached in memory.
 
@@ -637,7 +1039,7 @@ Requires enhanced (v2) database. Returns 409 Conflict if not available.
 
 ## Adding New Endpoints
 
-See `internal/api/v2/CLAUDE.md` for the full architecture and the "add a new
+See `internal/api/v2/AGENTS.md` for the full architecture and the "add a new
 domain" recipe. To add an endpoint to an EXISTING domain:
 
 ### 1. Create the Handler method (on the domain's `*Handler`)
@@ -664,7 +1066,7 @@ func (c *Handler) RegisterRoutes(g *echo.Group) {
 
 No facade change is needed for a new endpoint in an existing domain. A brand-new
 domain additionally needs a `Controller` field, a `New(...)` call, and one ordered
-`RegisterRoutes` entry in `api.go:initRoutes()` (see CLAUDE.md Recipe B).
+`RegisterRoutes` entry in `api.go:initRoutes()` (see AGENTS.md Recipe B).
 
 ### 3. Update Documentation
 
@@ -742,10 +1144,12 @@ All API errors follow this structure:
 
 SSE endpoints are rate limited to prevent abuse:
 
-- Detection streams: 10 requests/minute per IP
-- Sound level streams: 10 requests/minute per IP
-- Stream health streams: 5 requests/minute per IP (authenticated, settings page)
-- Notification streams: 10 requests/minute per IP, burst of 15 (public, used by dashboard NotificationBell)
+- Detection and sound level streams: 10 requests/minute per client, burst of 10, shared by both streams
+- Stream health streams: 5 requests/minute per client (authenticated, settings page)
+- Metrics stream: 10 requests/minute per client, burst of 10 (authenticated)
+- Notification streams: 10 requests/minute per client, burst of 15 (public, used by dashboard NotificationBell)
+
+A client is identified by its address, and IPv6 clients are counted per /64. Behind a reverse proxy the address is the one the proxy reported, and only when it can be believed. A proxy listed in `security.trustedproxies` is believed when its forwarded headers agree on one client. A proxy that is not listed (a loopback, link-local or private peer) is believed only for the visitors it names in headers that agree. Each such visitor gets its own count, kept under that proxy's address, so a header cannot name a count that belongs to a direct client or to another proxy's visitor. A host that can reach the proxy directly can still name any visitor of that proxy, and an unlisted local host can name any visitor under its own address; those counts are bounded by the store caps and, for login and import elevation, by the per-peer limit (ten clients' worth of attempts for the connection peer as a whole). That per-peer limit does not apply to a request that arrives directly (no client-IP header, or a peer whose headers are ignored), which is counted against its own address alone, nor to a request that a proxy listed in `security.trustedproxies` by its own address (a bare IP, a /32 or a /128, not a range) verified without a Cloudflare edge hop in the chain; listing such a proxy therefore stops its visitors from locking each other out. A client verified by a listed range, a client verified by a listed proxy behind a Cloudflare edge hop, and a visitor an unlisted proxy names keep the per-peer limit. Listing the proxy in `security.trustedproxies` (and the `cloudflare` preset when Cloudflare edge addresses sit in front of it) gives counts that a header cannot choose, provided the proxy's headers verify; the Reverse proxy card on the Security settings page shows whether they do. Requests whose headers do not agree (for example a forged `CF-Connecting-IP` next to the address the proxy appended to `X-Forwarded-For`) all share one count per proxy. A peer that is neither listed nor local is the client, and its forwarded headers are ignored.
 
 ## Server-Sent Events (SSE)
 
@@ -759,8 +1163,9 @@ The `/notifications/stream` endpoint provides both notifications and toast messa
 - `toast` - Temporary UI messages (success, info, warning, error - authenticated only)
 - `connected` - Connection established
 - `heartbeat` - Keep-alive signal
+- `notification_deleted` - A notification was deleted on the server (a cleared or replaced persistent notice, or a delete from another tab); payload `{"id": "..."}`. Guests receive it only for detection notifications.
 
-**Authentication:** Public read-only SSE, rate-limited (10 connections per minute per IP, burst of 15). Guests receive bird-detection events only; operational/admin notifications and toast messages are suppressed for unauthenticated subscribers so that integration errors and system warnings are never exposed anonymously. Authenticated subscribers receive the full stream.
+**Authentication:** Public read-only SSE, rate-limited (10 connections per minute per client, burst of 15). Guests receive bird-detection events only; operational/admin notifications and toast messages are suppressed for unauthenticated subscribers so that integration errors and system warnings are never exposed anonymously. Authenticated subscribers receive the full stream.
 
 **Toast Event Format:**
 
@@ -943,7 +1348,7 @@ The API reports these error types (from PR #1380):
 #### GET /api/v2/streams/health/stream
 
 **Authentication:** Required
-**Rate Limit:** 5 connections per minute per IP
+**Rate Limit:** 5 connections per minute per client
 **Connection Duration:** Maximum 30 minutes
 
 Establishes a Server-Sent Events (SSE) connection that pushes real-time updates when stream health changes. This is more efficient than polling for monitoring dashboards that need immediate notification of stream issues.

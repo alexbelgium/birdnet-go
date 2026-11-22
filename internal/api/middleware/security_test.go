@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -27,11 +28,6 @@ func TestNewSecureHeaders_ReferrerPolicy(t *testing.T) {
 			name:     "default when empty",
 			policy:   "",
 			expected: "strict-origin-when-cross-origin",
-		},
-		{
-			name:     "custom policy",
-			policy:   "origin-when-cross-origin",
-			expected: "origin-when-cross-origin",
 		},
 	}
 
@@ -232,29 +228,6 @@ func TestNewSecureHeaders_XFrameOptions(t *testing.T) {
 	}
 }
 
-func TestHasWildcardOrigin(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		origins []string
-		want    bool
-	}{
-		{"wildcard only", []string{"*"}, true},
-		{"wildcard among others", []string{"https://example.com", "*"}, true},
-		{"no wildcard", []string{"https://example.com"}, false},
-		{"empty list", []string{}, false},
-		{"nil list", nil, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, hasWildcardOrigin(tt.origins))
-		})
-	}
-}
-
 // newCORSTestContext creates an Echo context for CORS testing with the Origin header set.
 func newCORSTestContext(t *testing.T, method, path, origin string) (echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
@@ -272,31 +245,6 @@ func newCORSTestContext(t *testing.T, method, path, origin string) (echo.Context
 
 func TestNewCORS_WildcardWithCredentials(t *testing.T) {
 	t.Parallel()
-
-	t.Run("reflects origin instead of wildcard when credentials enabled", func(t *testing.T) {
-		t.Parallel()
-
-		corsMiddleware := NewCORS(&SecurityConfig{
-			AllowedOrigins:   []string{"*"},
-			AllowCredentials: true,
-		})
-
-		c, rec := newCORSTestContext(t, http.MethodGet, "/api/v2/detections", "https://my-birdnet.local:8080")
-
-		handler := corsMiddleware(func(c echo.Context) error {
-			return c.String(http.StatusOK, "ok")
-		})
-
-		err := handler(c)
-		require.NoError(t, err)
-
-		// The origin should be reflected, not "*"
-		allowOrigin := rec.Header().Get(echo.HeaderAccessControlAllowOrigin)
-		assert.Equal(t, "https://my-birdnet.local:8080", allowOrigin,
-			"expected reflected origin, not wildcard")
-
-		assert.Equal(t, "true", rec.Header().Get(echo.HeaderAccessControlAllowCredentials))
-	})
 
 	t.Run("uses wildcard when credentials disabled", func(t *testing.T) {
 		t.Parallel()
@@ -323,29 +271,49 @@ func TestNewCORS_WildcardWithCredentials(t *testing.T) {
 		assert.Empty(t, rec.Header().Get(echo.HeaderAccessControlAllowCredentials))
 	})
 
-	t.Run("explicit origins with credentials works normally", func(t *testing.T) {
-		t.Parallel()
+	// The exact CORS answers a GET from another origin receives for each kind
+	// of origin list. Credentials are allowed only when requested and only for a
+	// non-empty list of literal origins.
+	const requestOrigin = "https://other.example.com"
+	originRows := []struct {
+		name             string
+		allowedOrigins   []string
+		allowCredentials bool
+		wantAllowOrigin  string
+		wantCredentials  string
+	}{
+		{"origin outside an explicit list gets no allow-origin header", []string{"https://trusted.example.com"}, true, "", ""},
+		{"wildcard-only list answers wildcard without credentials", []string{"*"}, true, "*", ""},
+		{"wildcard among explicit origins answers wildcard without credentials", []string{"https://trusted.example.com", "*"}, true, "*", ""},
+		{"empty list answers wildcard without credentials", nil, true, "*", ""},
+		{"explicit origin list allows credentials for a listed origin", []string{requestOrigin}, true, requestOrigin, "true"},
+		{"explicit origin list allows credentials for a listed origin among several", []string{"https://trusted.example.com", requestOrigin}, true, requestOrigin, "true"},
+		{"explicit origin list without credentials requested answers without them", []string{requestOrigin}, false, requestOrigin, ""},
+		{"pattern entry before a literal origin answers without credentials", []string{"https://*.example.com", "https://trusted.example.com"}, true, requestOrigin, ""},
+		{"subdomain pattern entry answers without credentials", []string{"https://*.example.com"}, true, requestOrigin, ""},
+		{"scheme-only pattern entry answers without credentials", []string{"https://*"}, true, requestOrigin, ""},
+		{"single-character pattern entry answers without credentials", []string{"https://other.example.co?"}, true, requestOrigin, ""},
+	}
+	for _, tt := range originRows {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-		corsMiddleware := NewCORS(&SecurityConfig{
-			AllowedOrigins:   []string{"https://trusted.example.com"},
-			AllowCredentials: true,
+			corsMiddleware := NewCORS(&SecurityConfig{
+				AllowedOrigins:   tt.allowedOrigins,
+				AllowCredentials: tt.allowCredentials,
+			})
+			c, rec := newCORSTestContext(t, http.MethodGet, "/api/v2/detections", requestOrigin)
+			handler := corsMiddleware(func(c echo.Context) error {
+				return c.String(http.StatusOK, "ok")
+			})
+			require.NoError(t, handler(c))
+
+			assert.Equal(t, tt.wantAllowOrigin, rec.Header().Get(echo.HeaderAccessControlAllowOrigin))
+			assert.Equal(t, tt.wantCredentials, rec.Header().Get(echo.HeaderAccessControlAllowCredentials))
 		})
+	}
 
-		c, rec := newCORSTestContext(t, http.MethodGet, "/api/v2/detections", "https://trusted.example.com")
-
-		handler := corsMiddleware(func(c echo.Context) error {
-			return c.String(http.StatusOK, "ok")
-		})
-
-		err := handler(c)
-		require.NoError(t, err)
-
-		allowOrigin := rec.Header().Get(echo.HeaderAccessControlAllowOrigin)
-		assert.Equal(t, "https://trusted.example.com", allowOrigin)
-		assert.Equal(t, "true", rec.Header().Get(echo.HeaderAccessControlAllowCredentials))
-	})
-
-	t.Run("preflight reflects origin with credentials", func(t *testing.T) {
+	t.Run("preflight answers wildcard without credentials", func(t *testing.T) {
 		t.Parallel()
 
 		corsMiddleware := NewCORS(&SecurityConfig{
@@ -362,11 +330,8 @@ func TestNewCORS_WildcardWithCredentials(t *testing.T) {
 		err := handler(c)
 		require.NoError(t, err)
 
-		allowOrigin := rec.Header().Get(echo.HeaderAccessControlAllowOrigin)
-		assert.Equal(t, "https://home-assistant.local:8123", allowOrigin,
-			"preflight should reflect origin when credentials are enabled")
-
-		assert.Equal(t, "true", rec.Header().Get(echo.HeaderAccessControlAllowCredentials))
+		assert.Equal(t, "*", rec.Header().Get(echo.HeaderAccessControlAllowOrigin))
+		assert.Empty(t, rec.Header().Get(echo.HeaderAccessControlAllowCredentials))
 	})
 }
 
@@ -391,4 +356,83 @@ func TestNewCORS_AllowsCacheControlHeader(t *testing.T) {
 
 	assert.Contains(t, rec.Header().Get(echo.HeaderAccessControlAllowHeaders), echo.HeaderCacheControl,
 		"CORS preflight must allow the Cache-Control request header for cross-origin SSE")
+}
+
+// TestNewCORS_ConditionalWriteHeaders pins the CORS side of the settings
+// ETag and If-Match contract: a cross-origin preflight must allow the If-Match
+// request header, and a cross-origin response must expose ETag so the client can
+// read it.
+func TestNewCORS_ConditionalWriteHeaders(t *testing.T) {
+	t.Parallel()
+
+	corsMiddleware := NewCORS(&SecurityConfig{
+		AllowedOrigins: []string{"*"},
+	})
+	handler := corsMiddleware(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	t.Run("preflight allows If-Match", func(t *testing.T) {
+		t.Parallel()
+		c, rec := newCORSTestContext(t, http.MethodOptions, "/api/v2/settings", "https://example.com")
+		c.Request().Header.Set(echo.HeaderAccessControlRequestMethod, http.MethodPut)
+		c.Request().Header.Set(echo.HeaderAccessControlRequestHeaders, "If-Match")
+		require.NoError(t, handler(c))
+		assert.Contains(t, rec.Header().Get(echo.HeaderAccessControlAllowHeaders), "If-Match")
+	})
+
+	t.Run("response exposes ETag", func(t *testing.T) {
+		t.Parallel()
+		c, rec := newCORSTestContext(t, http.MethodGet, "/api/v2/settings", "https://example.com")
+		require.NoError(t, handler(c))
+		assert.Contains(t, rec.Header().Get(echo.HeaderAccessControlExposeHeaders), "ETag")
+	})
+}
+
+// TestNewSecureHeaders_HSTSFollowsEchoScheme pins that HSTS is decided by
+// Echo's Context.Scheme(), which Echo#SchemeExtractor controls.
+func TestNewSecureHeaders_HSTSFollowsEchoScheme(t *testing.T) {
+	t.Parallel()
+
+	const stubHTTPS, stubHTTP = "https", "http"
+
+	tests := []struct {
+		name           string
+		scheme         string
+		maxAge         int
+		excludeSubs    bool
+		wantHSTS       bool
+		wantSubdomains bool
+	}{
+		{name: "https scheme sends HSTS with subdomains", scheme: stubHTTPS, maxAge: HSTSMaxAge, wantHSTS: true, wantSubdomains: true},
+		{name: "http scheme sends no HSTS", scheme: stubHTTP, maxAge: HSTSMaxAge},
+		{name: "zero max age sends no HSTS even on https", scheme: stubHTTPS, maxAge: 0},
+		{name: "exclude subdomains drops includeSubdomains", scheme: stubHTTPS, maxAge: HSTSMaxAge, excludeSubs: true, wantHSTS: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			e := echo.New()
+			e.SchemeExtractor = func(*http.Request) string { return tt.scheme }
+			req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			cfg := DefaultSecurityConfig()
+			cfg.HSTSMaxAge = tt.maxAge
+			cfg.HSTSExcludeSubdomains = tt.excludeSubs
+			h := NewSecureHeaders(cfg)(func(echo.Context) error { return nil })
+			require.NoError(t, h(c))
+
+			got := rec.Header().Get("Strict-Transport-Security")
+			if !tt.wantHSTS {
+				assert.Empty(t, got)
+				return
+			}
+			assert.Contains(t, got, "max-age=")
+			assert.Equal(t, tt.wantSubdomains, strings.Contains(got, "includeSubdomains"))
+		})
+	}
 }

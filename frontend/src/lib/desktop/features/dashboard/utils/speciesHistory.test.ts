@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { getLocale } from '$lib/i18n';
 import {
   DAY_MS,
   axisLabel,
@@ -13,6 +14,7 @@ import {
   parseYmd,
   rangeWindow,
   selectPeakIndices,
+  fullDayLabel,
   shortDayLabel,
   topRoundedBarPath,
 } from './speciesHistory';
@@ -148,6 +150,9 @@ describe('movingAverage', () => {
   });
 });
 
+// Intl range output uses thin/narrow no-break spaces around the dash.
+const plain = (text: string): string => text.replace(/[\u2009\u202f\u00a0]/g, ' ');
+
 describe('labels', () => {
   it('formats day, week and month bucket labels', () => {
     const day = {
@@ -164,7 +169,7 @@ describe('labels', () => {
       endMs: parseYmd('2026-06-18'),
       count: 1,
     };
-    expect(bucketLabel(week, 'week')).toBe('Jun 12 – 18, 2026');
+    expect(plain(bucketLabel(week, 'week'))).toBe('Jun 12 – 18, 2026');
 
     const weekAcross = {
       key: '2026-06-29',
@@ -172,7 +177,7 @@ describe('labels', () => {
       endMs: parseYmd('2026-07-05'),
       count: 1,
     };
-    expect(bucketLabel(weekAcross, 'week')).toBe('Jun 29 – Jul 5, 2026');
+    expect(plain(bucketLabel(weekAcross, 'week'))).toBe('Jun 29 – Jul 5, 2026');
 
     const month = {
       key: '2026-06-01',
@@ -197,11 +202,23 @@ describe('labels', () => {
       endMs: parseYmd('2026-06-30'),
       count: 1,
     };
-    expect(axisLabel(month, 'month')).toBe("Jun '26");
+    expect(axisLabel(month, 'month')).toBe('Jun 26');
   });
 
   it('shortDayLabel drops the year', () => {
     expect(shortDayLabel(parseYmd('2026-01-03'))).toBe('Jan 3');
+  });
+
+  it('follows the active locale for field order and month names', () => {
+    vi.mocked(getLocale).mockReturnValue('de');
+    try {
+      expect(shortDayLabel(parseYmd('2026-06-12'))).toBe('12. Juni');
+      expect(fullDayLabel(parseYmd('2026-06-12'))).toBe('12. Juni 2026');
+    } finally {
+      vi.mocked(getLocale).mockReturnValue('en');
+    }
+    // Switching back must not reuse the German formatter.
+    expect(shortDayLabel(parseYmd('2026-06-12'))).toBe('Jun 12');
   });
 });
 

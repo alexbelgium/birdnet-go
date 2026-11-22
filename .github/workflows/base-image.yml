@@ -4,10 +4,11 @@ name: Container base image
 # library layer (Debian packages, ONNX Runtime, TFLite C, OpenVINO runtime, Intel
 # NEO/IGC) that the application image stacks on top of via `FROM ${BASE_IMAGE}`.
 #
-# The base tag is content-addressed from the Dockerfile itself
-# (base-<sha256(Dockerfile)[:12]>), so any change to the base recipe or its pins
-# yields a new tag and forces a rebuild, while unchanged recipes always resolve to
-# an already-published tag. Application releases dedup against the immutable base
+# The base tag is content-addressed from the Dockerfile and the two files its
+# ort-fetch stage copies (scripts/fetch-onnxruntime.sh and
+# scripts/onnxruntime-pins.sha256), so any change to the base recipe, its pins or
+# the ONNX Runtime download source yields a new tag and forces a rebuild, while
+# unchanged recipes always resolve to an already-published tag. Application releases dedup against the immutable base
 # blobs regardless of BuildKit cache state, which is the whole point of the split.
 #
 # Triggers:
@@ -62,17 +63,18 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Compute base repo and content-addressed tag
         id: meta
         run: |
           # Lowercase the owner/repo for a valid image ref, and append -base.
           BASE_REPO="ghcr.io/${GITHUB_REPOSITORY,,}-base"
-          # Content-address the tag on the Dockerfile. Any recipe/pin change yields
-          # a new tag; an unchanged Dockerfile always resolves to the same tag so
-          # normal app releases reuse the already-published base.
-          TAG="base-$(sha256sum Dockerfile | cut -c1-12)"
+          # Content-address the tag on every input of runtime-base: the Dockerfile
+          # and the ONNX Runtime fetch script and pins it copies. Any recipe, pin
+          # or source change yields a new tag; unchanged inputs always resolve to
+          # the same tag so normal app releases reuse the already-published base.
+          TAG="base-$(sha256sum Dockerfile scripts/fetch-onnxruntime.sh scripts/onnxruntime-pins.sha256 | sha256sum | cut -c1-12)"
           echo "base-repo=${BASE_REPO}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Base image: ${BASE_REPO}:${TAG}"
@@ -110,7 +112,7 @@ jobs:
 
       - name: Build and push base image
         if: steps.exists.outputs.build == 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           # Build only the heavy runtime-base stage; buildx skips buildenv/build

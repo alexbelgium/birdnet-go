@@ -29,7 +29,13 @@
   import NumberField from '$lib/desktop/components/forms/NumberField.svelte';
   import StreamManager from '$lib/desktop/components/forms/StreamManager.svelte';
   import SoundCardManager from '$lib/desktop/components/forms/SoundCardManager.svelte';
-  import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import {
+    problemSourceNames,
+    problemStreamNames,
+    soundCardProblems,
+    streamProblems,
+  } from '$lib/desktop/components/forms/sourceRules';
+  import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import TextInput from '$lib/desktop/components/forms/TextInput.svelte';
   import InlineSlider from '$lib/desktop/components/forms/InlineSlider.svelte';
@@ -40,16 +46,30 @@
     rtspSettings,
     realtimeSettings,
     extendedCaptureSettings,
+    setValidationIssues,
     type AudioSourceConfig,
+    type DenoiseSettings,
     type EqualizerFilterType,
     type StreamConfig,
   } from '$lib/stores/settings';
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
+  import { cn } from '$lib/utils/cn';
+  import { onDestroy } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
+  import Skeleton from '$lib/desktop/components/ui/Skeleton.svelte';
+  import SkeletonStatus from '$lib/desktop/components/ui/SkeletonStatus.svelte';
+  import {
+    DEFAULT_DENOISE_PRESET,
+    DENOISE_STRENGTH_OPTIONS,
+    isDenoisePresetId,
+  } from '$lib/utils/denoisePresets';
   import SettingsTabs, {
     type TabDefinition,
   } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
+  import { SETTINGS_CARD_HEADER_CLASSES } from '$lib/desktop/features/settings/components/SettingsCard.svelte';
   import SettingsNote from '$lib/desktop/features/settings/components/SettingsNote.svelte';
   import EmptyState from '$lib/desktop/features/settings/components/EmptyState.svelte';
   import AudioEqualizerSettings from '$lib/desktop/features/settings/components/AudioEqualizerSettings.svelte';
@@ -58,7 +78,14 @@
   import { getLocale } from '$lib/i18n';
   import { loggers } from '$lib/utils/logger';
   import { getBitrateConfig, formatBitrate, parseNumericBitrate } from '$lib/utils/audioValidation';
-  import { chooseBitrateForFormat, isExportFormat, type ExportFormat } from './audioExportFormat';
+  import {
+    chooseBitrateForFormat,
+    isExportFormat,
+    isLosslessExportFormat,
+    DENOISE_LOSSY_MIN_BITRATE_KBPS,
+    type ExportFormat,
+    type LosslessExportFormat,
+  } from './audioExportFormat';
   import {
     Volume2,
     Radio,
@@ -67,6 +94,14 @@
     Clock,
     RefreshCw,
     Info,
+    Mic,
+    WandSparkles,
+    Gauge,
+    SlidersVertical,
+    FileVolume,
+    Timer,
+    FolderCog,
+    Archive,
   } from '@lucide/svelte';
   import { api } from '$lib/utils/api';
   import { type AudioDevice } from '$lib/utils/audioDevices';
@@ -92,6 +127,18 @@
       { value: 'aac', label: t('settings.audio.formats.aac') },
       { value: 'opus', label: t('settings.audio.formats.opus') },
       { value: 'mp3', label: t('settings.audio.formats.mp3') },
+    ];
+  });
+
+  // Ultrasonic export is restricted to the two lossless containers (WAV/FLAC)
+  // that carry any sample rate natively, so a bat capture above the analysis rate
+  // is preserved losslessly at its full source rate.
+  const ultrasonicExportFormatOptions = $derived.by(() => {
+    // By accessing getLocale(), this will only recompute when locale changes
+    getLocale();
+    return [
+      { value: 'flac', label: t('settings.audio.formats.flac') },
+      { value: 'wav', label: t('settings.audio.formats.wav') },
     ];
   });
 
@@ -133,6 +180,7 @@
           enabled: false,
           path: 'clips/',
           type: 'wav' as const,
+          ultrasonicType: 'flac' as const,
           bitrate: '96k',
           retention: {
             policy: 'none',
@@ -149,6 +197,10 @@
             targetLUFS: -23.0, // EBU R128 broadcast standard
             loudnessRange: 7.0, // Typical range for broadcast
             truePeak: -2.0, // Headroom to prevent clipping
+          },
+          denoise: {
+            enabled: false, // Off by default
+            strength: DEFAULT_DENOISE_PRESET,
           },
         },
       };
@@ -181,20 +233,46 @@
   );
   let store = $derived($settingsStore);
 
-  // PERFORMANCE OPTIMIZATION: Reactive change detection per tab with $derived
-  // Sound Card tab changes
-  let soundCardTabHasChanges = $derived(
-    hasSettingsChanged(
-      store.originalData.realtime?.audio?.sources,
-      store.formData.realtime?.audio?.sources
-    )
+  // The page defaults and the settings coercion keep this object complete, so the
+  // update below always writes both fields.
+  let exportDenoise = $derived<DenoiseSettings>(settings.audio.export.denoise);
+  let isLossyExportType = $derived(!isLosslessExportFormat(settings.audio.export.type));
+  const denoiseStrengthOptions = $derived(
+    DENOISE_STRENGTH_OPTIONS.map(option => ({
+      value: option.id,
+      label: t(option.labelKey),
+    }))
   );
+
+  // Writes the denoise object whole: updateSection merges shallowly, so a partial
+  // object would drop the other field.
+  function updateExportDenoise(patch: Partial<DenoiseSettings>) {
+    settingsActions.updateSection('realtime', {
+      audio: {
+        ...settings.audio,
+        export: {
+          ...settings.audio.export,
+          denoise: { ...exportDenoise, ...patch },
+        },
+      },
+    });
+  }
+
+  // PERFORMANCE OPTIMIZATION: Reactive change detection per tab with $derived.
 
   // Streams tab changes
   let streamsTabHasChanges = $derived(
     hasSettingsChanged(
       store.originalData.realtime?.rtsp?.streams,
       store.formData.realtime?.rtsp?.streams
+    )
+  );
+
+  // Sound card tab changes
+  let soundCardTabHasChanges = $derived(
+    hasSettingsChanged(
+      store.originalData.realtime?.audio?.sources,
+      store.formData.realtime?.audio?.sources
     )
   );
 
@@ -206,7 +284,15 @@
     )
   );
 
-  // Processing tab changes (equalizer + sound level + normalization)
+  // Export denoise section changes
+  let denoiseHasChanges = $derived(
+    hasSettingsChanged(
+      store.originalData.realtime?.audio?.export?.denoise,
+      store.formData.realtime?.audio?.export?.denoise
+    )
+  );
+
+  // Processing tab changes (equalizer + sound level + normalization + denoise)
   let processingTabHasChanges = $derived(
     hasSettingsChanged(
       {
@@ -217,7 +303,9 @@
         equalizer: store.formData.realtime?.audio?.equalizer,
         soundLevel: store.formData.realtime?.audio?.soundLevel,
       }
-    ) || normalizationHasChanges
+    ) ||
+      normalizationHasChanges ||
+      denoiseHasChanges
   );
 
   // Clip Recording section changes (enable, capture settings)
@@ -244,11 +332,13 @@
       {
         path: store.originalData.realtime?.audio?.export?.path,
         type: store.originalData.realtime?.audio?.export?.type,
+        ultrasonicType: store.originalData.realtime?.audio?.export?.ultrasonicType,
         bitrate: store.originalData.realtime?.audio?.export?.bitrate,
       },
       {
         path: store.formData.realtime?.audio?.export?.path,
         type: store.formData.realtime?.audio?.export?.type,
+        ultrasonicType: store.formData.realtime?.audio?.export?.ultrasonicType,
         bitrate: store.formData.realtime?.audio?.export?.bitrate,
       }
     )
@@ -289,6 +379,8 @@
     error: null,
     data: [],
   });
+  // Set once the first device load has finished, so a refresh keeps the view it has.
+  let devicesLoadedOnce = $state(false);
 
   // PERFORMANCE OPTIMIZATION: Load audio devices with proper state management
   $effect(() => {
@@ -302,6 +394,9 @@
     try {
       const data = await api.get<AudioDevice[]>('/api/v2/system/audio/devices');
       audioDevices.data = data || [];
+      // Only a load that answered counts: after a failure, Retry shows the
+      // skeleton again instead of an empty state that is not known yet.
+      devicesLoadedOnce = true;
     } catch (error) {
       logger.error('Error fetching audio devices:', error);
       audioDevices.error = t('settings.audio.errors.devicesLoadFailed');
@@ -413,9 +508,6 @@
     })()
   );
 
-  // Check if ffmpeg is available
-  let ffmpegAvailable = $state(true); // Assume true for now
-
   // Bitrate slider configuration based on format
   let bitrateConfig = $derived(getBitrateConfig(settings.audio.export.type));
 
@@ -431,37 +523,94 @@
     keepSpectrograms: settings.audio.export?.retention?.keepSpectrograms || false,
   });
 
-  // Update handlers
-  function updateAudioSources(sources: AudioSourceConfig[]) {
-    for (const src of sources) {
-      logger.debug('updateAudioSources', {
-        component: 'AudioSettingsPage',
-        sourceName: src.name,
-        eqPresent: src.equalizer !== undefined,
-        eqEnabled: src.equalizer?.enabled,
-        eqFilterCount: src.equalizer?.filters?.length ?? 0,
-      });
-    }
-    settingsActions.updateSection('realtime', {
-      audio: { ...$audioSettings!, sources },
-    });
+  // What blocks Save is a pure function of the form and the saved values, so the
+  // page evaluates it whichever tab is open (only the active tab is mounted). The
+  // key set is fixed: one key per kind of problem, never one per row.
+  const SOUNDCARDS_ISSUE_KEY = 'audio-soundcards-invalid';
+  const STREAMS_ISSUE_KEY = 'audio-streams-invalid';
+  const STREAMS_UNTESTED_ISSUE_KEY = 'audio-streams-untested';
+  const VALIDATION_ISSUE_KEYS = [
+    SOUNDCARDS_ISSUE_KEY,
+    STREAMS_ISSUE_KEY,
+    STREAMS_UNTESTED_ISSUE_KEY,
+  ];
+  // Counts Resets of the form; keys the sound card manager.
+  let resetCount = $state(0);
+  let savedSources = $derived(store.originalData.realtime?.audio?.sources ?? []);
+  let savedStreams = $derived(store.originalData.realtime?.rtsp?.streams ?? []);
+  // URLs whose test succeeded in this page session. The page holds them, since
+  // only the active tab is mounted and a tab switch would otherwise forget them.
+  const testedUrls = new SvelteSet<string>();
+
+  let soundCardIssue = $derived.by(() => {
+    const names = problemSourceNames(
+      settings.audio.sources,
+      soundCardProblems(settings.audio.sources, savedSources),
+      position => t('settings.audio.validation.unnamedSource', { position })
+    );
+    return names.length > 0
+      ? t('settings.audio.validation.soundCards', {
+          tab: t('settings.audio.tabs.soundCard'),
+          names: names.join(', '),
+        })
+      : undefined;
+  });
+
+  // The save bar names each invalid stream once: a stream whose only problem is an
+  // untested URL is listed apart from the streams with a name or URL error.
+  const STREAM_ISSUE_MESSAGES = new Map([
+    ['invalid', 'settings.audio.validation.streams'],
+    ['untested', 'settings.audio.validation.streamsUntested'],
+  ] as const);
+  let streamProblemList = $derived(streamProblems(settings.rtsp.streams, savedStreams, testedUrls));
+
+  function streamIssue(kind: 'invalid' | 'untested'): string | undefined {
+    const names = problemStreamNames(
+      settings.rtsp.streams,
+      streamProblemList,
+      position => t('settings.audio.validation.unnamedStream', { position }),
+      kind
+    );
+    const messageKey = STREAM_ISSUE_MESSAGES.get(kind);
+    return names.length > 0 && messageKey
+      ? t(messageKey, {
+          tab: t('settings.audio.tabs.streams'),
+          names: names.join(', '),
+        })
+      : undefined;
   }
 
-  function updateRTSPStreams(streams: StreamConfig[]) {
-    const storeState = $settingsStore;
-    const currentRtsp = storeState.formData.realtime?.rtsp || { streams: [] };
+  let streamsIssue = $derived(streamIssue('invalid'));
+  let streamsUntestedIssue = $derived(streamIssue('untested'));
 
+  $effect(() => {
+    const active = new Map<string, string>();
+    if (soundCardIssue) active.set(SOUNDCARDS_ISSUE_KEY, soundCardIssue);
+    if (streamsIssue) active.set(STREAMS_ISSUE_KEY, streamsIssue);
+    if (streamsUntestedIssue) active.set(STREAMS_UNTESTED_ISSUE_KEY, streamsUntestedIssue);
+    setValidationIssues(VALIDATION_ISSUE_KEYS, active);
+  });
+  onDestroy(() => setValidationIssues(VALIDATION_ISSUE_KEYS, new Map()));
+
+  // Update handlers
+  // The sound card tab writes the whole sources array into the form; the page's
+  // Save Changes bar persists it.
+  function updateAudioSources(sources: AudioSourceConfig[]) {
+    settingsActions.updateSection('realtime', { audio: { ...settings.audio, sources } });
+  }
+
+  // The streams tab writes the whole streams array into the form. The store's own
+  // rtsp object is spread: the page's `settings.rtsp` view keeps only two of its
+  // keys and would drop ffmpegParameters.
+  function updateRTSPStreams(streams: StreamConfig[]) {
     settingsActions.updateSection('realtime', {
-      rtsp: {
-        ...currentRtsp,
-        streams,
-      },
+      rtsp: { ...store.formData.realtime?.rtsp, streams },
     });
   }
 
   function updateExportEnabled(enabled: boolean) {
     settingsActions.updateSection('realtime', {
-      audio: { ...$audioSettings!, export: { ...settings.audio.export, enabled } },
+      audio: { ...settings.audio, export: { ...settings.audio.export, enabled } },
     });
   }
 
@@ -469,8 +618,17 @@
     const nextBitrate = chooseBitrateForFormat(type, settings.audio.export.bitrate ?? '');
     settingsActions.updateSection('realtime', {
       audio: {
-        ...$audioSettings!,
+        ...settings.audio,
         export: { ...settings.audio.export, type, bitrate: nextBitrate },
+      },
+    });
+  }
+
+  function updateUltrasonicExportFormat(ultrasonicType: LosslessExportFormat) {
+    settingsActions.updateSection('realtime', {
+      audio: {
+        ...settings.audio,
+        export: { ...settings.audio.export, ultrasonicType },
       },
     });
   }
@@ -480,7 +638,7 @@
 
     settingsActions.updateSection('realtime', {
       audio: {
-        ...$audioSettings!,
+        ...settings.audio,
         export: { ...settings.audio.export, bitrate: formattedBitrate },
       },
     });
@@ -490,7 +648,7 @@
   function updateRetentionPolicy(policy: string) {
     settingsActions.updateSection('realtime', {
       audio: {
-        ...$audioSettings!,
+        ...settings.audio,
         export: {
           ...settings.audio.export,
           retention: { ...retentionSettings, policy },
@@ -502,7 +660,7 @@
   function updateRetentionMaxAge(maxAge: string) {
     settingsActions.updateSection('realtime', {
       audio: {
-        ...$audioSettings!,
+        ...settings.audio,
         export: {
           ...settings.audio.export,
           retention: { ...retentionSettings, maxAge },
@@ -514,7 +672,7 @@
   function updateRetentionMaxUsage(maxUsage: string) {
     settingsActions.updateSection('realtime', {
       audio: {
-        ...$audioSettings!,
+        ...settings.audio,
         export: {
           ...settings.audio.export,
           retention: { ...retentionSettings, maxUsage },
@@ -526,7 +684,7 @@
   function updateRetentionMinClips(minClips: number) {
     settingsActions.updateSection('realtime', {
       audio: {
-        ...$audioSettings!,
+        ...settings.audio,
         export: {
           ...settings.audio.export,
           retention: { ...retentionSettings, minClips },
@@ -538,7 +696,7 @@
   function updateRetentionKeepSpectrograms(keepSpectrograms: boolean) {
     settingsActions.updateSection('realtime', {
       audio: {
-        ...$audioSettings!,
+        ...settings.audio,
         export: {
           ...settings.audio.export,
           retention: { ...retentionSettings, keepSpectrograms },
@@ -587,11 +745,9 @@
   }
 
   // Handle equalizer updates from the AudioEqualizerSettings component
-  // Note: Filter type matches component's local interface with optional id
   function handleEqualizerUpdate(equalizerSettings: {
     enabled: boolean;
     filters: Array<{
-      id?: string;
       type: EqualizerFilterType;
       frequency: number;
       q?: number;
@@ -600,19 +756,10 @@
       passes?: number;
     }>;
   }) {
-    // Transform filters to ensure all have an id (required by store type)
-    const transformedSettings = {
-      enabled: equalizerSettings.enabled,
-      filters: equalizerSettings.filters.map((filter, index) => ({
-        ...filter,
-        id: filter.id || `filter-${Date.now()}-${index}`,
-      })),
-    };
-
     settingsActions.updateSection('realtime', {
       audio: {
-        ...$audioSettings!,
-        equalizer: transformedSettings,
+        ...settings.audio,
+        equalizer: { enabled: equalizerSettings.enabled, filters: equalizerSettings.filters },
       },
     });
   }
@@ -672,18 +819,30 @@
           onclick: loadAudioDevices,
         }}
       />
-    {:else if audioDevices.loading && audioDevices.data.length === 0 && settings.audio.sources.length === 0}
-      <!-- Initial Loading State (only when no data yet) -->
-      <div role="status" class="flex items-center justify-center py-12">
-        <span
-          aria-hidden="true"
-          class="inline-block w-10 h-10 border-2 border-[var(--color-base-300)] border-t-[var(--color-primary)] rounded-full animate-spin"
-        ></span>
-        <span class="ml-3 text-[var(--color-base-content)] opacity-90"
-          >{t('settings.audio.loading')}</span
-        >
+    {:else if !devicesLoadedOnce && audioDevices.data.length === 0 && settings.audio.sources.length === 0}
+      <!-- First load: a skeleton of the section with its summary bar and two source cards -->
+      <div class="card bg-[var(--color-base-100)] shadow-2xs">
+        <div class="space-y-2 {SETTINGS_CARD_HEADER_CLASSES}">
+          <Skeleton className="h-6 w-56" />
+          <SkeletonStatus label={t('settings.audio.loading')} class="block text-sm" />
+        </div>
+        <div class="space-y-4 px-6 pb-7">
+          <Skeleton className="h-14 w-full rounded-lg" />
+          {#each { length: 2 } as _, row (row)}
+            <div
+              class="flex items-center gap-3 rounded-lg border border-[var(--border-200)] bg-[var(--color-base-200)] p-3"
+            >
+              <Skeleton className="size-10 rounded-lg" />
+              <div class="flex-1 space-y-2">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+              <Skeleton className="h-5 w-28" />
+            </div>
+          {/each}
+        </div>
       </div>
-    {:else if !audioDevices.loading && audioDevices.data.length === 0 && settings.audio.sources.length === 0}
+    {:else if devicesLoadedOnce && audioDevices.data.length === 0 && settings.audio.sources.length === 0}
       <!-- Empty State: No Sound Cards Found -->
       <EmptyState
         icon={Volume2}
@@ -705,18 +864,24 @@
       <!-- Sound Card Source Manager -->
       <SettingsSection
         title={t('settings.audio.audioCapture.title')}
+        icon={Mic}
         description={t('settings.audio.audioCapture.description')}
         originalData={store.originalData.realtime?.audio?.sources}
         currentData={store.formData.realtime?.audio?.sources}
       >
-        <SoundCardManager
-          sources={settings.audio.sources}
-          audioDevices={audioDevices.data}
-          audioDevicesLoading={audioDevices.loading}
-          disabled={store.isLoading || store.isSaving}
-          onUpdateSources={updateAudioSources}
-          onRefreshDevices={loadAudioDevices}
-        />
+        <!-- A Reset recreates the manager, so a device pick that is waiting for its probe is dropped. -->
+        {#key resetCount}
+          <SoundCardManager
+            sources={settings.audio.sources}
+            {savedSources}
+            audioDevices={audioDevices.data}
+            audioDevicesLoading={audioDevices.loading}
+            disabled={store.isLoading || store.isSaving}
+            disabledReason={store.isSaving ? t('settings.actions.saving') : t('common.loading')}
+            onUpdateSources={updateAudioSources}
+            onRefreshDevices={loadAudioDevices}
+          />
+        {/key}
       </SettingsSection>
     {/if}
   </div>
@@ -727,24 +892,128 @@
     <!-- RTSP Stream Configuration -->
     <SettingsSection
       title={t('settings.audio.rtspStreams.title')}
+      icon={Radio}
       description={t('settings.audio.rtspStreams.description')}
       originalData={store.originalData.realtime?.rtsp?.streams}
       currentData={store.formData.realtime?.rtsp?.streams}
     >
-      <StreamManager
-        streams={settings.rtsp.streams}
-        disabled={store.isLoading || store.isSaving}
-        onUpdateStreams={updateRTSPStreams}
-      />
+      <!-- A Reset recreates the manager, so an analysis or test that is still running is dropped and the add form closes. -->
+      {#key resetCount}
+        <StreamManager
+          streams={settings.rtsp.streams}
+          {savedStreams}
+          {testedUrls}
+          disabled={store.isLoading || store.isSaving}
+          disabledReason={store.isSaving ? t('settings.actions.saving') : t('common.loading')}
+          onUpdateStreams={updateRTSPStreams}
+          onUrlTested={url => testedUrls.add(url)}
+        />
+      {/key}
     </SettingsSection>
   </div>
 {/snippet}
 
 {#snippet processingTabContent()}
   <div class="space-y-6">
+    <!-- Clip denoise (applies to saved clips, before they are written) -->
+    <SettingsSection
+      title={t('settings.audio.exportDenoise.title')}
+      icon={WandSparkles}
+      description={t('settings.audio.exportDenoise.description')}
+      originalData={store.originalData.realtime?.audio?.export?.denoise}
+      currentData={store.formData.realtime?.audio?.export?.denoise}
+    >
+      {#if !settings.audio.export.enabled}
+        <div
+          id="denoise-requires-recording"
+          class="flex items-start gap-3 p-4 rounded-lg bg-[color-mix(in_srgb,var(--color-info)_15%,transparent)] text-[var(--color-base-content)] mb-4"
+        >
+          <Info class="size-6 shrink-0 text-[var(--text-info)]" aria-hidden="true" />
+          <span>{t('settings.audio.exportDenoise.requiresRecording')}</span>
+        </div>
+      {/if}
+      <fieldset
+        disabled={!settings.audio.export.enabled || store.isLoading || store.isSaving}
+        class="contents"
+      >
+        <div
+          class="space-y-4 transition-opacity duration-200"
+          class:opacity-50={!settings.audio.export.enabled}
+        >
+          <ToggleField
+            value={exportDenoise.enabled}
+            label={t('settings.audio.exportDenoise.enable')}
+            description={settings.audio.export.enabled
+              ? t('settings.audio.exportDenoise.enableHelp')
+              : t('settings.audio.exportDenoise.requiresRecording')}
+            disabled={!settings.audio.export.enabled || store.isLoading || store.isSaving}
+            onUpdate={checked => updateExportDenoise({ enabled: checked })}
+          />
+
+          <SelectDropdown
+            value={exportDenoise.strength}
+            className={cn(
+              'transition-opacity duration-200',
+              settings.audio.export.enabled && !exportDenoise.enabled && 'opacity-50'
+            )}
+            label={t('settings.audio.exportDenoise.strengthLabel')}
+            helpText={settings.audio.export.enabled && !exportDenoise.enabled
+              ? t('settings.audio.exportDenoise.strengthDisabledHelp')
+              : t('settings.audio.exportDenoise.strengthHelp')}
+            options={denoiseStrengthOptions}
+            aria-describedby={settings.audio.export.enabled
+              ? undefined
+              : 'denoise-requires-recording'}
+            disabled={!exportDenoise.enabled ||
+              !settings.audio.export.enabled ||
+              store.isLoading ||
+              store.isSaving}
+            onChange={value => {
+              const candidate = Array.isArray(value) ? value[0] : value;
+              if (isDenoisePresetId(candidate)) {
+                updateExportDenoise({ strength: candidate });
+              } else {
+                logger.warn('Ignoring unknown denoise strength candidate', { candidate });
+              }
+            }}
+            groupBy={false}
+            menuSize="sm"
+          />
+
+          {#if exportDenoise.enabled}
+            <SettingsNote>
+              <p class="font-semibold">
+                {t('settings.audio.exportDenoise.warningTitle')}
+              </p>
+              <p class="text-[color:var(--color-base-content)] opacity-90 text-sm">
+                {t('settings.audio.exportDenoise.warningPermanent')}
+              </p>
+              <p class="mt-2 text-[color:var(--color-base-content)] opacity-90 text-sm">
+                {t('settings.audio.exportDenoise.warningBats')}
+              </p>
+              <p class="mt-2 text-[color:var(--color-base-content)] opacity-90 text-sm">
+                {t('settings.audio.exportDenoise.warningImported')}
+              </p>
+              <p class="mt-2 text-[color:var(--color-base-content)] opacity-90 text-sm">
+                {t('settings.audio.exportDenoise.warningPlayback')}
+              </p>
+              {#if isLossyExportType}
+                <p class="mt-2 text-[color:var(--color-base-content)] opacity-90 text-sm">
+                  {t('settings.audio.exportDenoise.lossyNote', {
+                    minBitrate: DENOISE_LOSSY_MIN_BITRATE_KBPS,
+                  })}
+                </p>
+              {/if}
+            </SettingsNote>
+          {/if}
+        </div>
+      </fieldset>
+    </SettingsSection>
+
     <!-- Audio Normalization (applies to saved clips) -->
     <SettingsSection
       title={t('settings.audio.audioNormalization.title')}
+      icon={Gauge}
       description={t('settings.audio.audioNormalization.description')}
       originalData={store.originalData.realtime?.audio?.export?.normalization}
       currentData={store.formData.realtime?.audio?.export?.normalization}
@@ -752,7 +1021,7 @@
       {#if !settings.audio.export.enabled}
         <!-- Dependency notice when recording is disabled -->
         <div
-          class="flex items-start gap-3 p-4 rounded-lg bg-[color-mix(in_srgb,var(--color-info)_15%,transparent)] text-[var(--color-info)] mb-4"
+          class="flex items-start gap-3 p-4 rounded-lg bg-[color-mix(in_srgb,var(--color-info)_15%,transparent)] text-[var(--text-info)] mb-4"
         >
           <Info class="size-6 shrink-0" />
           <span>{t('settings.audio.audioNormalization.requiresRecording')}</span>
@@ -772,20 +1041,20 @@
           class="space-y-4 transition-opacity duration-200"
           class:opacity-50={!settings.audio.export.enabled}
         >
-          <Checkbox
-            bind:checked={settings.audio.export.normalization.enabled}
+          <ToggleField
+            value={settings.audio.export.normalization.enabled}
             label={t('settings.audio.audioNormalization.enable')}
-            helpText={t('settings.audio.audioNormalization.enableHelp')}
+            description={t('settings.audio.audioNormalization.enableHelp')}
             disabled={!settings.audio.export.enabled || store.isLoading || store.isSaving}
-            onchange={() =>
+            onUpdate={enabled =>
               settingsActions.updateSection('realtime', {
                 audio: {
-                  ...$audioSettings!,
+                  ...settings.audio,
                   export: {
                     ...settings.audio.export,
                     normalization: {
                       ...settings.audio.export.normalization,
-                      enabled: settings.audio.export.normalization.enabled,
+                      enabled,
                     },
                   },
                 },
@@ -808,9 +1077,10 @@
             </span>
             <div
               class="space-y-4 transition-opacity duration-200"
-              class:opacity-50={!settings.audio.export.normalization.enabled}
+              class:opacity-50={settings.audio.export.enabled &&
+                !settings.audio.export.normalization.enabled}
             >
-              <div class="settings-form-grid">
+              <div class="settings-form-grid settings-form-grid-cols-2">
                 <!-- Target LUFS -->
                 <NumberField
                   label={t('settings.audio.audioNormalization.targetLUFSLabel')}
@@ -818,7 +1088,7 @@
                   onUpdate={value =>
                     settingsActions.updateSection('realtime', {
                       audio: {
-                        ...$audioSettings!,
+                        ...settings.audio,
                         export: {
                           ...settings.audio.export,
                           normalization: {
@@ -856,7 +1126,7 @@
                   onUpdate={value =>
                     settingsActions.updateSection('realtime', {
                       audio: {
-                        ...$audioSettings!,
+                        ...settings.audio,
                         export: {
                           ...settings.audio.export,
                           normalization: {
@@ -895,6 +1165,7 @@
     <!-- Audio Equalizer -->
     <SettingsSection
       title={t('settings.audio.audioFilters.title')}
+      icon={SlidersVertical}
       description={t('settings.audio.audioFilters.description')}
       originalData={store.originalData.realtime?.audio?.equalizer}
       currentData={store.formData.realtime?.audio?.equalizer}
@@ -909,20 +1180,21 @@
     <!-- Sound Level Monitoring -->
     <SettingsSection
       title={t('settings.audio.soundLevelMonitoring.title')}
+      icon={Volume2}
       description={t('settings.audio.soundLevelMonitoring.description')}
       originalData={store.originalData.realtime?.audio?.soundLevel}
       currentData={store.formData.realtime?.audio?.soundLevel}
     >
       <div class="space-y-4">
-        <Checkbox
-          checked={settings.audio.soundLevel.enabled}
+        <ToggleField
+          value={settings.audio.soundLevel.enabled}
           label={t('settings.audio.soundLevelMonitoring.enable')}
-          helpText={t('settings.audio.soundLevelMonitoring.enableHelp')}
+          description={t('settings.audio.soundLevelMonitoring.enableHelp')}
           disabled={store.isLoading || store.isSaving}
-          onchange={enabled =>
+          onUpdate={enabled =>
             settingsActions.updateSection('realtime', {
               audio: {
-                ...$audioSettings!,
+                ...settings.audio,
                 soundLevel: {
                   ...settings.audio.soundLevel,
                   enabled,
@@ -953,7 +1225,7 @@
                 onUpdate={value =>
                   settingsActions.updateSection('realtime', {
                     audio: {
-                      ...$audioSettings!,
+                      ...settings.audio,
                       soundLevel: { ...settings.audio.soundLevel, interval: value },
                     },
                   })}
@@ -981,12 +1253,16 @@
                   <code>{'{base_topic}'}/soundlevel</code>
                 </li>
                 <li>
+                  {t('settings.audio.soundLevelMonitoring.mqttSourceTopic')}
+                  <code>{'{base_topic}'}/sources/{'{source_id}'}/soundlevel</code>
+                </li>
+                <li>
                   {t('settings.audio.soundLevelMonitoring.sseEndpoint')}
                   <code>/api/v2/soundlevels/stream</code>
                 </li>
                 <li>
                   {t('settings.audio.soundLevelMonitoring.prometheusMetrics')}
-                  <code>birdnet_sound_level_db</code>
+                  <code>myaudio_sound_level_db</code>
                 </li>
               </ul>
             </SettingsNote>
@@ -1002,6 +1278,7 @@
     <!-- Card 1: Clip Recording Settings -->
     <SettingsSection
       title={t('settings.audio.clipRecording.title')}
+      icon={FileVolume}
       description={t('settings.audio.clipRecording.description')}
       originalData={{
         enabled: store.originalData.realtime?.audio?.export?.enabled,
@@ -1017,12 +1294,12 @@
       }}
     >
       <div class="space-y-4">
-        <Checkbox
-          checked={settings.audio.export.enabled}
+        <ToggleField
+          value={settings.audio.export.enabled}
           label={t('settings.audio.clipRecording.enable')}
-          helpText={t('settings.audio.clipRecording.enableHelp')}
+          description={t('settings.audio.clipRecording.enableHelp')}
           disabled={store.isLoading || store.isSaving}
-          onchange={updateExportEnabled}
+          onUpdate={updateExportEnabled}
         />
 
         <!-- Fieldset for accessible disabled state -->
@@ -1040,9 +1317,9 @@
             class="space-y-4 transition-opacity duration-200"
             class:opacity-50={!settings.audio.export.enabled}
           >
-            <h4 class="text-sm font-medium text-[var(--color-base-content)]">
+            <SettingsGroupLabel>
               {t('settings.audio.clipRecording.captureSettings')}
-            </h4>
+            </SettingsGroupLabel>
             <div class="settings-form-grid">
               <!-- Capture Length -->
               <InlineSlider
@@ -1053,7 +1330,7 @@
                   if (settings.audio.export.preCapture > maxPreCapture) {
                     settingsActions.updateSection('realtime', {
                       audio: {
-                        ...$audioSettings!,
+                        ...settings.audio,
                         export: {
                           ...settings.audio.export,
                           length: value,
@@ -1064,7 +1341,7 @@
                   } else {
                     settingsActions.updateSection('realtime', {
                       audio: {
-                        ...$audioSettings!,
+                        ...settings.audio,
                         export: { ...settings.audio.export, length: value },
                       },
                     });
@@ -1087,7 +1364,7 @@
                 onUpdate={value =>
                   settingsActions.updateSection('realtime', {
                     audio: {
-                      ...$audioSettings!,
+                      ...settings.audio,
                       export: { ...settings.audio.export, preCapture: value },
                     },
                   })}
@@ -1110,7 +1387,7 @@
                 onUpdate={value =>
                   settingsActions.updateSection('realtime', {
                     audio: {
-                      ...$audioSettings!,
+                      ...settings.audio,
                       export: { ...settings.audio.export, gain: value },
                     },
                   })}
@@ -1132,6 +1409,7 @@
     <!-- Card 2: Extended Capture Settings -->
     <SettingsSection
       title={t('settings.audio.extendedCapture.title')}
+      icon={Timer}
       description={t('settings.audio.extendedCapture.description')}
       originalData={store.originalData.realtime?.extendedCapture}
       currentData={store.formData.realtime?.extendedCapture}
@@ -1145,12 +1423,12 @@
         </ErrorAlert>
 
         <!-- Enable Extended Capture -->
-        <Checkbox
-          checked={extendedCaptureSettingsLocal.enabled}
+        <ToggleField
+          value={extendedCaptureSettingsLocal.enabled}
           label={t('settings.audio.extendedCapture.enable')}
-          helpText={t('settings.audio.extendedCapture.enableHelp')}
+          description={t('settings.audio.extendedCapture.enableHelp')}
           disabled={store.isLoading || store.isSaving}
-          onchange={enabled => updateExtendedCaptureEnabled(enabled)}
+          onUpdate={enabled => updateExtendedCaptureEnabled(enabled)}
         />
 
         <!-- Fieldset for accessible disabled state -->
@@ -1215,15 +1493,18 @@
     <!-- Card 3: File Settings -->
     <SettingsSection
       title={t('settings.audio.fileSettings.title')}
+      icon={FolderCog}
       description={t('settings.audio.fileSettings.description')}
       originalData={{
         path: store.originalData.realtime?.audio?.export?.path,
         type: store.originalData.realtime?.audio?.export?.type,
+        ultrasonicType: store.originalData.realtime?.audio?.export?.ultrasonicType,
         bitrate: store.originalData.realtime?.audio?.export?.bitrate,
       }}
       currentData={{
         path: store.formData.realtime?.audio?.export?.path,
         type: store.formData.realtime?.audio?.export?.type,
+        ultrasonicType: store.formData.realtime?.audio?.export?.ultrasonicType,
         bitrate: store.formData.realtime?.audio?.export?.bitrate,
       }}
     >
@@ -1253,7 +1534,7 @@
               onchange={() =>
                 settingsActions.updateSection('realtime', {
                   audio: {
-                    ...$audioSettings!,
+                    ...settings.audio,
                     export: { ...settings.audio.export, path: settings.audio.export.path },
                   },
                 })}
@@ -1280,6 +1561,27 @@
               menuSize="sm"
             />
 
+            <!-- Ultrasonic Export Type (bat/ultrasonic captures above 48 kHz) -->
+            <SelectDropdown
+              value={settings.audio.export.ultrasonicType}
+              label={t('settings.audio.fileSettings.ultrasonicTypeLabel')}
+              helpText={t('settings.audio.fileSettings.ultrasonicTypeHelp')}
+              options={ultrasonicExportFormatOptions}
+              disabled={!settings.audio.export.enabled || store.isLoading || store.isSaving}
+              onChange={value => {
+                const candidate = Array.isArray(value) ? value[0] : value;
+                if (isLosslessExportFormat(candidate)) {
+                  updateUltrasonicExportFormat(candidate);
+                } else {
+                  logger.warn('Ignoring unknown ultrasonic export format candidate', {
+                    candidate,
+                  });
+                }
+              }}
+              groupBy={false}
+              menuSize="sm"
+            />
+
             <!-- Bitrate -->
             {#if bitrateConfig}
               <InlineSlider
@@ -1291,10 +1593,7 @@
                 step={bitrateConfig.step}
                 size="sm"
                 unit="k"
-                disabled={!settings.audio.export.enabled ||
-                  store.isLoading ||
-                  store.isSaving ||
-                  !ffmpegAvailable}
+                disabled={!settings.audio.export.enabled || store.isLoading || store.isSaving}
                 formatValue={(v: number) => `${v}k`}
                 helpText={t('settings.audio.fileSettings.bitrateHelp', {
                   min: bitrateConfig.min,
@@ -1304,9 +1603,9 @@
             {:else}
               <div>
                 <label class="block py-1" for="export-bitrate-disabled">
-                  <span class="text-sm text-[var(--color-base-content)]"
-                    >{t('settings.audio.fileSettings.bitrateLabel')}</span
-                  >
+                  <span class="text-sm text-[var(--color-base-content)]">
+                    {t('settings.audio.fileSettings.bitrateLabel')}
+                  </span>
                 </label>
                 <input
                   id="export-bitrate-disabled"
@@ -1335,6 +1634,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.audio.audioClipRetention.title')}
+      icon={Archive}
       description={t('settings.audio.audioClipRetention.description')}
       originalData={store.originalData.realtime?.audio?.export?.retention}
       currentData={store.formData.realtime?.audio?.export?.retention}
@@ -1393,18 +1693,16 @@
               helpText={t('settings.audio.audioClipRetention.minClipsHelp')}
               disabled={store.isLoading || store.isSaving}
             />
-
-            <!-- Keep Spectrograms -->
-            <div class="mt-8">
-              <Checkbox
-                checked={retentionSettings.keepSpectrograms}
-                label={t('settings.audio.audioClipRetention.keepSpectrograms')}
-                helpText={t('settings.audio.audioClipRetention.keepSpectrogramsHelp')}
-                disabled={store.isLoading || store.isSaving}
-                onchange={updateRetentionKeepSpectrograms}
-              />
-            </div>
           </div>
+
+          <!-- Keep Spectrograms -->
+          <ToggleField
+            value={retentionSettings.keepSpectrograms}
+            label={t('settings.audio.audioClipRetention.keepSpectrograms')}
+            description={t('settings.audio.audioClipRetention.keepSpectrogramsHelp')}
+            disabled={store.isLoading || store.isSaving}
+            onUpdate={updateRetentionKeepSpectrograms}
+          />
         {/if}
 
         <!-- Retention Policy Info -->
@@ -1439,5 +1737,5 @@
 
 <!-- Main Content -->
 <div class="settings-page-content">
-  <SettingsTabs {tabs} bind:activeTab />
+  <SettingsTabs {tabs} bind:activeTab onReset={() => resetCount++} />
 </div>

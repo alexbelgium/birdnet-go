@@ -35,16 +35,28 @@ type Perch struct {
 	info       ModelInfo
 	mu         sync.Mutex
 	// device is the compute device the classifier bound to: the OpenVINO device
-	// (CPU/GPU) when the OV path succeeds, otherwise deviceCPU for the ONNX
+	// (CPU, GPU or GPU.<n>) when the OV path succeeds, otherwise deviceCPU for the ONNX
 	// Runtime CPU EP. Set once at construction; reported via RuntimeInfo().
 	device string
 	// backend is the live execution backend (BackendOpenVINO on the OV path, else
-	// BackendONNX), and precision is the effective runtime precision (FP16 on the
-	// OV path; the weight precision detected from the model filename on the ORT
-	// path, e.g. INT8 for perch_v2_int8_arm.onnx). Both set once at construction;
-	// reported via RuntimeInfo().
+	// BackendONNX), and precision is the effective runtime precision (on the OV
+	// path the compiled INFERENCE_PRECISION_HINT per openVINOPrecisionFor: FP32 on
+	// the GPU, FP16 on the CPU; on the ORT path the weight precision detected from
+	// the model filename, e.g. INT8 for perch_v2_int8_arm.onnx). Both set once at
+	// construction; reported via RuntimeInfo().
 	backend   string
 	precision string
+	// modelPath is the model file this instance actually loaded from (the resolved
+	// path the loader built with, which after a stale-path recovery differs from the
+	// configured Perch.ModelPath). Set once at construction; reported via
+	// ResolvedModelPath().
+	modelPath string
+	// calibrated and restLogit carry the slice score calibration found at
+	// construction (see perchScoreCalibration). When calibrated is false (the full
+	// model, or a slice the catalog does not know) Predict uses the plain softmax.
+	// Both are set once and never mutated, so reads under p.mu need no extra sync.
+	calibrated bool
+	restLogit  float64
 }
 
 // PerchConfig holds configuration for creating a Perch model instance.
@@ -59,7 +71,7 @@ type PerchConfig struct {
 	// (ARM A76 f16 CPU or Intel iGPU); any failure falls back to ORT.
 	Backend        string // BirdNET.Backend ("auto"/"onnx"/"openvino")
 	OpenVINOPath   string // BirdNET.OpenVINOPath (libopenvino_c location)
-	OpenVINODevice string // BirdNET.OpenVINODevice ("auto"/"cpu"/"gpu")
+	OpenVINODevice string // BirdNET.OpenVINODevice ("auto", "cpu", "gpu" or "GPU.<n>")
 }
 
 // NewPerch creates a new Perch v2 model instance.
@@ -94,12 +106,12 @@ func NewPerch(cfg *PerchConfig) (*Perch, error) {
 	// load, so tryPerchOpenVINO logs and swallows OV errors and returns ok=false.
 	// device records the compute device actually bound to (the OpenVINO device on
 	// the OV path, else the ONNX Runtime CPU EP).
-	classifier, device, ok := tryPerchOpenVINO(cfg, labels)
-	// Perch always compiles OpenVINO at the f16 default (openVINOPrecisionFor
-	// returns "" for Perch, never f32), so the effective OV runtime precision is
-	// FP16. The ORT path overrides both below.
+	classifier, device, precisionHint, ok := tryPerchOpenVINO(cfg, labels)
+	// On the OV path the effective runtime precision follows the compiled
+	// INFERENCE_PRECISION_HINT (f32 on the GPU per openVINOPrecisionFor, else the
+	// f16 default). The ORT path overrides both below.
 	backend := BackendOpenVINO
-	precision := string(QuantizationFP16)
+	precision := openVINOEffectivePrecision(precisionHint)
 	if !ok {
 		// Initialize ONNX Runtime
 		if err := inference.InitONNXRuntime(cfg.ONNXRuntimePath); err != nil {
@@ -130,6 +142,8 @@ func NewPerch(cfg *PerchConfig) (*Perch, error) {
 		precision = string(detectQuantization(cfg.ModelPath))
 	}
 
+	calibrated, restLogit := resolvePerchCalibration(labelData, labels, cfg.ModelPath)
+
 	info := ModelInfo{
 		ID:          RegistryIDPerchV2,
 		Name:        ModelNamePerchV2,
@@ -149,26 +163,59 @@ func NewPerch(cfg *PerchConfig) (*Perch, error) {
 		device:     device,
 		backend:    backend,
 		precision:  precision,
+		modelPath:  cfg.ModelPath,
+		calibrated: calibrated,
+		restLogit:  restLogit,
 	}, nil
 }
 
+// resolvePerchCalibration looks up the score calibration for the labels a Perch
+// build parsed, logs the outcome once, and returns what the instance stores: whether
+// Predict applies the rest term, and its rest logit.
+func resolvePerchCalibration(labelData []byte, labels []string, modelPath string) (calibrated bool, restLogit float64) {
+	c := perchScoreCalibration(labelData, labels, modelPath)
+	logPerchCalibration(GetLogger(), c, len(labels))
+	return c.status == perchCalibrationApplied, c.calibration.RestLogit
+}
+
+// logPerchCalibration reports once per build how the loaded labels were scored:
+// the calibration that applies to a catalog regional slice, or a warning for a
+// slice-sized label set the catalog does not know. The full model logs nothing.
+func logPerchCalibration(log logger.Logger, c perchCalibrationLookup, labelCount int) {
+	switch c.status {
+	case perchCalibrationApplied:
+		log.Info("Perch v2 score calibration applied",
+			logger.String("variant", c.variantID),
+			logger.Float64("rest_logit", c.calibration.RestLogit),
+			logger.String("method", c.calibration.Method))
+	case perchCalibrationUnknownLabels:
+		log.Warn("Perch v2 labels match no catalog Perch model; scores are normalized over the loaded labels only and run higher than the full model's",
+			logger.Int("species", labelCount),
+			logger.String("labels_sha256", c.labelsSHA256))
+	case perchCalibrationFullModel:
+		// The full model needs no calibration.
+	}
+}
+
 // tryPerchOpenVINO attempts to build an OpenVINO classifier for Perch v2. It
-// returns (classifier, device, true) on success or (nil, "", false) to fall back
-// to ORT, where device is the concrete OpenVINO device the classifier bound to
-// (inference.OVDeviceCPU/OVDeviceGPU). Any failure (ineligible model, gate
+// returns (classifier, device, precisionHint, true) on success or
+// (nil, "", "", false) to fall back to ORT, where device is the concrete OpenVINO
+// device the classifier bound to (CPU, GPU or a concrete GPU.<n>) and
+// precisionHint is the INFERENCE_PRECISION_HINT the model was compiled with
+// ("" = backend f16 default). Any failure (ineligible model, gate
 // denied, init/compile/validation error) is logged and swallowed: OpenVINO must
 // never make Perch fail to load. OV is only attempted for the no_dft model
 // variant, since the stock perch_v2.onnx cannot compile on OpenVINO (a
 // dynamic-rank DFT op).
-func tryPerchOpenVINO(cfg *PerchConfig, labels []string) (inference.Classifier, string, bool) {
+func tryPerchOpenVINO(cfg *PerchConfig, labels []string) (classifier inference.Classifier, device, precisionHint string, ok bool) {
 	if !isPerchNoDFT(cfg.ModelPath) {
 		logOpenVINODeclined(RegistryIDPerchV2, cfg.Backend, ovReasonNotPerchNoDFT)
-		return nil, "", false
+		return nil, "", "", false
 	}
 	plan, ok, reason := openVINOPlanFor(cfg.Backend, cfg.OpenVINODevice, RegistryIDPerchV2, cfg.OpenVINOPath, perchLogitsOutputIndex)
 	if !ok {
 		logOpenVINODeclined(RegistryIDPerchV2, cfg.Backend, reason)
-		return nil, "", false
+		return nil, "", "", false
 	}
 
 	log := GetLogger()
@@ -177,7 +224,7 @@ func tryPerchOpenVINO(cfg *PerchConfig, labels []string) (inference.Classifier, 
 	// here to cover it. A load failure means no usable OpenVINO; fall back to ORT.
 	if err := inference.InitOpenVINO(cfg.OpenVINOPath); err != nil {
 		log.Warn("Perch OpenVINO init failed; using ONNX Runtime", logger.Error(err))
-		return nil, "", false
+		return nil, "", "", false
 	}
 
 	start := time.Now()
@@ -186,21 +233,20 @@ func tryPerchOpenVINO(cfg *PerchConfig, labels []string) (inference.Classifier, 
 		Threads:       cfg.Threads,
 		Device:        plan.device,
 		OutputIndex:   plan.outputIndex,
-		PrecisionHint: plan.precision, // "" => f16 default; Perch f16-GPU validated OK
+		PrecisionHint: plan.precision, // f32 on the GPU (f16 returns NaN on Intel Arc), else the f16 default
 	})
 	if err != nil {
 		log.Warn("Perch OpenVINO classifier init failed; using ONNX Runtime",
 			logger.String("device", plan.device),
 			logger.Error(err))
-		return nil, "", false
+		return nil, "", "", false
 	}
 
-	log.Info("Perch v2 model using OpenVINO backend",
-		logger.String("device", plan.device),
+	log.Info("Perch v2 model using OpenVINO backend", append(openVINODeviceFields(plan),
 		logger.String("precision", openVINOPrecisionLabel(plan.precision)),
 		logger.Int("species", classifier.NumSpecies()),
-		logger.String("init_time", time.Since(start).String()))
-	return classifier, plan.device, true
+		logger.String("init_time", time.Since(start).String()))...)
+	return classifier, plan.device, plan.precision, true
 }
 
 // isPerchNoDFT reports whether the model file is the OpenVINO-compatible Perch
@@ -211,8 +257,10 @@ func isPerchNoDFT(modelPath string) bool {
 	return strings.Contains(base, "no_dft") || strings.Contains(base, "no-dft")
 }
 
-// Predict runs inference on the given audio samples.
-// Implements ModelInstance.
+// Predict runs inference on the given audio samples and returns the top-K scored
+// labels. Scores are a softmax over the logits; for a catalog regional slice the
+// softmax includes the slice's rest term, which puts its scores on the full
+// model's scale (see perchSoftmaxWithRest). Implements ModelInstance.
 func (p *Perch) Predict(ctx context.Context, samples [][]float32) ([]datastore.Results, error) {
 	span, _ := startPredictSpan(ctx, RegistryIDPerchV2, samples)
 	defer span.Finish()
@@ -249,10 +297,31 @@ func (p *Perch) Predict(ctx context.Context, samples [][]float32) ([]datastore.R
 		return nil, err
 	}
 
+	// Reject non-finite logits before softmax: a single NaN or +Inf poisons every
+	// score (the running max and the normalising sum both turn NaN), and a NaN
+	// confidence compares false against every threshold downstream, so instead of
+	// being dropped it would be promoted to a detection for whichever labels
+	// happen to sort first. Fail the window so the backend fault is counted and
+	// logged rather than turned into bogus detections.
+	if idx := firstNonFinite(rawLogits); idx != noNonFiniteScore {
+		err = newNonFiniteScoreError(nonFiniteScore{modelID: RegistryIDPerchV2, index: idx, count: len(rawLogits)}, p.RuntimeInfo)
+		recordPredictionFailure(span, RegistryIDPerchV2, errTypeNonFiniteLogits, start, err)
+		return nil, err
+	}
+
 	// Apply softmax to normalize raw logits into probabilities (0.0-1.0).
 	// The inference.Classifier interface returns pre-activation logits;
 	// BirdNET applies sigmoid in its own Predict path, Perch needs softmax.
-	predictions := perchSoftmax(rawLogits)
+	// A regional slice only sees its own classes, so its plain softmax would score
+	// every class higher than the full model does; the rest term puts the dropped
+	// classes back into the denominator. The full model, and a slice the catalog
+	// does not know, keep the plain softmax.
+	var predictions []float32
+	if p.calibrated {
+		predictions = perchSoftmaxWithRest(rawLogits, p.restLogit)
+	} else {
+		predictions = perchSoftmax(rawLogits)
+	}
 
 	// Pair labels with predictions
 	results, err := pairLabelsAndConfidence(p.labels, predictions)
@@ -292,13 +361,18 @@ func (p *Perch) Labels() []string {
 
 // RuntimeInfo returns the device, backend, and effective precision the Perch
 // classifier bound to at construction: the OpenVINO device on the OV path (else
-// "CPU"); BackendOpenVINO on the OV path (else BackendONNX); FP16 on the OV path
-// or the weight precision detected from the model filename on the ORT path (e.g.
-// INT8 for perch_v2_int8_arm.onnx, empty when no token). All three are set once
-// and never mutated, so no lock is needed. Implements ModelInstance.
+// "CPU"); BackendOpenVINO on the OV path (else BackendONNX); the compiled
+// OpenVINO precision on the OV path (FP32 on the GPU, FP16 on the CPU) or the
+// weight precision detected from the model filename on the ORT path (e.g. INT8
+// for perch_v2_int8_arm.onnx, empty when no token). All three are set once and
+// never mutated, so no lock is needed. Implements ModelInstance.
 func (p *Perch) RuntimeInfo() (device, backend, precision string) {
 	return p.device, p.backend, p.precision
 }
+
+// ResolvedModelPath returns the model file this Perch instance loaded from. Fixed
+// at construction, so the read needs no lock. Implements ModelInstance.
+func (p *Perch) ResolvedModelPath() string { return p.modelPath }
 
 // Close releases resources held by the Perch model.
 func (p *Perch) Close() error {
@@ -330,6 +404,33 @@ func perchSoftmax(logits []float32) []float32 {
 	}
 	for i := range result {
 		result[i] /= sum
+	}
+	return result
+}
+
+// perchSoftmaxWithRest is the softmax of a regional slice with one extra class, the
+// "rest", whose logit stands for the log-sum-exp of the classes the slice dropped:
+// score_i = exp(z_i) / (sum_kept exp(z_j) + exp(rest)). It puts a slice's scores on
+// the full model's scale, and since every score shares the denominator the ranking
+// is that of perchSoftmax. Sums are in float64 and shifted by max(max(logits), rest)
+// so neither a large logit nor a large rest can overflow. rest must be finite.
+func perchSoftmaxWithRest(logits []float32, rest float64) []float32 {
+	if len(logits) == 0 {
+		return []float32{}
+	}
+	shift := rest
+	for _, v := range logits {
+		shift = math.Max(shift, float64(v))
+	}
+	exps := make([]float64, len(logits))
+	sum := math.Exp(rest - shift)
+	for i, v := range logits {
+		exps[i] = math.Exp(float64(v) - shift)
+		sum += exps[i]
+	}
+	result := make([]float32, len(logits))
+	for i, e := range exps {
+		result[i] = float32(e / sum)
 	}
 	return result
 }

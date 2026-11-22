@@ -9,21 +9,33 @@
   - Secure state management
 -->
 <script lang="ts">
-  import { api } from '$lib/utils/api';
+  import { api, ApiError } from '$lib/utils/api';
   import { safeGet, safeElementAccess } from '$lib/utils/security';
-  import { extractRelativePath, getUiBasePath } from '$lib/utils/urlHelpers';
+  import { buildAppUrl, extractRelativePath, getUiBasePath } from '$lib/utils/urlHelpers';
+  import { MAX_LOGIN_REDIRECT_LENGTH } from '$lib/utils/loginRedirect';
   import { loggers } from '$lib/utils/logger';
   import { t } from '$lib/i18n';
+  import { unsavedChanges } from '$lib/stores/unsavedChanges.svelte';
   import { X, ShieldCheck, KeyRound } from '@lucide/svelte';
   import { getEnabledProviders, getProvider } from '$lib/auth';
+  import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
   import type { AuthConfig } from '../../../../app.d';
 
   // SECURITY: Define maximum password length to prevent DoS
   const MAX_PASSWORD_LENGTH = 512; // Reasonable limit for security
-  // Client-side cap on the captured redirect (path + query). Intentionally a bit
-  // tighter than the backend's authoritative security.MaxSafeRedirectLength (2048)
-  // so anything the client sends comfortably passes server validation.
-  const MAX_REDIRECT_LENGTH = 2000;
+
+  // Status the server answers with once the login attempt limit is used up
+  const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
+
+  // Whether "Remember this browser" starts ticked; the maintainer's choice of
+  // default lives in this one constant.
+  const REMEMBER_BROWSER_DEFAULT = true;
+
+  // Query parameter that carries the "Remember this browser" choice to the
+  // provider sign-in route (see security.RememberQueryParam in the backend)
+  const REMEMBER_QUERY_PARAM = 'remember';
+  // Value of that parameter that means ticked (security.RememberQueryValue)
+  const REMEMBER_QUERY_VALUE = '1';
 
   // Logger for authentication debugging
   const logger = loggers.auth;
@@ -33,7 +45,13 @@
 
   interface Props {
     isOpen: boolean;
+    /** Called when the dialog closes, including after a successful login. */
     onClose: () => void;
+    /**
+     * Called when the user dismisses the dialog (close button, backdrop, Escape);
+     * defaults to onClose. A successful login still calls onClose.
+     */
+    onCancel?: () => void;
     redirectUrl?: string;
     authConfig?: AuthConfig;
   }
@@ -41,6 +59,7 @@
   let {
     isOpen = false,
     onClose,
+    onCancel,
     // Empty by default so an omitted prop falls through to the proxy-aware
     // getUiBasePath() fallback instead of a hardcoded '/ui/' that ignores any
     // reverse-proxy prefix.
@@ -51,7 +70,15 @@
     },
   }: Props = $props();
 
+  function cancel() {
+    // A dismissed modal could not stop the pending request: on success it would still reload
+    // the page, past any leave prompt and over edits made after the dismissal. Wait for the answer.
+    if (loadingState === 'password') return;
+    (onCancel ?? onClose)();
+  }
+
   let password = $state('');
+  let rememberBrowser = $state(REMEMBER_BROWSER_DEFAULT);
   let error = $state('');
   let loadingState = $state<LoadingState>('idle');
 
@@ -77,7 +104,7 @@
       }
 
       // Check length (path + query). A generous cap covers heavily-filtered views.
-      if (url.length > MAX_REDIRECT_LENGTH) {
+      if (url.length > MAX_LOGIN_REDIRECT_LENGTH) {
         return false;
       }
 
@@ -166,6 +193,7 @@
       password: trimmedPassword, // Use the already trimmed password
       redirectUrl: finalRedirectUrl, // Pass the relative redirect URL to avoid duplication
       basePath: currentBasePath, // Send the detected base path
+      rememberBrowser, // Keep this browser signed in (persistent session cookie)
     };
 
     try {
@@ -191,21 +219,25 @@
         // the submit button, so if the navigation never commits we avoid both a UI
         // deadlock (controls stuck disabled) and a double-submit during navigation.
         onClose();
+        // The sign-in must complete; the sidebar asked about drafts before opening this modal.
+        unsavedChanges.allowUnload();
         window.location.href = response.redirectUrl;
         return; // Exit early - OAuth callback will handle the rest
       }
 
-      // If no redirectUrl, try a simple page refresh to trigger auth state update
-
-      // Close modal first
-      onClose();
-
-      // Give a moment for modal to close, then refresh
+      // If no redirectUrl, refresh the page to pick up the signed-in state. The modal stays
+      // open (and undismissable, since the sign-in is still pending) until the reload, so no
+      // edit can be made in the moment before it that the reload would then discard.
       setTimeout(() => {
+        unsavedChanges.allowUnload();
         window.location.reload();
       }, 500);
-    } catch {
-      error = t('auth.errors.loginFailed');
+    } catch (err) {
+      // A 429 means the attempt limit is used up, not that the password is wrong.
+      error =
+        err instanceof ApiError && err.status === HTTP_STATUS_TOO_MANY_REQUESTS
+          ? err.userMessage
+          : t('auth.errors.loginFailed');
       // Only re-enable on failure. On success the page navigates away (OAuth
       // callback redirect) or reloads, so keeping the control disabled here
       // prevents a double-submit firing redundant login requests mid-navigation.
@@ -243,8 +275,22 @@
       action: 'handleOAuthLogin',
     });
 
-    // Redirect to OAuth provider
-    window.location.href = endpoint;
+    // Redirect to OAuth provider. The endpoint is this app's own backend route
+    // (e.g. '/auth/google'), so it must carry the reverse-proxy base path when the
+    // UI is served behind a path-prefixing proxy such as Home Assistant Ingress.
+    // buildAppUrl is idempotent and open-redirect guarded, and the endpoint
+    // validation above has already restricted this to a relative path.
+    // The endpoint may already carry a query string when it is overridden.
+    const providerUrl = new URL(endpoint, window.location.origin);
+    if (rememberBrowser) {
+      providerUrl.searchParams.set(REMEMBER_QUERY_PARAM, REMEMBER_QUERY_VALUE);
+    } else {
+      // An overridden endpoint may already carry the parameter; unticked means
+      // the server must not see it.
+      providerUrl.searchParams.delete(REMEMBER_QUERY_PARAM);
+    }
+    unsavedChanges.allowUnload();
+    window.location.href = buildAppUrl(providerUrl.pathname + providerUrl.search);
   }
 
   function handleSubmit(event: Event) {
@@ -286,7 +332,7 @@
           }
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          onClose();
+          cancel();
         }
       };
 
@@ -301,6 +347,7 @@
       password = '';
       error = '';
       loadingState = 'idle';
+      rememberBrowser = REMEMBER_BROWSER_DEFAULT;
 
       // Clean up focus trap
       if (focusTrap) {
@@ -331,7 +378,7 @@
       <button
         type="button"
         class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3"
-        onclick={onClose}
+        onclick={cancel}
         disabled={isAnyLoading}
         aria-label="Close login dialog"
       >
@@ -345,7 +392,7 @@
         <div class="text-center space-y-2">
           <div class="flex justify-center mb-4">
             <div class="p-3 bg-[var(--color-primary)]/10 rounded-full">
-              <ShieldCheck class="size-8 text-[var(--color-primary)]" />
+              <ShieldCheck class="size-8 text-[var(--text-primary)]" />
             </div>
           </div>
           <h3 id="modal-title" class="text-2xl font-semibold">
@@ -355,6 +402,16 @@
             {t('auth.loginSubtitle')}
           </p>
         </div>
+
+        {#snippet rememberCheckbox()}
+          <Checkbox
+            bind:checked={rememberBrowser}
+            id="loginRememberBrowser"
+            label={t('auth.rememberBrowser')}
+            helpText={t('auth.rememberBrowserHelp')}
+            disabled={isAnyLoading}
+          />
+        {/snippet}
 
         <!-- Password login section -->
         {#if authConfig.basicEnabled}
@@ -383,7 +440,7 @@
               {#if error}
                 <div
                   id="loginError"
-                  class="text-[var(--color-error)] text-sm mt-2"
+                  class="text-[var(--text-error)] text-sm mt-2"
                   role="alert"
                   aria-live="polite"
                 >
@@ -391,6 +448,8 @@
                 </div>
               {/if}
             </div>
+
+            {@render rememberCheckbox()}
 
             <button
               type="submit"
@@ -416,6 +475,9 @@
         <!-- OAuth providers -->
         {#if hasOAuthProviders}
           <div class="space-y-3">
+            {#if !authConfig.basicEnabled}
+              {@render rememberCheckbox()}
+            {/if}
             {#each enabledProviders as provider (provider.id)}
               {@const Icon = provider.icon}
               {@const isLoading = loadingState === provider.id}
@@ -441,8 +503,8 @@
 
     <div
       class="modal-backdrop bg-black/50"
-      onclick={onClose}
-      onkeydown={e => e.key === 'Escape' && onClose()}
+      onclick={cancel}
+      onkeydown={e => e.key === 'Escape' && cancel()}
       role="button"
       tabindex="-1"
       aria-label="Close modal"

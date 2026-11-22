@@ -7,11 +7,26 @@ import (
 
 	"github.com/tphakala/birdnet-go/internal/errors"
 	ov "github.com/tphakala/birdnet-go/internal/inference/openvino"
+	"github.com/tphakala/birdnet-go/internal/logger"
 )
 
 var (
 	ovInitMu      sync.Mutex
 	ovInitialized bool
+	// ovInitPath is the library path the loaded core really came from (the
+	// resolved path, or ov.DefaultLibraryName for a default-name load), recorded
+	// by InitOpenVINO so every probe describes the library this process loaded
+	// and the probe child never rediscovers one. Guarded by ovInitMu.
+	ovInitPath string
+)
+
+// Seams for the OpenVINO loader, replaced in tests.
+//
+//nolint:gochecknoglobals // test seams
+var (
+	ovInit             = ov.InitOV
+	ovLoadedLibrary    = ov.LoadedLibraryPath
+	ovLoadedConfigured = ov.LoadedLibraryConfigured
 )
 
 // ovActiveClassifiers counts OpenVINO classifiers currently serving inference.
@@ -23,11 +38,16 @@ var (
 var ovActiveClassifiers atomic.Int64
 
 // OpenVINO device names accepted by OpenVINOClassifierOptions.Device. They are
-// the device strings the OpenVINO backend expects ("CPU", "GPU").
+// the device strings the OpenVINO backend expects ("CPU", "GPU"); a concrete
+// "GPU.<n>" name (see OpenVINOIsGPUDevice) is accepted as well.
 const (
 	OVDeviceCPU = ov.DeviceCPU
 	OVDeviceGPU = ov.DeviceGPU
 )
+
+// OpenVINOIsGPUDevice reports whether an enumerated OpenVINO device name is a GPU:
+// the bare "GPU" or a concrete "GPU.<n>".
+func OpenVINOIsGPUDevice(name string) bool { return ov.IsGPUDevice(name) }
 
 // OVPrecisionF32 is the INFERENCE_PRECISION_HINT for full f32 inference, used to
 // override the f16 default where the GPU plugin miscompiles a model at f16.
@@ -38,7 +58,7 @@ type OpenVINOClassifierOptions struct {
 	Labels        []string // species labels; required (validated against model output)
 	Threads       int      // INFERENCE_NUM_THREADS; 0 = OpenVINO auto-tune (CPU only)
 	PrecisionHint string   // INFERENCE_PRECISION_HINT; "" defaults to f16
-	Device        string   // ov.DeviceCPU (default) or ov.DeviceGPU
+	Device        string   // ov.DeviceCPU (default), ov.DeviceGPU or a concrete "GPU.<n>"
 	OutputIndex   int      // logits output port index; 0 default, 3 for Perch v2
 }
 
@@ -84,14 +104,75 @@ func NewOpenVINOClassifier(modelPath string, opts OpenVINOClassifierOptions) (Cl
 }
 
 // OpenVINOHasDevice reports whether the named OpenVINO device (e.g. ov.DeviceGPU)
-// is available. It returns false on any error (backend not compiled in, core not
-// initialized, or query failure), so callers can use it as a plain gate.
+// is available. A GPU request matches by class: any enumerated "GPU" or "GPU.<n>"
+// satisfies it, because a host with several GPUs lists only the indexed names.
+// Other names must match exactly. It returns false on any error (backend not
+// compiled in, core not initialized, or query failure), so callers can use it as
+// a plain gate.
+//
+// It never enumerates devices in-process: ov_core_get_available_devices walks
+// the vendor driver stack, and a fault there aborts the whole process (issue
+// #4236). When the out-of-process probe has completed, its cached result
+// answers. While a probe is in flight, and before any probe has run, it answers
+// false. The GPU device planner runs the probe before building a classifier; a
+// host that loaded the core without it (the explicit-CPU plan path) reads false
+// here until EnsureOpenVINOProbe fills the cache.
 func OpenVINOHasDevice(name string) bool {
-	devs, err := ov.AvailableDevices()
+	devs, status, err := cachedOVProbeDevices()
+	if status != ovProbeCached {
+		return false
+	}
 	if err != nil {
 		return false
 	}
+	if name == OVDeviceGPU {
+		return slices.ContainsFunc(devs, OpenVINOIsGPUDevice)
+	}
 	return slices.Contains(devs, name)
+}
+
+// EnsureOpenVINOProbe runs the out-of-process device probe for the library the
+// loaded OpenVINO core came from, unless a probe verdict for it is already
+// cached, so later OpenVINOHasDevice calls answer from the probe. It is a no-op
+// when this build has no OpenVINO backend or the core is not loaded (then no
+// device is available anyway). It blocks until the probe child finishes (bounded
+// by the probe timeout), so call it off request paths or where a one-time wait
+// is acceptable. A failed probe degrades to "no device", as in device planning.
+func EnsureOpenVINOProbe() {
+	if !ov.Supported {
+		return
+	}
+	ovInitMu.Lock()
+	initialized, path := ovInitialized, ovInitPath
+	ovInitMu.Unlock()
+	if !initialized {
+		return
+	}
+	if _, err := OpenVINOProbeDevices(path); err != nil {
+		logOVProbeFailure(path, err)
+	}
+}
+
+// ovProbeFailureWarned records the library paths whose probe failure has been
+// logged at WARN (value: struct{}), so a failing probe is diagnosable from the
+// log without a WARN line per call (a cached probe failure is returned to every
+// caller, and a timed-out probe is retried by later callers).
+//
+//nolint:gochecknoglobals // process-wide once-per-path log guard
+var ovProbeFailureWarned sync.Map
+
+// logOVProbeFailure logs a failed device probe for libraryPath: WARN the first
+// time for that path, DEBUG after. The error names the cause (a crashed child
+// with its stderr excerpt, a timeout, or a missing completion marker).
+func logOVProbeFailure(libraryPath string, err error) {
+	log := logger.Global().Module("inference")
+	if _, seen := ovProbeFailureWarned.LoadOrStore(libraryPath, struct{}{}); seen {
+		log.Debug("OpenVINO device probe failed again",
+			logger.String("library_path", libraryPath), logger.Error(err))
+		return
+	}
+	log.Warn("OpenVINO device probe failed; treating the GPU as unavailable",
+		logger.String("library_path", libraryPath), logger.Error(err))
 }
 
 func (c *openvinoClassifier) Predict(samples []float32) ([]float32, error) {
@@ -119,7 +200,7 @@ func (c *openvinoClassifier) Close() {
 type OpenVINOEmbeddingExtractorOptions struct {
 	Threads       int    // INFERENCE_NUM_THREADS; 0 = OpenVINO auto-tune (CPU only)
 	PrecisionHint string // INFERENCE_PRECISION_HINT; "" defaults to f16
-	Device        string // ov.DeviceCPU (default) or ov.DeviceGPU
+	Device        string // ov.DeviceCPU (default), ov.DeviceGPU or a concrete "GPU.<n>"
 	OutputIndex   int    // embedding output port index (e.g. 1 for birdnet-v24-embeddings)
 	ExpectedDim   int    // required embedding element count; validated against the model
 }
@@ -217,18 +298,42 @@ func (e *openvinoEmbeddingExtractor) Close() {
 
 // InitOpenVINO initializes the OpenVINO runtime (loads libopenvino_c and the
 // process-global core). Safe to call repeatedly; retries after failure for
-// hot-reload recovery. Mirrors InitONNXRuntime.
+// hot-reload recovery. Mirrors InitONNXRuntime. On success it records the
+// library path the loader actually used (which, with no configured path, may
+// have been discovered) for the probes, and logs it once together with whether
+// the bound library came from configuration.
 func InitOpenVINO(libraryPath string) error {
 	ovInitMu.Lock()
 	defer ovInitMu.Unlock()
 	if ovInitialized {
 		return nil
 	}
-	if err := ov.InitOV(libraryPath); err != nil {
+	if err := ovInit(libraryPath); err != nil {
 		return err
 	}
+	loaded, _ := ovLoadedLibrary()
+	if loaded == "" {
+		loaded = ov.DefaultLibraryName
+	}
 	ovInitialized = true
+	ovInitializedSnap.Store(true)
+	ovInitPath = loaded
+	logger.Global().Module("inference").Info("OpenVINO runtime loaded",
+		logger.String("library_path", loaded),
+		logger.Bool("configured", ovLoadedConfigured()))
 	return nil
+}
+
+// OpenVINOLoadedLibraryPath returns the library path the OpenVINO core was
+// loaded from, or "" when no core is loaded. Probes must use it instead of the
+// configured path so they describe the library this process actually loaded.
+func OpenVINOLoadedLibraryPath() string {
+	ovInitMu.Lock()
+	defer ovInitMu.Unlock()
+	if !ovInitialized {
+		return ""
+	}
+	return ovInitPath
 }
 
 // DestroyOpenVINO tears down the OpenVINO core. Call only on shutdown.
@@ -242,6 +347,8 @@ func DestroyOpenVINO() error {
 		return err
 	}
 	ovInitialized = false
+	ovInitializedSnap.Store(false)
+	ovInitPath = ""
 	return nil
 }
 

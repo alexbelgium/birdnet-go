@@ -53,18 +53,19 @@ If you're using Docker Compose with BirdNET-Go, setting up Cloudflare Tunnel is 
        depends_on:
          - birdnet-go
      ```
-   - Alternatively, use the [premade docker-compose.yml](../../Docker/docker-compose.yml) which already includes this configuration (commented out)
+   - With the host networking file ([docker-compose.host.yml](../../Docker/docker-compose.host.yml), recommended for new installs), add `network_mode: host` to the cloudflared service and use `http://localhost:<WEB_PORT>` as the service URL in step 5. A container on a bridge network cannot reach a host-network service by name. The host file already includes a cloudflared service set up this way (commented out).
+   - With the bridge file ([docker-compose.yml](../../Docker/docker-compose.yml)), the snippet above works as is, and the file already includes it (commented out)
 
 4. **Start the Services**:
 
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 5. **Configure Public Hostname in Cloudflare Dashboard**:
    - Go back to your tunnel in the Cloudflare Zero Trust dashboard
    - Add a public hostname (e.g., `birdnet.yourdomain.com`)
-   - Set the service to `http://birdnet-go:8080`
+   - Set the service to `http://localhost:<WEB_PORT>` (host networking) or `http://birdnet-go:8080` (bridge networking)
    - Save the configuration
 
 Your BirdNET-Go instance will now be accessible at `https://birdnet.yourdomain.com` from anywhere.
@@ -90,6 +91,8 @@ If you're using the standard Docker installation method:
    ```
 
 3. **Configure Public Hostname** (same as above)
+
+If BirdNET-Go runs with host networking (`--network host`), add `--network host` to the cloudflared command as well and use `http://localhost:<BIRDNET_WEBSERVER_PORT>` as the service URL.
 
 ### Using Binary Installation (Non-Docker)
 
@@ -184,7 +187,7 @@ There are several authentication methods available in BirdNET-Go:
 
    ```yaml
    security:
-     # Required for OAuth methods
+     # Required for OAuth/OIDC redirect URLs
      host: "birdnet.yourdomain.com" # Your Cloudflare domain
 
      # Option 1: Basic Password Authentication
@@ -192,19 +195,19 @@ There are several authentication methods available in BirdNET-Go:
        enabled: true
        password: "your_password" # Will be automatically hashed
 
-     # Option 2: Google OAuth (requires Google Cloud account)
-     googleauth:
-       enabled: true
-       clientid: "your_client_id" # From Google Cloud Console
-       clientsecret: "your_client_secret"
-       userid: "your_email@gmail.com"
+     # Option 2: OAuth2 / OIDC providers (google, github, microsoft, oidc)
+     oauthProviders:
+       - provider: google
+         enabled: true
+         clientId: "your_client_id" # From Google Cloud Console
+         clientSecret: "your_client_secret"
+         userId: "your_google_user_id" # Prefer provider user ID over email
 
-     # Option 3: GitHub OAuth
-     githubauth:
-       enabled: true
-       clientid: "your_client_id" # From GitHub developer settings
-       clientsecret: "your_client_secret"
-       userid: "your_github_username"
+       - provider: github
+         enabled: true
+         clientId: "your_client_id" # From GitHub developer settings
+         clientSecret: "your_client_secret"
+         userId: "your_github_user_id"
 
      # Optional: Allow local network access without auth
      allowsubnetbypass:
@@ -212,12 +215,14 @@ There are several authentication methods available in BirdNET-Go:
        subnet: "192.168.1.0/24,10.0.0.0/8" # Your local network ranges
    ```
 
-2. **Restart BirdNET-Go** for the changes to take effect
+   See [Security & Access Control](security.md) for Microsoft, generic OIDC, and allowed-user ID details.
+
+2. **Restart BirdNET-Go** for `config.yaml` edits to take effect. When saving in **Settings > Security**, OAuth provider and basic-auth changes hot-reload without a restart, while changes to `host`, `baseurl`, `tlsMode`, `autoTls`, or `redirecttohttps` require restarting BirdNET-Go.
 
 ### Authentication Method Comparison
 
 - **Basic Password Authentication**: Simplest to set up, but offers the least security. Good for personal use.
-- **OAuth (Google/GitHub)**: More secure, requires fewer passwords to remember, and offers better protection against brute force attacks. Recommended for most users.
+- **OAuth2 / OIDC (Google, GitHub, Microsoft, or generic OIDC)**: More secure, requires fewer passwords to remember, and offers better protection against brute force attacks. Recommended for most users.
 - **Subnet Bypass**: Optional feature that allows unauthenticated access from your local network while requiring authentication from the internet. Useful for mixed home/remote usage.
 
 If you're sharing your BirdNET-Go instance with family or friends, consider using OAuth which makes it easier to control who has access without sharing passwords.
@@ -249,6 +254,7 @@ For more advanced setups, you can use a config file instead of a token:
 3. **Add credentials file** obtained from Cloudflare dashboard to `~/cloudflared/credentials.json`
 
 4. **Run with Docker Compose**:
+
    ```yaml
    cloudflared:
      image: cloudflare/cloudflared:latest
@@ -260,6 +266,8 @@ For more advanced setups, you can use a config file instead of a token:
      depends_on:
        - birdnet-go
    ```
+
+   With the host networking Compose file, add `network_mode: host` to this cloudflared service and use `service: http://localhost:<WEB_PORT>` in `config.yml` instead of `http://birdnet-go:8080`.
 
 ### Securing Multiple Services
 
@@ -277,7 +285,7 @@ If you run multiple services on your network, you can expose them all through a 
 
 ## Troubleshooting
 
-- **Connection refused errors**: Verify that the BirdNET-Go container is accessible from the cloudflared container. They should be on the same Docker network.
+- **Connection refused errors**: Verify that the BirdNET-Go container is accessible from the cloudflared container. They should be on the same Docker network, or, with host networking, both use the host network and the service URL is `http://localhost:<WEB_PORT>`.
 - **Tunnel not connecting**: Check logs with `docker logs birdnet-cloudflared` to ensure the token is valid.
 - **Cannot access web interface**: Verify that your DNS settings in Cloudflare are properly configured for your domain.
 - **Authentication issues**: If using OAuth, ensure the `security.host` matches your public domain exactly.
