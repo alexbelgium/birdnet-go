@@ -40,6 +40,19 @@
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import InlineSlider from '$lib/desktop/components/forms/InlineSlider.svelte';
+  import {
+    PLAYBACK_GAIN_MAX_DB,
+    PLAYBACK_GAIN_MIN_DB,
+    PLAYBACK_GAIN_STEP_DB,
+    PLAYBACK_HIGH_PASS_MAX_HZ,
+    PLAYBACK_HIGH_PASS_MIN_HZ,
+    PLAYBACK_HIGH_PASS_STEP_HZ,
+    clampPlaybackGain,
+    formatPlaybackGainLabel,
+    formatPlaybackHighPass,
+    highPassFromStored,
+    highPassToStored,
+  } from '$lib/utils/playbackDefaults';
   import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import FlagIcon, { type FlagLocale } from '$lib/desktop/components/ui/FlagIcon.svelte';
   import { t, getLocale } from '$lib/i18n';
@@ -249,10 +262,12 @@
       {
         defaultAudioGain: store.originalData.realtime?.dashboard?.defaultAudioGain,
         playbackDenoise: store.originalData.realtime?.dashboard?.playbackDenoise,
+        playback: store.originalData.realtime?.dashboard?.playback,
       },
       {
         defaultAudioGain: store.formData.realtime?.dashboard?.defaultAudioGain,
         playbackDenoise: store.formData.realtime?.dashboard?.playbackDenoise,
+        playback: store.formData.realtime?.dashboard?.playback,
       }
     )
   );
@@ -269,6 +284,17 @@
   function updatePlaybackDenoise(patch: Partial<DenoiseSettings>) {
     settingsActions.updateSection('realtime', {
       dashboard: { ...settings.dashboard, playbackDenoise: { ...playbackDenoise, ...patch } },
+    });
+  }
+
+  // Writes the playback object whole, like the denoise object: updateSection
+  // merges shallowly, so a partial object would drop the other fields.
+  function updatePlaybackHighPass(hz: number) {
+    settingsActions.updateSection('realtime', {
+      dashboard: {
+        ...settings.dashboard,
+        playback: { ...settings.dashboard.playback, highPassHz: highPassToStored(hz) },
+      },
     });
   }
 
@@ -434,22 +460,35 @@
       originalData={{
         defaultAudioGain: store.originalData.realtime?.dashboard?.defaultAudioGain,
         playbackDenoise: store.originalData.realtime?.dashboard?.playbackDenoise,
+        playback: store.originalData.realtime?.dashboard?.playback,
       }}
       currentData={{
         defaultAudioGain: store.formData.realtime?.dashboard?.defaultAudioGain,
         playbackDenoise: store.formData.realtime?.dashboard?.playbackDenoise,
+        playback: store.formData.realtime?.dashboard?.playback,
       }}
     >
       <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
         <InlineSlider
           label={t('settings.userInterface.audioPlayback.defaultGain')}
           helpText={t('settings.userInterface.audioPlayback.defaultGainHelpText')}
-          value={settings.dashboard.defaultAudioGain ?? 0}
+          value={clampPlaybackGain(settings.dashboard.defaultAudioGain)}
           onUpdate={value => updateDashboardSetting('defaultAudioGain', value)}
-          min={0}
-          max={24}
-          step={1}
-          unit={t('settings.userInterface.audioPlayback.defaultGainUnit')}
+          formatValue={formatPlaybackGainLabel}
+          min={PLAYBACK_GAIN_MIN_DB}
+          max={PLAYBACK_GAIN_MAX_DB}
+          step={PLAYBACK_GAIN_STEP_DB}
+          disabled={store.isLoading || store.isSaving}
+        />
+        <InlineSlider
+          label={t('settings.userInterface.audioPlayback.highPassLabel')}
+          helpText={t('settings.userInterface.audioPlayback.highPassHelpText')}
+          value={highPassFromStored(settings.dashboard.playback?.highPassHz)}
+          onUpdate={updatePlaybackHighPass}
+          min={PLAYBACK_HIGH_PASS_MIN_HZ}
+          max={PLAYBACK_HIGH_PASS_MAX_HZ}
+          step={PLAYBACK_HIGH_PASS_STEP_HZ}
+          formatValue={formatPlaybackHighPass}
           disabled={store.isLoading || store.isSaving}
         />
       </div>

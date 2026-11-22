@@ -94,6 +94,7 @@
   import { schemaObjectTypeLabel } from '$lib/utils/alertSchema';
   import { translateField } from '$lib/utils/notifications';
   import { handleAppLinkClick } from '$lib/stores/navigation.svelte';
+  import { useUnsavedChangesGuard } from '$lib/utils/useUnsavedChangesGuard.svelte';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import { SETTINGS_ROUTES } from '$lib/utils/settingsRoutes';
 
@@ -266,6 +267,27 @@
     originalPushSettings !== null &&
       JSON.stringify(pushSettings) !== JSON.stringify(originalPushSettings)
   );
+
+  // What the provider form holds that the user can change. The ntfy connection probe fields
+  // are left out: Test Connection and the delayed auto-check write them without any user edit.
+  function providerFormSnapshot(): string {
+    const editable: Partial<ServiceFormData> = { ...serviceFormData };
+    delete editable.ntfyCheckHost;
+    delete editable.ntfyCheckStatus;
+    return JSON.stringify({ selectedService, providerFormData, editable });
+  }
+
+  // Set when the add or edit form opens; the form is dirty once it differs.
+  let providerFormInitial = $state<string | null>(null);
+  let providerFormDirty = $derived(
+    showProviderForm &&
+      providerFormInitial !== null &&
+      providerFormInitial !== providerFormSnapshot()
+  );
+
+  // Template, push and provider state are page level, so tab switches keep them: only a route
+  // change asks.
+  useUnsavedChangesGuard(() => hasTemplateChanges || hasPushChanges || providerFormDirty);
 
   const templateFieldKeys = [
     'commonName',
@@ -596,19 +618,23 @@
     savingTemplate = true;
     templateStatusMessage = '';
 
+    // What goes out is what counts as saved: text typed while the request is pending is not.
+    const submittedTitle = editedTitle;
+    const submittedMessage = editedMessage;
+
     try {
       await api.patch('/api/v2/settings/notification', {
         templates: {
           newSpecies: {
-            title: editedTitle,
-            message: editedMessage,
+            title: submittedTitle,
+            message: submittedMessage,
           },
         },
       });
 
       if (templateConfig) {
-        templateConfig.title = editedTitle;
-        templateConfig.message = editedMessage;
+        templateConfig.title = submittedTitle;
+        templateConfig.message = submittedMessage;
       }
 
       templateStatusMessage = t('settings.notifications.templates.saveSuccess');
@@ -834,6 +860,7 @@
       enabled: true,
       filterTypes: ['detection', 'warning'],
     };
+    providerFormInitial = providerFormSnapshot();
     showProviderForm = true;
   }
 
@@ -868,11 +895,13 @@
       enabled: provider.enabled,
       filterTypes: provider.filter?.types || ['detection'],
     };
+    providerFormInitial = providerFormSnapshot();
     showProviderForm = true;
   }
 
   function closeProviderForm() {
     showProviderForm = false;
+    providerFormInitial = null;
     editingProviderIndex = null;
   }
 
@@ -963,12 +992,15 @@
     savingPush = true;
     pushStatusMessage = '';
 
+    // What is sent becomes the saved baseline, so an edit made while the request is pending
+    // (provider toggles stay enabled) stays unsaved.
+    const submitted = JSON.parse(JSON.stringify(pushSettings));
     try {
       await api.patch('/api/v2/settings/notification', {
-        push: pushSettings,
+        push: submitted,
       });
 
-      originalPushSettings = JSON.parse(JSON.stringify(pushSettings));
+      originalPushSettings = submitted;
 
       pushStatusMessage = t('settings.notifications.templates.saveSuccess');
       pushStatusType = 'success';
@@ -1048,6 +1080,13 @@
       if (rec === 'https' || rec === 'http') {
         serviceFormData.ntfyProtocol = rec;
         serviceFormData.ntfyCheckStatus = rec;
+        // The probe picks the protocol without a user edit, so only the baseline's protocol moves
+        // with it: other edits stay edits, and undoing them leaves the form clean.
+        if (providerFormInitial !== null) {
+          const baseline = JSON.parse(providerFormInitial);
+          baseline.editable.ntfyProtocol = rec;
+          providerFormInitial = JSON.stringify(baseline);
+        }
       } else {
         serviceFormData.ntfyCheckStatus = 'unreachable';
       }
@@ -1532,8 +1571,9 @@
                       />
                       <span
                         class="inline-flex items-center justify-center px-3 text-sm bg-[var(--color-base-300)] border border-l-0 border-[var(--color-base-300)] rounded-r-lg"
-                        >%</span
                       >
+                        %
+                      </span>
                     </div>
                     <p class="text-xs text-[var(--color-base-content)]/60 mt-1">
                       {t('settings.notifications.push.filters.minConfidence.helpText')}
@@ -1567,8 +1607,9 @@
                       />
                       <span
                         class="inline-flex items-center justify-center px-3 text-sm bg-[var(--color-base-300)] border border-l-0 border-[var(--color-base-300)] rounded-r-lg"
-                        >{t('settings.notifications.push.filters.speciesCooldown.unit')}</span
                       >
+                        {t('settings.notifications.push.filters.speciesCooldown.unit')}
+                      </span>
                     </div>
                     <p class="text-xs text-[var(--color-base-content)]/60 mt-1">
                       {t('settings.notifications.push.filters.speciesCooldown.helpText')}
@@ -1702,25 +1743,21 @@
                           {t('settings.notifications.push.services.ntfy.testConnection')}
                         </button>
                         {#if serviceFormData.ntfyCheckStatus === 'https'}
-                          <span class="text-xs text-[var(--text-success)]"
-                            >{t(
-                              'settings.notifications.push.services.ntfy.connectionOk.https'
-                            )}</span
-                          >
+                          <span class="text-xs text-[var(--text-success)]">
+                            {t('settings.notifications.push.services.ntfy.connectionOk.https')}
+                          </span>
                         {:else if serviceFormData.ntfyCheckStatus === 'http'}
-                          <span class="text-xs text-[var(--text-warning)]"
-                            >{t(
-                              'settings.notifications.push.services.ntfy.connectionOk.http'
-                            )}</span
-                          >
+                          <span class="text-xs text-[var(--text-warning)]">
+                            {t('settings.notifications.push.services.ntfy.connectionOk.http')}
+                          </span>
                         {:else if serviceFormData.ntfyCheckStatus === 'unreachable'}
-                          <span class="text-xs text-[var(--text-error)]"
-                            >{t('settings.notifications.push.services.ntfy.connectionFailed')}</span
-                          >
+                          <span class="text-xs text-[var(--text-error)]">
+                            {t('settings.notifications.push.services.ntfy.connectionFailed')}
+                          </span>
                         {:else if serviceFormData.ntfyCheckStatus === 'checkError'}
-                          <span class="text-xs text-[var(--text-warning)]"
-                            >{t('settings.notifications.push.services.ntfy.checkError')}</span
-                          >
+                          <span class="text-xs text-[var(--text-warning)]">
+                            {t('settings.notifications.push.services.ntfy.checkError')}
+                          </span>
                         {/if}
                       </div>
 
@@ -1977,15 +2014,15 @@
                         class="mt-2 pl-2 space-y-1 font-mono text-[var(--color-base-content)]/70"
                       >
                         <p>
-                          <strong
-                            >{t('settings.notifications.push.form.urlFormats.discord')}:</strong
-                          >
+                          <strong>
+                            {t('settings.notifications.push.form.urlFormats.discord')}:
+                          </strong>
                           {t('settings.notifications.push.form.urlFormats.discordFormat')}
                         </p>
                         <p>
-                          <strong
-                            >{t('settings.notifications.push.form.urlFormats.telegram')}:</strong
-                          >
+                          <strong>
+                            {t('settings.notifications.push.form.urlFormats.telegram')}:
+                          </strong>
                           {t('settings.notifications.push.form.urlFormats.telegramFormat')}
                         </p>
                         <p>
@@ -1993,14 +2030,15 @@
                           {t('settings.notifications.push.form.urlFormats.slackFormat')}
                         </p>
                         <p>
-                          <strong
-                            >{t('settings.notifications.push.form.urlFormats.pushover')}:</strong
-                          >
+                          <strong>
+                            {t('settings.notifications.push.form.urlFormats.pushover')}:
+                          </strong>
                           {t('settings.notifications.push.form.urlFormats.pushoverFormat')}
                         </p>
                         <p>
-                          <strong>{t('settings.notifications.push.form.urlFormats.gotify')}:</strong
-                          >
+                          <strong>
+                            {t('settings.notifications.push.form.urlFormats.gotify')}:
+                          </strong>
                           {t('settings.notifications.push.form.urlFormats.gotifyFormat')}
                         </p>
                         <p>
@@ -2265,9 +2303,9 @@
               <div class="space-y-4">
                 <div>
                   <label for="template-title" class="block mb-1">
-                    <span class="text-sm font-semibold text-[var(--color-base-content)]"
-                      >{t('settings.notifications.templates.titleLabel')}</span
-                    >
+                    <span class="text-sm font-semibold text-[var(--color-base-content)]">
+                      {t('settings.notifications.templates.titleLabel')}
+                    </span>
                   </label>
                   <input
                     id="template-title"
@@ -2280,9 +2318,9 @@
 
                 <div>
                   <label for="template-message" class="block mb-1">
-                    <span class="text-sm font-semibold text-[var(--color-base-content)]"
-                      >{t('settings.notifications.templates.messageLabel')}</span
-                    >
+                    <span class="text-sm font-semibold text-[var(--color-base-content)]">
+                      {t('settings.notifications.templates.messageLabel')}
+                    </span>
                   </label>
                   <textarea
                     id="template-message"
@@ -2324,11 +2362,11 @@
                       ></span>
                       <span>{t('settings.notifications.templates.savingButton')}</span>
                     {:else}
-                      <span
-                        >{hasTemplateChanges
+                      <span>
+                        {hasTemplateChanges
                           ? t('settings.notifications.templates.saveButtonUnsaved')
-                          : t('settings.notifications.templates.saveButton')}</span
-                      >
+                          : t('settings.notifications.templates.saveButton')}
+                      </span>
                     {/if}
                   </button>
                   <button
@@ -2364,17 +2402,17 @@
               </h3>
               <p class="text-sm text-[var(--color-base-content)]/80 mb-3">
                 {t('settings.notifications.templates.variablesDescription')}
-                <code class="bg-[var(--color-base-300)] px-1 rounded-sm"
-                  >&#123;&#123;.VariableName&#125;&#125;</code
-                >
+                <code class="bg-[var(--color-base-300)] px-1 rounded-sm">
+                  &#123;&#123;.VariableName&#125;&#125;
+                </code>
               </p>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs">
                 {#each templateFields as field (field.name)}
                   <div class="flex items-baseline gap-2">
-                    <code class="font-mono text-[var(--text-primary)] shrink-0"
-                      >&#123;&#123;.{field.name}&#125;&#125;</code
-                    >
+                    <code class="font-mono text-[var(--text-primary)] shrink-0">
+                      &#123;&#123;.{field.name}&#125;&#125;
+                    </code>
                     <span class="text-[var(--color-base-content)]/70">{field.description}</span>
                   </div>
                 {/each}
@@ -2528,8 +2566,9 @@
           <!-- Content -->
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-sm font-medium" class:opacity-50={!rule.enabled}>{displayName}</span
-              >
+              <span class="text-sm font-medium" class:opacity-50={!rule.enabled}>
+                {displayName}
+              </span>
               {#if rule.built_in}
                 <span
                   class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--color-base-200)] text-[var(--color-base-content)]/70"

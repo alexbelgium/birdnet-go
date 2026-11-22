@@ -155,6 +155,12 @@
       "confirmAction": "Confirm Action",
       "confirmMessage": "Are you sure you want to perform this action?"
     },
+    "unsavedChanges": {
+      "title": "Leave this page?",
+      "message": "You have unsaved changes. If you leave, they will be lost.",
+      "leave": "Leave page",
+      "stay": "Stay"
+    },
     "review": {
       "modalTitle": "Review Detection: {species}",
       "status": {
@@ -3736,12 +3742,7 @@
           "atLeastOneModel": "At least one model must be selected"
         },
         "captureTitle": "Capture",
-        "levelTitle": "Input level",
-        "captureApplyHint": "Capture restarts when you apply.",
-        "applyCapture": "Apply and restart capture",
-        "applying": "Applying...",
-        "adding": "Adding...",
-        "captureApplyFailed": "Capture was not changed. Apply again or cancel."
+        "levelTitle": "Input level"
       },
       "audioCapture": {
         "title": "Sound Card Configuration",
@@ -3759,7 +3760,8 @@
         "deviceSelected": "Sound card selected and ready for capture",
         "availableDevices": "Available Audio Devices",
         "active": "Active",
-        "streamsConfigured": "{count} stream(s) configured"
+        "streamsConfigured": "{count} stream(s) configured",
+        "description": "Sound cards BirdNET-Go listens to. A device or sample rate change restarts capture on that source when you save."
       },
       "quietHours": {
         "title": "Quiet Hours",
@@ -3783,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Audio Stream Configuration",
-        "noStreamsConfigured": "No streams configured"
+        "noStreamsConfigured": "No streams configured",
+        "description": "Configure network audio streams for remote audio capture. Supports RTSP, HTTP, HLS, RTMP, and UDP protocols. A connection change reconnects the stream when you save."
       },
       "streams": {
         "streamLabel": "Stream",
@@ -3906,12 +3909,7 @@
           "message": "Stereo stream detected. Downmixing multiple channels can reduce detection accuracy due to phase differences between channels. Select a specific channel (left/right) or use the channel detector for best results.",
           "short": "Stereo downmix active. Detection accuracy may be reduced. Select a specific channel under Connection."
         },
-        "autoSaveHelp": "Changes are saved as you make them. Connection changes reconnect the stream, so they wait until you press Apply.",
         "connectionTitle": "Connection",
-        "connectionApplyHint": "The stream reconnects when you apply.",
-        "connectionApplyFailed": "The connection was not changed. Apply again or cancel.",
-        "applyConnection": "Apply and reconnect",
-        "testBeforeApply": "Test the new URL before you apply it.",
         "statsLine": "Total: {total} · Rate: {rate} · Last: {last}",
         "ago": {
           "seconds": "{count}s ago",
@@ -4152,8 +4150,13 @@
         "listFailed": "The model list could not be loaded.",
         "warningBadge": "Check classifiers"
       },
-      "sources": {
-        "autoSaveHelp": "Changes are saved as you make them. Device and sample rate changes restart capture, so they wait until you press Apply."
+      "validation": {
+        "soundCards": "Fix the sound cards on the {tab} tab before saving: {names}",
+        "unnamedSource": "source {position} (no name)",
+        "needsAttention": "Needs attention",
+        "streams": "Fix the streams on the {tab} tab before saving: {names}",
+        "streamsUntested": "Test the new stream URL on the {tab} tab before saving: {names}",
+        "unnamedStream": "stream {position} (no name)"
       }
     },
     "security": {
@@ -5092,8 +5095,8 @@
       "audioPlayback": {
         "title": "Audio Playback",
         "description": "Default settings for playing bird recordings.",
-        "defaultGain": "Default Volume Boost",
-        "defaultGainHelpText": "Initial gain applied when playing recordings. Bird sounds are often quiet, so a boost of 6-12 dB is recommended.",
+        "defaultGain": "Default Gain",
+        "defaultGainHelpText": "Gain every clip starts with. Bird sounds are often quiet, so 6 to 12 dB is a good start; a negative value makes clips quieter.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Denoise clips when played",
         "denoiseHelpText": "Plays and downloads a denoised copy of every clip. Stored clips stay unchanged. Downloads become WAV files and are larger. The audio settings of a clip can pick another strength or turn denoising off.",
@@ -5102,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Turn on playback denoising above to choose a strength.",
         "denoiseExportPrecedence": "Not applied while Denoise Saved Clips is on (Audio settings, Processing tab). Those clips are already denoised.",
         "denoiseRedenoiseNote": "Clips saved while Denoise Saved Clips was on are denoised again when played. Choose Off in the audio settings of a clip to hear it as saved.",
-        "denoiseLossyNote": "Denoising works best on FLAC or WAV clips. Below {minBitrate} kbps, codec artefacts limit how clean the result gets."
+        "denoiseLossyNote": "Denoising works best on FLAC or WAV clips. Below {minBitrate} kbps, codec artefacts limit how clean the result gets.",
+        "highPassLabel": "Default High-Pass Filter",
+        "highPassHelpText": "Removes sound below this frequency while a clip plays, such as wind and traffic rumble. It is applied in the browser, so stored, downloaded and exported clips are not filtered.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Off"
       }
     },
     "restartRequired": "Some changes require a server restart to take effect. Please restart BirdNET-Go."
@@ -5117,6 +5124,8 @@
     "passwordPlaceholder": "Enter your password",
     "enterPassword": "Enter your password",
     "continue": "Continue",
+    "rememberBrowser": "Remember this browser",
+    "rememberBrowserHelp": "Stay signed in on this browser. Leave unticked on a shared computer.",
     "or": "or",
     "loginWithGoogle": "Login with Google",
     "loginWithGithub": "Login with GitHub",
@@ -5412,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "Generation failed with status {status}",
         "spectrogramFailed": "Failed to generate spectrogram"
+      },
+      "defaults": {
+        "open": "Playback defaults",
+        "title": "Playback defaults",
+        "description": "Every clip starts with these values. They are saved on this station and apply to everyone who uses it.",
+        "useCurrent": "Use current values",
+        "useCurrentHelp": "Copies the gain, denoise and high-pass filter this player is set to into the fields below. Nothing is saved until you choose Save Changes.",
+        "useCurrentHelpNoDenoise": "Copies the gain and high-pass filter this player is set to into the fields below. Nothing is saved until you choose Save Changes.",
+        "copied": "Current values copied. Choose Save Changes to keep them.",
+        "saved": "Playback defaults saved",
+        "saveFailed": "The playback defaults were not saved. Nothing was changed.",
+        "unavailable": "Settings could not be loaded, so the defaults cannot be changed here."
       },
       "clipExtraction": {
         "selectRange": "Click and drag to select a range",
@@ -5958,6 +5979,8 @@
       },
       "actionInProgress": "Wait for the current model install, reinstall, or remove to finish",
       "installSuccess": "Installed {name}",
+      "cancelling": "Cancelling...",
+      "cancelled": "Download of {name} cancelled.",
       "installedEnableOnSources": "{name} is installed. To use it, turn it on for your sources in Settings > Audio.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6005,7 +6028,8 @@
         "verifying": "Verifying...",
         "loading": "Loading...",
         "complete": "Installed successfully",
-        "failed": "Failed"
+        "failed": "Failed",
+        "cancelled": "Cancelled"
       },
       "license": {
         "title": "License Agreement",
@@ -6033,6 +6057,7 @@
         "removeFailed": "Failed to remove model",
         "removeHasDependents": "{name} is needed by {models}. Remove those models first.",
         "operationInProgress": "A model install, reinstall, or remove is already in progress ({name}). Try again when it finishes.",
+        "cancelUnavailable": "The download of {name} can no longer be cancelled.",
         "actionFailed": "There was a problem with {name}",
         "downloadSourceHint": "If huggingface.co is blocked or slow on your network, set a mirror in the Download Source section below.",
         "goToDownloadSource": "Go to Download Source",
@@ -6065,8 +6090,16 @@
       },
       "update": {
         "cardNotice": "A newer build ({to}) replaces the installed {from} build.",
+        "cardNoticeBuild": "Build {to} of version {version} replaces the installed build {from}.",
         "action": "Update",
         "applying": "Updating..."
+      },
+      "buildNotes": {
+        "heading": "What's new in build {build} of version {version}",
+        "released": "Released {date}",
+        "buildLabel": "Build number",
+        "buildValue": "{build}, released {date}",
+        "disclosure": "What's new in this build"
       },
       "entryIncompatible": "This model is not available on this system.",
       "regionGlobal": "Global",
@@ -6382,6 +6415,52 @@
       "patternNone": "None",
       "patternTransient": "Transient",
       "patternSustained": "Sustained"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Keyboard shortcuts",
+    "modal": {
+      "title": "Keyboard shortcuts",
+      "enable": "Enable keyboard shortcuts",
+      "enableHelp": "Turn this off if single-key shortcuts get in the way of a screen reader, voice control or an assistive keyboard.",
+      "offNote": "Keyboard shortcuts are off. The keys below do nothing until you turn them on.",
+      "or": "or"
+    },
+    "scopes": {
+      "global": "All pages"
+    },
+    "groups": {
+      "navigation": "Navigation",
+      "review": "Review",
+      "audio": "Audio",
+      "general": "General"
+    },
+    "keys": {
+      "shift": "Shift",
+      "space": "Space",
+      "arrowLeft": "Left arrow",
+      "arrowRight": "Right arrow",
+      "comma": "Comma",
+      "period": "Period",
+      "questionMark": "Question mark",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Older detection of the same species",
+      "newerSpecies": "Newer detection of the same species",
+      "correct": "Mark as correct",
+      "falsePositive": "Mark as false positive",
+      "wrongSpecies": "Change the species",
+      "keep": "Keep or release this recording",
+      "playPause": "Play or pause",
+      "seekBack": "Back one second",
+      "seekForward": "Forward one second",
+      "focusReview": "Go to the review buttons",
+      "backToList": "Back to detections"
+    },
+    "global": {
+      "help": "Show or hide keyboard shortcuts"
     }
   }
 }

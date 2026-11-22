@@ -187,9 +187,17 @@ type Dashboard struct {
 	CustomColors     *CustomColors        `yaml:"customcolors,omitempty" json:"customColors,omitempty"` // custom scheme colors (used when colorScheme is "custom")
 	LogoStyle        string               `yaml:"logostyle,omitempty" json:"logoStyle,omitempty"`       // logo display style: "gradient" or "solid"
 	Layout           DashboardLayout      `yaml:"layout" json:"layout"`                                 // configurable dashboard element layout
-	DefaultAudioGain float64              `yaml:"defaultaudiogain" json:"defaultAudioGain"`             // Default playback gain in dB (0-24)
+	DefaultAudioGain float64              `yaml:"defaultaudiogain" json:"defaultAudioGain"`             // Default playback gain in dB (-12 to 24)
 	LiveSpectrogram  bool                 `yaml:"livespectrogram" json:"liveSpectrogram"`               // auto-start live spectrogram on dashboard
 	PlaybackDenoise  DenoiseSettings      `yaml:"playbackdenoise" json:"playbackDenoise"`               // denoise clips when they are played or downloaded; stored clips stay unchanged
+	Playback         PlaybackDefaults     `yaml:"playback" json:"playback"`                             // further playback defaults
+}
+
+// PlaybackDefaults holds the values a clip player starts with. The two older
+// defaults, Dashboard.DefaultAudioGain and Dashboard.PlaybackDenoise, stay
+// where they are; new playback defaults are added here.
+type PlaybackDefaults struct {
+	HighPassHz int `yaml:"highpasshz" json:"highPassHz"` // high-pass cutoff in Hz applied in the browser while a clip plays; 0 is off
 }
 
 // DashboardLayout defines the ordered list of elements displayed on the dashboard.
@@ -1631,7 +1639,7 @@ type BasicAuth struct {
 	ClientSecret   string        `yaml:"clientsecret" json:"clientSecret"`     // client secret for OAuth2
 	RedirectURI    string        `yaml:"redirecturi" json:"redirectUri"`       // redirect uri for OAuth2
 	AuthCodeExp    time.Duration `yaml:"authcodeexp" json:"authCodeExp"`       // duration for authorization code
-	AccessTokenExp time.Duration `yaml:"accesstokenexp" json:"accessTokenExp"` // duration for access token
+	AccessTokenExp time.Duration `yaml:"accesstokenexp" json:"accessTokenExp"` // no longer sets how long a browser stays signed in
 }
 
 // SocialProvider holds settings for an OAuth2 identity provider
@@ -1821,7 +1829,7 @@ type Security struct {
 	MicrosoftAuth SocialProvider `yaml:"microsoftAuth,omitempty" json:"microsoftAuth,omitempty"` //nolint:modernize // Deprecated: use OAuthProviders, yaml.v3 doesn't support omitzero
 
 	SessionSecret   string        `yaml:"sessionsecret" json:"sessionSecret"`     // secret for session cookie
-	SessionDuration time.Duration `yaml:"sessionduration" json:"sessionDuration"` // duration for browser session cookies
+	SessionDuration time.Duration `yaml:"sessionduration" json:"sessionDuration"` // lifetime of the OAuth handshake cookie; no longer sets how long a browser stays signed in
 }
 
 type WebServerSettings struct {

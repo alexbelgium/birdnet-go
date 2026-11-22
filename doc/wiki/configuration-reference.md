@@ -256,10 +256,11 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.dashboard.customcolors.accent` | string | accent hex color, e.g. "#0284c7" |
 | `realtime.dashboard.logostyle` | string | logo display style: "gradient" or "solid" |
 | `realtime.dashboard.layout.elements` | dashboard-element[] |  |
-| `realtime.dashboard.defaultaudiogain` | number | Default playback gain in dB (0-24) |
+| `realtime.dashboard.defaultaudiogain` | number | Default playback gain in dB (-12 to 24) |
 | `realtime.dashboard.livespectrogram` | boolean | auto-start live spectrogram on dashboard |
 | `realtime.dashboard.playbackdenoise.enabled` | boolean | true to apply the denoise |
 | `realtime.dashboard.playbackdenoise.strength` | string | preset name, see the DenoisePreset constants |
+| `realtime.dashboard.playback.highpasshz` | integer | high-pass cutoff in Hz applied in the browser while a clip plays; 0 is off |
 | `realtime.dynamicthreshold.enabled` | boolean | true to enable dynamic threshold |
 | `realtime.dynamicthreshold.debug` | boolean | true to enable debug mode |
 | `realtime.dynamicthreshold.trigger` | number | trigger threshold for dynamic threshold |
@@ -422,7 +423,7 @@ SecurityConfig handles all security-related settings and validations for the app
 | `security.basicauth.clientsecret` | string | client secret for OAuth2 |
 | `security.basicauth.redirecturi` | string | redirect uri for OAuth2 |
 | `security.basicauth.authcodeexp` | string | duration for authorization code |
-| `security.basicauth.accesstokenexp` | string | duration for access token |
+| `security.basicauth.accesstokenexp` | string | no longer sets how long a browser stays signed in |
 | `security.oauthProviders` | o-auth-provider-config[] | OAuthProviders is the new array-based OAuth configuration. This is the preferred format for configuring OAuth providers. |
 | `security.googleAuth.enabled` | boolean | true to enable social provider |
 | `security.googleAuth.clientid` | string | client id for OAuth2 |
@@ -440,7 +441,7 @@ SecurityConfig handles all security-related settings and validations for the app
 | `security.microsoftAuth.redirecturi` | string | redirect uri for OAuth2 |
 | `security.microsoftAuth.userid` | string | valid user id for OAuth2 |
 | `security.sessionsecret` | string | secret for session cookie |
-| `security.sessionduration` | string | duration for browser session cookies |
+| `security.sessionduration` | string | lifetime of the OAuth handshake cookie; no longer sets how long a browser stays signed in |
 
 ## sentry
 

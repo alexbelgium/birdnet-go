@@ -155,6 +155,12 @@
       "confirmAction": "Bekräfta åtgärd",
       "confirmMessage": "Är du säker på att du vill utföra denna åtgärd?"
     },
+    "unsavedChanges": {
+      "title": "Lämna den här sidan?",
+      "message": "Du har osparade ändringar. Om du lämnar sidan går de förlorade.",
+      "leave": "Lämna sidan",
+      "stay": "Stanna"
+    },
     "review": {
       "modalTitle": "Granska detektion: {species}",
       "status": {
@@ -3736,12 +3742,7 @@
           "atLeastOneModel": "Minst en modell måste väljas"
         },
         "captureTitle": "Inspelning",
-        "levelTitle": "Ingångsnivå",
-        "captureApplyHint": "Inspelningen startas om när du verkställer.",
-        "applyCapture": "Verkställ och starta om inspelningen",
-        "applying": "Verkställer...",
-        "adding": "Lägger till...",
-        "captureApplyFailed": "Inspelningen ändrades inte. Verkställ igen eller avbryt."
+        "levelTitle": "Ingångsnivå"
       },
       "audioCapture": {
         "title": "Ljudkortskonfiguration",
@@ -3759,7 +3760,8 @@
         "deviceSelected": "Ljudkort valt och redo för inspelning",
         "availableDevices": "Tillgängliga ljudenheter",
         "active": "Aktiv",
-        "streamsConfigured": "{count} ström(mar) konfigurerade"
+        "streamsConfigured": "{count} ström(mar) konfigurerade",
+        "description": "Ljudkort som BirdNET-Go lyssnar på. En ändring av enhet eller samplingsfrekvens startar om inspelningen på den källan när du sparar."
       },
       "quietHours": {
         "title": "Tysta timmar",
@@ -3783,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Konfiguration av ljudströmmar",
-        "noStreamsConfigured": "Inga strömmar konfigurerade"
+        "noStreamsConfigured": "Inga strömmar konfigurerade",
+        "description": "Konfigurera nätverksljudströmmar för fjärrinspelning av ljud. Stöder RTSP, HTTP, HLS, RTMP och UDP-protokoll. En ändring av anslutningen ansluter strömmen igen när du sparar."
       },
       "streams": {
         "streamLabel": "Ström",
@@ -3906,12 +3909,7 @@
           "message": "Stereoström detekterad. Nedmixning av flera kanaler kan minska detektionsnoggrannheten på grund av fasskillnader mellan kanaler. Välj en specifik kanal (vänster/höger) eller använd kanaldetektorn för bästa resultat.",
           "short": "Stereo nedmix aktiv. Detektionsnoggrannheten kan vara nedsatt. Välj en specifik kanal under Anslutning."
         },
-        "autoSaveHelp": "Ändringar sparas direkt. Ändringar av anslutningen ansluter strömmen på nytt och väntar därför tills du klickar på Verkställ.",
         "connectionTitle": "Anslutning",
-        "connectionApplyHint": "Strömmen ansluts på nytt när du verkställer.",
-        "connectionApplyFailed": "Anslutningen ändrades inte. Verkställ igen eller avbryt.",
-        "applyConnection": "Verkställ och anslut på nytt",
-        "testBeforeApply": "Testa den nya URL:en innan du verkställer den.",
         "statsLine": "Totalt: {total} · Hastighet: {rate} · Senast: {last}",
         "ago": {
           "seconds": "{count} s sedan",
@@ -4152,8 +4150,13 @@
         "listFailed": "Modellistan kunde inte läsas in.",
         "warningBadge": "Kontrollera klassificerare"
       },
-      "sources": {
-        "autoSaveHelp": "Ändringar sparas direkt. Ändringar av enhet och samplingsfrekvens startar om inspelningen och väntar därför tills du klickar på Verkställ."
+      "validation": {
+        "soundCards": "Åtgärda ljudkorten på fliken {tab} innan du sparar: {names}",
+        "unnamedSource": "källa {position} (utan namn)",
+        "needsAttention": "Kräver uppmärksamhet",
+        "streams": "Åtgärda strömmarna på fliken {tab} innan du sparar: {names}",
+        "streamsUntested": "Testa den nya ström-URL:en på fliken {tab} innan du sparar: {names}",
+        "unnamedStream": "ström {position} (utan namn)"
       }
     },
     "security": {
@@ -5092,8 +5095,8 @@
       "audioPlayback": {
         "title": "Ljuduppspelning",
         "description": "Standardinställningar för uppspelning av fågelinspelningar.",
-        "defaultGain": "Standard volymförstärkning",
-        "defaultGainHelpText": "Initial förstärkning vid uppspelning av inspelningar. Fågelljud är ofta svaga, så en förstärkning på 6-12 dB rekommenderas.",
+        "defaultGain": "Standardförstärkning",
+        "defaultGainHelpText": "Förstärkningen som varje klipp startar med. Fågelljud är ofta svaga, så 6 till 12 dB är en bra start; ett negativt värde gör klipp svagare.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Brusreducera klipp vid uppspelning",
         "denoiseHelpText": "Spelar upp och laddar ner en brusreducerad kopia av varje klipp. Sparade klipp förblir oförändrade. Nedladdningar blir WAV-filer och är större. Ett klipps ljudinställningar kan välja en annan styrka eller stänga av brusreducering.",
@@ -5102,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Slå på brusreducering vid uppspelning ovan för att välja en styrka.",
         "denoiseExportPrecedence": "Tillämpas inte medan „Brusreducering av sparade klipp” är på (Ljudinställningar, fliken Bearbetning). Dessa klipp är redan brusreducerade.",
         "denoiseRedenoiseNote": "Klipp som sparades medan „Brusreducering av sparade klipp” var på brusreduceras igen vid uppspelning. Välj Av i ett klipps ljudinställningar för att höra det som det sparades.",
-        "denoiseLossyNote": "Brusreducering fungerar bäst på FLAC- eller WAV-klipp. Under {minBitrate} kbps begränsar kodekartefakter hur rent resultatet blir."
+        "denoiseLossyNote": "Brusreducering fungerar bäst på FLAC- eller WAV-klipp. Under {minBitrate} kbps begränsar kodekartefakter hur rent resultatet blir.",
+        "highPassLabel": "Standard högpassfilter",
+        "highPassHelpText": "Tar bort ljud under denna frekvens medan ett klipp spelas upp, till exempel vind och trafikbrus. Det tillämpas i webbläsaren, så lagrade, nedladdade och exporterade klipp filtreras inte.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Av"
       }
     },
     "restartRequired": "Vissa ändringar kräver en omstart av servern för att träda i kraft. Starta om BirdNET-Go."
@@ -5117,6 +5124,8 @@
     "passwordPlaceholder": "Ange ditt lösenord",
     "enterPassword": "Ange ditt lösenord",
     "continue": "Fortsätt",
+    "rememberBrowser": "Kom ihåg den här webbläsaren",
+    "rememberBrowserHelp": "Förbli inloggad i den här webbläsaren. Lämna okryssad på en delad dator.",
     "or": "eller",
     "loginWithGoogle": "Logga in med Google",
     "loginWithGithub": "Logga in med GitHub",
@@ -5412,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "Generering misslyckades med status {status}",
         "spectrogramFailed": "Kunde inte generera spektrogram"
+      },
+      "defaults": {
+        "open": "Standardvärden för uppspelning",
+        "title": "Standardvärden för uppspelning",
+        "description": "Varje klipp startar med dessa värden. De sparas på denna station och gäller för alla som använder den.",
+        "useCurrent": "Använd aktuella värden",
+        "useCurrentHelp": "Kopierar förstärkningen, brusreduceringen och högpassfiltret som den här spelaren är inställd på till fälten nedan. Inget sparas förrän du väljer Spara ändringar.",
+        "useCurrentHelpNoDenoise": "Kopierar förstärkningen och högpassfiltret som den här spelaren är inställd på till fälten nedan. Inget sparas förrän du väljer Spara ändringar.",
+        "copied": "Aktuella värden kopierade. Välj Spara ändringar för att behålla dem.",
+        "saved": "Standardvärden för uppspelning sparade",
+        "saveFailed": "Standardvärdena för uppspelning sparades inte. Inget ändrades.",
+        "unavailable": "Inställningarna kunde inte läsas in, så standardvärdena kan inte ändras här."
       },
       "clipExtraction": {
         "selectRange": "Klicka och dra för att markera ett intervall",
@@ -5958,6 +5979,8 @@
       },
       "actionInProgress": "Vänta tills den pågående installationen, ominstallationen eller borttagningen av modellen är klar",
       "installSuccess": "{name} har installerats",
+      "cancelling": "Avbryter...",
+      "cancelled": "Nedladdningen av {name} avbröts.",
       "installedEnableOnSources": "{name} är installerad. Aktivera den för dina källor under Inställningar > Ljud för att använda den.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6005,7 +6028,8 @@
         "verifying": "Verifierar...",
         "loading": "Laddar...",
         "complete": "Installerad",
-        "failed": "Misslyckades"
+        "failed": "Misslyckades",
+        "cancelled": "Avbruten"
       },
       "license": {
         "title": "Licensavtal",
@@ -6033,6 +6057,7 @@
         "removeFailed": "Kunde inte ta bort modell",
         "removeHasDependents": "{name} används av {models}. Ta bort de modellerna först.",
         "operationInProgress": "En installation, ominstallation eller borttagning av en modell pågår redan ({name}). Försök igen när den är klar.",
+        "cancelUnavailable": "Nedladdningen av {name} kan inte längre avbrytas.",
         "actionFailed": "Det uppstod ett problem med {name}",
         "downloadSourceHint": "Om huggingface.co är blockerat eller långsamt på ditt nätverk kan du ange en spegelsajt i avsnittet Nedladdningskälla nedan.",
         "goToDownloadSource": "Gå till Nedladdningskälla",
@@ -6065,8 +6090,16 @@
       },
       "update": {
         "cardNotice": "En nyare version ({to}) ersätter den installerade versionen {from}.",
+        "cardNoticeBuild": "Bygge {to} av version {version} ersätter det installerade bygget {from}.",
         "action": "Uppdatera",
         "applying": "Uppdaterar..."
+      },
+      "buildNotes": {
+        "heading": "Nytt i bygge {build} av version {version}",
+        "released": "Publicerat {date}",
+        "buildLabel": "Byggnummer",
+        "buildValue": "{build}, publicerat {date}",
+        "disclosure": "Nytt i det här bygget"
       },
       "entryIncompatible": "Den här modellen är inte tillgänglig på detta system.",
       "regionGlobal": "Global",
@@ -6382,6 +6415,52 @@
       "patternNone": "Inget",
       "patternTransient": "Övergående",
       "patternSustained": "Ihållande"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Kortkommandon",
+    "modal": {
+      "title": "Kortkommandon",
+      "enable": "Aktivera kortkommandon",
+      "enableHelp": "Stäng av detta om kortkommandon med en enda tangent stör en skärmläsare, röststyrning eller ett hjälpmedelstangentbord.",
+      "offNote": "Kortkommandon är avstängda. Tangenterna nedan gör ingenting förrän du aktiverar dem.",
+      "or": "eller"
+    },
+    "scopes": {
+      "global": "Alla sidor"
+    },
+    "groups": {
+      "navigation": "Navigering",
+      "review": "Granskning",
+      "audio": "Ljud",
+      "general": "Allmänt"
+    },
+    "keys": {
+      "shift": "Skift",
+      "space": "Blanksteg",
+      "arrowLeft": "Vänsterpil",
+      "arrowRight": "Högerpil",
+      "comma": "Komma",
+      "period": "Punkt",
+      "questionMark": "Frågetecken",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Äldre detektering av samma art",
+      "newerSpecies": "Nyare detektering av samma art",
+      "correct": "Markera som korrekt",
+      "falsePositive": "Markera som falskt positiv",
+      "wrongSpecies": "Ändra art",
+      "keep": "Behåll eller frigör denna inspelning",
+      "playPause": "Spela upp eller pausa",
+      "seekBack": "En sekund bakåt",
+      "seekForward": "En sekund framåt",
+      "focusReview": "Gå till granskningsknapparna",
+      "backToList": "Tillbaka till detekteringar"
+    },
+    "global": {
+      "help": "Visa eller dölj kortkommandon"
     }
   }
 }

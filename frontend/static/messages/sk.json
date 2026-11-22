@@ -155,6 +155,12 @@
       "confirmAction": "Potvrdiť akciu",
       "confirmMessage": "Naozaj chcete vykonať túto akciu?"
     },
+    "unsavedChanges": {
+      "title": "Opustiť túto stránku?",
+      "message": "Máte neuložené zmeny. Ak stránku opustíte, stratia sa.",
+      "leave": "Opustiť stránku",
+      "stay": "Zostať"
+    },
     "review": {
       "modalTitle": "Kontrola detekcie: {species}",
       "status": {
@@ -3736,12 +3742,7 @@
           "atLeastOneModel": "Musí byť vybraný aspoň jeden model"
         },
         "captureTitle": "Záznam",
-        "levelTitle": "Vstupná úroveň",
-        "captureApplyHint": "Záznam sa po použití reštartuje.",
-        "applyCapture": "Použiť a reštartovať záznam",
-        "applying": "Používa sa...",
-        "adding": "Pridáva sa...",
-        "captureApplyFailed": "Záznam sa nezmenil. Použite znova alebo zrušte."
+        "levelTitle": "Vstupná úroveň"
       },
       "audioCapture": {
         "title": "Konfigurácia zvukovej karty",
@@ -3759,7 +3760,8 @@
         "deviceSelected": "Zvuková karta vybraná a pripravená na zachytávanie",
         "availableDevices": "Dostupné zvukové zariadenia",
         "active": "Aktívne",
-        "streamsConfigured": "{count} nakonfigurovaných streamov"
+        "streamsConfigured": "{count} nakonfigurovaných streamov",
+        "description": "Zvukové karty, ktoré BirdNET-Go počúva. Zmena zariadenia alebo vzorkovacej frekvencie reštartuje záznam na tomto zdroji pri uložení."
       },
       "quietHours": {
         "title": "Tiché hodiny",
@@ -3783,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Konfigurácia zvukových streamov",
-        "noStreamsConfigured": "Žiadne nakonfigurované streamy"
+        "noStreamsConfigured": "Žiadne nakonfigurované streamy",
+        "description": "Nakonfigurujte sieťové zvukové streamy pre vzdialené zachytávanie zvuku. Podporuje protokoly RTSP, HTTP, HLS, RTMP a UDP. Zmena pripojenia znovu pripojí stream pri uložení."
       },
       "streams": {
         "streamLabel": "Stream",
@@ -3906,12 +3909,7 @@
           "message": "Detekovaný stereo stream. Zmiešanie viacerých kanálov môže znížiť presnosť detekcie kvôli fázovým rozdielom medzi kanálmi. Pre najlepšie výsledky vyberte konkrétny kanál (ľavý/pravý) alebo použite detektor kanálov.",
           "short": "Stereo downmix aktívny. Presnosť detekcie môže byť znížená. Vyberte konkrétny kanál v časti Pripojenie."
         },
-        "autoSaveHelp": "Zmeny sa ukladajú okamžite. Zmeny pripojenia znova pripoja stream, preto čakajú, kým nekliknete na Použiť.",
         "connectionTitle": "Pripojenie",
-        "connectionApplyHint": "Stream sa po použití znova pripojí.",
-        "connectionApplyFailed": "Pripojenie sa nezmenilo. Použite znova alebo zrušte.",
-        "applyConnection": "Použiť a znova pripojiť",
-        "testBeforeApply": "Pred použitím novú URL otestujte.",
         "statsLine": "Celkom: {total} · Rýchlosť: {rate} · Naposledy: {last}",
         "ago": {
           "seconds": "pred {count} s",
@@ -4152,8 +4150,13 @@
         "listFailed": "Zoznam modelov sa nepodarilo načítať.",
         "warningBadge": "Skontrolujte klasifikátory"
       },
-      "sources": {
-        "autoSaveHelp": "Zmeny sa ukladajú okamžite. Zmeny zariadenia a vzorkovacej frekvencie reštartujú záznam, preto čakajú, kým nekliknete na Použiť."
+      "validation": {
+        "soundCards": "Pred uložením opravte zvukové karty na karte {tab}: {names}",
+        "unnamedSource": "zdroj {position} (bez názvu)",
+        "needsAttention": "Vyžaduje pozornosť",
+        "streams": "Pred uložením opravte streamy na karte {tab}: {names}",
+        "streamsUntested": "Pred uložením otestujte novú URL streamu na karte {tab}: {names}",
+        "unnamedStream": "stream {position} (bez názvu)"
       }
     },
     "security": {
@@ -5092,8 +5095,8 @@
       "audioPlayback": {
         "title": "Prehrávanie zvuku",
         "description": "Predvolené nastavenia pre prehrávanie nahrávok vtákov.",
-        "defaultGain": "Predvolené zosilnenie hlasitosti",
-        "defaultGainHelpText": "Počiatočné zosilnenie pri prehrávaní nahrávok. Zvuky vtákov sú často tiché, preto sa odporúča zosilnenie 6-12 dB.",
+        "defaultGain": "Predvolené zosilnenie",
+        "defaultGainHelpText": "Zosilnenie, s ktorým sa začína každý klip. Zvuky vtákov sú často tiché, preto je dobrým začiatkom 6 až 12 dB; záporná hodnota klipy stíši.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Odšumiť klipy pri prehrávaní",
         "denoiseHelpText": "Prehráva a sťahuje odšumenú kópiu každého klipu. Uložené klipy zostávajú nezmenené. Stiahnuté súbory sú vo formáte WAV a sú väčšie. V nastaveniach zvuku klipu možno zvoliť inú silu alebo odšumenie vypnúť.",
@@ -5102,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Na výber sily zapnite vyššie odšumenie pri prehrávaní.",
         "denoiseExportPrecedence": "Nepoužije sa, kým je zapnuté „Odšumenie uložených klipov“ (Nastavenia zvuku, karta Spracovanie). Tieto klipy sú už odšumené.",
         "denoiseRedenoiseNote": "Klipy uložené pri zapnutom „Odšumení uložených klipov“ sa pri prehrávaní odšumia znova. Ak chcete počuť klip tak, ako bol uložený, zvoľte v jeho nastaveniach zvuku Vypnuté.",
-        "denoiseLossyNote": "Odšumenie funguje najlepšie pri klipoch FLAC alebo WAV. Pod {minBitrate} kb/s obmedzujú čistotu výsledku artefakty kodeku."
+        "denoiseLossyNote": "Odšumenie funguje najlepšie pri klipoch FLAC alebo WAV. Pod {minBitrate} kb/s obmedzujú čistotu výsledku artefakty kodeku.",
+        "highPassLabel": "Predvolený hornopriepustný filter",
+        "highPassHelpText": "Pri prehrávaní klipu odstraňuje zvuk pod touto frekvenciou, napríklad hukot vetra a dopravy. Použije sa v prehliadači, takže uložené, stiahnuté a exportované klipy sa nefiltrujú.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Vypnuté"
       }
     },
     "restartRequired": "Niektoré zmeny vyžadujú reštart servera. Reštartujte BirdNET-Go."
@@ -5117,6 +5124,8 @@
     "passwordPlaceholder": "Zadajte svoje heslo",
     "enterPassword": "Zadajte svoje heslo",
     "continue": "Pokračovať",
+    "rememberBrowser": "Zapamätať si tento prehliadač",
+    "rememberBrowserHelp": "Zostať prihlásený v tomto prehliadači. Na zdieľanom počítači nechajte nezaškrtnuté.",
     "or": "alebo",
     "loginWithGoogle": "Prihlásiť sa cez Google",
     "loginWithGithub": "Prihlásiť sa cez GitHub",
@@ -5412,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "Generovanie zlyhalo so stavom {status}",
         "spectrogramFailed": "Nepodarilo sa vygenerovať spektrogram"
+      },
+      "defaults": {
+        "open": "Predvolené nastavenia prehrávania",
+        "title": "Predvolené nastavenia prehrávania",
+        "description": "Každý klip začína s týmito hodnotami. Ukladajú sa na tejto stanici a platia pre každého, kto ju používa.",
+        "useCurrent": "Použiť aktuálne hodnoty",
+        "useCurrentHelp": "Skopíruje do polí nižšie zosilnenie, odšumenie a hornopriepustný filter, na ktoré je tento prehrávač nastavený. Nič sa neuloží, kým nezvolíte Uložiť zmeny.",
+        "useCurrentHelpNoDenoise": "Skopíruje do polí nižšie zosilnenie a hornopriepustný filter, na ktoré je tento prehrávač nastavený. Nič sa neuloží, kým nezvolíte Uložiť zmeny.",
+        "copied": "Aktuálne hodnoty skopírované. Ak ich chcete ponechať, zvoľte Uložiť zmeny.",
+        "saved": "Predvolené nastavenia prehrávania uložené",
+        "saveFailed": "Predvolené nastavenia prehrávania sa neuložili. Nič sa nezmenilo.",
+        "unavailable": "Nastavenia sa nepodarilo načítať, preto tu nemožno zmeniť predvolené hodnoty."
       },
       "clipExtraction": {
         "selectRange": "Kliknite a ťahajte pre výber rozsahu",
@@ -5958,6 +5979,8 @@
       },
       "actionInProgress": "Počkajte na dokončenie prebiehajúcej inštalácie, preinštalovania alebo odstránenia modelu",
       "installSuccess": "Model {name} bol nainštalovaný",
+      "cancelling": "Ruší sa...",
+      "cancelled": "Sťahovanie modelu {name} bolo zrušené.",
       "installedEnableOnSources": "Model {name} je nainštalovaný. Ak ho chcete používať, zapnite ho pre svoje zdroje v Nastavenia > Zvuk.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6005,7 +6028,8 @@
         "verifying": "Overovanie...",
         "loading": "Načítava sa...",
         "complete": "Úspešne nainštalované",
-        "failed": "Zlyhanie"
+        "failed": "Zlyhanie",
+        "cancelled": "Zrušené"
       },
       "license": {
         "title": "Licenčná zmluva",
@@ -6033,6 +6057,7 @@
         "removeFailed": "Nepodarilo sa odstrániť model",
         "removeHasDependents": "{name} je vyžadovaný modelmi {models}. Najprv tieto modely odstráňte.",
         "operationInProgress": "Už prebieha inštalácia, preinštalovanie alebo odstránenie modelu ({name}). Skúste to znova po jej dokončení.",
+        "cancelUnavailable": "Sťahovanie modelu {name} už nie je možné zrušiť.",
         "actionFailed": "Vyskytol sa problém s {name}",
         "downloadSourceHint": "Ak je huggingface.co vo vašej sieti zablokované alebo pomalé, nastavte zrkadlový server v sekcii Zdroj sťahovania nižšie.",
         "goToDownloadSource": "Prejsť na Zdroj sťahovania",
@@ -6065,8 +6090,16 @@
       },
       "update": {
         "cardNotice": "Novšie zostavenie ({to}) nahrádza nainštalované zostavenie {from}.",
+        "cardNoticeBuild": "Zostavenie {to} verzie {version} nahrádza nainštalované zostavenie {from}.",
         "action": "Aktualizovať",
         "applying": "Aktualizuje sa..."
+      },
+      "buildNotes": {
+        "heading": "Novinky v zostavení {build} verzie {version}",
+        "released": "Vydané {date}",
+        "buildLabel": "Číslo zostavenia",
+        "buildValue": "{build}, vydané {date}",
+        "disclosure": "Novinky v tomto zostavení"
       },
       "entryIncompatible": "Tento model nie je v tomto systéme k dispozícii.",
       "regionGlobal": "Globálny",
@@ -6382,6 +6415,52 @@
       "patternNone": "Žiadny",
       "patternTransient": "Prechodný",
       "patternSustained": "Trvalý"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Klávesové skratky",
+    "modal": {
+      "title": "Klávesové skratky",
+      "enable": "Povoliť klávesové skratky",
+      "enableHelp": "Vypnite, ak vám skratky na jednej klávese prekážajú pri používaní čítača obrazovky, hlasového ovládania alebo asistenčnej klávesnice.",
+      "offNote": "Klávesové skratky sú vypnuté. Nižšie uvedené klávesy nerobia nič, kým ich nezapnete.",
+      "or": "alebo"
+    },
+    "scopes": {
+      "global": "Všetky stránky"
+    },
+    "groups": {
+      "navigation": "Navigácia",
+      "review": "Kontrola",
+      "audio": "Zvuk",
+      "general": "Všeobecné"
+    },
+    "keys": {
+      "shift": "Shift",
+      "space": "Medzerník",
+      "arrowLeft": "Šípka vľavo",
+      "arrowRight": "Šípka vpravo",
+      "comma": "Čiarka",
+      "period": "Bodka",
+      "questionMark": "Otáznik",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Staršia detekcia rovnakého druhu",
+      "newerSpecies": "Novšia detekcia rovnakého druhu",
+      "correct": "Označiť ako správne",
+      "falsePositive": "Označiť ako falošne pozitívne",
+      "wrongSpecies": "Zmeniť druh",
+      "keep": "Ponechať alebo uvoľniť túto nahrávku",
+      "playPause": "Prehrať alebo pozastaviť",
+      "seekBack": "O sekundu späť",
+      "seekForward": "O sekundu vpred",
+      "focusReview": "Prejsť na tlačidlá kontroly",
+      "backToList": "Späť na detekcie"
+    },
+    "global": {
+      "help": "Zobraziť alebo skryť klávesové skratky"
     }
   }
 }

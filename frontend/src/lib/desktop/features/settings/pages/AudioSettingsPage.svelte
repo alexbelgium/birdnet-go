@@ -30,9 +30,11 @@
   import StreamManager from '$lib/desktop/components/forms/StreamManager.svelte';
   import SoundCardManager from '$lib/desktop/components/forms/SoundCardManager.svelte';
   import {
-    AUDIO_SOURCES_FIELD_PREFIX,
-    STREAMS_FIELD_PREFIX,
-  } from '$lib/desktop/components/forms/sourceFields';
+    problemSourceNames,
+    problemStreamNames,
+    soundCardProblems,
+    streamProblems,
+  } from '$lib/desktop/components/forms/sourceRules';
   import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import TextInput from '$lib/desktop/components/forms/TextInput.svelte';
@@ -44,6 +46,7 @@
     rtspSettings,
     realtimeSettings,
     extendedCaptureSettings,
+    setValidationIssues,
     type AudioSourceConfig,
     type DenoiseSettings,
     type EqualizerFilterType,
@@ -51,7 +54,8 @@
   } from '$lib/stores/settings';
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import { cn } from '$lib/utils/cn';
-  import { commitSetting, type CommitOptions } from '$lib/stores/settingsAutoSave.svelte';
+  import { onDestroy } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import Skeleton from '$lib/desktop/components/ui/Skeleton.svelte';
   import SkeletonStatus from '$lib/desktop/components/ui/SkeletonStatus.svelte';
   import {
@@ -255,8 +259,22 @@
   }
 
   // PERFORMANCE OPTIMIZATION: Reactive change detection per tab with $derived.
-  // The sound card and streams tabs save as they change, so they have no unsaved
-  // state to track.
+
+  // Streams tab changes
+  let streamsTabHasChanges = $derived(
+    hasSettingsChanged(
+      store.originalData.realtime?.rtsp?.streams,
+      store.formData.realtime?.rtsp?.streams
+    )
+  );
+
+  // Sound card tab changes
+  let soundCardTabHasChanges = $derived(
+    hasSettingsChanged(
+      store.originalData.realtime?.audio?.sources,
+      store.formData.realtime?.audio?.sources
+    )
+  );
 
   // Audio Normalization section changes (moved here for dependency order)
   let normalizationHasChanges = $derived(
@@ -505,17 +523,89 @@
     keepSpectrograms: settings.audio.export?.retention?.keepSpectrograms || false,
   });
 
-  // Update handlers
-  // The sound card tab saves each change at once: the whole sources array, under
-  // the field key of the control that made the change.
-  function updateAudioSources(sources: AudioSourceConfig[], options: CommitOptions) {
-    commitSetting('audio', { sources }, options);
+  // What blocks Save is a pure function of the form and the saved values, so the
+  // page evaluates it whichever tab is open (only the active tab is mounted). The
+  // key set is fixed: one key per kind of problem, never one per row.
+  const SOUNDCARDS_ISSUE_KEY = 'audio-soundcards-invalid';
+  const STREAMS_ISSUE_KEY = 'audio-streams-invalid';
+  const STREAMS_UNTESTED_ISSUE_KEY = 'audio-streams-untested';
+  const VALIDATION_ISSUE_KEYS = [
+    SOUNDCARDS_ISSUE_KEY,
+    STREAMS_ISSUE_KEY,
+    STREAMS_UNTESTED_ISSUE_KEY,
+  ];
+  // Counts Resets of the form; keys the sound card manager.
+  let resetCount = $state(0);
+  let savedSources = $derived(store.originalData.realtime?.audio?.sources ?? []);
+  let savedStreams = $derived(store.originalData.realtime?.rtsp?.streams ?? []);
+  // URLs whose test succeeded in this page session. The page holds them, since
+  // only the active tab is mounted and a tab switch would otherwise forget them.
+  const testedUrls = new SvelteSet<string>();
+
+  let soundCardIssue = $derived.by(() => {
+    const names = problemSourceNames(
+      settings.audio.sources,
+      soundCardProblems(settings.audio.sources, savedSources),
+      position => t('settings.audio.validation.unnamedSource', { position })
+    );
+    return names.length > 0
+      ? t('settings.audio.validation.soundCards', {
+          tab: t('settings.audio.tabs.soundCard'),
+          names: names.join(', '),
+        })
+      : undefined;
+  });
+
+  // The save bar names each invalid stream once: a stream whose only problem is an
+  // untested URL is listed apart from the streams with a name or URL error.
+  const STREAM_ISSUE_MESSAGES = new Map([
+    ['invalid', 'settings.audio.validation.streams'],
+    ['untested', 'settings.audio.validation.streamsUntested'],
+  ] as const);
+  let streamProblemList = $derived(streamProblems(settings.rtsp.streams, savedStreams, testedUrls));
+
+  function streamIssue(kind: 'invalid' | 'untested'): string | undefined {
+    const names = problemStreamNames(
+      settings.rtsp.streams,
+      streamProblemList,
+      position => t('settings.audio.validation.unnamedStream', { position }),
+      kind
+    );
+    const messageKey = STREAM_ISSUE_MESSAGES.get(kind);
+    return names.length > 0 && messageKey
+      ? t(messageKey, {
+          tab: t('settings.audio.tabs.streams'),
+          names: names.join(', '),
+        })
+      : undefined;
   }
 
-  // The streams tab saves each change at once: the whole streams array, under the
-  // field key of the control that made the change.
-  function updateRTSPStreams(streams: StreamConfig[], options: CommitOptions) {
-    commitSetting('rtsp', { streams }, options);
+  let streamsIssue = $derived(streamIssue('invalid'));
+  let streamsUntestedIssue = $derived(streamIssue('untested'));
+
+  $effect(() => {
+    const active = new Map<string, string>();
+    if (soundCardIssue) active.set(SOUNDCARDS_ISSUE_KEY, soundCardIssue);
+    if (streamsIssue) active.set(STREAMS_ISSUE_KEY, streamsIssue);
+    if (streamsUntestedIssue) active.set(STREAMS_UNTESTED_ISSUE_KEY, streamsUntestedIssue);
+    setValidationIssues(VALIDATION_ISSUE_KEYS, active);
+  });
+  onDestroy(() => setValidationIssues(VALIDATION_ISSUE_KEYS, new Map()));
+
+  // Update handlers
+  // The sound card tab writes the whole sources array into the form; the page's
+  // Save Changes bar persists it.
+  function updateAudioSources(sources: AudioSourceConfig[]) {
+    settingsActions.updateSection('realtime', { audio: { ...settings.audio, sources } });
+  }
+
+  // The streams tab writes the whole streams array into the form. The store's own
+  // rtsp object is spread: the page's `settings.rtsp` view keeps only two of its
+  // keys and would drop ffmpegParameters.
+  function updateRTSPStreams(streams: StreamConfig[]) {
+    settingsActions.updateSection('realtime', {
+      rtsp: { ...store.formData.realtime?.rtsp, streams },
+    });
   }
 
   function updateExportEnabled(enabled: boolean) {
@@ -680,16 +770,14 @@
       id: 'soundcard',
       label: t('settings.audio.tabs.soundCard'),
       icon: Volume2,
-      saveMode: 'immediate',
-      autoSaveScope: AUDIO_SOURCES_FIELD_PREFIX,
+      hasChanges: soundCardTabHasChanges,
       content: soundCardTabContent,
     },
     {
       id: 'streams',
       label: t('settings.audio.tabs.streams'),
       icon: Radio,
-      saveMode: 'immediate',
-      autoSaveScope: STREAMS_FIELD_PREFIX,
+      hasChanges: streamsTabHasChanges,
       content: streamsTabContent,
     },
     {
@@ -777,16 +865,23 @@
       <SettingsSection
         title={t('settings.audio.audioCapture.title')}
         icon={Mic}
-        description={t('settings.audio.sources.autoSaveHelp')}
+        description={t('settings.audio.audioCapture.description')}
+        originalData={store.originalData.realtime?.audio?.sources}
+        currentData={store.formData.realtime?.audio?.sources}
       >
-        <SoundCardManager
-          sources={settings.audio.sources}
-          audioDevices={audioDevices.data}
-          audioDevicesLoading={audioDevices.loading}
-          disabled={store.isLoading}
-          onUpdateSources={updateAudioSources}
-          onRefreshDevices={loadAudioDevices}
-        />
+        <!-- A Reset recreates the manager, so a device pick that is waiting for its probe is dropped. -->
+        {#key resetCount}
+          <SoundCardManager
+            sources={settings.audio.sources}
+            {savedSources}
+            audioDevices={audioDevices.data}
+            audioDevicesLoading={audioDevices.loading}
+            disabled={store.isLoading || store.isSaving}
+            disabledReason={store.isSaving ? t('settings.actions.saving') : t('common.loading')}
+            onUpdateSources={updateAudioSources}
+            onRefreshDevices={loadAudioDevices}
+          />
+        {/key}
       </SettingsSection>
     {/if}
   </div>
@@ -798,13 +893,22 @@
     <SettingsSection
       title={t('settings.audio.rtspStreams.title')}
       icon={Radio}
-      description={t('settings.audio.streams.autoSaveHelp')}
+      description={t('settings.audio.rtspStreams.description')}
+      originalData={store.originalData.realtime?.rtsp?.streams}
+      currentData={store.formData.realtime?.rtsp?.streams}
     >
-      <StreamManager
-        streams={settings.rtsp.streams}
-        disabled={store.isLoading}
-        onUpdateStreams={updateRTSPStreams}
-      />
+      <!-- A Reset recreates the manager, so an analysis or test that is still running is dropped and the add form closes. -->
+      {#key resetCount}
+        <StreamManager
+          streams={settings.rtsp.streams}
+          {savedStreams}
+          {testedUrls}
+          disabled={store.isLoading || store.isSaving}
+          disabledReason={store.isSaving ? t('settings.actions.saving') : t('common.loading')}
+          onUpdateStreams={updateRTSPStreams}
+          onUrlTested={url => testedUrls.add(url)}
+        />
+      {/key}
     </SettingsSection>
   </div>
 {/snippet}
@@ -1499,9 +1603,9 @@
             {:else}
               <div>
                 <label class="block py-1" for="export-bitrate-disabled">
-                  <span class="text-sm text-[var(--color-base-content)]"
-                    >{t('settings.audio.fileSettings.bitrateLabel')}</span
-                  >
+                  <span class="text-sm text-[var(--color-base-content)]">
+                    {t('settings.audio.fileSettings.bitrateLabel')}
+                  </span>
                 </label>
                 <input
                   id="export-bitrate-disabled"
@@ -1633,5 +1737,5 @@
 
 <!-- Main Content -->
 <div class="settings-page-content">
-  <SettingsTabs {tabs} bind:activeTab />
+  <SettingsTabs {tabs} bind:activeTab onReset={() => resetCount++} />
 </div>

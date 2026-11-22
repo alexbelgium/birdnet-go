@@ -155,6 +155,12 @@
       "confirmAction": "Apstiprināt darbību",
       "confirmMessage": "Vai tiešām vēlaties veikt šo darbību?"
     },
+    "unsavedChanges": {
+      "title": "Vai pamest šo lapu?",
+      "message": "Jums ir nesaglabātas izmaiņas. Ja pametīsiet lapu, tās tiks zaudētas.",
+      "leave": "Pamest lapu",
+      "stay": "Palikt"
+    },
     "review": {
       "modalTitle": "Pārskatīt noteikšanu: {species}",
       "status": {
@@ -3736,12 +3742,7 @@
           "atLeastOneModel": "Jāizvēlas vismaz viens modelis"
         },
         "captureTitle": "Ierakstīšana",
-        "levelTitle": "Ieejas līmenis",
-        "captureApplyHint": "Ierakstīšana tiks restartēta, kad lietosiet izmaiņas.",
-        "applyCapture": "Lietot un restartēt ierakstīšanu",
-        "applying": "Lieto...",
-        "adding": "Pievieno...",
-        "captureApplyFailed": "Ierakstīšana netika mainīta. Lietojiet vēlreiz vai atceliet."
+        "levelTitle": "Ieejas līmenis"
       },
       "audioCapture": {
         "title": "Skaņas kartes konfigurācija",
@@ -3759,7 +3760,8 @@
         "deviceSelected": "Skaņas karte izvēlēta un gatava uztveršanai",
         "availableDevices": "Pieejamās audio ierīces",
         "active": "Aktīvs",
-        "streamsConfigured": "{count} straume(-es) konfigurēta(-as)"
+        "streamsConfigured": "{count} straume(-es) konfigurēta(-as)",
+        "description": "Skaņas kartes, kuras BirdNET-Go klausās. Ierīces vai diskretizācijas frekvences maiņa saglabājot restartē ierakstīšanu šajā avotā."
       },
       "quietHours": {
         "title": "Klusās stundas",
@@ -3783,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Audio straumju konfigurācija",
-        "noStreamsConfigured": "Nav konfigurētu straumju"
+        "noStreamsConfigured": "Nav konfigurētu straumju",
+        "description": "Konfigurēt tīkla audio straumes attālinātai audio uztveršanai. Atbalsta RTSP, HTTP, HLS, RTMP un UDP protokolus. Savienojuma maiņa saglabājot atkārtoti savieno straumi."
       },
       "streams": {
         "streamLabel": "Straume",
@@ -3906,12 +3909,7 @@
           "message": "Konstatēta stereo straume. Vairāku kanālu samazināšana var pazemināt noteikšanas precizitāti fāzu atšķirību dēļ starp kanāliem. Izvēlieties konkrētu kanālu (kreiso/labo) vai izmantojiet kanālu detektoru labākajiem rezultātiem.",
           "short": "Stereo downmix aktīvs. Noteikšanas precizitāte var būt samazināta. Izvēlieties konkrētu kanālu sadaļā Savienojums."
         },
-        "autoSaveHelp": "Izmaiņas tiek saglabātas uzreiz. Savienojuma izmaiņas atkārtoti savieno straumi, tāpēc tās gaida, līdz noklikšķināt uz Lietot.",
         "connectionTitle": "Savienojums",
-        "connectionApplyHint": "Straume tiks atkārtoti savienota, kad lietosiet izmaiņas.",
-        "connectionApplyFailed": "Savienojums netika mainīts. Lietojiet vēlreiz vai atceliet.",
-        "applyConnection": "Lietot un savienot atkārtoti",
-        "testBeforeApply": "Pirms lietošanas pārbaudiet jauno URL.",
         "statsLine": "Kopā: {total} · Ātrums: {rate} · Pēdējie: {last}",
         "ago": {
           "seconds": "pirms {count} s",
@@ -4152,8 +4150,13 @@
         "listFailed": "Modeļu sarakstu neizdevās ielādēt.",
         "warningBadge": "Pārbaudiet klasifikatorus"
       },
-      "sources": {
-        "autoSaveHelp": "Izmaiņas tiek saglabātas uzreiz. Ierīces un iztveršanas frekvences izmaiņas restartē ierakstīšanu, tāpēc tās gaida, līdz noklikšķināt uz Lietot."
+      "validation": {
+        "soundCards": "Pirms saglabāšanas izlabojiet skaņas kartes cilnē {tab}: {names}",
+        "unnamedSource": "avots {position} (bez nosaukuma)",
+        "needsAttention": "Nepieciešama uzmanība",
+        "streams": "Pirms saglabāšanas izlabojiet straumes cilnē {tab}: {names}",
+        "streamsUntested": "Pirms saglabāšanas pārbaudiet jauno straumes URL cilnē {tab}: {names}",
+        "unnamedStream": "straume {position} (bez nosaukuma)"
       }
     },
     "security": {
@@ -5092,8 +5095,8 @@
       "audioPlayback": {
         "title": "Audio atskaņošana",
         "description": "Noklusējuma iestatījumi putnu ierakstu atskaņošanai.",
-        "defaultGain": "Noklusējuma skaļuma pastiprināšana",
-        "defaultGainHelpText": "Sākotnējā pastiprināšana, kas tiek piemērota, atskaņojot ierakstus. Putnu skaņas bieži ir klusas, tāpēc ieteicama 6-12 dB pastiprināšana.",
+        "defaultGain": "Noklusējuma pastiprinājums",
+        "defaultGainHelpText": "Pastiprinājums, ar kādu sākas katrs klips. Putnu skaņas bieži ir klusas, tāpēc 6-12 dB ir labs sākums; negatīva vērtība padara klipus klusākus.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Samazināt klipu troksni atskaņošanas laikā",
         "denoiseHelpText": "Atskaņo un lejupielādē katra klipa kopiju bez trokšņa. Saglabātie klipi paliek nemainīti. Lejupielādes kļūst par WAV failiem un ir lielākas. Klipa audio iestatījumos var izvēlēties citu stiprumu vai izslēgt trokšņu samazināšanu.",
@@ -5102,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Lai izvēlētos stiprumu, augstāk ieslēdziet trokšņu samazināšanu atskaņošanas laikā.",
         "denoiseExportPrecedence": "Netiek lietots, kamēr ir ieslēgta „Saglabāto klipu trokšņu samazināšana“ (Audio iestatījumi, cilne Apstrāde). Šie klipi jau ir attīrīti no trokšņa.",
         "denoiseRedenoiseNote": "Klipi, kas saglabāti, kamēr bija ieslēgta „Saglabāto klipu trokšņu samazināšana“, atskaņošanas laikā tiek attīrīti no trokšņa vēlreiz. Klipa audio iestatījumos izvēlieties Izslēgts, lai to dzirdētu tādu, kāds tas saglabāts.",
-        "denoiseLossyNote": "Trokšņu samazināšana vislabāk darbojas ar FLAC vai WAV klipiem. Zem {minBitrate} kbps kodeka artefakti ierobežo rezultāta tīrību."
+        "denoiseLossyNote": "Trokšņu samazināšana vislabāk darbojas ar FLAC vai WAV klipiem. Zem {minBitrate} kbps kodeka artefakti ierobežo rezultāta tīrību.",
+        "highPassLabel": "Noklusējuma augstfrekvences filtrs",
+        "highPassHelpText": "Klipa atskaņošanas laikā noņem skaņu zem šīs frekvences, piemēram, vēja un satiksmes dunoņu. Tas tiek piemērots pārlūkprogrammā, tāpēc saglabātie, lejupielādētie un eksportētie klipi netiek filtrēti.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Izslēgts"
       }
     },
     "restartRequired": "Dažām izmaiņām nepieciešama servera pārstartēšana, lai tās stātos spēkā. Lūdzu, pārstartējiet BirdNET-Go."
@@ -5117,6 +5124,8 @@
     "passwordPlaceholder": "Ievadiet savu paroli",
     "enterPassword": "Ievadiet savu paroli",
     "continue": "Turpināt",
+    "rememberBrowser": "Atcerēties šo pārlūku",
+    "rememberBrowserHelp": "Palikt pieteiktam šajā pārlūkā. Kopīgā datorā atstājiet neatzīmētu.",
     "or": "vai",
     "loginWithGoogle": "Pieteikties ar Google",
     "loginWithGithub": "Pieteikties ar GitHub",
@@ -5412,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "Ģenerēšana neizdevās ar statusu {status}",
         "spectrogramFailed": "Neizdevās ģenerēt spektrogrammu"
+      },
+      "defaults": {
+        "open": "Atskaņošanas noklusējumi",
+        "title": "Atskaņošanas noklusējumi",
+        "description": "Katrs klips sākas ar šīm vērtībām. Tās tiek saglabātas šajā stacijā un attiecas uz visiem, kas to izmanto.",
+        "useCurrent": "Izmantot pašreizējās vērtības",
+        "useCurrentHelp": "Iekopē zemāk esošajos laukos šī atskaņotāja pašreizējo pastiprinājumu, trokšņu samazināšanu un augstfrekvences filtru. Nekas netiek saglabāts, kamēr neizvēlaties Saglabāt izmaiņas.",
+        "useCurrentHelpNoDenoise": "Iekopē zemāk esošajos laukos šī atskaņotāja pašreizējo pastiprinājumu un augstfrekvences filtru. Nekas netiek saglabāts, kamēr neizvēlaties Saglabāt izmaiņas.",
+        "copied": "Pašreizējās vērtības nokopētas. Izvēlieties Saglabāt izmaiņas, lai tās paturētu.",
+        "saved": "Atskaņošanas noklusējumi saglabāti",
+        "saveFailed": "Atskaņošanas noklusējumi netika saglabāti. Nekas netika mainīts.",
+        "unavailable": "Iestatījumus neizdevās ielādēt, tāpēc noklusējumus šeit nevar mainīt."
       },
       "clipExtraction": {
         "selectRange": "Noklikšķiniet un velciet, lai atlasītu diapazonu",
@@ -5958,6 +5979,8 @@
       },
       "actionInProgress": "Pagaidiet, līdz beidzas pašreizējā modeļa instalēšana, pārinstalēšana vai noņemšana",
       "installSuccess": "{name} instalēts",
+      "cancelling": "Atceļ...",
+      "cancelled": "{name} lejupielāde atcelta.",
       "installedEnableOnSources": "{name} ir instalēts. Lai to izmantotu, ieslēdziet to saviem avotiem sadaļā Iestatījumi > Audio.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6005,7 +6028,8 @@
         "verifying": "Pārbauda...",
         "loading": "Ielādē...",
         "complete": "Veiksmīgi instalēts",
-        "failed": "Neizdevās"
+        "failed": "Neizdevās",
+        "cancelled": "Atcelts"
       },
       "license": {
         "title": "Licences līgums",
@@ -6033,6 +6057,7 @@
         "removeFailed": "Neizdevās noņemt modeli",
         "removeHasDependents": "{name} ir nepieciešams modeļiem {models}. Vispirms noņemiet šos modeļus.",
         "operationInProgress": "Jau notiek modeļa instalēšana, pārinstalēšana vai noņemšana ({name}). Mēģiniet vēlreiz, kad tā būs pabeigta.",
+        "cancelUnavailable": "{name} lejupielādi vairs nevar atcelt.",
         "actionFailed": "Radās problēma ar {name}",
         "downloadSourceHint": "Ja jūsu tīklā huggingface.co ir bloķēts vai lēns, iestatiet spoguļvietni zemāk esošajā sadaļā Lejupielādes avots.",
         "goToDownloadSource": "Doties uz Lejupielādes avots",
@@ -6065,8 +6090,16 @@
       },
       "update": {
         "cardNotice": "Jaunāka versija ({to}) aizstāj instalēto versiju {from}.",
+        "cardNoticeBuild": "Versijas {version} būvējums {to} aizstāj instalēto būvējumu {from}.",
         "action": "Atjaunināt",
         "applying": "Atjaunina..."
+      },
+      "buildNotes": {
+        "heading": "Jaunumi versijas {version} būvējumā {build}",
+        "released": "Izlaists {date}",
+        "buildLabel": "Būvējuma numurs",
+        "buildValue": "{build}, izlaists {date}",
+        "disclosure": "Jaunumi šajā būvējumā"
       },
       "entryIncompatible": "Šis modelis nav pieejams šajā sistēmā.",
       "regionGlobal": "Globāls",
@@ -6382,6 +6415,52 @@
       "patternNone": "Nav",
       "patternTransient": "Īslaicīgs",
       "patternSustained": "Ilgstošs"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Īsinājumtaustiņi",
+    "modal": {
+      "title": "Īsinājumtaustiņi",
+      "enable": "Iespējot īsinājumtaustiņus",
+      "enableHelp": "Izslēdziet, ja viena taustiņa īsinājumi traucē ekrāna lasītājam, balss vadībai vai palīgtastatūrai.",
+      "offNote": "Īsinājumtaustiņi ir izslēgti. Tālāk norādītie taustiņi neko nedara, kamēr tos neieslēdzat.",
+      "or": "vai"
+    },
+    "scopes": {
+      "global": "Visas lapas"
+    },
+    "groups": {
+      "navigation": "Navigācija",
+      "review": "Pārskatīšana",
+      "audio": "Audio",
+      "general": "Vispārīgi"
+    },
+    "keys": {
+      "shift": "Shift",
+      "space": "Atstarpes taustiņš",
+      "arrowLeft": "Kreisā bultiņa",
+      "arrowRight": "Labā bultiņa",
+      "comma": "Komats",
+      "period": "Punkts",
+      "questionMark": "Jautājuma zīme",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Vecāka tās pašas sugas noteikšana",
+      "newerSpecies": "Jaunāka tās pašas sugas noteikšana",
+      "correct": "Atzīmēt kā pareizu",
+      "falsePositive": "Atzīmēt kā kļūdaini pozitīvu",
+      "wrongSpecies": "Mainīt sugu",
+      "keep": "Paturēt vai atbrīvot šo ierakstu",
+      "playPause": "Atskaņot vai apturēt",
+      "seekBack": "Viena sekunde atpakaļ",
+      "seekForward": "Viena sekunde uz priekšu",
+      "focusReview": "Pāriet uz pārskatīšanas pogām",
+      "backToList": "Atpakaļ uz noteikšanām"
+    },
+    "global": {
+      "help": "Rādīt vai paslēpt īsinājumtaustiņus"
     }
   }
 }

@@ -60,14 +60,26 @@ func TestUpdateOffers(t *testing.T) {
 	replaced := updateTestEntry()
 	replaced.ID, replaced.Name = "replaced", "Replaced"
 	replaced.SupersededBy = "successor"
+	newerBuild := updateTestEntry()
+	newerBuild.ID, newerBuild.Name = "newer-build", "Newer build"
+	newerBuild.Variants[0].Build = 2
+	newerBuild.Variants[1].Version = "" // same release, build 1 -> build 2
 	entries := []classifier.CatalogEntry{
 		updateTestEntry(), withdrawn, dangling, replaced,
 		{ID: "successor", Name: "Successor", Version: "1.0"},
+		newerBuild,
 	}
 	want := updateOffer{
 		CatalogID: updateEntryID, ModelName: updateModelName,
-		ToVariantID: updateNewID,
+		FromVariantID: updateOldID, ToVariantID: updateNewID,
 		FromVersion: updateOldRel, ToVersion: updateNewRel,
+		FromBuild: 1, ToBuild: 1,
+	}
+	wantBuild := updateOffer{
+		CatalogID: "newer-build", ModelName: "Newer build",
+		FromVariantID: updateOldID, ToVariantID: updateNewID,
+		FromVersion: updateNewRel, ToVersion: updateNewRel,
+		FromBuild: 1, ToBuild: 2,
 	}
 
 	tests := []struct {
@@ -76,6 +88,7 @@ func TestUpdateOffers(t *testing.T) {
 		want      []updateOffer
 	}{
 		{name: "installed older release gets an offer with both versions", installed: map[string]string{updateEntryID: updateOldID}, want: []updateOffer{want}},
+		{name: "installed older build of the same release gets an offer with both builds", installed: map[string]string{"newer-build": updateOldID}, want: []updateOffer{wantBuild}},
 		{name: "installed current build gets none", installed: map[string]string{updateEntryID: updateNewID}},
 		{name: "withdrawn build of the same release gets none", installed: map[string]string{"withdrawn": updateOldID}},
 		{name: "entry with a visible entry-level successor gets none", installed: map[string]string{"replaced": updateOldID}},
@@ -99,11 +112,12 @@ func TestUpdateOffers(t *testing.T) {
 func TestUpdateOffersSignature(t *testing.T) {
 	t.Parallel()
 
-	a := updateOffer{CatalogID: "a", ToVariantID: "x"}
-	b := updateOffer{CatalogID: "b", ToVariantID: "y"}
+	a := updateOffer{CatalogID: "a", FromVariantID: "w", ToVariantID: "x"}
+	b := updateOffer{CatalogID: "b", FromVariantID: "w", ToVariantID: "y"}
 	assert.Equal(t, updateOffersSignature([]updateOffer{a, b}), updateOffersSignature([]updateOffer{b, a}), "the signature ignores order")
-	assert.Equal(t, "a:x,b:y", updateOffersSignature([]updateOffer{b, a}))
-	assert.NotEqual(t, updateOffersSignature([]updateOffer{a}), updateOffersSignature([]updateOffer{{CatalogID: "a", ToVariantID: "z"}}), "a different target is a different offer")
+	assert.Equal(t, "a:w>x,b:w>y", updateOffersSignature([]updateOffer{b, a}))
+	assert.NotEqual(t, updateOffersSignature([]updateOffer{a}), updateOffersSignature([]updateOffer{{CatalogID: "a", FromVariantID: "w", ToVariantID: "z"}}), "a different target is a different offer")
+	assert.NotEqual(t, updateOffersSignature([]updateOffer{a}), updateOffersSignature([]updateOffer{{CatalogID: "a", FromVariantID: "v", ToVariantID: "x"}}), "a different installed build is a different offer")
 }
 
 func TestNewUpdateNotification(t *testing.T) {
@@ -126,6 +140,10 @@ func TestNewUpdateNotification(t *testing.T) {
 
 	one := newUpdateNotification([]updateOffer{{CatalogID: "a", ModelName: "Model A", FromVersion: "3.0", ToVersion: "3.0.1"}})
 	assert.Equal(t, updateTitleOne, one.Title)
+
+	// A same-release update reads with the build on both sides, never "2 → 2".
+	build := newUpdateNotification([]updateOffer{{CatalogID: "p", ModelName: "Perch v2", FromVersion: "2", ToVersion: "2", FromBuild: 1, ToBuild: 2}})
+	assert.Equal(t, "Perch v2 (2-b1 → 2-b2)", build.MessageParams["models"])
 }
 
 // TestUpdateNoticeFallbacksMatchEnglishLocale pins that the English fallback texts
@@ -283,18 +301,71 @@ func TestGetModelCatalog_ReportsUpdate(t *testing.T) {
 	entry := findEntry(catalogRequest(t, h), updateEntryID)
 	require.NotNil(t, entry)
 	require.NotNil(t, entry.Update, "an installed older release reports its update")
-	assert.Equal(t, CatalogUpdateResponse{VariantID: updateNewID, FromVersion: updateOldRel, ToVersion: updateNewRel}, *entry.Update)
+	assert.Equal(t, CatalogUpdateResponse{VariantID: updateNewID, FromVersion: updateOldRel, ToVersion: updateNewRel, FromBuild: 1, ToBuild: 1}, *entry.Update)
 
 	f.setBuild(t, "m_v2")
 	entry = findEntry(catalogRequest(t, h), updateEntryID)
 	require.NotNil(t, entry)
 	assert.Nil(t, entry.Update, "the installed current build has no update")
 
+	// A newer build of the same release reports both build numbers, so a swapped
+	// or duplicated copy into the response would show.
+	sameRelease := updateTestEntry()
+	sameRelease.Variants[0].Build = 3
+	sameRelease.Variants[1].Version = ""
+	sameRelease.Variants[1].Build = 2
+	useCatalog(t, []classifier.CatalogEntry{sameRelease})
+	f.setBuild(t, "m_v1")
+	entry = findEntry(catalogRequest(t, h), updateEntryID)
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.Update)
+	assert.Equal(t, CatalogUpdateResponse{VariantID: updateNewID, FromVersion: updateNewRel, ToVersion: updateNewRel, FromBuild: 2, ToBuild: 3}, *entry.Update)
+	useCatalog(t, []classifier.CatalogEntry{updateTestEntry()})
+
 	f.setBuild(t, "")
 	entry = findEntry(catalogRequest(t, h), updateEntryID)
 	require.NotNil(t, entry)
 	assert.False(t, entry.Installed, "fixture: nothing is installed")
 	assert.Nil(t, entry.Update, "a model that is not installed has no update")
+}
+
+// TestGetModelCatalog_ReportsReleaseNotes pins the release-notes fields of the
+// catalog response: the entry's build records, and each variant's release and
+// build, for an installed Legacy build 1 and its live build 2 successor of the
+// same release. The client matches the two to show the notes of the build an
+// update installs.
+func TestGetModelCatalog_ReportsReleaseNotes(t *testing.T) {
+	f := newUpdateFixture(t)
+
+	entry := updateTestEntry()
+	entry.Variants[0].Build = 2
+	entry.Variants[1].Version = ""
+	notes := classifier.CatalogBuild{Version: updateNewRel, Build: 2, Date: "2026-11-21", Reason: "Why build 2 exists.", Notes: []string{"First change.", "Second change."}}
+	entry.Builds = []classifier.CatalogBuild{notes}
+	useCatalog(t, []classifier.CatalogEntry{entry})
+	f.setBuild(t, "m_v1")
+
+	got := findEntry(catalogRequest(t, f.h), updateEntryID)
+	require.NotNil(t, got)
+	assert.Equal(t, []CatalogBuildResponse{{Version: notes.Version, Build: notes.Build, Date: notes.Date, Reason: notes.Reason, Notes: notes.Notes}}, got.Builds)
+	builds := make(map[string][2]any, len(got.Variants))
+	for _, v := range got.Variants {
+		builds[v.ID] = [2]any{v.Version, v.Build}
+	}
+	assert.Equal(t, map[string][2]any{
+		updateNewID: {updateNewRel, 2},
+		updateOldID: {updateNewRel, 1},
+	}, builds, "the installed build 1 and its build 2 successor carry their release and build")
+
+	// An entry without records omits the key, not only its value.
+	useCatalog(t, []classifier.CatalogEntry{updateTestEntry()})
+	var raw struct {
+		Catalog []map[string]json.RawMessage `json:"catalog"`
+	}
+	require.NoError(t, json.Unmarshal(catalogBody(t, f.h), &raw))
+	require.Len(t, raw.Catalog, 1)
+	assert.NotContains(t, raw.Catalog[0], "builds")
+	assert.Contains(t, raw.Catalog[0], "variants", "fixture: the entry is in the response")
 }
 
 // TestSyncUpdateNotice_NilModelManagerIsNoop uses a catalog that holds an

@@ -41,6 +41,23 @@ export interface CatalogVariant {
    * server, in which case the client derives a coarser class from the id.
    */
   hardwareClass?: string;
+  /** Release of the variant's files (its own or the model's); absent on an older server. */
+  version?: string;
+  /** Build of the variant's files within its release (1 or more); absent on an older server, meaning 1. */
+  build?: number;
+}
+
+/**
+ * Release notes of one build of one release of a model. Mirrors the Go
+ * CatalogBuildResponse. `reason` and `notes` are English text from the upstream
+ * manifest, shown as plain text (never as markup); `date` is YYYY-MM-DD.
+ */
+export interface CatalogBuild {
+  version: string;
+  build: number;
+  date: string;
+  reason?: string;
+  notes?: string[];
 }
 
 /**
@@ -119,15 +136,24 @@ export interface CatalogEntry {
   /** The variant the gallery preselects for this host, absent when not eligible. */
   recommendedVariantId?: string;
   /**
-   * Set when the installed build is an older release that a newer release of this model
-   * replaces: `variantId` is the successor variant to install, `fromVersion` and `toVersion`
-   * are the two releases. Absent otherwise.
+   * Set when the installed build is superseded by a newer release or a newer build of the same
+   * release of this model: `variantId` is the successor variant to install, `fromVersion` and
+   * `toVersion` are the two releases, `fromBuild` and `toBuild` the build numbers within them
+   * (1 or more). Equal releases mean a newer build of one release. Absent otherwise.
    */
-  update?: { variantId: string; fromVersion: string; toVersion: string };
+  update?: {
+    variantId: string;
+    fromVersion: string;
+    toVersion: string;
+    fromBuild: number;
+    toBuild: number;
+  };
   /** Catalog IDs installed with this model; absent when it has none. May name hidden components the catalog does not list. */
   dependsOn?: string[];
   /** Licence and policy documents of the entry's own repo; absent when it has none. */
   documents?: CatalogDocument[];
+  /** Release notes of the model's builds that carry any, ordered by release string (compared as text) and then build; absent when it has none. */
+  builds?: CatalogBuild[];
 }
 
 /** Response wrapper for the catalog endpoint. */
@@ -149,7 +175,7 @@ export interface InstalledModel {
 /** Progress state for an ongoing model download, sent via SSE. */
 export interface DownloadProgress {
   catalogId: string;
-  status: 'downloading' | 'verifying' | 'loading' | 'complete' | 'failed';
+  status: 'downloading' | 'verifying' | 'loading' | 'complete' | 'failed' | 'cancelled';
   downloadedBytes: number;
   totalBytes: number;
   currentFile: number;

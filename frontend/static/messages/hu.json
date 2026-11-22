@@ -155,6 +155,12 @@
       "confirmAction": "Művelet megerősítése",
       "confirmMessage": "Biztosan végre szeretné hajtani ezt a műveletet?"
     },
+    "unsavedChanges": {
+      "title": "Elhagyja ezt az oldalt?",
+      "message": "Mentetlen módosításai vannak. Ha elhagyja az oldalt, elvesznek.",
+      "leave": "Oldal elhagyása",
+      "stay": "Maradás"
+    },
     "review": {
       "modalTitle": "Észlelés áttekintése: {species}",
       "status": {
@@ -3736,12 +3742,7 @@
           "atLeastOneModel": "Legalább egy modellt ki kell választani"
         },
         "captureTitle": "Rögzítés",
-        "levelTitle": "Bemeneti szint",
-        "captureApplyHint": "A rögzítés az alkalmazáskor újraindul.",
-        "applyCapture": "Alkalmazás és a rögzítés újraindítása",
-        "applying": "Alkalmazás...",
-        "adding": "Hozzáadás...",
-        "captureApplyFailed": "A rögzítés nem változott. Alkalmazza újra, vagy szakítsa meg."
+        "levelTitle": "Bemeneti szint"
       },
       "audioCapture": {
         "title": "Hangkártya konfiguráció",
@@ -3759,7 +3760,8 @@
         "deviceSelected": "Hangkártya kiválasztva és készen a rögzítésre",
         "availableDevices": "Elérhető hang eszközök",
         "active": "Aktív",
-        "streamsConfigured": "{count} stream konfigurálva"
+        "streamsConfigured": "{count} stream konfigurálva",
+        "description": "A BirdNET-Go által figyelt hangkártyák. Az eszköz vagy a mintavételezési frekvencia módosítása mentéskor újraindítja az adott forrás rögzítését."
       },
       "quietHours": {
         "title": "Csendes órák",
@@ -3783,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Hang stream konfiguráció",
-        "noStreamsConfigured": "Nincs stream konfigurálva"
+        "noStreamsConfigured": "Nincs stream konfigurálva",
+        "description": "Hálózati hang streamek konfigurálása távoli hang rögzítéshez. Támogatja az RTSP, HTTP, HLS, RTMP és UDP protokollokat. A kapcsolat módosítása mentéskor újracsatlakoztatja a streamet."
       },
       "streams": {
         "streamLabel": "Adatfolyam",
@@ -3906,12 +3909,7 @@
           "message": "Sztereó stream észlelve. A több csatorna keverése csökkentheti az érzékelési pontosságot a csatornák közötti fáziskülönbségek miatt. Válasszon konkrét csatornát (bal/jobb) vagy használja a csatornaészlelőt a legjobb eredményekhez.",
           "short": "Sztereó downmix aktív. Az érzékelési pontosság csökkent lehet. Válasszon konkrét csatornát a Kapcsolat részben."
         },
-        "autoSaveHelp": "A módosítások azonnal mentésre kerülnek. A kapcsolat módosítása újracsatlakoztatja a streamet, ezért ezek az Alkalmaz gombra kattintásig várnak.",
         "connectionTitle": "Kapcsolat",
-        "connectionApplyHint": "A stream az alkalmazáskor újracsatlakozik.",
-        "connectionApplyFailed": "A kapcsolat nem változott. Alkalmazza újra, vagy szakítsa meg.",
-        "applyConnection": "Alkalmazás és újracsatlakozás",
-        "testBeforeApply": "Az alkalmazás előtt tesztelje az új URL-t.",
         "statsLine": "Összesen: {total} · Sebesség: {rate} · Utoljára: {last}",
         "ago": {
           "seconds": "{count} mp-e",
@@ -4152,8 +4150,13 @@
         "listFailed": "A modellek listáját nem sikerült betölteni.",
         "warningBadge": "Osztályozók ellenőrzése"
       },
-      "sources": {
-        "autoSaveHelp": "A módosítások azonnal mentésre kerülnek. Az eszköz és a mintavételi frekvencia módosítása újraindítja a rögzítést, ezért ezek az Alkalmaz gombra kattintásig várnak."
+      "validation": {
+        "soundCards": "Mentés előtt javítsa ki a hangkártyákat a(z) {tab} lapon: {names}",
+        "unnamedSource": "{position}. forrás (név nélkül)",
+        "needsAttention": "Figyelmet igényel",
+        "streams": "Mentés előtt javítsa ki a streameket a(z) {tab} lapon: {names}",
+        "streamsUntested": "Mentés előtt tesztelje az új stream URL-jét a(z) {tab} lapon: {names}",
+        "unnamedStream": "{position}. stream (név nélkül)"
       }
     },
     "security": {
@@ -5092,8 +5095,8 @@
       "audioPlayback": {
         "title": "Hang lejátszás",
         "description": "Alapértelmezett beállítások a madár hangfelvételek lejátszásához.",
-        "defaultGain": "Alapértelmezett hangerő növelés",
-        "defaultGainHelpText": "Kezdeti erősítés a felvételek lejátszásakor. A madár hangok gyakran halkak, ezért 6-12 dB erősítés ajánlott.",
+        "defaultGain": "Alapértelmezett erősítés",
+        "defaultGainHelpText": "Az erősítés, amellyel minden klip indul. A madárhangok gyakran halkak, ezért a 6-12 dB jó kiindulópont; a negatív érték halkabbá teszi a klipeket.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Minták zajszűrése lejátszáskor",
         "denoiseHelpText": "Minden minta zajszűrt másolatát játssza le és tölti le. A mentett minták változatlanok maradnak. A letöltések WAV fájlok lesznek, és nagyobbak. Egy minta hangbeállításaiban másik erősség választható, vagy a zajszűrés kikapcsolható.",
@@ -5102,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Az erősség kiválasztásához kapcsolja be fent a lejátszás zajszűrését.",
         "denoiseExportPrecedence": "Nem érvényesül, amíg a „Mentett minták zajszűrése” be van kapcsolva (Hangbeállítások, Feldolgozás lap). Ezek a minták már zajszűrtek.",
         "denoiseRedenoiseNote": "A „Mentett minták zajszűrése” bekapcsolt állapotában mentett minták lejátszáskor újra zajszűrésen esnek át. Válassza a Ki lehetőséget egy minta hangbeállításaiban, hogy úgy hallja, ahogyan mentették.",
-        "denoiseLossyNote": "A zajszűrés FLAC vagy WAV mintákon működik a legjobban. {minBitrate} kbps alatt a kodek műtermékei korlátozzák az eredmény tisztaságát."
+        "denoiseLossyNote": "A zajszűrés FLAC vagy WAV mintákon működik a legjobban. {minBitrate} kbps alatt a kodek műtermékei korlátozzák az eredmény tisztaságát.",
+        "highPassLabel": "Alapértelmezett felül átengedő szűrő",
+        "highPassHelpText": "Egy klip lejátszása közben eltávolítja az ennél alacsonyabb frekvenciájú hangot, például a szél és a forgalom dübörgését. A böngészőben érvényesül, ezért a tárolt, letöltött és exportált klipek nincsenek szűrve.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Ki"
       }
     },
     "restartRequired": "Néhány változtatáshoz szerver újraindítás szükséges. Kérjük, indítsa újra a BirdNET-Go-t."
@@ -5117,6 +5124,8 @@
     "passwordPlaceholder": "Adja meg a jelszavát",
     "enterPassword": "Adja meg a jelszavát",
     "continue": "Folytatás",
+    "rememberBrowser": "Böngésző megjegyzése",
+    "rememberBrowserHelp": "Maradjon bejelentkezve ebben a böngészőben. Megosztott számítógépen hagyja bejelöletlenül.",
     "or": "vagy",
     "loginWithGoogle": "Bejelentkezés Google-lal",
     "loginWithGithub": "Bejelentkezés GitHub-bal",
@@ -5412,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "A generálás sikertelen, állapot: {status}",
         "spectrogramFailed": "A spektrogram generálása sikertelen"
+      },
+      "defaults": {
+        "open": "Lejátszási alapértékek",
+        "title": "Lejátszási alapértékek",
+        "description": "Minden minta ezekkel az értékekkel indul. Ezen az állomáson tárolódnak, és mindenkire érvényesek, aki használja.",
+        "useCurrent": "Jelenlegi értékek használata",
+        "useCurrentHelp": "Az alábbi mezőkbe másolja a lejátszó jelenlegi erősítését, zajcsökkentését és felül átengedő szűrőjét. Semmi sem mentődik, amíg a Módosítások mentése gombot nem választja.",
+        "useCurrentHelpNoDenoise": "Az alábbi mezőkbe másolja a lejátszó jelenlegi erősítését és felül átengedő szűrőjét. Semmi sem mentődik, amíg a Módosítások mentése gombot nem választja.",
+        "copied": "Jelenlegi értékek átmásolva. A megtartásukhoz válassza a Módosítások mentése gombot.",
+        "saved": "Lejátszási alapértékek mentve",
+        "saveFailed": "A lejátszási alapértékek nem lettek mentve. Semmi sem változott.",
+        "unavailable": "A beállításokat nem sikerült betölteni, ezért az alapértékek itt nem módosíthatók."
       },
       "clipExtraction": {
         "selectRange": "Kattintson és húzza a tartomány kijelöléséhez",
@@ -5958,6 +5979,8 @@
       },
       "actionInProgress": "Várd meg a modell jelenlegi telepítésének, újratelepítésének vagy eltávolításának befejezését",
       "installSuccess": "{name} telepítve",
+      "cancelling": "Megszakítás...",
+      "cancelled": "A(z) {name} letöltése megszakítva.",
       "installedEnableOnSources": "A(z) {name} telepítve van. A használatához kapcsolja be a forrásaihoz a Beállítások > Hang menüben.",
       "removeSuccess": "{name} eltávolítva",
       "reasons": {
@@ -6005,7 +6028,8 @@
         "verifying": "Ellenőrzés...",
         "loading": "Betöltés...",
         "complete": "Sikeresen telepítve",
-        "failed": "Sikertelen"
+        "failed": "Sikertelen",
+        "cancelled": "Megszakítva"
       },
       "license": {
         "title": "Licencszerződés",
@@ -6033,6 +6057,7 @@
         "removeFailed": "Nem sikerült eltávolítani a modellt",
         "removeHasDependents": "{name} szükséges a következő modellekhez: {models}. Először távolítsa el ezeket a modelleket.",
         "operationInProgress": "Már folyamatban van egy modell telepítése, újratelepítése vagy eltávolítása ({name}). Próbáld újra, ha befejeződött.",
+        "cancelUnavailable": "A(z) {name} letöltése már nem szakítható meg.",
         "actionFailed": "Probléma történt a következővel: {name}",
         "downloadSourceHint": "Ha a huggingface.co blokkolva van vagy lassú a hálózatán, állítson be egy tükörszervert az alábbi Letöltési forrás szakaszban.",
         "goToDownloadSource": "Ugrás a Letöltési forráshoz",
@@ -6065,8 +6090,16 @@
       },
       "update": {
         "cardNotice": "Újabb változat ({to}) váltja le a telepített {from} változatot.",
+        "cardNoticeBuild": "A(z) {version} verzió {to}. buildje leváltja a telepített {from}. buildet.",
         "action": "Frissítés",
         "applying": "Frissítés..."
+      },
+      "buildNotes": {
+        "heading": "A(z) {version} verzió {build}. buildjének újdonságai",
+        "released": "Megjelent: {date}",
+        "buildLabel": "Build száma",
+        "buildValue": "{build}, megjelent: {date}",
+        "disclosure": "Újdonságok ebben a buildben"
       },
       "entryIncompatible": "Ez a modell nem érhető el ezen a rendszeren.",
       "regionGlobal": "Globális",
@@ -6382,6 +6415,52 @@
       "patternNone": "Nincs",
       "patternTransient": "Átmeneti",
       "patternSustained": "Tartós"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Billentyűparancsok",
+    "modal": {
+      "title": "Billentyűparancsok",
+      "enable": "Billentyűparancsok engedélyezése",
+      "enableHelp": "Kapcsolja ki, ha az egybillentyűs parancsok zavarják a képernyőolvasót, a hangvezérlést vagy a kisegítő billentyűzetet.",
+      "offNote": "A billentyűparancsok ki vannak kapcsolva. Az alábbi billentyűk nem csinálnak semmit, amíg be nem kapcsolja őket.",
+      "or": "vagy"
+    },
+    "scopes": {
+      "global": "Minden oldal"
+    },
+    "groups": {
+      "navigation": "Navigáció",
+      "review": "Ellenőrzés",
+      "audio": "Hang",
+      "general": "Általános"
+    },
+    "keys": {
+      "shift": "Shift",
+      "space": "Szóköz",
+      "arrowLeft": "Balra nyíl",
+      "arrowRight": "Jobbra nyíl",
+      "comma": "Vessző",
+      "period": "Pont",
+      "questionMark": "Kérdőjel",
+      "combination": "{first} plusz {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Régebbi észlelés ugyanarról a fajról",
+      "newerSpecies": "Újabb észlelés ugyanarról a fajról",
+      "correct": "Megjelölés helyesként",
+      "falsePositive": "Megjelölés hamis pozitívként",
+      "wrongSpecies": "Faj módosítása",
+      "keep": "A felvétel megtartása vagy felszabadítása",
+      "playPause": "Lejátszás vagy szüneteltetés",
+      "seekBack": "Vissza egy másodpercet",
+      "seekForward": "Előre egy másodpercet",
+      "focusReview": "Ugrás az ellenőrző gombokra",
+      "backToList": "Vissza az észlelésekhez"
+    },
+    "global": {
+      "help": "Billentyűparancsok megjelenítése vagy elrejtése"
     }
   }
 }

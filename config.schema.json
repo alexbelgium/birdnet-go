@@ -381,7 +381,7 @@
         },
         "accesstokenexp": {
           "type": "string",
-          "description": "duration for access token",
+          "description": "no longer sets how long a browser stays signed in",
           "examples": [
             "10s",
             "5m",
@@ -707,7 +707,7 @@
         },
         "defaultaudiogain": {
           "type": "number",
-          "description": "Default playback gain in dB (0-24)"
+          "description": "Default playback gain in dB (-12 to 24)"
         },
         "livespectrogram": {
           "type": "boolean",
@@ -716,6 +716,10 @@
         "playbackdenoise": {
           "$ref": "#/$defs/DenoiseSettings",
           "description": "denoise clips when they are played or downloaded; stored clips stay unchanged"
+        },
+        "playback": {
+          "$ref": "#/$defs/PlaybackDefaults",
+          "description": "further playback defaults"
         }
       },
       "additionalProperties": false,
@@ -1683,6 +1687,17 @@
       "type": "object",
       "description": "PirateWeatherSettings contains settings for Pirate Weather integration."
     },
+    "PlaybackDefaults": {
+      "properties": {
+        "highpasshz": {
+          "type": "integer",
+          "description": "high-pass cutoff in Hz applied in the browser while a clip plays; 0 is off"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "PlaybackDefaults holds the values a clip player starts with."
+    },
     "PrivacyFilterSettings": {
       "properties": {
         "debug": {
@@ -2330,7 +2345,7 @@
         },
         "sessionduration": {
           "type": "string",
-          "description": "duration for browser session cookies",
+          "description": "lifetime of the OAuth handshake cookie; no longer sets how long a browser stays signed in",
           "examples": [
             "10s",
             "5m",

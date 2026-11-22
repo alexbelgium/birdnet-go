@@ -666,6 +666,40 @@ func TestCatalogChecksum_OmitemptyKeepsOldFilesPristine(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(named), `"superseded_by":"new"`)
 
+	// Only a variant above build 1 carries the key; every build 1 variant omits it.
+	// The embedded catalog holds later builds, so only the build 1 variants are
+	// marshalled for the absence check (without the entry's release notes, whose
+	// records carry a "build" of their own; they are checked below).
+	buildOne := make([]CatalogEntry, 0, len(EmbeddedCatalog))
+	for i := range EmbeddedCatalog {
+		e := EmbeddedCatalog[i]
+		e.Builds = nil
+		e.Variants = slices.DeleteFunc(slices.Clone(e.Variants), func(v CatalogVariant) bool { return v.Build > 1 })
+		buildOne = append(buildOne, e)
+	}
+	buildOneJSON, err := json.Marshal(buildOne)
+	require.NoError(t, err)
+	assert.NotContains(t, string(buildOneJSON), `"build"`)
+
+	later, err := json.Marshal(CatalogVariant{ID: "v", Build: 2})
+	require.NoError(t, err)
+	assert.Contains(t, string(later), `"build":2`)
+
+	// Only entries with release notes carry the builds key; the rest omit it.
+	// Variants are stripped: a later build carries its own "build" key.
+	var noRecords []CatalogEntry
+	for i := range EmbeddedCatalog {
+		if len(EmbeddedCatalog[i].Builds) == 0 {
+			e := EmbeddedCatalog[i]
+			e.Variants = nil
+			noRecords = append(noRecords, e)
+		}
+	}
+	require.NotEmpty(t, noRecords)
+	noRecordsJSON, err := json.Marshal(noRecords)
+	require.NoError(t, err)
+	assert.NotContains(t, string(noRecordsJSON), `"builds"`)
+
 	var round []CatalogEntry
 	require.NoError(t, json.Unmarshal(plain, &round))
 	again, err := json.Marshal(round)

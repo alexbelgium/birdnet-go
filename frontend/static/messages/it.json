@@ -155,6 +155,12 @@
       "confirmAction": "Conferma azione",
       "confirmMessage": "Sei sicuro di voler eseguire questa azione?"
     },
+    "unsavedChanges": {
+      "title": "Lasciare questa pagina?",
+      "message": "Hai modifiche non salvate. Se esci, andranno perse.",
+      "leave": "Esci dalla pagina",
+      "stay": "Resta"
+    },
     "review": {
       "modalTitle": "Revisiona rilevamento: {species}",
       "status": {
@@ -3736,12 +3742,7 @@
           "atLeastOneModel": "È necessario selezionare almeno un modello"
         },
         "captureTitle": "Acquisizione",
-        "levelTitle": "Livello di ingresso",
-        "captureApplyHint": "L'acquisizione si riavvia quando applichi.",
-        "applyCapture": "Applica e riavvia l'acquisizione",
-        "applying": "Applicazione...",
-        "adding": "Aggiunta...",
-        "captureApplyFailed": "L'acquisizione non è stata modificata. Applica di nuovo o annulla."
+        "levelTitle": "Livello di ingresso"
       },
       "audioCapture": {
         "title": "Configurazione Scheda Audio",
@@ -3759,7 +3760,8 @@
         "deviceSelected": "Scheda audio selezionata e pronta per cattura",
         "availableDevices": "Dispositivi Audio Disponibili",
         "active": "Attivo",
-        "streamsConfigured": "{count} flusso/i configurato/i"
+        "streamsConfigured": "{count} flusso/i configurato/i",
+        "description": "Schede audio che BirdNET-Go ascolta. Una modifica del dispositivo o della frequenza di campionamento riavvia l'acquisizione su quella sorgente quando salvi."
       },
       "quietHours": {
         "title": "Ore silenziose",
@@ -3783,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Configurazione Flusso Audio",
-        "noStreamsConfigured": "Nessun flusso configurato"
+        "noStreamsConfigured": "Nessun flusso configurato",
+        "description": "Configura flussi audio di rete per cattura audio remota. Supporta protocolli RTSP, HTTP, HLS, RTMP e UDP. Una modifica della connessione riconnette il flusso al salvataggio."
       },
       "streams": {
         "streamLabel": "Flusso",
@@ -3906,12 +3909,7 @@
           "message": "Stream stereo rilevato. Il downmix di più canali può ridurre la precisione del rilevamento a causa delle differenze di fase tra i canali. Seleziona un canale specifico (sinistro/destro) o usa il rilevatore di canali per i migliori risultati.",
           "short": "Downmix stereo attivo. La precisione del rilevamento potrebbe essere ridotta. Seleziona un canale specifico in Connessione."
         },
-        "autoSaveHelp": "Le modifiche vengono salvate subito. Le modifiche alla connessione riconnettono lo stream, quindi attendono che si faccia clic su Applica.",
         "connectionTitle": "Connessione",
-        "connectionApplyHint": "Lo stream si riconnette quando applichi.",
-        "connectionApplyFailed": "La connessione non è stata modificata. Applica di nuovo o annulla.",
-        "applyConnection": "Applica e riconnetti",
-        "testBeforeApply": "Testa il nuovo URL prima di applicarlo.",
         "statsLine": "Totale: {total} · Velocità: {rate} · Ultimo: {last}",
         "ago": {
           "seconds": "{count} s fa",
@@ -4152,8 +4150,13 @@
         "listFailed": "Impossibile caricare l'elenco dei modelli.",
         "warningBadge": "Controlla i classificatori"
       },
-      "sources": {
-        "autoSaveHelp": "Le modifiche vengono salvate subito. Le modifiche a dispositivo e frequenza di campionamento riavviano l'acquisizione, quindi attendono che si faccia clic su Applica."
+      "validation": {
+        "soundCards": "Correggi le schede audio nella scheda {tab} prima di salvare: {names}",
+        "unnamedSource": "sorgente {position} (senza nome)",
+        "needsAttention": "Richiede attenzione",
+        "streams": "Correggi i flussi nella scheda {tab} prima di salvare: {names}",
+        "streamsUntested": "Testa il nuovo URL del flusso nella scheda {tab} prima di salvare: {names}",
+        "unnamedStream": "flusso {position} (senza nome)"
       }
     },
     "security": {
@@ -5092,8 +5095,8 @@
       "audioPlayback": {
         "title": "Riproduzione audio",
         "description": "Impostazioni predefinite per la riproduzione delle registrazioni di uccelli.",
-        "defaultGain": "Amplificazione volume predefinita",
-        "defaultGainHelpText": "Guadagno iniziale applicato durante la riproduzione delle registrazioni. I suoni degli uccelli sono spesso deboli, quindi è consigliato un incremento di 6-12 dB.",
+        "defaultGain": "Guadagno predefinito",
+        "defaultGainHelpText": "Guadagno con cui parte ogni clip. I suoni degli uccelli sono spesso deboli, quindi 6-12 dB è un buon punto di partenza; un valore negativo rende i clip più silenziosi.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Riduci il rumore delle clip in riproduzione",
         "denoiseHelpText": "Riproduce e scarica una copia senza rumore di ogni clip. Le clip salvate restano invariate. I download diventano file WAV e sono più grandi. Le impostazioni audio di una clip permettono di scegliere un'altra intensità o di disattivare la riduzione del rumore.",
@@ -5102,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Attiva sopra la riduzione del rumore in riproduzione per scegliere un'intensità.",
         "denoiseExportPrecedence": "Non applicata finché «Riduzione del rumore delle clip salvate» è attiva (Impostazioni audio, scheda Elaborazione). Queste clip sono già ripulite dal rumore.",
         "denoiseRedenoiseNote": "Le clip salvate mentre «Riduzione del rumore delle clip salvate» era attiva vengono ripulite dal rumore una seconda volta in riproduzione. Scegli Disattivato nelle impostazioni audio di una clip per ascoltarla come è stata salvata.",
-        "denoiseLossyNote": "La riduzione del rumore funziona meglio con clip FLAC o WAV. Sotto {minBitrate} kbps, gli artefatti del codec limitano la pulizia del risultato."
+        "denoiseLossyNote": "La riduzione del rumore funziona meglio con clip FLAC o WAV. Sotto {minBitrate} kbps, gli artefatti del codec limitano la pulizia del risultato.",
+        "highPassLabel": "Filtro passa-alto predefinito",
+        "highPassHelpText": "Rimuove il suono al di sotto di questa frequenza mentre una clip viene riprodotta, come il rombo del vento e del traffico. Viene applicato nel browser, quindi le clip memorizzate, scaricate ed esportate non sono filtrate.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Disattivato"
       }
     },
     "restartRequired": "Alcune modifiche richiedono un riavvio del server per avere effetto. Riavvia BirdNET-Go."
@@ -5117,6 +5124,8 @@
     "passwordPlaceholder": "Inserisci la tua password",
     "enterPassword": "Inserisci la tua password",
     "continue": "Continua",
+    "rememberBrowser": "Ricorda questo browser",
+    "rememberBrowserHelp": "Resta connesso su questo browser. Lascia deselezionato su un computer condiviso.",
     "or": "o",
     "loginWithGoogle": "Accedi con Google",
     "loginWithGithub": "Accedi con GitHub",
@@ -5412,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "Generazione non riuscita con stato {status}",
         "spectrogramFailed": "Generazione dello spettrogramma non riuscita"
+      },
+      "defaults": {
+        "open": "Valori di riproduzione predefiniti",
+        "title": "Valori di riproduzione predefiniti",
+        "description": "Ogni clip parte con questi valori. Sono salvati su questa stazione e valgono per chiunque la usi.",
+        "useCurrent": "Usa i valori attuali",
+        "useCurrentHelp": "Copia nei campi sottostanti il guadagno, la riduzione del rumore e il filtro passa-alto impostati su questo lettore. Nulla viene salvato finché non scegli Salva Modifiche.",
+        "useCurrentHelpNoDenoise": "Copia nei campi sottostanti il guadagno e il filtro passa-alto impostati su questo lettore. Nulla viene salvato finché non scegli Salva Modifiche.",
+        "copied": "Valori attuali copiati. Scegli Salva Modifiche per mantenerli.",
+        "saved": "Valori di riproduzione predefiniti salvati",
+        "saveFailed": "I valori di riproduzione predefiniti non sono stati salvati. Non è stato modificato nulla.",
+        "unavailable": "Non è stato possibile caricare le impostazioni, quindi qui non si possono modificare i valori predefiniti."
       },
       "clipExtraction": {
         "selectRange": "Clicca e trascina per selezionare un intervallo",
@@ -5958,6 +5979,8 @@
       },
       "actionInProgress": "Attendi il completamento dell'installazione, reinstallazione o rimozione del modello corrente",
       "installSuccess": "{name} installato",
+      "cancelling": "Annullamento...",
+      "cancelled": "Download di {name} annullato.",
       "installedEnableOnSources": "{name} è installato. Per usarlo, attivalo per le tue sorgenti in Impostazioni > Audio.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6005,7 +6028,8 @@
         "verifying": "Verifica in corso...",
         "loading": "Caricamento...",
         "complete": "Installazione completata",
-        "failed": "Non riuscito"
+        "failed": "Non riuscito",
+        "cancelled": "Annullato"
       },
       "license": {
         "title": "Contratto di licenza",
@@ -6033,6 +6057,7 @@
         "removeFailed": "Impossibile rimuovere il modello",
         "removeHasDependents": "{name} è richiesto da {models}. Rimuovi prima questi modelli.",
         "operationInProgress": "È già in corso un'installazione, reinstallazione o rimozione di un modello ({name}). Riprova al termine.",
+        "cancelUnavailable": "Il download di {name} non può più essere annullato.",
         "actionFailed": "Si è verificato un problema con {name}",
         "downloadSourceHint": "Se huggingface.co è bloccato o lento sulla tua rete, imposta un mirror nella sezione Sorgente di download sottostante.",
         "goToDownloadSource": "Vai a Sorgente di download",
@@ -6065,8 +6090,16 @@
       },
       "update": {
         "cardNotice": "Una build più recente ({to}) sostituisce la build {from} installata.",
+        "cardNoticeBuild": "La build {to} della versione {version} sostituisce la build installata {from}.",
         "action": "Aggiorna",
         "applying": "Aggiornamento..."
+      },
+      "buildNotes": {
+        "heading": "Novità della build {build} della versione {version}",
+        "released": "Pubblicata il {date}",
+        "buildLabel": "Numero di build",
+        "buildValue": "{build}, pubblicata il {date}",
+        "disclosure": "Novità di questa build"
       },
       "entryIncompatible": "Questo modello non è disponibile su questo sistema.",
       "regionGlobal": "Globale",
@@ -6382,6 +6415,52 @@
       "patternNone": "Nessuno",
       "patternTransient": "Transitorio",
       "patternSustained": "Persistente"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Scorciatoie da tastiera",
+    "modal": {
+      "title": "Scorciatoie da tastiera",
+      "enable": "Attiva le scorciatoie da tastiera",
+      "enableHelp": "Disattivale se le scorciatoie a tasto singolo interferiscono con uno screen reader, il controllo vocale o una tastiera assistiva.",
+      "offNote": "Le scorciatoie da tastiera sono disattivate. I tasti qui sotto non fanno nulla finché non le attivi.",
+      "or": "o"
+    },
+    "scopes": {
+      "global": "Tutte le pagine"
+    },
+    "groups": {
+      "navigation": "Navigazione",
+      "review": "Revisione",
+      "audio": "Audio",
+      "general": "Generali"
+    },
+    "keys": {
+      "shift": "Maiusc",
+      "space": "Barra spaziatrice",
+      "arrowLeft": "Freccia sinistra",
+      "arrowRight": "Freccia destra",
+      "comma": "Virgola",
+      "period": "Punto",
+      "questionMark": "Punto interrogativo",
+      "combination": "{first} più {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Rilevamento precedente della stessa specie",
+      "newerSpecies": "Rilevamento successivo della stessa specie",
+      "correct": "Segna come corretto",
+      "falsePositive": "Segna come falso positivo",
+      "wrongSpecies": "Cambia la specie",
+      "keep": "Conserva o rilascia questa registrazione",
+      "playPause": "Riproduci o metti in pausa",
+      "seekBack": "Indietro di un secondo",
+      "seekForward": "Avanti di un secondo",
+      "focusReview": "Vai ai pulsanti di revisione",
+      "backToList": "Torna ai rilevamenti"
+    },
+    "global": {
+      "help": "Mostra o nascondi le scorciatoie da tastiera"
     }
   }
 }
