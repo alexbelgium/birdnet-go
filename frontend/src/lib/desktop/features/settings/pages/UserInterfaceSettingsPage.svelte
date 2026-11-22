@@ -32,6 +32,7 @@
   import { DENOISE_LOSSY_MIN_BITRATE_KBPS, isLosslessExportFormat } from './audioExportFormat';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
   import SettingsNote from '$lib/desktop/features/settings/components/SettingsNote.svelte';
@@ -39,11 +40,24 @@
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
   import InlineSlider from '$lib/desktop/components/forms/InlineSlider.svelte';
-  import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import {
+    PLAYBACK_GAIN_MAX_DB,
+    PLAYBACK_GAIN_MIN_DB,
+    PLAYBACK_GAIN_STEP_DB,
+    PLAYBACK_HIGH_PASS_MAX_HZ,
+    PLAYBACK_HIGH_PASS_MIN_HZ,
+    PLAYBACK_HIGH_PASS_STEP_HZ,
+    clampPlaybackGain,
+    formatPlaybackGainLabel,
+    formatPlaybackHighPass,
+    highPassFromStored,
+    highPassToStored,
+  } from '$lib/utils/playbackDefaults';
+  import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import FlagIcon, { type FlagLocale } from '$lib/desktop/components/ui/FlagIcon.svelte';
   import { t, getLocale } from '$lib/i18n';
   import { LOCALES } from '$lib/i18n/config';
-  import { Palette, Globe, Image, Volume2, Info } from '@lucide/svelte';
+  import { Palette, Globe, Image, Volume2, Info, Languages, Headphones } from '@lucide/svelte';
   import { api, ApiError } from '$lib/utils/api';
   import { toastActions } from '$lib/stores/toast';
 
@@ -248,10 +262,12 @@
       {
         defaultAudioGain: store.originalData.realtime?.dashboard?.defaultAudioGain,
         playbackDenoise: store.originalData.realtime?.dashboard?.playbackDenoise,
+        playback: store.originalData.realtime?.dashboard?.playback,
       },
       {
         defaultAudioGain: store.formData.realtime?.dashboard?.defaultAudioGain,
         playbackDenoise: store.formData.realtime?.dashboard?.playbackDenoise,
+        playback: store.formData.realtime?.dashboard?.playback,
       }
     )
   );
@@ -268,6 +284,17 @@
   function updatePlaybackDenoise(patch: Partial<DenoiseSettings>) {
     settingsActions.updateSection('realtime', {
       dashboard: { ...settings.dashboard, playbackDenoise: { ...playbackDenoise, ...patch } },
+    });
+  }
+
+  // Writes the playback object whole, like the denoise object: updateSection
+  // merges shallowly, so a partial object would drop the other fields.
+  function updatePlaybackHighPass(hz: number) {
+    settingsActions.updateSection('realtime', {
+      dashboard: {
+        ...settings.dashboard,
+        playback: { ...settings.dashboard.playback, highPassHz: highPassToStored(hz) },
+      },
     });
   }
 
@@ -334,6 +361,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.userInterface.appearance.title')}
+      icon={Palette}
       description={t('settings.userInterface.appearance.description')}
       originalData={{
         colorScheme: store.originalData.realtime?.dashboard?.colorScheme,
@@ -355,6 +383,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.userInterface.language.title')}
+      icon={Languages}
       description={t('settings.userInterface.language.description')}
       originalData={{
         locale: store.originalData.realtime?.dashboard?.locale,
@@ -426,26 +455,40 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.userInterface.audioPlayback.title')}
+      icon={Headphones}
       description={t('settings.userInterface.audioPlayback.description')}
       originalData={{
         defaultAudioGain: store.originalData.realtime?.dashboard?.defaultAudioGain,
         playbackDenoise: store.originalData.realtime?.dashboard?.playbackDenoise,
+        playback: store.originalData.realtime?.dashboard?.playback,
       }}
       currentData={{
         defaultAudioGain: store.formData.realtime?.dashboard?.defaultAudioGain,
         playbackDenoise: store.formData.realtime?.dashboard?.playbackDenoise,
+        playback: store.formData.realtime?.dashboard?.playback,
       }}
     >
       <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
         <InlineSlider
           label={t('settings.userInterface.audioPlayback.defaultGain')}
           helpText={t('settings.userInterface.audioPlayback.defaultGainHelpText')}
-          value={settings.dashboard.defaultAudioGain ?? 0}
+          value={clampPlaybackGain(settings.dashboard.defaultAudioGain)}
           onUpdate={value => updateDashboardSetting('defaultAudioGain', value)}
-          min={0}
-          max={24}
-          step={1}
-          unit={t('settings.userInterface.audioPlayback.defaultGainUnit')}
+          formatValue={formatPlaybackGainLabel}
+          min={PLAYBACK_GAIN_MIN_DB}
+          max={PLAYBACK_GAIN_MAX_DB}
+          step={PLAYBACK_GAIN_STEP_DB}
+          disabled={store.isLoading || store.isSaving}
+        />
+        <InlineSlider
+          label={t('settings.userInterface.audioPlayback.highPassLabel')}
+          helpText={t('settings.userInterface.audioPlayback.highPassHelpText')}
+          value={highPassFromStored(settings.dashboard.playback?.highPassHz)}
+          onUpdate={updatePlaybackHighPass}
+          min={PLAYBACK_HIGH_PASS_MIN_HZ}
+          max={PLAYBACK_HIGH_PASS_MAX_HZ}
+          step={PLAYBACK_HIGH_PASS_STEP_HZ}
+          formatValue={formatPlaybackHighPass}
           disabled={store.isLoading || store.isSaving}
         />
       </div>
@@ -461,14 +504,14 @@
           </div>
         {/if}
 
-        <Checkbox
-          checked={playbackDenoise.enabled}
+        <ToggleField
+          value={playbackDenoise.enabled}
           label={t('settings.userInterface.audioPlayback.denoiseLabel')}
-          helpText={exportDenoiseOn
+          description={exportDenoiseOn
             ? t('settings.userInterface.audioPlayback.denoiseExportPrecedence')
             : t('settings.userInterface.audioPlayback.denoiseHelpText')}
           disabled={exportDenoiseOn || store.isLoading || store.isSaving}
-          onchange={checked => updatePlaybackDenoise({ enabled: checked })}
+          onUpdate={checked => updatePlaybackDenoise({ enabled: checked })}
         />
 
         <SelectDropdown
@@ -516,6 +559,7 @@
   <div class="space-y-6">
     <SettingsSection
       title={t('settings.userInterface.visualContent.title')}
+      icon={Image}
       description={t('settings.userInterface.visualContent.description')}
       originalData={{
         thumbnails: store.originalData.realtime?.dashboard?.thumbnails,
@@ -529,29 +573,33 @@
       <div class="space-y-6">
         <!-- Bird Images Section -->
         <div class="space-y-4">
-          <h4 class="text-sm font-medium text-[var(--color-base-content)]/70">
+          <SettingsGroupLabel>
             {t('settings.main.sections.userInterface.dashboard.birdImages.title')}
-          </h4>
+          </SettingsGroupLabel>
 
-          <Checkbox
-            checked={settings.dashboard.thumbnails.summary}
-            label={t('settings.main.sections.userInterface.dashboard.thumbnails.summary.label')}
-            helpText={t(
-              'settings.main.sections.userInterface.dashboard.thumbnails.summary.helpText'
-            )}
-            disabled={store.isLoading || store.isSaving}
-            onchange={value => updateThumbnailSetting('summary', value)}
-          />
+          <div class="divide-y divide-[var(--border-100)]">
+            <ToggleField
+              className="pb-4"
+              value={settings.dashboard.thumbnails.summary}
+              label={t('settings.main.sections.userInterface.dashboard.thumbnails.summary.label')}
+              description={t(
+                'settings.main.sections.userInterface.dashboard.thumbnails.summary.helpText'
+              )}
+              disabled={store.isLoading || store.isSaving}
+              onUpdate={value => updateThumbnailSetting('summary', value)}
+            />
 
-          <Checkbox
-            checked={settings.dashboard.thumbnails.recent}
-            label={t('settings.main.sections.userInterface.dashboard.thumbnails.recent.label')}
-            helpText={t(
-              'settings.main.sections.userInterface.dashboard.thumbnails.recent.helpText'
-            )}
-            disabled={store.isLoading || store.isSaving}
-            onchange={value => updateThumbnailSetting('recent', value)}
-          />
+            <ToggleField
+              className="pt-4"
+              value={settings.dashboard.thumbnails.recent}
+              label={t('settings.main.sections.userInterface.dashboard.thumbnails.recent.label')}
+              description={t(
+                'settings.main.sections.userInterface.dashboard.thumbnails.recent.helpText'
+              )}
+              disabled={store.isLoading || store.isSaving}
+              onUpdate={value => updateThumbnailSetting('recent', value)}
+            />
+          </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
             <div class:opacity-50={!multipleProvidersAvailable}>
@@ -613,9 +661,9 @@
 
         <!-- Spectrograms Section -->
         <div class="space-y-4">
-          <h4 class="text-sm font-medium text-[var(--color-base-content)]/70">
+          <SettingsGroupLabel>
             {t('settings.main.sections.userInterface.dashboard.spectrogram.title')}
-          </h4>
+          </SettingsGroupLabel>
 
           <!-- Generation Mode with contextual note -->
           <div class="space-y-3">

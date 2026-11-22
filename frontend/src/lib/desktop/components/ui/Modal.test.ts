@@ -8,7 +8,7 @@ import {
 } from '../../../../test/render-helpers';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'svelte';
-import Modal from './Modal.svelte';
+import Modal, { openDialogCount } from './Modal.svelte';
 import ModalTestWrapper from './Modal.test.svelte';
 import ModalTrapHost from './Modal.trap.test.svelte';
 import ModalStackHost from './Modal.stack.test.svelte';
@@ -562,6 +562,41 @@ describe('Modal', () => {
 
       renderHost({ size: 'full', scrollBody: true });
       expect(screen.getByRole('document')).toHaveClass('max-w-full', 'w-full');
+    });
+  });
+
+  describe('paint order', () => {
+    // The toasts' layer: every open Modal must stay under it
+    const TOAST_LAYER = 2000;
+    const layerOf = (name: string) => Number(screen.getByRole('dialog', { name }).style.zIndex);
+    const press = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
+
+    it('paints the Modal opened last above the one opened first, whatever their DOM order', async () => {
+      renderTyped(ModalToggleHost, {});
+      // The Modal later in the DOM opens first, so the one opened last sits earlier in the DOM
+      await press('Toggle upper');
+      await press('Toggle lower');
+
+      expect(layerOf('Lower modal')).toBeGreaterThan(layerOf('Upper modal'));
+    });
+
+    it('keeps stacked Modals under the toasts', async () => {
+      renderTyped(ModalToggleHost, {});
+      await press('Toggle lower');
+      await press('Toggle upper');
+
+      expect(layerOf('Upper modal')).toBeLessThan(TOAST_LAYER);
+      expect(layerOf('Lower modal')).toBeLessThan(layerOf('Upper modal'));
+    });
+
+    it('paints a Modal reopened over another above it', async () => {
+      renderTyped(ModalToggleHost, {});
+      await press('Toggle lower');
+      await press('Toggle upper');
+      await press('Toggle lower');
+      await press('Toggle lower');
+
+      expect(layerOf('Lower modal')).toBeGreaterThan(layerOf('Upper modal'));
     });
   });
 
@@ -1582,6 +1617,52 @@ describe('Modal', () => {
 
       expect(onCloseSecond).toHaveBeenCalledTimes(1);
       expect(onCloseFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('open dialog count', () => {
+    afterEach(() => {
+      for (const foreign of document.querySelectorAll('[data-test-foreign]')) foreign.remove();
+    });
+
+    function addForeign(tag: string, attributes: Record<string, string>): HTMLElement {
+      const element = document.createElement(tag);
+      element.setAttribute('data-test-foreign', '');
+      for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+      document.body.append(element);
+      return element;
+    }
+
+    it('counts only open Modals and foreign dialogs', async () => {
+      const host = createComponentTestFactory(ModalStackHost);
+      const view = host.render({ props: { firstOpen: false, secondOpen: false } });
+
+      // Closed Modals stay in the DOM with aria-modal but are not open dialogs
+      expect(openDialogCount()).toBe(0);
+
+      await view.rerender({ firstOpen: true, secondOpen: false });
+      expect(openDialogCount()).toBe(1);
+
+      await view.rerender({ firstOpen: true, secondOpen: true });
+      expect(openDialogCount()).toBe(2);
+
+      await view.rerender({ firstOpen: false, secondOpen: true });
+      expect(openDialogCount()).toBe(1);
+
+      await view.rerender({ firstOpen: false, secondOpen: false });
+      expect(openDialogCount()).toBe(0);
+
+      // A foreign modal dialog counts, and is not a Modal root
+      addForeign('div', { role: 'dialog', 'aria-modal': 'true' });
+      expect(openDialogCount()).toBe(1);
+
+      // A native dialog counts when open
+      addForeign('dialog', { open: '' });
+      expect(openDialogCount()).toBe(2);
+
+      // One element matching both selectors counts once
+      addForeign('dialog', { open: '', 'aria-modal': 'true' });
+      expect(openDialogCount()).toBe(3);
     });
   });
 });

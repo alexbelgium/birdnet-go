@@ -2,7 +2,7 @@
 
 ## Authentication Methods
 
-BirdNET-Go provides three authentication methods that can be used independently or in combination. You can configure the security settings in the BirdNET-Go security settings or directly in the `config.yaml` file.
+BirdNET-Go supports basic password authentication and OAuth2 / OpenID Connect (OIDC) providers (Google, GitHub, Microsoft, and generic OIDC), which can be used independently or in combination. You can configure security settings in the web UI under **Settings > Security** or directly in `config.yaml`.
 
 ### Basic Password Authentication
 
@@ -19,30 +19,26 @@ security:
     clientsecret: "your-client-secret"
 ```
 
-### Social Authentication
+### Social and OIDC Authentication
 
-BirdNET-Go supports OAuth authentication through Google and GitHub identity providers. To implement either provider, you'll need to generate the corresponding client ID and secret, then configure them through the Security settings or in the configuration file. Remember to set the Redirect URI parameter in your Google or GitHub developer console to match the value configured in `redirecturi`. The `userid` is a list of accepted authenticated user emails.
-
-```yaml
-security:
-  googleauth:
-    enabled: true
-    clientid: "your-google-client-id"
-    clientsecret: "your-google-client-secret"
-    userid: "allowed@gmail.com,another@gmail.com"
-    redirecturi: "https://your.domain.com/auth/google/callback"
-```
-
-Similarly, GitHub authentication can be enabled:
+BirdNET-Go supports OAuth2 and OIDC authentication through Google, GitHub, Microsoft, and generic OIDC identity providers. Configure providers under `security.oauthProviders` (the preferred format) or in **Settings > Security**. Legacy flat `googleauth`/`githubauth`/`microsoftauth` keys are migrated only when `security.oauthProviders` is empty; once migrated, changes to legacy keys are ignored and you must edit `security.oauthProviders` instead. Remember to set the Redirect URI in your provider's developer console to match `redirectUri`.
 
 ```yaml
 security:
-  githubauth:
-    enabled: true
-    clientid: "your-github-client-id"
-    clientsecret: "your-github-client-secret"
-    userid: "user@example.com"
-    redirecturi: "https://your.domain.com/auth/github/callback"
+  oauthProviders:
+    - provider: google
+      enabled: true
+      clientId: "your-google-client-id"
+      clientSecret: "your-google-client-secret"
+      userId: "your-google-user-id"
+      redirectUri: "https://your.domain.com/auth/google/callback"
+
+    - provider: github
+      enabled: true
+      clientId: "your-github-client-id"
+      clientSecret: "your-github-client-secret"
+      userId: "your-github-user-id"
+      redirectUri: "https://your.domain.com/auth/github/callback"
 ```
 
 #### Allowed users: prefer user IDs
@@ -73,6 +69,12 @@ security:
       issuerUrl: "https://auth.example.com/application/o/birdnet-go/"
       postLogoutRedirect: true
 ```
+
+## Staying signed in
+
+The sign-in dialog has a "Remember this browser" box, ticked by default. Ticked, the browser stays signed in for 30 days after its last visit; the days are counted from the last renewal, which happens at most once a day, so a browser that is not used can be signed out up to a day sooner. Unticked, the browser is signed out after 8 hours without a request, counted from the last renewal (at most every 15 minutes), and usually when it is closed; a browser that restores its previous session on start keeps the cookie, so the 8 hour limit is the guarantee. The choice applies to password and social sign-ins alike. Leave it unticked on a shared computer.
+
+Signing out ends the session at once. The end of the session is written to `tokens.json` before the sign-out returns; if that write fails, the failure is logged and a restart can restore the session until a later write succeeds. Changing the password (or the basic authentication client ID) signs every browser out, including the one that made the change. Removing a user from a provider's allowed list blocks that user's browser on its next request; the session stays until it expires, so adding the user back lets that browser in again. After an upgrade to a version with this feature, each browser signs in once. The `sessionduration` and `accesstokenexp` settings in `config.yaml` no longer control how long a browser stays signed in.
 
 ## Authentication Bypass
 

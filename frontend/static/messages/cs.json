@@ -155,6 +155,12 @@
       "confirmAction": "Potvrdit akci",
       "confirmMessage": "Opravdu chcete tuto akci provést?"
     },
+    "unsavedChanges": {
+      "title": "Opustit tuto stránku?",
+      "message": "Máte neuložené změny. Pokud stránku opustíte, budou ztraceny.",
+      "leave": "Opustit stránku",
+      "stay": "Zůstat"
+    },
     "review": {
       "modalTitle": "Kontrola detekce: {species}",
       "status": {
@@ -493,6 +499,12 @@
         "loadFailedTitle": "Akustický model se nepodařilo načíst",
         "loadFailedMessage": "Povolený akustický model se nepodařilo načíst, takže zvuk je zachycován, ale není analyzován. Zkontrolujte model na stránce Systém > Modely AI."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel není nainstalován",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 je potřeba k filtrování detekcí podle polohy pro: {models}. Nainstalujte BirdNET Geomodel v3.0 z galerie modelů v Nastavení > Analýza > Modely.",
+        "loadFailedTitle": "Geomodel se nepodařilo načíst",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 se nepodařilo načíst, proto je filtrování podle polohy vypnuto pro: {models}. Zkontrolujte log aplikace a poté nainstalujte nebo přeinstalujte BirdNET Geomodel v3.0 z galerie modelů v Nastavení > Analýza > Modely."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# model má lepší sestavení pro tento systém} few {# modely mají lepší sestavení pro tento systém} many {# modelů má lepší sestavení pro tento systém} other {# modelů má lepší sestavení pro tento systém}}",
         "message": "Sestavení lépe odpovídající hardwaru nebo poloze tohoto systému je k dispozici pro: {models}. Otevřete Nastavení > Analýza > Modely a zvolte Optimalizovat."
@@ -500,6 +512,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Nainstalovaný model má novější verzi} few {# nainstalované modely mají novější verze} many {# nainstalovaného modelu má novější verze} other {# nainstalovaných modelů má novější verze}}",
         "message": "Nainstalovaný model je náhledová verze a jeho finální vydání je nyní k dispozici: {models}. Otevřete Nastavení > Analýza > Modely, nainstalujte finální vydání a odeberte náhledovou verzi."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Nainstalovaný model má novější sestavení} few {# nainstalované modely mají novější sestavení} many {# nainstalovaného modelu má novější sestavení} other {# nainstalovaných modelů má novější sestavení}}",
+        "message": "Pro tyto modely je k dispozici novější sestavení, které nahrazuje nainstalované: {models}. Nainstalované sestavení funguje beze změny, dokud nepřepnete. Otevřete Nastavení > Analýza > Modely a zvolte Aktualizovat."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -2527,7 +2543,6 @@
       "loadFailed": "Nepodařilo se načíst nastavení",
       "saveFailed": "Nepodařilo se uložit nastavení",
       "changedElsewhere": "Nastavení bylo změněno jinde. Zkontrolujte je a uložte znovu.",
-      "databaseStatsFailed": "Nepodařilo se načíst statistiky databáze",
       "csvDownloadFailed": "Nepodařilo se stáhnout CSV"
     },
     "card": {
@@ -2578,12 +2593,12 @@
           "title": "Dynamický práh",
           "description": "Automaticky upravovat citlivost detekce na základě předchozích pozorování",
           "enable": {
-            "label": "Povolit dynamický práh (funkce specifická pro BirdNET-Go)",
-            "helpText": "Povolí funkci dynamického prahu spolehlivosti pro adaptivnější detekci ptačího zpěvu."
+            "label": "Povolit dynamický práh",
+            "helpText": "Sníží práh spolehlivosti pro druh poté, co byl detekován s vysokou spolehlivostí."
           },
           "trigger": {
             "label": "Spouštěcí práh",
-            "helpText": "Úroveň spolehlivosti, při které se aktivuje dynamický práh. Pokud je ptačí zpěv detekován se spolehlivostí nad touto hodnotou, práh pro pozitivní shody tohoto druhu se pro následující volání sníží."
+            "helpText": "Úroveň spolehlivosti, při které se aktivuje dynamický práh. Pokud je druh detekován se spolehlivostí nad touto hodnotou, práh pro pozitivní shody tohoto druhu se pro následující detekce sníží."
           },
           "minimum": {
             "label": "Minimální dynamický práh",
@@ -2632,7 +2647,7 @@
           "overloadedNoticeTitle": "Toto zařízení nestíhá analýzu",
           "overloadedNotice": "Spuštění {models, plural, one {# modelu} few {# modelů} many {# modelu} other {# modelů}} na {sources, plural, one {# zvukovém zdroji} few {# zvukových zdrojích} many {# zvukového zdroje} other {# zvukových zdrojích}} překračuje změřenou kapacitu tohoto zařízení i bez překryvu. Analýza se může zpožďovat a detekce mohou být vynechány. Povolte méně modelů nebo zvukových zdrojů, nebo zvolte rychlejší variantu modelu.",
           "unknownLatency": "Dobu zpracování se nepodařilo změřit pro {models}, proto se při omezování překryvu nezapočítává. Analýza se přesto může zpožďovat.",
-          "cpuNote": "Vyšší síla analyzuje překrývající se zvuk častěji, což stojí čas CPU pro každý povolený model a zvukový zdroj. BirdNET-Go automaticky omezí překryv na to, co toto zařízení zvládne zpracovat."
+          "cpuNote": "Vyšší síla analyzuje překrývající se zvuk častěji, což stojí čas CPU pro každý povolený klasifikátor, na který se tento filtr vztahuje, a pro každý zvukový zdroj. BirdNET-Go automaticky omezí překryv na to, co toto zařízení zvládne zpracovat."
         },
         "rangeFilter": {
           "title": "Filtr výskytu",
@@ -2734,26 +2749,15 @@
               "helpText": "Název databáze MySQL"
             }
           },
-          "stats": {
-            "title": "Statistiky databáze",
-            "description": "Informace o vaší databázi za běhu",
-            "loading": "Načítají se statistiky databáze...",
-            "retry": "Zkusit znovu",
-            "refresh": "Obnovit",
-            "noData": "Nejsou k dispozici žádné statistiky databáze.",
-            "type": "Typ",
-            "status": "Stav",
-            "size": "Velikost",
-            "totalDetections": "Detekcí celkem",
-            "location": "Umístění",
-            "connected": "Připojeno",
-            "disconnected": "Odpojeno"
-          },
           "errors": {
             "backupStartFailed": "Nepodařilo se spustit zálohování",
             "backupStatusFailed": "Nepodařilo se získat stav zálohování",
             "backupFailed": "Zálohování selhalo",
             "backupDownloadFailed": "Nepodařilo se stáhnout zálohu"
+          },
+          "statsMoved": {
+            "text": "Statistiky databáze byly přesunuty do sekce Systém.",
+            "link": "Otevřít Systém > Databáze"
           }
         },
         "interface": {
@@ -3772,12 +3776,7 @@
           "atLeastOneModel": "Musí být vybrán alespoň jeden model"
         },
         "captureTitle": "Záznam",
-        "levelTitle": "Vstupní úroveň",
-        "captureApplyHint": "Záznam se po použití restartuje.",
-        "applyCapture": "Použít a restartovat záznam",
-        "applying": "Používání...",
-        "adding": "Přidávání...",
-        "captureApplyFailed": "Záznam nebyl změněn. Použijte znovu nebo zrušte."
+        "levelTitle": "Vstupní úroveň"
       },
       "audioCapture": {
         "title": "Konfigurace zvukové karty",
@@ -3795,7 +3794,8 @@
         "deviceSelected": "Zvuková karta vybrána a připravena k záznamu",
         "availableDevices": "Dostupná zvuková zařízení",
         "active": "Aktivní",
-        "streamsConfigured": "Nakonfigurováno {count} streamů"
+        "streamsConfigured": "Nakonfigurováno {count} streamů",
+        "description": "Zvukové karty, které BirdNET-Go poslouchá. Změna zařízení nebo vzorkovací frekvence restartuje záznam na tomto zdroji při uložení."
       },
       "quietHours": {
         "title": "Tiché hodiny",
@@ -3819,7 +3819,8 @@
       },
       "rtspStreams": {
         "title": "Konfigurace zvukových streamů",
-        "noStreamsConfigured": "Žádné nakonfigurované streamy"
+        "noStreamsConfigured": "Žádné nakonfigurované streamy",
+        "description": "Nakonfigurujte síťové zvukové streamy pro vzdálený záznam zvuku. Podporuje protokoly RTSP, HTTP, HLS, RTMP a UDP. Změna připojení znovu připojí stream při uložení."
       },
       "streams": {
         "streamLabel": "Stream",
@@ -3942,12 +3943,7 @@
           "message": "Detekován stereo stream. Smíchání více kanálů může snížit přesnost detekce kvůli fázovým rozdílům mezi kanály. Pro nejlepší výsledky vyberte konkrétní kanál (levý/pravý) nebo použijte detektor kanálů.",
           "short": "Aktivní stereo downmix. Přesnost detekce může být snížena. Vyberte konkrétní kanál v části Připojení."
         },
-        "autoSaveHelp": "Změny se ukládají okamžitě. Změny připojení znovu připojí stream, proto čekají, dokud nekliknete na Použít.",
         "connectionTitle": "Připojení",
-        "connectionApplyHint": "Stream se po použití znovu připojí.",
-        "connectionApplyFailed": "Připojení nebylo změněno. Použijte znovu nebo zrušte.",
-        "applyConnection": "Použít a znovu připojit",
-        "testBeforeApply": "Před použitím novou URL otestujte.",
         "statsLine": "Celkem: {total} · Rychlost: {rate} · Naposledy: {last}",
         "ago": {
           "seconds": "před {count} s",
@@ -4188,8 +4184,13 @@
         "listFailed": "Seznam modelů se nepodařilo načíst.",
         "warningBadge": "Zkontrolujte klasifikátory"
       },
-      "sources": {
-        "autoSaveHelp": "Změny se ukládají okamžitě. Změny zařízení a vzorkovací frekvence restartují záznam, proto čekají, dokud nekliknete na Použít."
+      "validation": {
+        "soundCards": "Před uložením opravte zvukové karty na kartě {tab}: {names}",
+        "unnamedSource": "zdroj {position} (bez názvu)",
+        "needsAttention": "Vyžaduje pozornost",
+        "streams": "Před uložením opravte streamy na kartě {tab}: {names}",
+        "streamsUntested": "Před uložením otestujte novou URL streamu na kartě {tab}: {names}",
+        "unnamedStream": "stream {position} (bez názvu)"
       }
     },
     "security": {
@@ -5128,8 +5129,8 @@
       "audioPlayback": {
         "title": "Přehrávání zvuku",
         "description": "Výchozí nastavení pro přehrávání nahrávek ptáků.",
-        "defaultGain": "Výchozí zesílení hlasitosti",
-        "defaultGainHelpText": "Počáteční zesílení při přehrávání nahrávek. Zvuky ptáků jsou často tiché, proto se doporučuje zesílení 6-12 dB.",
+        "defaultGain": "Výchozí zesílení",
+        "defaultGainHelpText": "Zesílení, se kterým každý klip začíná. Zvuky ptáků jsou často tiché, proto je dobrým začátkem 6 až 12 dB; záporná hodnota klipy ztiší.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Odšumit klipy při přehrávání",
         "denoiseHelpText": "Přehrává a stahuje odšuměnou kopii každého klipu. Uložené klipy zůstávají beze změny. Stažené soubory jsou ve formátu WAV a jsou větší. V nastavení zvuku klipu lze zvolit jinou sílu nebo odšumění vypnout.",
@@ -5138,7 +5139,11 @@
         "denoiseStrengthDisabledHelp": "Pro volbu síly zapněte výše odšumění při přehrávání.",
         "denoiseExportPrecedence": "Nepoužije se, dokud je zapnuto „Odšumění uložených klipů“ (Nastavení zvuku, karta Zpracování). Tyto klipy jsou již odšuměné.",
         "denoiseRedenoiseNote": "Klipy uložené při zapnutém „Odšumění uložených klipů“ se při přehrávání odšumí znovu. Chcete-li slyšet klip tak, jak byl uložen, zvolte v jeho nastavení zvuku Vypnuto.",
-        "denoiseLossyNote": "Odšumění funguje nejlépe u klipů FLAC nebo WAV. Pod {minBitrate} kb/s omezují čistotu výsledku artefakty kodeku."
+        "denoiseLossyNote": "Odšumění funguje nejlépe u klipů FLAC nebo WAV. Pod {minBitrate} kb/s omezují čistotu výsledku artefakty kodeku.",
+        "highPassLabel": "Výchozí horní propust",
+        "highPassHelpText": "Odstraní zvuk pod touto frekvencí při přehrávání klipu, například šum větru a dopravy. Použije se v prohlížeči, takže uložené, stažené a exportované klipy se nefiltrují.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Vypnuto"
       }
     },
     "restartRequired": "Některé změny vyžadují restart serveru. Restartujte prosím BirdNET-Go."
@@ -5153,6 +5158,8 @@
     "passwordPlaceholder": "Zadejte své heslo",
     "enterPassword": "Zadejte své heslo",
     "continue": "Pokračovat",
+    "rememberBrowser": "Zapamatovat si tento prohlížeč",
+    "rememberBrowserHelp": "Zůstat přihlášen v tomto prohlížeči. Na sdíleném počítači nechte nezaškrtnuté.",
     "or": "nebo",
     "loginWithGoogle": "Přihlásit se přes Google",
     "loginWithGithub": "Přihlásit se přes GitHub",
@@ -5449,6 +5456,18 @@
         "generationFailedStatus": "Generování selhalo se stavem {status}",
         "spectrogramFailed": "Spektrogram se nepodařilo vygenerovat"
       },
+      "defaults": {
+        "open": "Výchozí nastavení přehrávání",
+        "title": "Výchozí nastavení přehrávání",
+        "description": "Každý klip začíná s těmito hodnotami. Ukládají se na této stanici a platí pro každého, kdo ji používá.",
+        "useCurrent": "Použít aktuální hodnoty",
+        "useCurrentHelp": "Zkopíruje zesílení, odšumění a horní propust, na které je tento přehrávač nastaven, do polí níže. Nic se neuloží, dokud nezvolíte Uložit změny.",
+        "useCurrentHelpNoDenoise": "Zkopíruje zesílení a horní propust, na které je tento přehrávač nastaven, do polí níže. Nic se neuloží, dokud nezvolíte Uložit změny.",
+        "copied": "Aktuální hodnoty zkopírovány. Pro jejich uchování zvolte Uložit změny.",
+        "saved": "Výchozí nastavení přehrávání uloženo",
+        "saveFailed": "Výchozí nastavení přehrávání nebylo uloženo. Nic se nezměnilo.",
+        "unavailable": "Nastavení se nepodařilo načíst, proto zde nelze výchozí hodnoty změnit."
+      },
       "clipExtraction": {
         "selectRange": "Klikněte a tažením vyberte rozsah",
         "playSelection": "Přehrát vybraný rozsah",
@@ -5694,6 +5713,7 @@
       "reloadPage": "Obnovit stránku"
     },
     "skip": "Přeskočit",
+    "notNow": "Teď ne",
     "back": "Zpět",
     "next": "Další",
     "done": "Hotovo",
@@ -5812,29 +5832,53 @@
         "citizenPoint3": "AI detekce použijte jako výchozí bod pro vaše vlastní pozorování",
         "outro": "Tento přístup zajišťuje kvalitu dat pro vědecký výzkum a zároveň maximalizuje vaše poznávání a radost z ptactva.",
         "acknowledge": "Rozumím"
+      },
+      "enableOnSources": {
+        "title": "Zapnout na zvukových zdrojích",
+        "intro": "Model {name} je nainstalován. Vyberte zvukové zdroje, které jím mají analyzovat zvuk.",
+        "saveHint": "Volba se uloží, když vyberete Hotovo. Teď ne toto okno zavře bez uložení.",
+        "allSources": "Všechny zvukové zdroje",
+        "soundCardsHeading": "Zvukové karty",
+        "streamsHeading": "Streamy",
+        "alreadyOn": "Již analyzuje modelem {name}.",
+        "followsDefaultsRuns": "Používá výchozí modely, mezi které patří {name}.",
+        "followsDefaultsAdd": "Používá výchozí modely. Zapnutím se zachovají a přidá se {name}.",
+        "followsDefaultsUnknown": "Používá výchozí modely, které se nepodařilo načíst. Zapněte {name} pro tento zdroj v nastavení zvuku.",
+        "batStreamWarning": "Modely netopýrů potřebují stream s bezztrátovým kodekem (PCM) a vzorkovací frekvencí alespoň 96 kHz; BSG-BAT potřebuje alespoň 192 kHz. Běžný stream z kamery není ultrazvukový, proto stream před použitím otestujte v nastavení zvuku.",
+        "allRunning": "Všechny zvukové zdroje již analyzují modelem {name}. Není co měnit.",
+        "notListed": "Model {name} není v seznamu povolených modelů, proto ho zde nelze zapnout pro zvukový zdroj.",
+        "notLoadedPending": "Model {name} se stále načítá, proto ho zatím nelze zapnout pro zvukový zdroj. Po načtení ho zapněte v nastavení zvukových zdrojů.",
+        "notLoadedFailed": "Model {name} se nepodařilo načíst, proto ho nelze zapnout pro zvukový zdroj.",
+        "noSources": "Zatím není nastaven žádný zvukový zdroj. Přidejte zvukovou kartu nebo stream v nastavení zvuku a tam zapněte {name}.",
+        "openAudioSettings": "Otevřít nastavení zvuku",
+        "enabledToast": "Model {name} zapnut pro {count, plural, one {# zvukový zdroj} few {# zvukové zdroje} many {# zvukových zdrojů} other {# zvukových zdrojů}}"
+      }
+    },
+    "modelNextSteps": {
+      "title": "Další kroky pro {name}",
+      "errors": {
+        "saveFailed": "Uložení se nezdařilo. Zkontrolujte připojení a zkuste to znovu, nebo zvolte Teď ne a zapněte model pro své zdroje později v Nastavení > Zvuk.",
+        "saveRejected": "Změna nebyla přijata. Zkuste to znovu, nebo zvolte Teď ne a zapněte model pro své zdroje později v Nastavení > Zvuk."
       }
     }
   },
   "analysis": {
     "title": "Analýza",
     "tabs": {
-      "settings": "Nastavení",
-      "models": "Modely"
+      "models": "Modely",
+      "detection": "Detekce",
+      "bats": "Netopýři",
+      "inference": "Inference",
+      "filters": "Filtry"
     },
     "detection": {
       "title": "Nastavení detekce",
       "description": "Nakonfigurujte prahy spolehlivosti a jazyk klasifikace druhů.",
-      "confidenceThreshold": {
-        "label": "Práh spolehlivosti",
-        "helpText": "Minimální skóre spolehlivosti (0,0 - 1,0) potřebné pro zaznamenání detekce."
-      },
       "batThreshold": {
-        "label": "Práh detekce netopýrů (BattyBirdNET)",
-        "helpText": "Minimální skóre spolehlivosti pro detekce druhů netopýrů modelem BattyBirdNET. BSG-BAT má vlastní práh."
+        "label": "Práh detekce netopýrů (BattyBirdNET)"
       },
       "bsgBatThreshold": {
         "label": "Práh detekce netopýrů (BSG-BAT)",
-        "helpText": "Minimální skóre spolehlivosti pro detekce druhů netopýrů modelem BSG-BAT.",
         "sampleRateWarning": "Záznamy při 192 kHz fungují, ale druhy, které se ozývají nad 96 kHz, nelze určit a skóre jsou méně spolehlivá. Doporučená vzorkovací frekvence záznamu je 384 kHz."
       },
       "bsgBatStep": {
@@ -5875,27 +5919,9 @@
       "locale": {
         "label": "Jazyk druhů",
         "helpText": "Jazyk používaný pro běžné názvy druhů v rozhraní."
-      },
-      "secondaryThresholdOverride": {
-        "label": "Override confidence threshold",
-        "helpText": "When enabled, this model uses its own confidence threshold below. When disabled, it follows the main BirdNET confidence threshold."
-      },
-      "secondaryThreshold": {
-        "helpText": "Minimum confidence score (0.01 - 0.99) required for a detection from this model to be recorded.",
-        "followsBirdnet": "Enable the override above to set a custom value. This model currently follows the main BirdNET confidence threshold."
-      },
-      "perchThreshold": {
-        "label": "Perch v2 Confidence Threshold"
-      },
-      "birdnetv3Threshold": {
-        "label": "BirdNET v3.0 Confidence Threshold"
-      },
-      "birdnetplusThreshold": {
-        "label": "Práh spolehlivosti BirdNET+ V3.0"
       }
     },
     "rangeFilter": {
-      "birdOnlyNote": "Filtr rozsahu se vztahuje pouze na klasifikátory ptáků. Modely netopýrů používají vlastní seznamy druhů.",
       "status": {
         "title": "Přehled filtru rozsahu",
         "geomodelInfo": "BirdNET Geomodel {version} - {species} známých druhů",
@@ -5910,13 +5936,13 @@
         "noFilter": "Žádný aktivní filtr rozsahu",
         "passUnmapped": {
           "label": "Povolit druhy bez dat o rozsahu",
-          "helpText": "Povolit detekce druhů, pro které geomodel nemá geografická data. Pokud je vypnuto, tyto druhy jsou vždy odfiltrovány."
+          "helpText": "Povolit detekce druhů, pro které geomodel nemá geografická data. Pokud je vypnuto, tyto druhy jsou vždy odfiltrovány. Týká se pouze klasifikátorů, na které se filtr rozsahu vztahuje."
         }
       }
     },
     "advanced": {
       "title": "Pokročilé",
-      "description": "Konfigurace zpracování a vlastních modelů."
+      "description": "Vlastní soubory modelu a štítků."
     },
     "downloadSource": {
       "title": "Zdroj stahování",
@@ -5930,7 +5956,7 @@
     },
     "gallery": {
       "title": "Galerie modelů",
-      "description": "Správa klasifikačních modelů pro detekci ptáků a netopýrů.",
+      "description": "Správa klasifikačních modelů.",
       "region": {
         "title": "Oblast modelu",
         "modeAuto": "Automaticky",
@@ -5986,6 +6012,10 @@
         "precisionHelp": "Precision (FP32, FP16, INT8) trades accuracy for size and speed: FP32 is most accurate, INT8 is smallest and fastest. Recommended is the best match for your detected hardware; Default is the model's standard build."
       },
       "actionInProgress": "Počkejte na dokončení probíhající instalace, přeinstalace nebo odstranění modelu",
+      "installSuccess": "Model {name} byl nainstalován",
+      "cancelling": "Rušení...",
+      "cancelled": "Stahování modelu {name} bylo zrušeno.",
+      "installedEnableOnSources": "Model {name} je nainstalován. Chcete-li ho používat, zapněte ho pro své zdroje v Nastavení > Zvuk.",
       "removeSuccess": "Removed {name}",
       "reasons": {
         "backendRecommended": "Běží na {backend}, doporučeném backendu pro váš hardware",
@@ -6032,7 +6062,8 @@
         "verifying": "Ověřování…",
         "loading": "Načítání…",
         "complete": "Úspěšně nainstalováno",
-        "failed": "Selhalo"
+        "failed": "Selhalo",
+        "cancelled": "Zrušeno"
       },
       "license": {
         "title": "Licenční smlouva",
@@ -6046,7 +6077,9 @@
         "commercialUseAllowed": "Komerční použití povoleno",
         "nonCommercialOnly": "Pouze nekomerční použití",
         "nonCommercialWarning": "Tento model je licencován pouze pro nekomerční použití. Instalací souhlasíte s podmínkami licence.",
-        "acceptAndInstall": "Přijmout a nainstalovat"
+        "acceptAndInstall": "Přijmout a nainstalovat",
+        "continue": "Pokračovat",
+        "agreementNext": "Tento model má podmínky, se kterými musíte souhlasit. Zobrazí se v dalším kroku."
       },
       "removeDialog": {
         "title": "Odstranit {name}?",
@@ -6058,12 +6091,15 @@
         "removeFailed": "Nepodařilo se odstranit model",
         "removeHasDependents": "{name} je vyžadován modely {models}. Nejprve tyto modely odeberte.",
         "operationInProgress": "Již probíhá instalace, přeinstalace nebo odstranění modelu ({name}). Zkuste to znovu po jejím dokončení.",
+        "cancelUnavailable": "Stahování modelu {name} už nelze zrušit.",
         "actionFailed": "Došlo k problému s {name}",
         "downloadSourceHint": "Pokud je huggingface.co ve vaší síti blokováno nebo pomalé, nastavte zrcadlový server v sekci Zdroj stahování níže.",
         "goToDownloadSource": "Přejít na Zdroj stahování",
         "dismiss": "Zavřít",
         "details": "Details",
-        "removeRetryHint": "To try again, use the Remove button on the model's card."
+        "removeRetryHint": "To try again, use the Remove button on the model's card.",
+        "agreementRequired": "{name} vyžaduje váš souhlas s podmínkami, než jej bude možné nainstalovat.",
+        "documentUnavailable": "Text dokumentu se nepodařilo načíst a ověřit. Zkontrolujte, zda BirdNET-Go dosáhne na zdroj stahování modelů, a zkuste to znovu."
       },
       "regionLabel": "Oblast",
       "speciesLabel": "Druhy",
@@ -6071,10 +6107,10 @@
       "reinstalling": "Přeinstalování…",
       "reinstallComplete": "Soubory úspěšně ověřeny",
       "geomodelBadge": "Obsahuje BirdNET v3.0 geomodel",
+      "newBadge": "Nový",
       "preview": {
         "badge": "Náhled",
         "buildLabel": "{version} · {build}",
-        "cardNotice": "Vývojářský náhled, nejedná se o finální verzi. Jde o rané sestavení pro testování; výsledky se mohou před stabilní verzí změnit.",
         "dialogNotice": "Instalujete vývojářský náhled ({build}). Hodí se k vyzkoušení, ale zatím se nedoporučuje jako váš jediný klasifikátor."
       },
       "experimental": {
@@ -6085,6 +6121,19 @@
       "superseded": {
         "cardNotice": "Nahrazeno modelem {name}. Používejte místo něj novější model.",
         "dialogNotice": "Tento model byl nahrazen modelem {name}. Zvažte instalaci modelu {name}."
+      },
+      "update": {
+        "cardNotice": "Novější sestavení ({to}) nahrazuje nainstalované sestavení {from}.",
+        "cardNoticeBuild": "Sestavení {to} verze {version} nahrazuje nainstalované sestavení {from}.",
+        "action": "Aktualizovat",
+        "applying": "Aktualizace..."
+      },
+      "buildNotes": {
+        "heading": "Novinky v sestavení {build} verze {version}",
+        "released": "Vydáno {date}",
+        "buildLabel": "Číslo sestavení",
+        "buildValue": "{build}, vydáno {date}",
+        "disclosure": "Novinky v tomto sestavení"
       },
       "entryIncompatible": "Tento model není v tomto systému k dispozici.",
       "regionGlobal": "Globální",
@@ -6113,30 +6162,122 @@
         "applyFailed": "Použití se nezdařilo",
         "upToDate": "Všechny vaše modely jsou již pro tento hardware optimalizovány.",
         "licenseNote": "Záměna probíhá v rámci stejného modelu, takže se jeho licence nemění."
+      },
+      "documents": {
+        "heading": "Dokumenty",
+        "kinds": {
+          "license": "Licence",
+          "acceptable_use": "Zásady přijatelného použití"
+        },
+        "genericKind": "Podmínky modelu",
+        "source": "Z {repo}",
+        "textRegion": "Text: {document}",
+        "loading": "Načítání textu dokumentu",
+        "view": "Zobrazit: {document}",
+        "hide": "Skrýt: {document}"
+      },
+      "agreement": {
+        "title": "Přečtěte si a odsouhlaste",
+        "intro": "Před instalací modelu {name} si přečtěte níže uvedené podmínky a vyjádřete s nimi souhlas.",
+        "agree": "Přečetl(a) jsem a souhlasím: {document}",
+        "agreeAndContinue": "Souhlasit a pokračovat",
+        "tickEach": "Pokračujte zaškrtnutím políčka pod každým dokumentem.",
+        "waitForText": "Souhlas můžete vyjádřit, až se načtou všechny dokumenty.",
+        "unavailableBlocked": "Dokument se nepodařilo načíst, proto s ním zatím nemůžete souhlasit. Načtěte jej znovu tlačítkem Zkusit znovu."
       }
-    },
-    "bird": {
-      "title": "Detekce ptáků",
-      "description": "Nakonfigurujte práh spolehlivosti, jazyk druhů a filtrování falešných detekcí pro klasifikátory ptáků."
     },
     "bat": {
       "title": "Detekce netopýrů",
-      "description": "Nakonfigurujte práh, plánování a filtrování falešných detekcí pro klasifikátory netopýrů."
-    },
-    "dynamicThreshold": {
-      "birdOnlyNote": "Dynamický práh se vztahuje pouze na klasifikátory ptáků."
+      "description": "Plánování, validace a filtrování falešně pozitivních detekcí pro klasifikátory netopýrů."
     },
     "perch": {
-      "title": "Perch v2 Detection",
-      "description": "Set a dedicated confidence threshold for Google Perch v2 detections, independent of the BirdNET threshold."
+      "title": "Perch v2 Detection"
     },
     "birdnetv3": {
-      "title": "BirdNET v3.0 Detection",
-      "description": "Set a dedicated confidence threshold for BirdNET v3.0 detections, independent of the main BirdNET threshold."
+      "title": "BirdNET v3.0 Detection"
     },
     "birdnetplus": {
-      "title": "Detekce BirdNET+ V3.0",
-      "description": "Nastavte vyhrazený práh spolehlivosti pro detekce BirdNET+ V3.0, nezávislý na hlavním prahu BirdNET."
+      "title": "Detekce BirdNET+ v3.0"
+    },
+    "thresholds": {
+      "title": "Prahy detekce",
+      "description": "Minimální spolehlivost, kterou detekce potřebuje k zaznamenání, pro každý povolený klasifikátor.",
+      "category": {
+        "bat": "Netopýři"
+      },
+      "state": {
+        "pending": "Načítá se",
+        "failed": "Načtení selhalo"
+      },
+      "empty": "Nejsou povoleny žádné klasifikátory.",
+      "shared": {
+        "label": "Sdílený práh",
+        "usedBy": "Používají všechny klasifikátory bez vlastního prahu: {models}.",
+        "unused": "Používají všechny klasifikátory bez vlastního prahu. Aktuálně jej nepoužívá žádný povolený klasifikátor."
+      },
+      "customSwitch": "Vlastní práh",
+      "usesShared": "Používá sdílený práh"
+    },
+    "speciesNames": {
+      "title": "Názvy druhů",
+      "description": "Jak jsou detekované druhy pojmenovány v rozhraní."
+    },
+    "inference": {
+      "runtime": {
+        "title": "Prostředí inference",
+        "description": "Které běhové prostředí a zařízení spouštějí klasifikátory a kolik CPU vláken používají."
+      },
+      "backend": {
+        "label": "Backend",
+        "helpText": "Automaticky vybere nejrychlejší běhové prostředí, které toto zařízení pro každý model podporuje.",
+        "options": {
+          "auto": "Automaticky (doporučeno)",
+          "onnx": "ONNX Runtime",
+          "openvino": "OpenVINO"
+        }
+      },
+      "device": {
+        "label": "Zařízení OpenVINO",
+        "helpText": "Používá se pro modely běžící na OpenVINO.",
+        "helpTextMultipleGpus": "Používá se pro modely běžící na OpenVINO. Toto zařízení má více než jednu GPU, vyberte tu, na které mají modely běžet.",
+        "notDetectedHint": "Vybraná GPU nebyla nalezena. Modely běží na ONNX Runtime, dokud nevyberete jiné zařízení.",
+        "options": {
+          "auto": "Automaticky",
+          "cpu": "CPU",
+          "gpu": "GPU",
+          "gpuDefault": "Výchozí OpenVINO: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (nenalezeno)"
+        },
+        "gpuTypes": {
+          "integrated": "integrovaná",
+          "discrete": "dedikovaná"
+        }
+      },
+      "reloadNote": "Změna backendu nebo zařízení znovu načte modely, takže se detekce na několik sekund pozastaví.",
+      "backendsLoading": "Zjišťuje se, která běhová prostředí toto zařízení podporuje.",
+      "backendsUnavailable": "Nepodařilo se zjistit, která běhová prostředí toto zařízení podporuje. Backend a zařízení lze změnit po jejich načtení.",
+      "running": {
+        "title": "Aktuálně spuštěno",
+        "description": "Běhové prostředí a přesnost, se kterými běží každý povolený klasifikátor.",
+        "unknown": "Neuvedeno"
+      }
+    },
+    "scope": {
+      "dynamicThreshold": "Vztahuje se na všechny klasifikátory včetně klasifikátorů netopýrů. Druh s vlastním prahem se neupravuje.",
+      "speciesNames": "Vztahuje se na všechny klasifikátory. Druh bez názvu ve zvoleném jazyce si ponechá název ze svého klasifikátoru.",
+      "falsePositiveFilter": "Vztahuje se na všechny klasifikátory kromě klasifikátorů netopýrů, které mají vlastní filtr falešně pozitivních detekcí.",
+      "falsePositiveFilterBatTab": "Vztahuje se na všechny klasifikátory kromě klasifikátorů netopýrů, které mají vlastní filtr falešně pozitivních detekcí na kartě Netopýři.",
+      "rangeFilter": {
+        "appliesTo": "Vztahuje se na: {models}.",
+        "notApplied": "Bez filtru rozsahu: {models}.",
+        "generic": "Vztahuje se na klasifikátory podporované modelem rozsahu. Klasifikátory netopýrů se filtrem rozsahu nikdy nefiltrují.",
+        "needsLocation": "Funguje pouze tehdy, když je nastavena poloha stanice."
+      },
+      "bat": "Vztahuje se pouze na klasifikátory netopýrů."
+    },
+    "dynamicThreshold": {
+      "minAboveTrigger": "Minimální práh nesmí být vyšší než spouštěcí práh."
     }
   },
   "restart": {
@@ -6308,6 +6449,52 @@
       "patternNone": "Žádný",
       "patternTransient": "Přechodný",
       "patternSustained": "Trvalý"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Klávesové zkratky",
+    "modal": {
+      "title": "Klávesové zkratky",
+      "enable": "Povolit klávesové zkratky",
+      "enableHelp": "Vypněte, pokud vám zkratky na jedné klávese překážejí při práci se čtečkou obrazovky, hlasovým ovládáním nebo asistivní klávesnicí.",
+      "offNote": "Klávesové zkratky jsou vypnuté. Níže uvedené klávesy nic nedělají, dokud je nezapnete.",
+      "or": "nebo"
+    },
+    "scopes": {
+      "global": "Všechny stránky"
+    },
+    "groups": {
+      "navigation": "Navigace",
+      "review": "Kontrola",
+      "audio": "Zvuk",
+      "general": "Obecné"
+    },
+    "keys": {
+      "shift": "Shift",
+      "space": "Mezerník",
+      "arrowLeft": "Šipka vlevo",
+      "arrowRight": "Šipka vpravo",
+      "comma": "Čárka",
+      "period": "Tečka",
+      "questionMark": "Otazník",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Starší detekce stejného druhu",
+      "newerSpecies": "Novější detekce stejného druhu",
+      "correct": "Označit jako správné",
+      "falsePositive": "Označit jako falešně pozitivní",
+      "wrongSpecies": "Změnit druh",
+      "keep": "Ponechat nebo uvolnit tuto nahrávku",
+      "playPause": "Přehrát nebo pozastavit",
+      "seekBack": "O jednu sekundu zpět",
+      "seekForward": "O jednu sekundu vpřed",
+      "focusReview": "Přejít na tlačítka kontroly",
+      "backToList": "Zpět na detekce"
+    },
+    "global": {
+      "help": "Zobrazit nebo skrýt klávesové zkratky"
     }
   }
 }

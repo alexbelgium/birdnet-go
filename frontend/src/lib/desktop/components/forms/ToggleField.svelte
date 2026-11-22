@@ -25,6 +25,13 @@
     disabled?: boolean;
     /** Id of an element outside the field that also describes the switch, read after its own description. */
     describedBy?: string;
+    /** Shortcut key of the switch, named on the input as `aria-keyshortcuts`. */
+    ariaKeyshortcuts?: string;
+    /**
+     * Id of an element outside the field whose text is read before the label in the switch's
+     * accessible name, such as a row heading, so repeated labels stay unique.
+     */
+    contextLabelId?: string;
     error?: string;
     /**
      * Default variant only: badges shown on the label line after the label text. They are not
@@ -45,6 +52,8 @@
     value = $bindable(),
     disabled = false,
     describedBy: outsideDescriptionId,
+    ariaKeyshortcuts,
+    contextLabelId,
     error,
     badges,
     onUpdate,
@@ -217,8 +226,9 @@
     required={required && !disabled}
     onclickcapture={handleClick}
     onchangecapture={handleChange}
-    aria-labelledby={labelId}
+    aria-labelledby={contextLabelId ? `${contextLabelId} ${labelId}` : labelId}
     aria-describedby={describedBy}
+    aria-keyshortcuts={ariaKeyshortcuts}
     aria-invalid={error ? 'true' : undefined}
   />
 {/snippet}

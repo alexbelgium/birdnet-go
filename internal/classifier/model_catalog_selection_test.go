@@ -1,6 +1,7 @@
 package classifier_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,8 +81,8 @@ func TestRecommend_RegionalTiles(t *testing.T) {
 			// regional tile must win.
 			lowRAM := 400 * mib
 			gotPerch := recommendedVariantID(&perch, []string{hwprofile.CapAArch64, hwprofile.CapONNXRuntimeCPU, hwprofile.CapLowRAM}, lowRAM, slug)
-			assert.Equalf(t, "no-dft-fp32@"+slug, gotPerch, "low-RAM aarch64 host in %q must get the regional no-dft-fp32 slice", slug)
-			assert.Equalf(t, "regional/"+slug+"/perch_v2_"+slug+"_no_dft_fp32.onnx", modelRemotePath(t, &perch, gotPerch),
+			assert.Equalf(t, "no-dft-fp32-b2@"+slug, gotPerch, "low-RAM aarch64 host in %q must get the regional no-dft-fp32 slice", slug)
+			assert.Equalf(t, "regional/"+slug+"/perch-v2-"+slug+"-no-dft-fp32-b2.onnx", modelRemotePath(t, &perch, gotPerch),
 				"recommended perch variant must own the manifest low-ram selection path")
 
 			// BirdNET v3.0: a plain CPU host in a region prefers the region's fp32
@@ -103,7 +104,7 @@ func TestRecommend_RegionalTiles(t *testing.T) {
 		caps := []string{hwprofile.CapAArch64, hwprofile.CapONNXRuntimeCPU, hwprofile.CapLowRAM}
 
 		assert.Empty(t, recommendedVariantID(&perch, caps, 300*mib, "amazonia"), "own slice blocked at 300 MiB: nothing, not another region's slice")
-		assert.Equal(t, "no-dft-fp32@amazonia", recommendedVariantID(&perch, caps, 400*mib, "amazonia"), "own slice fits at 400 MiB")
+		assert.Equal(t, "no-dft-fp32-b2@amazonia", recommendedVariantID(&perch, caps, 400*mib, "amazonia"), "own slice fits at 400 MiB")
 	})
 
 	// The same rule holds for every family shape: below the global floors, with
@@ -154,6 +155,33 @@ func TestRecommend_RegionalTiles(t *testing.T) {
 		gotPerch := recommendedVariantID(&perch, caps, high, "")
 		assert.Equal(t, "fp32", gotPerch, "no region resolved must recommend a global perch variant")
 	})
+}
+
+// TestRecommend_BirdNETPlusOffersTheCurrentRelease checks the recommender picks
+// the 3.0.1 build of the host's tile (or the 3.0.1 global build with no region)
+// and never an older release's Legacy variant, which is what makes an installed
+// 3.0 differ from the recommendation the optimize rule reads.
+func TestRecommend_BirdNETPlusOffersTheCurrentRelease(t *testing.T) {
+	t.Parallel()
+
+	plus, ok := classifier.GetCatalogEntry("birdnet-plus-v3.0")
+	require.True(t, ok)
+	caps := []string{hwprofile.CapX86_64, hwprofile.CapONNXRuntimeCPU}
+	high := 8 * 1024 * mib
+
+	for _, tc := range []struct{ name, region, want string }{
+		{"region resolved to nordic", "nordic", "fp32-3.0.1-b2@nordic"},
+		{"no region", "", "fp32-3.0.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := recommendedVariantID(&plus, caps, high, tc.region)
+			assert.Equal(t, tc.want, got)
+			idx := slices.IndexFunc(plus.Variants, func(v classifier.CatalogVariant) bool { return v.ID == got })
+			require.GreaterOrEqual(t, idx, 0)
+			assert.False(t, plus.Variants[idx].Legacy, "a Legacy variant is never recommended")
+		})
+	}
 }
 
 // TestRecommend_V30GlobalSelection is a regression guard that the recommender
