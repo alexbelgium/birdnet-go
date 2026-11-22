@@ -30,7 +30,7 @@
   import { downloadBlob } from '$lib/utils/fileHelpers';
   import SpeciesInput from '$lib/desktop/components/forms/SpeciesInput.svelte';
   import TextInput from '$lib/desktop/components/forms/TextInput.svelte';
-  import Checkbox from '$lib/desktop/components/forms/Checkbox.svelte';
+  import ToggleField from '$lib/desktop/components/forms/ToggleField.svelte';
   import Button from '$lib/desktop/components/ui/Button.svelte';
   import SelectDropdown from '$lib/desktop/components/forms/SelectDropdown.svelte';
   import type { SelectOption } from '$lib/desktop/components/forms/SelectDropdown.types';
@@ -45,6 +45,7 @@
   import { hasSettingsChanged } from '$lib/utils/settingsChanges';
   import type { SpeciesSettings } from '$lib/stores/settings';
   import SettingsSection from '$lib/desktop/features/settings/components/SettingsSection.svelte';
+  import SettingsGroupLabel from '$lib/desktop/features/settings/components/SettingsGroupLabel.svelte';
   import SettingsTabs from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import type { TabDefinition } from '$lib/desktop/features/settings/components/SettingsTabs.svelte';
   import SettingsNote from '$lib/desktop/features/settings/components/SettingsNote.svelte';
@@ -97,6 +98,10 @@
     CalendarClock,
     Activity,
     TriangleAlert,
+    ListChecks,
+    CalendarDays,
+    Leaf,
+    Sparkles,
   } from '@lucide/svelte';
   import { toastActions } from '$lib/stores/toast';
 
@@ -1385,13 +1390,13 @@
             >
               <Bird class="w-3.5 h-3.5 text-[var(--text-success)]" />
             </div>
-            <span class="text-xs font-medium text-muted"
-              >{t('settings.species.activeSpecies.stats.species')}</span
-            >
+            <span class="text-xs font-medium text-muted">
+              {t('settings.species.activeSpecies.stats.species')}
+            </span>
           </div>
-          <span class="font-mono tabular-nums text-xl font-semibold pl-0.5"
-            >{activeSpeciesState.data.count}</span
-          >
+          <span class="font-mono tabular-nums text-xl font-semibold pl-0.5">
+            {activeSpeciesState.data.count}
+          </span>
         </div>
 
         <div
@@ -1401,15 +1406,15 @@
             <div class="p-1 rounded-md bg-[color-mix(in_srgb,var(--color-info)_10%,transparent)]">
               <MapPin class="w-3.5 h-3.5 text-[var(--text-info)]" />
             </div>
-            <span class="text-xs font-medium text-muted"
-              >{t('settings.species.activeSpecies.stats.location')}</span
-            >
+            <span class="text-xs font-medium text-muted">
+              {t('settings.species.activeSpecies.stats.location')}
+            </span>
           </div>
-          <span class="font-mono tabular-nums text-xl font-semibold pl-0.5"
-            >{activeSpeciesState.data.location.latitude.toFixed(2)}°, {activeSpeciesState.data.location.longitude.toFixed(
+          <span class="font-mono tabular-nums text-xl font-semibold pl-0.5">
+            {activeSpeciesState.data.location.latitude.toFixed(2)}°, {activeSpeciesState.data.location.longitude.toFixed(
               2
-            )}°</span
-          >
+            )}°
+          </span>
         </div>
 
         <div
@@ -1419,13 +1424,13 @@
             <div class="p-1 rounded-md bg-violet-500/10">
               <SlidersHorizontal class="w-3.5 h-3.5 text-violet-500" />
             </div>
-            <span class="text-xs font-medium text-muted"
-              >{t('settings.species.activeSpecies.stats.threshold')}</span
-            >
+            <span class="text-xs font-medium text-muted">
+              {t('settings.species.activeSpecies.stats.threshold')}
+            </span>
           </div>
-          <span class="font-mono tabular-nums text-xl font-semibold pl-0.5"
-            >{activeSpeciesState.data.threshold}</span
-          >
+          <span class="font-mono tabular-nums text-xl font-semibold pl-0.5">
+            {activeSpeciesState.data.threshold}
+          </span>
         </div>
 
         <div
@@ -1437,13 +1442,13 @@
             >
               <Clock class="w-3.5 h-3.5 text-[var(--text-warning)]" />
             </div>
-            <span class="text-xs font-medium text-muted"
-              >{t('settings.species.activeSpecies.stats.updated')}</span
-            >
+            <span class="text-xs font-medium text-muted">
+              {t('settings.species.activeSpecies.stats.updated')}
+            </span>
           </div>
-          <span class="font-mono tabular-nums text-xl font-semibold pl-0.5"
-            >{formatRelativeTime(activeSpeciesState.data.lastUpdated)}</span
-          >
+          <span class="font-mono tabular-nums text-xl font-semibold pl-0.5">
+            {formatRelativeTime(activeSpeciesState.data.lastUpdated)}
+          </span>
         </div>
       </div>
     {/if}
@@ -1636,9 +1641,9 @@
         <div class="p-1.5 rounded-lg bg-violet-500/10">
           <ArrowLeftRight class="w-4 h-4 text-violet-500" />
         </div>
-        <h3 class="text-xs font-semibold uppercase tracking-wider text-muted">
+        <SettingsGroupLabel as="h3">
           {t('settings.species.synonyms.tabLabel')}
-        </h3>
+        </SettingsGroupLabel>
         {#if synonymCount > 0}
           <span
             class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-500/10 text-muted"
@@ -1728,6 +1733,7 @@
     <!-- Main Tracking Settings -->
     <SettingsSection
       title={t('settings.species.tracking.title')}
+      icon={ListChecks}
       description={t('settings.species.tracking.description')}
       defaultOpen={true}
       originalData={store.originalData.realtime?.speciesTracking}
@@ -1735,12 +1741,12 @@
     >
       <div class="space-y-4">
         <!-- Enable Species Tracking -->
-        <Checkbox
-          checked={trackingSettings?.enabled ?? false}
+        <ToggleField
+          value={trackingSettings?.enabled ?? false}
           label={t('settings.species.tracking.enabled.label')}
-          helpText={t('settings.species.tracking.enabled.helpText')}
+          description={t('settings.species.tracking.enabled.helpText')}
           disabled={store.isLoading || store.isSaving}
-          onchange={value => updateTrackingSettings({ enabled: value })}
+          onUpdate={value => updateTrackingSettings({ enabled: value })}
         />
 
         {#if trackingSettings?.enabled}
@@ -1770,8 +1776,9 @@
                 />
                 <span
                   class="inline-flex items-center justify-center h-9 px-3 text-sm font-medium rounded-r-lg border border-[var(--border-100)] bg-[var(--surface-200)] text-muted"
-                  >{t('settings.species.tracking.units.days')}</span
                 >
+                  {t('settings.species.tracking.units.days')}
+                </span>
               </div>
               <p class="text-xs text-muted mt-1">
                 {t('settings.species.tracking.newSpeciesWindowDays.helpText')}
@@ -1803,8 +1810,9 @@
                 />
                 <span
                   class="inline-flex items-center justify-center h-9 px-3 text-sm font-medium rounded-r-lg border border-[var(--border-100)] bg-[var(--surface-200)] text-muted"
-                  >{t('settings.species.tracking.units.min')}</span
                 >
+                  {t('settings.species.tracking.units.min')}
+                </span>
               </div>
               <p class="text-xs text-muted mt-1">
                 {t('settings.species.tracking.syncIntervalMinutes.helpText')}
@@ -1836,8 +1844,9 @@
                 />
                 <span
                   class="inline-flex items-center justify-center h-9 px-3 text-sm font-medium rounded-r-lg border border-[var(--border-100)] bg-[var(--surface-200)] text-muted"
-                  >{t('settings.species.tracking.units.hours')}</span
                 >
+                  {t('settings.species.tracking.units.hours')}
+                </span>
               </div>
               <p class="text-xs text-muted mt-1">
                 {t('settings.species.tracking.notificationSuppressionHours.helpText')}
@@ -1852,17 +1861,18 @@
       <!-- Yearly Tracking Settings -->
       <SettingsSection
         title={t('settings.species.tracking.yearly.title')}
+        icon={CalendarDays}
         description={t('settings.species.tracking.yearly.description')}
         defaultOpen={false}
       >
         <div class="space-y-4">
           <!-- Enable Yearly Tracking -->
-          <Checkbox
-            checked={trackingSettings?.yearlyTracking?.enabled ?? false}
+          <ToggleField
+            value={trackingSettings?.yearlyTracking?.enabled ?? false}
             label={t('settings.species.tracking.yearly.enabled.label')}
-            helpText={t('settings.species.tracking.yearly.enabled.helpText')}
+            description={t('settings.species.tracking.yearly.enabled.helpText')}
             disabled={store.isLoading || store.isSaving}
-            onchange={value => updateTrackingSettings({ yearlyTracking: { enabled: value } })}
+            onUpdate={value => updateTrackingSettings({ yearlyTracking: { enabled: value } })}
           />
 
           {#if trackingSettings?.yearlyTracking?.enabled}
@@ -1943,8 +1953,9 @@
                   />
                   <span
                     class="inline-flex items-center justify-center h-9 px-3 text-sm font-medium rounded-r-lg border border-[var(--border-100)] bg-[var(--surface-200)] text-muted"
-                    >{t('settings.species.tracking.units.days')}</span
                   >
+                    {t('settings.species.tracking.units.days')}
+                  </span>
                 </div>
                 <p class="text-xs text-muted mt-1">
                   {t('settings.species.tracking.yearly.windowDays.helpText')}
@@ -1958,17 +1969,18 @@
       <!-- Seasonal Tracking Settings -->
       <SettingsSection
         title={t('settings.species.tracking.seasonal.title')}
+        icon={Leaf}
         description={t('settings.species.tracking.seasonal.description')}
         defaultOpen={false}
       >
         <div class="space-y-4">
           <!-- Enable Seasonal Tracking -->
-          <Checkbox
-            checked={trackingSettings?.seasonalTracking?.enabled ?? false}
+          <ToggleField
+            value={trackingSettings?.seasonalTracking?.enabled ?? false}
             label={t('settings.species.tracking.seasonal.enabled.label')}
-            helpText={t('settings.species.tracking.seasonal.enabled.helpText')}
+            description={t('settings.species.tracking.seasonal.enabled.helpText')}
             disabled={store.isLoading || store.isSaving}
-            onchange={value => updateTrackingSettings({ seasonalTracking: { enabled: value } })}
+            onUpdate={value => updateTrackingSettings({ seasonalTracking: { enabled: value } })}
           />
 
           {#if trackingSettings?.seasonalTracking?.enabled}
@@ -1997,8 +2009,9 @@
                 />
                 <span
                   class="inline-flex items-center justify-center h-9 px-3 text-sm font-medium rounded-r-lg border border-[var(--border-100)] bg-[var(--surface-200)] text-muted"
-                  >{t('settings.species.tracking.units.days')}</span
                 >
+                  {t('settings.species.tracking.units.days')}
+                </span>
               </div>
               <p class="text-xs text-muted mt-1">
                 {t('settings.species.tracking.seasonal.windowDays.helpText')}
@@ -2007,9 +2020,9 @@
 
             <!-- Season Definitions -->
             <div class="mt-6">
-              <h4 class="font-medium text-sm mb-2">
+              <SettingsGroupLabel divided class="mb-2">
                 {t('settings.species.tracking.seasonal.seasons.title')}
-              </h4>
+              </SettingsGroupLabel>
               <p class="text-xs text-muted mb-4">
                 {t('settings.species.tracking.seasonal.seasons.description')}
               </p>
@@ -2083,17 +2096,18 @@
       <!-- Infrequent Tracking Settings -->
       <SettingsSection
         title={t('settings.species.tracking.infrequent.title')}
+        icon={Sparkles}
         description={t('settings.species.tracking.infrequent.description')}
         defaultOpen={false}
       >
         <div class="space-y-4">
           <!-- Enable Infrequent Tracking -->
-          <Checkbox
-            checked={trackingSettings?.infrequentTracking?.enabled ?? false}
+          <ToggleField
+            value={trackingSettings?.infrequentTracking?.enabled ?? false}
             label={t('settings.species.tracking.infrequent.enabled.label')}
-            helpText={t('settings.species.tracking.infrequent.enabled.helpText')}
+            description={t('settings.species.tracking.infrequent.enabled.helpText')}
             disabled={store.isLoading || store.isSaving}
-            onchange={value => updateTrackingSettings({ infrequentTracking: { enabled: value } })}
+            onUpdate={value => updateTrackingSettings({ infrequentTracking: { enabled: value } })}
           />
 
           {#if trackingSettings?.infrequentTracking?.enabled}
@@ -2123,8 +2137,9 @@
                   />
                   <span
                     class="inline-flex items-center justify-center h-9 px-3 text-sm font-medium rounded-r-lg border border-[var(--border-100)] bg-[var(--surface-200)] text-muted"
-                    >{t('settings.species.tracking.units.days')}</span
                   >
+                    {t('settings.species.tracking.units.days')}
+                  </span>
                 </div>
                 <p class="text-xs text-muted mt-1">
                   {t('settings.species.tracking.infrequent.absenceDays.helpText')}

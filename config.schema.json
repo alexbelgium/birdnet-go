@@ -381,7 +381,7 @@
         },
         "accesstokenexp": {
           "type": "string",
-          "description": "duration for access token",
+          "description": "no longer sets how long a browser stays signed in",
           "examples": [
             "10s",
             "5m",
@@ -496,7 +496,7 @@
         },
         "openvinopath": {
           "type": "string",
-          "description": "path to libopenvino_c shared library (OpenVINO image variants only)"
+          "description": "path to the OpenVINO C runtime (libopenvino_c.so, or openvino_c.dll on Windows); empty uses the default library name, and on Windows first searches the known install locations"
         },
         "backend": {
           "type": "string",
@@ -504,7 +504,7 @@
         },
         "openvinodevice": {
           "type": "string",
-          "description": "OpenVINO device preference: \"auto\" (default), \"cpu\", or \"gpu\""
+          "description": "OpenVINO device preference: \"auto\" (default), \"cpu\", \"gpu\", or a concrete GPU such as \"GPU.1\" on a host with several GPUs"
         },
         "huggingfaceendpoint": {
           "type": "string",
@@ -526,15 +526,15 @@
       "properties": {
         "modelpath": {
           "type": "string",
-          "description": "path to BirdNET+ V3.0 ONNX model file"
+          "description": "path to BirdNET+ v3.0 ONNX model file"
         },
         "labelpath": {
           "type": "string",
-          "description": "path to BirdNET+ V3.0 label file"
+          "description": "path to BirdNET+ v3.0 label file"
         },
         "overridethreshold": {
           "type": "boolean",
-          "description": "when true, gate BirdNET+ V3.0 detections on Threshold instead of following BirdNET.Threshold"
+          "description": "when true, gate BirdNET+ v3.0 detections on Threshold instead of following BirdNET.Threshold"
         },
         "threshold": {
           "type": "number",
@@ -547,7 +547,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "BirdNETPlusConfig holds configuration for the BirdNET+ V3.0 acoustic classifier."
+      "description": "BirdNETPlusConfig holds configuration for the BirdNET+ v3.0 acoustic classifier."
     },
     "BirdNETV3Config": {
       "properties": {
@@ -707,7 +707,7 @@
         },
         "defaultaudiogain": {
           "type": "number",
-          "description": "Default playback gain in dB (0-24)"
+          "description": "Default playback gain in dB (-12 to 24)"
         },
         "livespectrogram": {
           "type": "boolean",
@@ -716,6 +716,10 @@
         "playbackdenoise": {
           "$ref": "#/$defs/DenoiseSettings",
           "description": "denoise clips when they are played or downloaded; stored clips stay unchanged"
+        },
+        "playback": {
+          "$ref": "#/$defs/PlaybackDefaults",
+          "description": "further playback defaults"
         }
       },
       "additionalProperties": false,
@@ -1654,6 +1658,17 @@
       "type": "object",
       "description": "PirateWeatherSettings contains settings for Pirate Weather integration."
     },
+    "PlaybackDefaults": {
+      "properties": {
+        "highpasshz": {
+          "type": "integer",
+          "description": "high-pass cutoff in Hz applied in the browser while a clip plays; 0 is off"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "PlaybackDefaults holds the values a clip player starts with."
+    },
     "PrivacyFilterSettings": {
       "properties": {
         "debug": {
@@ -1952,7 +1967,7 @@
         },
         "model": {
           "type": "string",
-          "description": "range filter model version: \"legacy\" for v1, \"v3\" for geomodel v3.0, or empty/default for v2"
+          "description": "range filter model version: \"legacy\" for v1, \"v3\" for geomodel v3.0, or empty/default for v2; an installed geomodel replaces the stock v1 and v2 models"
         },
         "modelpath": {
           "type": "string",
@@ -2297,7 +2312,7 @@
         },
         "sessionduration": {
           "type": "string",
-          "description": "duration for browser session cookies",
+          "description": "lifetime of the OAuth handshake cookie; no longer sets how long a browser stays signed in",
           "examples": [
             "10s",
             "5m",
@@ -2364,7 +2379,7 @@
         },
         "birdnetplus": {
           "$ref": "#/$defs/BirdNETPlusConfig",
-          "description": "BirdNET+ V3.0 acoustic classifier configuration"
+          "description": "BirdNET+ v3.0 acoustic classifier configuration"
         },
         "bat": {
           "$ref": "#/$defs/BatConfig",

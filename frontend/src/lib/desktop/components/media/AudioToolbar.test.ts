@@ -7,6 +7,7 @@ import { expectNoA11yViolations } from '$lib/utils/axe-utils';
 import AudioToolbar from './AudioToolbar.svelte';
 import toolbarSource from './AudioToolbar.svelte?raw';
 import { DENOISE_OPTIONS } from '$lib/utils/denoisePresets';
+import { describeBinding, KEYS } from '$lib/utils/keyboard';
 import { SEEK_PAGE_STEP_SECONDS, SEEK_STEP_SECONDS } from '$lib/utils/seek';
 import { DENOISE_BUTTON_NAME, EXPORT_BUTTON_NAME } from '../../../../test/audioPlayerQueries';
 import { AUDIO_TOOLBAR_CLIP_SECONDS, audioToolbarProps } from '../../../../test/audioToolbarProps';
@@ -683,5 +684,51 @@ describe('AudioToolbar menus', () => {
     openedMenu('export').dispatchEvent(new Event('scroll'));
 
     expect(openedMenu('export').style.left).toBe(placed);
+  });
+});
+
+describe('AudioToolbar play shortcut hint', () => {
+  const toolbarTest = createComponentTestFactory(AudioToolbar);
+  const PLAY_NAME = 'media.audio.play';
+
+  it('sets aria-keyshortcuts and a key hint title on the play button only when given a hint', () => {
+    const hint = describeBinding({ key: 'p' }, false, { key: KEYS.space });
+    const view = toolbarTest.render({ props: audioToolbarProps({ playShortcut: hint }) });
+
+    const hinted = screen.getByRole('button', { name: PLAY_NAME });
+    expect(hinted).toHaveAttribute('aria-keyshortcuts', 'P Space');
+    expect(hinted).toHaveAttribute('title', `${PLAY_NAME} (P)`);
+    view.unmount();
+
+    toolbarTest.render({ props: audioToolbarProps() });
+    const plain = screen.getByRole('button', { name: PLAY_NAME });
+    expect(plain).not.toHaveAttribute('aria-keyshortcuts');
+    expect(plain).not.toHaveAttribute('title');
+  });
+});
+
+describe('AudioToolbar playback defaults button', () => {
+  const toolbarTest = createComponentTestFactory(AudioToolbar);
+  const DEFAULTS_NAME = 'components.audioPlayer.defaults.open';
+
+  it('is not shown without a handler', () => {
+    toolbarTest.render({ props: audioToolbarProps() });
+
+    expect(screen.queryByRole('button', { name: DEFAULTS_NAME })).toBeNull();
+  });
+
+  it('is the last tabbable control of the bar and opens the dialog', async () => {
+    const onOpenDefaults = vi.fn();
+    const { container } = toolbarTest.render({ props: audioToolbarProps({ onOpenDefaults }) });
+
+    const button = screen.getByRole('button', { name: DEFAULTS_NAME });
+    const tabbable = Array.from(
+      container.querySelectorAll<HTMLElement>('button:not([disabled]), input, [tabindex="0"]')
+    );
+    expect(tabbable.at(-1)).toBe(button);
+    expect(button).toHaveAttribute('aria-haspopup', 'dialog');
+
+    await fireEvent.click(button);
+    expect(onOpenDefaults).toHaveBeenCalledTimes(1);
   });
 });

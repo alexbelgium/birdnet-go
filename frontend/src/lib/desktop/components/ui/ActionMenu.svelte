@@ -15,6 +15,7 @@
   @component
 -->
 <script lang="ts">
+  /* global ResizeObserver */
   import { cn } from '$lib/utils/cn';
   import type { Detection } from '$lib/types/detection.types';
   import type { HTMLAttributes } from 'svelte/elements';
@@ -189,12 +190,22 @@
       window.addEventListener('resize', handleResize);
       window.addEventListener('scroll', handleResize, true);
 
+      // The menu is sized by its content, which can change while it is open (a verified
+      // badge appears, the lock label swaps, items come and go). Re-anchor on each size
+      // change so the menu stays aligned to its trigger and inside the viewport.
+      let resizeObserver: ResizeObserver | undefined;
+      if (menuElement) {
+        resizeObserver = new ResizeObserver(() => updateMenuPosition());
+        resizeObserver.observe(menuElement);
+      }
+
       return () => {
         // Automatic cleanup when effect re-runs or component unmounts
         document.removeEventListener('click', handleClickOutside);
         document.removeEventListener('keydown', handleKeydown);
         window.removeEventListener('resize', handleResize);
         window.removeEventListener('scroll', handleResize, true);
+        resizeObserver?.disconnect();
       };
     }
   });
@@ -238,7 +249,7 @@
         in:dropdown
         out:dropdown={{ duration: 100 }}
         class={cn(
-          'fixed z-[1100] p-2 shadow-lg rounded-lg w-52 border',
+          'fixed z-[1100] p-2 shadow-lg rounded-lg w-max min-w-52 max-w-[calc(100vw-2rem)] border',
           variant === 'overlay'
             ? 'bg-[var(--color-base-100)]/95 border-[var(--color-base-300)]/60 backdrop-blur-md'
             : 'bg-[var(--color-base-100)] border-[var(--color-base-300)]'
@@ -262,8 +273,9 @@
                   {#if detection.verified === 'correct'}
                     <span
                       class="ml-auto inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--color-success)]/15 text-[var(--text-success)]"
-                      >✓</span
                     >
+                      ✓
+                    </span>
                   {/if}
                 </div>
               </button>
@@ -285,8 +297,9 @@
                   {#if detection.verified === 'false_positive'}
                     <span
                       class="ml-auto inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--color-error)]/15 text-[var(--text-error)]"
-                      >✗</span
                     >
+                      ✗
+                    </span>
                   {/if}
                 </div>
               </button>
@@ -311,13 +324,15 @@
                 {#if detection.verified === 'correct'}
                   <span
                     class="ml-auto inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--color-success)]/15 text-[var(--text-success)]"
-                    >✓</span
                   >
+                    ✓
+                  </span>
                 {:else if detection.verified === 'false_positive'}
                   <span
                     class="ml-auto inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--color-error)]/15 text-[var(--text-error)]"
-                    >✗</span
                   >
+                    ✗
+                  </span>
                 {/if}
               </div>
             </button>

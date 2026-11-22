@@ -187,9 +187,17 @@ type Dashboard struct {
 	CustomColors     *CustomColors        `yaml:"customcolors,omitempty" json:"customColors,omitempty"` // custom scheme colors (used when colorScheme is "custom")
 	LogoStyle        string               `yaml:"logostyle,omitempty" json:"logoStyle,omitempty"`       // logo display style: "gradient" or "solid"
 	Layout           DashboardLayout      `yaml:"layout" json:"layout"`                                 // configurable dashboard element layout
-	DefaultAudioGain float64              `yaml:"defaultaudiogain" json:"defaultAudioGain"`             // Default playback gain in dB (0-24)
+	DefaultAudioGain float64              `yaml:"defaultaudiogain" json:"defaultAudioGain"`             // Default playback gain in dB (-12 to 24)
 	LiveSpectrogram  bool                 `yaml:"livespectrogram" json:"liveSpectrogram"`               // auto-start live spectrogram on dashboard
 	PlaybackDenoise  DenoiseSettings      `yaml:"playbackdenoise" json:"playbackDenoise"`               // denoise clips when they are played or downloaded; stored clips stay unchanged
+	Playback         PlaybackDefaults     `yaml:"playback" json:"playback"`                             // further playback defaults
+}
+
+// PlaybackDefaults holds the values a clip player starts with. The two older
+// defaults, Dashboard.DefaultAudioGain and Dashboard.PlaybackDenoise, stay
+// where they are; new playback defaults are added here.
+type PlaybackDefaults struct {
+	HighPassHz int `yaml:"highpasshz" json:"highPassHz"` // high-pass cutoff in Hz applied in the browser while a clip plays; 0 is off
 }
 
 // DashboardLayout defines the ordered list of elements displayed on the dashboard.
@@ -1348,9 +1356,9 @@ type BirdNETConfig struct {
 	Labels              []string            `yaml:"-" json:"-"`                                                         // list of available species labels, runtime value
 	UseXNNPACK          bool                `yaml:"usexnnpack" json:"useXnnpack"`                                       // true to use XNNPACK delegate for inference acceleration
 	ONNXRuntimePath     string              `yaml:"onnxruntimepath,omitempty" json:"onnxRuntimePath,omitempty"`         // path to ONNX Runtime shared library (required for ONNX models)
-	OpenVINOPath        string              `yaml:"openvinopath,omitempty" json:"openVinoPath,omitempty"`               // path to libopenvino_c shared library (OpenVINO image variants only)
+	OpenVINOPath        string              `yaml:"openvinopath,omitempty" json:"openVinoPath,omitempty"`               // path to the OpenVINO C runtime (libopenvino_c.so, or openvino_c.dll on Windows); empty uses the default library name, and on Windows first searches the known install locations
 	Backend             string              `yaml:"backend,omitempty" json:"backend,omitempty"`                         // inference backend preference: "auto" (default), "onnx", or "openvino"
-	OpenVINODevice      string              `yaml:"openvinodevice,omitempty" json:"openVinoDevice,omitempty"`           // OpenVINO device preference: "auto" (default), "cpu", or "gpu"
+	OpenVINODevice      string              `yaml:"openvinodevice,omitempty" json:"openVinoDevice,omitempty"`           // OpenVINO device preference: "auto" (default), "cpu", "gpu", or a concrete GPU such as "GPU.1" on a host with several GPUs
 	HuggingFaceEndpoint string              `yaml:"huggingfaceendpoint,omitempty" json:"huggingFaceEndpoint,omitempty"` // model download host, e.g. "https://hf-mirror.com" where huggingface.co is blocked; empty falls back to $HF_ENDPOINT then https://huggingface.co
 	ModelRegion         string              `yaml:"modelregion,omitempty" json:"modelRegion,omitempty"`                 // regional model preference: "auto" (resolve from coordinates, default), "global" (always global models), or a region slug pin (e.g. "iberia"); empty is treated as "auto"
 
@@ -1371,11 +1379,14 @@ const (
 )
 
 // OpenVINO device preferences for BirdNET.OpenVINODevice. "auto" picks the GPU
-// (Intel iGPU) when present for eligible models. On arm64 the auto backend keeps
+// (Intel iGPU) when present for eligible models. Besides these three keywords
+// the setting accepts a concrete OpenVINO GPU name "GPU.<n>" (see
+// IsOVGPUDeviceName), which selects that adapter by its index on a host with
+// several GPUs; "gpu" keeps meaning OpenVINO's own GPU alias, the first GPU. On arm64 the auto backend keeps
 // models on ONNX Runtime unless birdnet.backend is openvino (or, for BirdNET
 // v2.4, ONNX Runtime is unavailable), and then uses the CPU device on an
 // ARMv8.2+ CPU with native f16 (the precision is per model; see
-// classifier.openVINOPrecisionFor); "cpu" and "gpu" force a device, and "cpu" is
+// classifier.openVINOPrecisionFor); "cpu", "gpu" and "GPU.<n>" force a device, and "cpu" is
 // also an opt-in to the OpenVINO CPU on arm64 under the auto backend (INT8 or
 // unrecognized weights additionally need birdnet.backend openvino). An empty
 // string is treated as "auto".
@@ -1384,6 +1395,20 @@ const (
 	OVDeviceCPU  = "cpu"
 	OVDeviceGPU  = "gpu"
 )
+
+// ovGPUDevicePattern matches a concrete OpenVINO GPU device name: "GPU." and a
+// decimal index, case-sensitive like the names OpenVINO enumerates. It mirrors
+// the indexed form accepted by the inference package's OpenVINOIsGPUDevice,
+// kept as an independent pattern so this foundational config package stays free
+// of an inference dependency; a drift-guard test in the classifier package
+// asserts the two agree.
+var ovGPUDevicePattern = regexp.MustCompile(`^GPU\.\d+$`)
+
+// IsOVGPUDeviceName reports whether s is a concrete OpenVINO GPU device name
+// ("GPU.0", "GPU.12"), the form BirdNET.OpenVINODevice accepts to select one
+// adapter on a host with several GPUs. The bare "GPU" is the OVDeviceGPU keyword
+// ("gpu") in its OpenVINO spelling and is not matched.
+func IsOVGPUDeviceName(s string) bool { return ovGPUDevicePattern.MatchString(s) }
 
 // Model region preferences for BirdNET.ModelRegion. "auto" resolves the regional
 // model from the configured coordinates and falls back to the global model when
@@ -1407,7 +1432,7 @@ var ModelRegionSlugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // RangeFilterSettings contains settings for the range filter
 type RangeFilterSettings struct {
 	Debug                   bool                `yaml:"debug" json:"debug"`                               // true to enable debug mode
-	Model                   string              `yaml:"model" json:"model"`                               // range filter model version: "legacy" for v1, "v3" for geomodel v3.0, or empty/default for v2
+	Model                   string              `yaml:"model" json:"model"`                               // range filter model version: "legacy" for v1, "v3" for geomodel v3.0, or empty/default for v2; an installed geomodel replaces the stock v1 and v2 models
 	ModelPath               string              `yaml:"modelpath" json:"modelPath"`                       // path to external meta model file (empty for embedded)
 	LabelsPath              string              `yaml:"labelspath,omitempty" json:"labelsPath,omitempty"` // path to geomodel labels file (required when geomodel differs from classifier labels)
 	Threshold               float32             `yaml:"threshold" json:"threshold"`                       // rangefilter species occurrence threshold
@@ -1435,11 +1460,11 @@ type BirdNETV3Config struct {
 	Locale            string  `yaml:"locale,omitempty" json:"locale,omitempty"`       // locale for species label translation
 }
 
-// BirdNETPlusConfig holds configuration for the BirdNET+ V3.0 acoustic classifier.
+// BirdNETPlusConfig holds configuration for the BirdNET+ v3.0 acoustic classifier.
 type BirdNETPlusConfig struct {
-	ModelPath         string  `yaml:"modelpath,omitempty" json:"modelPath,omitempty"` // path to BirdNET+ V3.0 ONNX model file
-	LabelPath         string  `yaml:"labelpath,omitempty" json:"labelPath,omitempty"` // path to BirdNET+ V3.0 label file
-	OverrideThreshold bool    `yaml:"overridethreshold" json:"overrideThreshold"`     // when true, gate BirdNET+ V3.0 detections on Threshold instead of following BirdNET.Threshold
+	ModelPath         string  `yaml:"modelpath,omitempty" json:"modelPath,omitempty"` // path to BirdNET+ v3.0 ONNX model file
+	LabelPath         string  `yaml:"labelpath,omitempty" json:"labelPath,omitempty"` // path to BirdNET+ v3.0 label file
+	OverrideThreshold bool    `yaml:"overridethreshold" json:"overrideThreshold"`     // when true, gate BirdNET+ v3.0 detections on Threshold instead of following BirdNET.Threshold
 	Threshold         float64 `yaml:"threshold" json:"threshold"`                     // confidence threshold for detections (applied only when OverrideThreshold is true)
 	Locale            string  `yaml:"locale,omitempty" json:"locale,omitempty"`       // locale for species label translation
 }
@@ -1598,7 +1623,7 @@ type BasicAuth struct {
 	ClientSecret   string        `yaml:"clientsecret" json:"clientSecret"`     // client secret for OAuth2
 	RedirectURI    string        `yaml:"redirecturi" json:"redirectUri"`       // redirect uri for OAuth2
 	AuthCodeExp    time.Duration `yaml:"authcodeexp" json:"authCodeExp"`       // duration for authorization code
-	AccessTokenExp time.Duration `yaml:"accesstokenexp" json:"accessTokenExp"` // duration for access token
+	AccessTokenExp time.Duration `yaml:"accesstokenexp" json:"accessTokenExp"` // no longer sets how long a browser stays signed in
 }
 
 // SocialProvider holds settings for an OAuth2 identity provider
@@ -1788,7 +1813,7 @@ type Security struct {
 	MicrosoftAuth SocialProvider `yaml:"microsoftAuth,omitempty" json:"microsoftAuth,omitempty"` //nolint:modernize // Deprecated: use OAuthProviders, yaml.v3 doesn't support omitzero
 
 	SessionSecret   string        `yaml:"sessionsecret" json:"sessionSecret"`     // secret for session cookie
-	SessionDuration time.Duration `yaml:"sessionduration" json:"sessionDuration"` // duration for browser session cookies
+	SessionDuration time.Duration `yaml:"sessionduration" json:"sessionDuration"` // lifetime of the OAuth handshake cookie; no longer sets how long a browser stays signed in
 }
 
 type WebServerSettings struct {
@@ -2066,7 +2091,7 @@ type Settings struct {
 	BirdNET     BirdNETConfig     `yaml:"birdnet" json:"birdnet"`         // BirdNET configuration
 	Perch       PerchConfig       `yaml:"perch" json:"perch"`             // Perch v2 model configuration
 	BirdNETV3   BirdNETV3Config   `yaml:"birdnetv3" json:"birdnetv3"`     // BirdNET v3.0 acoustic classifier configuration
-	BirdNETPlus BirdNETPlusConfig `yaml:"birdnetplus" json:"birdnetplus"` // BirdNET+ V3.0 acoustic classifier configuration
+	BirdNETPlus BirdNETPlusConfig `yaml:"birdnetplus" json:"birdnetplus"` // BirdNET+ v3.0 acoustic classifier configuration
 	Bat         BatConfig         `yaml:"bat" json:"bat"`                 // Bat detection configuration
 	BSGBat      BSGBatConfig      `yaml:"bsgbat" json:"bsgbat"`           // BSG-BAT bat classifier configuration
 	BSG         BSGConfig         `yaml:"bsg" json:"bsg"`                 // BSG regional bird model configuration

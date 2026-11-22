@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Download, Clock, Loader2 } from '@lucide/svelte';
+  import { buildAppUrl, isRelativePath } from '$lib/utils/urlHelpers';
   import { formatBytesCompact, formatDateTime } from '$lib/utils/formatters';
   import { t } from '$lib/i18n';
   import ErrorAlert from '$lib/desktop/components/ui/ErrorAlert.svelte';
@@ -238,26 +239,30 @@
                 <span
                   class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] {dbTypeClasses(
                     backup.db_type
-                  )}">{backup.db_type}</span
+                  )}"
                 >
+                  {backup.db_type}
+                </span>
               </td>
               <td class="py-2 px-3">
-                <span class="font-mono tabular-nums text-xs font-medium"
-                  >{formatBytesCompact(backup.bytes_written)}</span
-                >
+                <span class="font-mono tabular-nums text-xs font-medium">
+                  {formatBytesCompact(backup.bytes_written)}
+                </span>
               </td>
               <td class="py-2 px-3">
                 <span
                   class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] {statusClasses(
                     backup.status
-                  )}">{statusLabel(backup.status)}</span
+                  )}"
                 >
+                  {statusLabel(backup.status)}
+                </span>
               </td>
               <td class="py-2 px-3">
                 <div class="flex justify-end">
-                  {#if backup.status === 'completed' && backup.download_url}
+                  {#if backup.status === 'completed' && backup.download_url && isRelativePath(backup.download_url)}
                     <a
-                      href={backup.download_url}
+                      href={buildAppUrl(backup.download_url)}
                       class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded transition-colors hover:bg-[color-mix(in_srgb,var(--color-primary)_10%,transparent)] text-[var(--text-info)]"
                       download
                     >

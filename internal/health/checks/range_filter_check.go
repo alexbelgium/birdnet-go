@@ -23,7 +23,7 @@ const (
 	rangeFilterNoLocationMsg   = "Range filtering not applicable (no location configured)"
 	rangeFilterFellBackMsg     = "Configured geomodel range filter failed to load; using the classifier's embedded range filter"
 	rangeFilterMappedZeroMsg   = "Range filter geomodel matched no classifier species; all detections would be filtered out (check the labels file)"
-	rangeFilterFallbackModels  = "Perch, BirdNET v3.0 and BirdNET+ V3.0"
+	rangeFilterFallbackModels  = "Perch, BirdNET v3.0 and BirdNET+ v3.0"
 	rangeFilterNotInstalledFmt = "BirdNET Geomodel is not installed, so these models are not filtered by location: %s. Install BirdNET Geomodel v3.0 from the models list (Settings > Analysis > Models)."
 	rangeFilterNotSelectedFmt  = "BirdNET Geomodel is installed but the range filter is configured to use another model, so these models are not filtered by location: %s. Remove the range filter model override (birdnet.rangefilter.model and birdnet.rangefilter.modelpath in the configuration file, or the BIRDNET_RANGEFILTER_MODEL and BIRDNET_RANGEFILTER_MODELPATH environment variables) to use the BirdNET Geomodel."
 	rangeFilterLoadFailedFmt   = "BirdNET Geomodel could not be loaded, so these models are not filtered by location: %s. Check the log, and install or reinstall BirdNET Geomodel v3.0 from the models list (Settings > Analysis > Models)."
@@ -54,7 +54,7 @@ type RangeFilterStatusInfo struct {
 	// value) means the status is unknown and the check is skipped.
 	Available bool
 	// ParticipantsLoaded reports whether any loaded acoustic model participates in range
-	// filtering (BirdNET v2.4, v3.0, BirdNET+ V3.0, Perch). When false there is nothing to range-filter,
+	// filtering (BirdNET v2.4, v3.0, BirdNET+ v3.0, Perch). When false there is nothing to range-filter,
 	// so a missing backend is "not applicable" rather than a fault.
 	ParticipantsLoaded bool
 	// LocationConfigured reports whether a location is set; range filtering only filters
@@ -72,7 +72,7 @@ type RangeFilterStatusInfo struct {
 	// meaningful when GeomodelActive. Zero means the geomodel filters out everything.
 	MappedSpecies int
 	// GeomodelIssue is non-empty when a loaded model that needs the BirdNET Geomodel
-	// (Perch, BirdNET v3.0, BirdNET+ V3.0) is not served by it. Such a state is never healthy.
+	// (Perch, BirdNET v3.0, BirdNET+ v3.0) is not served by it. Such a state is never healthy.
 	GeomodelIssue GeomodelIssue
 	// UncoveredModels lists the display names of loaded models the active backend does
 	// not cover.
@@ -102,9 +102,10 @@ func (c *RangeFilterCheck) Name() string { return rangeFilterCheckName }
 // Category returns the analysis category.
 func (c *RangeFilterCheck) Category() health.Category { return health.CategoryAnalysis }
 
-// geomodelIssueResult maps a geomodel issue to a status and message. It is Critical when
-// a location is set and no backend filters (fail-open), otherwise Warning.
-func geomodelIssueResult(s *RangeFilterStatusInfo) (status health.Status, message string) {
+// geomodelIssueMessage builds the message for a geomodel issue. The caller reports every
+// geomodel issue as a Warning; the message says nothing is filtered when a location is set
+// and no backend is loaded.
+func geomodelIssueMessage(s *RangeFilterStatusInfo) string {
 	models := rangeFilterFallbackModels
 	if len(s.UncoveredModels) > 0 {
 		models = strings.Join(s.UncoveredModels, ", ")
@@ -118,11 +119,11 @@ func geomodelIssueResult(s *RangeFilterStatusInfo) (status health.Status, messag
 	default:
 		format = rangeFilterNotInstalledFmt
 	}
-	message = fmt.Sprintf(format, models)
+	message := fmt.Sprintf(format, models)
 	if s.LocationConfigured && !s.Active {
-		return health.StatusCritical, rangeFilterInactivePrefix + message
+		return rangeFilterInactivePrefix + message
 	}
-	return health.StatusWarning, message
+	return message
 }
 
 // reloadFailedMessage builds the retained-backend reload failure message.
@@ -135,7 +136,8 @@ func reloadFailedMessage(uncovered []string) string {
 }
 
 // Run evaluates range-filter health. A loaded model that needs the BirdNET Geomodel
-// without it is evaluated before the no-location case, so it is never reported healthy.
+// without it is evaluated before the no-location case and reported as a Warning, so it is
+// never reported healthy.
 func (c *RangeFilterCheck) Run(_ context.Context) health.Result {
 	start := time.Now()
 
@@ -157,7 +159,9 @@ func (c *RangeFilterCheck) Run(_ context.Context) health.Result {
 		// a fault. Checked before Active so this does not report a spurious Critical.
 		message = rangeFilterNoParticipant
 	case s.GeomodelIssue != "":
-		status, message = geomodelIssueResult(&s)
+		// A geomodel issue is always a Warning, whatever the location or backend state.
+		status = health.StatusWarning
+		message = geomodelIssueMessage(&s)
 	case s.ReloadFailed && s.Active:
 		status = health.StatusWarning
 		message = reloadFailedMessage(s.UncoveredModels)
