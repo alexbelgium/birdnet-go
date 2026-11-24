@@ -99,7 +99,7 @@ func newPopulatedSettings() *Settings {
 	s.Realtime.DaylightFilter.Species = []string{"Strix aluco"}
 	s.Realtime.FirstDailyConsensus.Whitelist = []string{"Parus major"}
 	s.Realtime.FirstDailyConsensus.BatWhitelist = []string{"Parus major"}
-	s.Realtime.ModelConsensus.Species = []string{"Parus major"}
+	s.Realtime.ModelConsensus.Rules = []ModelConsensusRule{{Species: []string{"Parus major"}, Models: []string{"perch_v2"}}}
 
 	s.Realtime.RTSP.Streams = []StreamConfig{
 		{
@@ -228,7 +228,8 @@ func mutateCloneEverywhere(dst *Settings) {
 	dst.Realtime.DaylightFilter.Species[0] = mutated
 	dst.Realtime.FirstDailyConsensus.Whitelist[0] = mutated
 	dst.Realtime.FirstDailyConsensus.BatWhitelist[0] = mutated
-	dst.Realtime.ModelConsensus.Species[0] = mutated
+	dst.Realtime.ModelConsensus.Rules[0].Species[0] = mutated
+	dst.Realtime.ModelConsensus.Rules[0].Models[0] = mutated
 
 	dst.Realtime.RTSP.Streams[0].Models[0] = mutated
 	dst.Realtime.RTSP.Streams[0].Enabled = false
@@ -360,7 +361,8 @@ func assertSourceUnchanged(t *testing.T, src *Settings) {
 	assert.Equal(t, []string{"Strix aluco"}, src.Realtime.DaylightFilter.Species)
 	assert.Equal(t, []string{"Parus major"}, src.Realtime.FirstDailyConsensus.Whitelist)
 	assert.Equal(t, []string{"Parus major"}, src.Realtime.FirstDailyConsensus.BatWhitelist)
-	assert.Equal(t, []string{"Parus major"}, src.Realtime.ModelConsensus.Species)
+	assert.Equal(t, []string{"Parus major"}, src.Realtime.ModelConsensus.Rules[0].Species)
+	assert.Equal(t, []string{"perch_v2"}, src.Realtime.ModelConsensus.Rules[0].Models)
 
 	require.Len(t, src.Realtime.RTSP.Streams, 1)
 	assert.True(t, src.Realtime.RTSP.Streams[0].Enabled)

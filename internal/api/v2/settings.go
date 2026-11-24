@@ -298,9 +298,11 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 		updated.Realtime.FirstDailyConsensus.Whitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.Whitelist)
 		updated.Realtime.FirstDailyConsensus.BatWhitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.BatWhitelist)
 
-		// The model consensus species list is matched like the exclude list, so store
-		// it in the same canonical form.
-		updated.Realtime.ModelConsensus.Species = c.canonicalizeExcludeList(updated.Realtime.ModelConsensus.Species)
+		// Each model consensus rule's species list is matched like the exclude list, so
+		// store it in the same canonical form.
+		if err := c.canonicalizeConsensusRules(updated.Realtime.ModelConsensus.Rules); err != nil {
+			return newRejection(err, err.Error(), http.StatusBadRequest)
+		}
 
 		// Ensure LocationConfigured is set when birdnet coordinates are present.
 		// Backward compatibility with older frontends that don't send the flag.
@@ -315,6 +317,9 @@ func (c *Controller) UpdateSettings(ctx echo.Context) error {
 		// failure: commitSettings publishes nothing when this returns an error.
 		if err := conf.ValidateOAuthProviderIDs(&updated.Security); err != nil {
 			// The text names the field, so the settings page can show what to fix.
+			return newRejection(err, err.Error(), http.StatusBadRequest)
+		}
+		if err := conf.ValidateModelConsensusRuleModels(&current.Realtime.ModelConsensus, &updated.Realtime.ModelConsensus); err != nil {
 			return newRejection(err, err.Error(), http.StatusBadRequest)
 		}
 		if err := conf.ValidateSecurityBaseURL(&updated.Security); err != nil {
@@ -528,14 +533,19 @@ func (c *Controller) UpdateSectionSettings(ctx echo.Context) error {
 			updated.Realtime.FirstDailyConsensus.BatWhitelist = c.canonicalizeExcludeList(updated.Realtime.FirstDailyConsensus.BatWhitelist)
 		}
 
-		// The model consensus species list lives in the realtime section only.
+		// The model consensus rules live in the realtime section only.
 		if strings.EqualFold(section, SettingsSectionRealtime) {
-			updated.Realtime.ModelConsensus.Species = c.canonicalizeExcludeList(updated.Realtime.ModelConsensus.Species)
+			if err := c.canonicalizeConsensusRules(updated.Realtime.ModelConsensus.Rules); err != nil {
+				return newRejection(err, err.Error(), http.StatusBadRequest)
+			}
 		}
 
 		// Validate the clone before publishing. No rollback needed on validation
 		// failure: commitSettings publishes nothing when this returns an error.
 		if err := conf.ValidateOAuthProviderIDs(&updated.Security); err != nil {
+			return newRejection(err, err.Error(), http.StatusBadRequest)
+		}
+		if err := conf.ValidateModelConsensusRuleModels(&current.Realtime.ModelConsensus, &updated.Realtime.ModelConsensus); err != nil {
 			return newRejection(err, err.Error(), http.StatusBadRequest)
 		}
 		if err := conf.ValidateSecurityBaseURL(&updated.Security); err != nil {
