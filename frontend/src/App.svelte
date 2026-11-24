@@ -70,6 +70,7 @@
   let ReviewPage = $state<Component | null>(null);
   let Species = $state<Component | null>(null);
   let Search = $state<Component | null>(null);
+  let SettingsSearch = $state<Component | null>(null);
   let About = $state<Component | null>(null);
   let Help = $state<Component | null>(null);
   let ReportBug = $state<Component | null>(null);
@@ -250,6 +251,12 @@
     },
     { route: 'search', page: 'search', titleKey: 'navigation.search', component: 'search' },
     {
+      route: 'search-settings',
+      page: 'settings/search',
+      titleKey: 'navigation.settings',
+      component: 'search-settings',
+    },
+    {
       route: 'detections',
       page: 'detections',
       titleKey: 'navigation.detections',
@@ -379,6 +386,12 @@
           if (!Search) {
             const module = await import('./lib/desktop/views/Search.svelte');
             Search = module.default;
+          }
+          break;
+        case 'search-settings':
+          if (!SettingsSearch) {
+            const module = await import('./lib/desktop/views/SearchSettings.svelte');
+            SettingsSearch = module.default;
           }
           break;
         case 'about':
@@ -524,6 +537,7 @@
     [uiPath('analytics', 'soundscape')]: findRouteConfig('analytics-soundscape'),
     [uiPath('analytics', 'review')]: findRouteConfig('analytics-review'),
     [uiPath('search')]: findRouteConfig('search'),
+    [uiPath('settings', 'search')]: findRouteConfig('search-settings'),
     [uiPath('detections')]: findRouteConfig('detections'),
     [uiPath('about')]: findRouteConfig('about'),
     [uiPath('help')]: findRouteConfig('help'),
@@ -613,6 +627,18 @@
     }
 
     if (UI_SETTINGS_PREFIX_RE.test(path)) {
+      // Settings subpaths that have their own component (e.g. /ui/settings/search)
+      // are routed exactly, like the system branch does; everything else falls
+      // through to the shared Settings shell via handleSubpageRouting.
+      const normalizedPath = path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
+      const exactMatch = pathToRouteMap.get(normalizedPath);
+      if (exactMatch?.component === 'search-settings') {
+        currentRoute = exactMatch.route;
+        currentPage = exactMatch.page;
+        pageTitleKey = exactMatch.titleKey;
+        loadComponent(exactMatch.component);
+        return;
+      }
       handleSubpageRouting(path, 'settings', settingsSubpages, 'pageTitle.settingsNotAvailable');
       return;
     }
@@ -919,6 +945,8 @@
       {@render renderRoute(Species)}
     {:else if currentRoute === 'search'}
       {@render renderRoute(Search)}
+    {:else if currentRoute === 'search-settings'}
+      {@render renderRoute(SettingsSearch)}
     {:else if currentRoute === 'about'}
       {@render renderRoute(About)}
     {:else if currentRoute === 'help'}
