@@ -816,6 +816,12 @@ export type TranslationKey =
   | 'detections.detail.review.keepHelp'
   | 'detections.detail.review.reloadFailed'
   | 'detections.detail.review.ignoredSpecies' // params: species
+  | 'detections.detail.review.rerunUnlikely'
+  | 'detections.detail.review.rerunUnlikelyHelp'
+  | 'detections.detail.review.rerunUnlikelyFailed'
+  | 'detections.detail.review.rerunUnlikelyRefused' // params: reason
+  | 'detections.detail.review.rerunUnlikelyResultUnlikely' // params: cv, threshold
+  | 'detections.detail.review.rerunUnlikelyResultProbable' // params: cv, threshold
   | 'detections.detail.review.wrongSpecies'
   | 'detections.detail.review.legacyHelp'
   | 'detections.detail.review.databaseChecking'
@@ -4963,6 +4969,15 @@ export type TranslationParams = {
   'detections.detail.conditions.observedAt': { time: string | number };
   'detections.detail.review.question': { species: string | number };
   'detections.detail.review.ignoredSpecies': { species: string | number };
+  'detections.detail.review.rerunUnlikelyRefused': { reason: string | number };
+  'detections.detail.review.rerunUnlikelyResultUnlikely': {
+    cv: string | number;
+    threshold: string | number;
+  };
+  'detections.detail.review.rerunUnlikelyResultProbable': {
+    cv: string | number;
+    threshold: string | number;
+  };
   'detections.detail.models.summary': { hit: string | number; total: string | number };
   'detections.detail.models.hits': { count: string | number };
   'detections.detail.models.mean': { value: string | number };

@@ -20,6 +20,8 @@ export interface ModelContribution {
 
 /** The single-detection response, with the fields the list responses do not carry. */
 export interface DetectionDetailData extends Detection {
+  /** A bat detection the ultrasonic filter can re-run on (RerunUnlikelyButton). */
+  canRerunUnlikely?: boolean;
   modelContributions?: ModelContribution[];
   clipDenoised?: boolean;
   /** Time the review was first stored (RFC3339); absent without a review. */
