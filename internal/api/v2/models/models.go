@@ -68,6 +68,9 @@ type Handler struct {
 	// superseded latches the superseded-model bell notice (superseded_notice.go),
 	// evaluated alongside the optimize notice.
 	superseded supersededNotice
+	// update latches the bell notice for an installed build that a newer release
+	// or a newer build of the same release replaces (update_notice.go), evaluated alongside the other two.
+	update updateNotice
 	// modelRuntime reports the live backend and precision of each loaded model,
 	// keyed by registry ID. It is an injectable seam: nil means the live default
 	// (liveModelRuntime, read from the model manager and the orchestrator), and
@@ -77,6 +80,10 @@ type Handler struct {
 	// models that failed to load. Injectable like modelRuntime: nil means the live
 	// orchestrator's LoadErrors, and tests inject a fixed map.
 	loadErrors func() map[string]string
+	// speciesKnowledge reports which species each loaded model can classify (see
+	// speciesKnowledge in species_coverage.go). It is an injectable seam: nil means
+	// the live orchestrator's ModelSpecies snapshot, and tests inject a fixed one.
+	speciesKnowledge func() (speciesKnowledge, error)
 	// announceListChange tells connected clients that the model list changed. nil
 	// means a topology broadcast on the metrics store, and tests inject a counter.
 	announceListChange func()
@@ -115,18 +122,22 @@ func New(core *apicore.Core, authService auth.Service) *Handler {
 }
 
 // RegisterRoutes registers all model-related API endpoints on the supplied API
-// v2 group, preserving the exact routes and order the facade used before the
-// models domain was extracted.
+// v2 group: the routes and order the facade used before the models domain was
+// extracted, plus the species coverage route. Cancelling a running install is POST
+// /models/install/:id/cancel, registered before the reinstall route.
 func (c *Handler) RegisterRoutes(g *echo.Group) {
 	g.GET("/models", c.ListModels)
 	g.GET("/models/catalog", c.GetModelCatalog)
 	g.GET("/models/regions", c.GetModelRegions, c.AuthMiddleware)
+	// Auth-gated: the result depends on the configured location through the range filter.
+	g.GET("/models/species-coverage", c.GetSpeciesCoverage, c.AuthMiddleware)
 	// Public: serves fixed embedded SVG bytes selected by a public region slug,
 	// nothing user-derived, matching the public /models/catalog route.
 	g.GET("/models/regions/:slug/map", c.GetRegionCoverageMap)
 	g.GET("/models/documents/:sha256", c.GetModelDocument, c.AuthMiddleware)
 	g.GET("/models/installed", c.GetInstalledModels)
 	g.POST("/models/install/:id", c.InstallModel, c.AuthMiddleware)
+	g.POST("/models/install/:id/cancel", c.CancelInstall, c.AuthMiddleware)
 	g.POST("/models/reinstall/:id", c.ReinstallModel, c.AuthMiddleware)
 	g.DELETE("/models/installed/:id", c.UninstallModel, c.AuthMiddleware)
 	g.GET("/models/install/:id/progress", c.StreamInstallProgress)
@@ -246,6 +257,40 @@ type CatalogEntryResponse struct {
 	// Omitted for flat entries and when the request is not eligible for hardware
 	// recommendations (an unauthenticated request on an auth-enabled instance).
 	RecommendedVariantID string `json:"recommendedVariantId,omitempty"`
+	// Update is set when the installed build is superseded by a newer release or a
+	// newer build of the same release of this model. Omitted otherwise. It depends on install
+	// state and the catalog only, not on hardware recommendations, so it is
+	// reported to every caller that can see the catalog.
+	Update *CatalogUpdateResponse `json:"update,omitempty"`
+	// Builds lists the release notes of the model's builds that carry any,
+	// ordered by release string (compared as text) and then build. A variant's notes are the record whose version and
+	// build match the variant's; a build without a record has no notes. Omitted
+	// when the model has none.
+	Builds []CatalogBuildResponse `json:"builds,omitempty"`
+}
+
+// CatalogBuildResponse is the release notes of one build of one release of a
+// model. Reason and Notes are English text from the upstream manifest, not
+// translated, and are plain text (never markup). Date is YYYY-MM-DD.
+type CatalogBuildResponse struct {
+	Version string   `json:"version"`
+	Build   int      `json:"build"`
+	Date    string   `json:"date"`
+	Reason  string   `json:"reason,omitempty"`
+	Notes   []string `json:"notes,omitempty"`
+}
+
+// CatalogUpdateResponse describes the newer release or build that replaces the
+// installed build of a catalog entry. VariantID is the variant to install: the
+// successor of the installed variant. FromBuild and ToBuild are the build numbers
+// within the two releases (1 or more); when the releases are equal the update is
+// a newer build of the same release.
+type CatalogUpdateResponse struct {
+	VariantID   string `json:"variantId"`
+	FromVersion string `json:"fromVersion"`
+	ToVersion   string `json:"toVersion"`
+	FromBuild   int    `json:"fromBuild"`
+	ToBuild     int    `json:"toBuild"`
 }
 
 // CatalogSuccessorResponse identifies the catalog entry that supersedes another.
@@ -286,6 +331,11 @@ type CatalogVariantResponse struct {
 	// request is eligible for recommendations; otherwise the intrinsic "cpu"/"gpu"
 	// class (from the variant's own recommended backends) is emitted.
 	HardwareClass string `json:"hardwareClass,omitempty"`
+	// Version is the release of the variant's files (the variant's own release or
+	// the model's) and Build their build within it (1 or more). Together they
+	// select the variant's release notes in the entry's builds.
+	Version string `json:"version,omitempty"`
+	Build   int    `json:"build"`
 }
 
 // VariantReasonResponse is a structured, localizable reason for a variant's
@@ -494,6 +544,14 @@ const removeHasDependentsKey = "analysis.gallery.errors.removeHasDependents"
 // ({id, name}) identify it.
 const operationInProgressKey = "analysis.gallery.errors.operationInProgress"
 
+// cancelUnavailableKey is the i18n key of the 409 returned when a cancel is refused
+// because no cancellable download runs for the model (it finished, never started, or
+// activation has begun). The frontend interpolates error_params.name.
+const cancelUnavailableKey = "analysis.gallery.errors.cancelUnavailable"
+
+// cancelUnavailableMsg is the message of the cancel-unavailable 409.
+const cancelUnavailableMsg = "no cancellable download is running for this model"
+
 // operationInProgressMsg is the message of the operation-in-progress 409.
 const operationInProgressMsg = "another model operation is in progress"
 
@@ -536,6 +594,8 @@ func visibleSuccessor(visible []classifier.CatalogEntry, id string) *CatalogSucc
 // GetModelCatalog returns the embedded model catalog enriched with install
 // status and compatibility information. An entry's successor is reported only when
 // the successor is itself visible, and its documents are those of its own repo only.
+// An installed build that a newer release, or a newer build of the same release,
+// replaces carries update, whether or not hardware recommendations are computed for the request.
 func (c *Handler) GetModelCatalog(ctx echo.Context) error {
 	visible := classifier.VisibleCatalog()
 	catalog := make([]CatalogEntryResponse, 0, len(visible))
@@ -577,6 +637,14 @@ func (c *Handler) GetModelCatalog(ctx echo.Context) error {
 			}
 		}
 
+		var update *CatalogUpdateResponse
+		if offer, ok := installedUpdate(visible, entry, installedVariantID); ok {
+			update = &CatalogUpdateResponse{
+				VariantID: offer.ToVariantID, FromVersion: offer.FromVersion, ToVersion: offer.ToVersion,
+				FromBuild: offer.FromBuild, ToBuild: offer.ToBuild,
+			}
+		}
+
 		// Models requiring ONNX Runtime are incompatible when ORT is absent.
 		compatible := true
 		incompatibleReason := ""
@@ -611,6 +679,8 @@ func (c *Handler) GetModelCatalog(ctx echo.Context) error {
 			Documents:            buildDocumentResponses(docSvc, entry),
 			InstalledVariantID:   installedVariantID,
 			RecommendedVariantID: recommendedVariant[entry.ID],
+			Update:               update,
+			Builds:               buildBuildResponses(entry.Builds),
 			Variants:             buildVariantResponses(entry, installed, installedVariantID, recsByVariant[entry.ID], hostArch),
 		})
 	}
@@ -634,6 +704,19 @@ func (c *Handler) GetModelCatalog(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"catalog": catalog,
 	})
+}
+
+// buildBuildResponses maps an entry's release-notes records to their API form;
+// an entry with none gets nil, which omitempty drops.
+func buildBuildResponses(builds []classifier.CatalogBuild) []CatalogBuildResponse {
+	if len(builds) == 0 {
+		return nil
+	}
+	out := make([]CatalogBuildResponse, 0, len(builds))
+	for i := range builds {
+		out = append(out, CatalogBuildResponse(builds[i]))
+	}
+	return out
 }
 
 // buildDocumentResponses maps the documents of the entry's own repo to their API
@@ -685,6 +768,8 @@ func buildVariantResponses(entry *classifier.CatalogEntry, installed bool, insta
 			Installed:    isInstalledVariant,
 			BuiltIn:      v.BuiltIn,
 			SizeBytes:    sizeBytes,
+			Version:      classifier.VariantVersion(entry, v.ID),
+			Build:        classifier.VariantBuild(entry, v.ID),
 			// Neutral default: without a recommendation the variant is not claimed
 			// incompatible. Overwritten below when recommendations are present.
 			Compatible: true,
@@ -876,11 +961,13 @@ func (c *Handler) rankCatalog(entries []classifier.CatalogEntry, ort inference.O
 	}
 	profile := profileFn(ort)
 	hostArch = profile.Arch
+	fallbackRegion, regionByEntry := c.resolveRecommendRegions(entries)
 	recs := recommend.Rank(&recommend.Input{
 		Capabilities:   profile.Capabilities(),
 		TotalRAMBytes:  profile.RAMUpperBound(),
 		DeviceClass:    recommend.DeviceClass(profile.Board.Tier, profile.Arch),
-		ResolvedRegion: c.resolveRecommendRegion(),
+		ResolvedRegion: fallbackRegion,
+		RegionByEntry:  regionByEntry,
 		Entries:        entries,
 	})
 
@@ -1055,7 +1142,8 @@ func (c *Handler) GetInstalledModels(ctx echo.Context) error {
 // hot load of the model succeeded. A request for an entry whose own repo has a
 // requires-agreement document that is neither agreed nor listed in
 // acceptedDocuments gets a synchronous 409 with agreementRequiredKey before the
-// slot is taken, and records nothing.
+// slot is taken, and records nothing. The running install can be cancelled with
+// CancelInstall; a cancelled install is logged at info and announces nothing.
 func (c *Handler) InstallModel(ctx echo.Context) error {
 	catalogID := ctx.Param("id")
 	if catalogID == "" {
@@ -1178,11 +1266,18 @@ func (c *Handler) InstallModel(ctx echo.Context) error {
 			}
 		}()
 		if err := lease.InstallOrReplace(c.Context(), &entry, req.VariantID, "", progressChan); err != nil {
-			c.LogErrorIfEnabled("Model install failed",
-				logger.String("catalog_id", catalogID),
-				logger.String("variant_id", req.VariantID),
-				logger.Error(err),
-			)
+			if errors.Is(err, classifier.ErrOperationCancelled) {
+				c.LogInfoIfEnabled("Model install cancelled",
+					logger.String("catalog_id", catalogID),
+					logger.String("variant_id", req.VariantID),
+				)
+			} else {
+				c.LogErrorIfEnabled("Model install failed",
+					logger.String("catalog_id", catalogID),
+					logger.String("variant_id", req.VariantID),
+					logger.Error(err),
+				)
+			}
 		} else {
 			c.announceModelListChange()
 		}
@@ -1198,6 +1293,47 @@ func (c *Handler) InstallModel(ctx echo.Context) error {
 		"status":    classifier.StatusDownloading,
 	})
 }
+
+// CancelInstall handles POST /api/v2/models/install/:id/cancel. It cancels the
+// install or variant swap running for the entry and answers 202 with status
+// "cancelling"; the outcome (cancelled) arrives over the progress stream. A
+// reinstall is not cancellable, and a cancel that cannot be honoured, because no
+// install runs for the entry, its download has ended or its activation has started,
+// gets a 409 with cancelUnavailableKey and changes nothing; the install then
+// completes as it would have.
+func (c *Handler) CancelInstall(ctx echo.Context) error {
+	catalogID := ctx.Param("id")
+	if catalogID == "" {
+		return c.HandleError(ctx, nil, "catalog ID is required", http.StatusBadRequest)
+	}
+
+	entry, ok := classifier.GetCatalogEntry(catalogID)
+	if !ok || entry.Hidden {
+		return c.HandleError(ctx, nil, "unknown catalog ID: "+catalogID, http.StatusNotFound)
+	}
+
+	if c.ModelManager == nil {
+		return c.HandleError(ctx, nil, "model manager is not available", http.StatusServiceUnavailable)
+	}
+
+	if err := c.ModelManager.CancelOperation(catalogID); err != nil {
+		if _, refused := errors.AsType[*classifier.OperationNotCancellableError](err); refused {
+			return c.HandleErrorWithKey(ctx, err, cancelUnavailableMsg, http.StatusConflict,
+				cancelUnavailableKey, map[string]any{"name": entry.Name})
+		}
+		return c.HandleError(ctx, err, "failed to cancel model operation", http.StatusInternalServerError)
+	}
+
+	return ctx.JSON(http.StatusAccepted, map[string]string{
+		"catalogId": catalogID,
+		"status":    cancellingStatus,
+	})
+}
+
+// cancellingStatus is the status CancelInstall answers: the cancel was accepted and
+// the operation is winding down. It is not a download state; the final state comes
+// over the progress stream.
+const cancellingStatus = "cancelling"
 
 // reinstallRefusal returns a responder for the first check that refuses a
 // reinstall of entry (the model is not installed, or it needs an ONNX Runtime that
@@ -1399,10 +1535,22 @@ func (c *Handler) UninstallModel(ctx echo.Context) error {
 	})
 }
 
+// isTerminalStatus reports whether a download status ends the progress stream.
+func isTerminalStatus(status string) bool {
+	switch status {
+	case classifier.StatusComplete, classifier.StatusFailed, classifier.StatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // StreamInstallProgress streams model download progress as Server-Sent Events.
-// The stream closes automatically when the download completes or fails. Completion
-// is reported only once the entry's operation has released the manager's operation
-// slot, so a client that starts the next operation on it is not refused with 409.
+// The stream closes automatically when the download completes, fails or is
+// cancelled. A terminal state is reported only once the entry's operation has
+// released the manager's operation slot, so a client that starts the next
+// operation on it is not refused with 409, and a retry's stream never replays the
+// previous attempt's retained outcome.
 func (c *Handler) StreamInstallProgress(ctx echo.Context) error {
 	catalogID := ctx.Param("id")
 	if catalogID == "" {
@@ -1450,14 +1598,20 @@ func (c *Handler) StreamInstallProgress(ctx echo.Context) error {
 			flusher.Flush()
 
 		default:
-			state := c.ModelManager.GetDownloadState(catalogID)
+			// State and slot are read together: a state that was retained from an
+			// earlier attempt cannot then be paired with a slot the next attempt has
+			// already released.
+			state, running := c.ModelManager.DownloadStateAndRunning(catalogID)
 			if state == nil {
 				// No active download. Check if the model is already installed,
 				// which means the download completed before we connected.
 				if c.ModelManager.IsInstalled(catalogID) {
-					if c.ModelManager.OperationRunningFor(catalogID) {
+					if running {
 						// Installed, but the operation still runs (the post-install
 						// hot-load, or a reinstall not yet registered): wait for it.
+						// The flag comes from the snapshot: a fresh read could see the
+						// slot released by an attempt that has just recorded a failed
+						// or cancelled state, and report it as complete.
 						time.Sleep(apicore.SSEEventLoopSleep)
 						continue
 					}
@@ -1492,6 +1646,16 @@ func (c *Handler) StreamInstallProgress(ctx echo.Context) error {
 			// Reset counter when we have valid state.
 			noStateCount = 0
 
+			// A retained failed or cancelled state is the end of an earlier attempt,
+			// or of an operation still cleaning up. While an operation holds the
+			// slot for the entry, wait: an immediate retry's stream must not replay
+			// the previous attempt's outcome, and a client that sees the end must be
+			// able to start the next operation without a 409.
+			if isTerminalStatus(state.Status) && running {
+				time.Sleep(apicore.SSEEventLoopSleep)
+				continue
+			}
+
 			// Send current progress.
 			if err := writeSSEEvent(ctx, "progress", state); err != nil {
 				return nil
@@ -1499,7 +1663,7 @@ func (c *Handler) StreamInstallProgress(ctx echo.Context) error {
 			flusher.Flush()
 
 			// Terminal states end the stream.
-			if state.Status == classifier.StatusComplete || state.Status == classifier.StatusFailed {
+			if isTerminalStatus(state.Status) {
 				return nil
 			}
 

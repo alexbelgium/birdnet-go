@@ -14,8 +14,12 @@
   import AudioPlayer from '$lib/desktop/components/media/AudioPlayer.svelte';
   import SpectrogramImage from '$lib/desktop/components/media/SpectrogramImage.svelte';
   import { t } from '$lib/i18n';
+  import type { PlaybackControls } from '$lib/utils/audio';
   import { isAuthenticated } from '$lib/utils/auth';
-  import { audioUrlFor, getPlaybackDenoiseDefault } from '$lib/utils/playbackDenoise';
+  import type { ShortcutHint } from '$lib/utils/keyboard';
+  import { audioUrlFor, playbackDenoiseDefaultOf } from '$lib/utils/playbackDenoise';
+  import { appState } from '$lib/stores/appState.svelte';
+  import { settingsDataLoaded, settingsStore } from '$lib/stores/settings';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
   import DetailCard from './DetailCard.svelte';
   import { formatDecimal } from './detailFormat';
@@ -25,14 +29,31 @@
   interface Props {
     detection: DetectionDetailData;
     speciesName: string;
+    /** Receives the player's controls when it mounts; the function it returns detaches them. */
+    onPlaybackControls?: (_controls: PlaybackControls) => () => void;
+    /** The key that plays and pauses, shown on the player's play button. */
+    playShortcut?: ShortcutHint | null;
   }
 
-  let { detection, speciesName }: Props = $props();
+  let { detection, speciesName, onPlaybackControls, playShortcut = null }: Props = $props();
 
   const HERTZ_PER_KILOHERTZ = 1000;
 
   // Signed-in users can save a range of the clip; the hint tells them how.
   let clipExtractionEnabled = $derived($isAuthenticated);
+
+  // The download carries the playback denoise default, read reactively so a
+  // default saved on this page (the player's playback defaults dialog) updates it.
+  let downloadUrl = $derived(
+    audioUrlFor(
+      detection.id,
+      playbackDenoiseDefaultOf(
+        $settingsDataLoaded,
+        $settingsStore.originalData.realtime,
+        appState.playbackDenoise
+      )
+    )
+  );
 
   let captureWindow = $derived.by(() => {
     // On the detection's own offset, like every other clock on the page.
@@ -119,11 +140,7 @@
       </div>
 
       {#if detection.clipName}
-        <a
-          href={audioUrlFor(detection.id, getPlaybackDenoiseDefault())}
-          download
-          class="dd-rec-download focus-ring"
-        >
+        <a href={downloadUrl} download class="dd-rec-download focus-ring">
           <Download class="size-4" />
           <span>{t('media.audio.download')}<span class="sr-only">, {speciesName}</span></span>
         </a>
@@ -148,6 +165,8 @@
           modelType={detection.modelType}
           clipSampleRate={detection.clipSampleRate}
           spectrogramFollowsDenoise={true}
+          {onPlaybackControls}
+          {playShortcut}
         />
       {:else}
         <SpectrogramImage

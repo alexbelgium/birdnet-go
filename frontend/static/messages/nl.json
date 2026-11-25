@@ -155,6 +155,12 @@
       "confirmAction": "Aktie bevestigen",
       "confirmMessage": "Weet je zeker dat je de aktie wilt uitvoeren"
     },
+    "unsavedChanges": {
+      "title": "Deze pagina verlaten?",
+      "message": "Je hebt niet-opgeslagen wijzigingen. Als je de pagina verlaat, gaan ze verloren.",
+      "leave": "Pagina verlaten",
+      "stay": "Blijven"
+    },
     "review": {
       "modalTitle": "Herkenning beoordelen: {species}",
       "status": {
@@ -493,6 +499,12 @@
         "loadFailedTitle": "Akoestisch model kon niet worden geladen",
         "loadFailedMessage": "Een ingeschakeld akoestisch model kon niet worden geladen, dus audio wordt opgenomen maar niet geanalyseerd. Controleer het model op de pagina Systeem > AI-modellen."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel niet geïnstalleerd",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 is nodig om detecties op locatie te filteren voor: {models}. Installeer BirdNET Geomodel v3.0 vanuit de modellengalerij via Instellingen > Analyse > Modellen.",
+        "loadFailedTitle": "Geomodel kon niet laden",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 kon niet worden geladen, dus filteren op locatie staat uit voor: {models}. Controleer het applicatielogboek en installeer of herinstalleer BirdNET Geomodel v3.0 vanuit de modellengalerij via Instellingen > Analyse > Modellen."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# model heeft een betere versie voor dit systeem} other {# modellen hebben betere versies voor dit systeem}}",
         "message": "Er is een versie beschikbaar die beter past bij de hardware of locatie van dit systeem, voor: {models}. Open Instellingen > Analyse > Modellen en kies Optimaliseren om over te schakelen."
@@ -500,6 +512,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Een geïnstalleerd model heeft een nieuwere uitgave} other {# geïnstalleerde modellen hebben nieuwere uitgaven}}",
         "message": "Een geïnstalleerd model is een voorvertoningsversie en de definitieve uitgave is nu beschikbaar: {models}. Open Instellingen > Analyse > Modellen, installeer de definitieve uitgave en verwijder de voorvertoning."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Een geïnstalleerd model heeft een nieuwere versie} other {# geïnstalleerde modellen hebben nieuwere versies}}",
+        "message": "Een nieuwere versie vervangt de geïnstalleerde voor: {models}. De geïnstalleerde versie blijft werken tot er wordt overgeschakeld. Open Instellingen > Analyse > Modellen en kies Bijwerken."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -901,7 +917,7 @@
         "changed": "Soort gewijzigd naar {species}",
         "changeFailed": "De soort kon niet worden gewijzigd. Probeer het opnieuw.",
         "conflict": "De soort kan nu niet worden gewijzigd: de detectie is bewaard (vergrendeld), of het oude databaseformaat is in gebruik.",
-        "notKnownHere": "{species} is op dit station nog nooit gedetecteerd of voorspeld en kan daarom nog niet worden gekozen.",
+        "unknownSpecies": "{species} staat niet meer op de soortenlijst en kan daarom niet worden gekozen. Sluit dit dialoogvenster en probeer het opnieuw.",
         "predictionsTitle": "Overige voorspellingen",
         "noPredictions": "Het model heeft geen andere voorspellingen voor deze opname opgeslagen.",
         "allSpecies": "Alle soorten",
@@ -2493,7 +2509,6 @@
       "loadFailed": "Instellingen konden niet worden geladen",
       "saveFailed": "Instellingen konden niet worden opgeslagen",
       "changedElsewhere": "De instellingen zijn elders gewijzigd. Controleer ze en sla opnieuw op.",
-      "databaseStatsFailed": "Databasestatistieken konden niet worden geladen",
       "csvDownloadFailed": "CSV-download mislukt"
     },
     "card": {
@@ -2700,26 +2715,15 @@
               "helpText": "MySQL database naam"
             }
           },
-          "stats": {
-            "title": "Databasestatistieken",
-            "description": "Runtime-informatie over uw database",
-            "loading": "Databasestatistieken laden...",
-            "retry": "Opnieuw proberen",
-            "refresh": "Vernieuwen",
-            "noData": "Geen databasestatistieken beschikbaar.",
-            "type": "Type",
-            "status": "Status",
-            "size": "Grootte",
-            "totalDetections": "Totaal detecties",
-            "location": "Locatie",
-            "connected": "Verbonden",
-            "disconnected": "Niet verbonden"
-          },
           "errors": {
             "backupStartFailed": "Back-up starten mislukt",
             "backupStatusFailed": "Back-upstatus ophalen mislukt",
             "backupFailed": "Back-up mislukt",
             "backupDownloadFailed": "Back-up downloaden mislukt"
+          },
+          "statsMoved": {
+            "text": "De databasestatistieken zijn verplaatst naar de sectie Systeem.",
+            "link": "Systeem > Database openen"
           }
         },
         "interface": {
@@ -3738,12 +3742,7 @@
           "atLeastOneModel": "Minimaal één model moet geselecteerd zijn"
         },
         "captureTitle": "Opname",
-        "levelTitle": "Ingangsniveau",
-        "captureApplyHint": "De opname wordt herstart wanneer u toepast.",
-        "applyCapture": "Toepassen en opname herstarten",
-        "applying": "Bezig met toepassen...",
-        "adding": "Bezig met toevoegen...",
-        "captureApplyFailed": "De opname is niet gewijzigd. Pas opnieuw toe of annuleer."
+        "levelTitle": "Ingangsniveau"
       },
       "audioCapture": {
         "title": "Audio Opname",
@@ -3761,7 +3760,8 @@
         "deviceSelected": "Geluidskaart geselecteerd en klaar voor opname",
         "availableDevices": "Beschikbare Audio Apparaten",
         "active": "Actief",
-        "streamsConfigured": "{count} stream(s) geconfigureerd"
+        "streamsConfigured": "{count} stream(s) geconfigureerd",
+        "description": "Geluidskaarten waar BirdNET-Go naar luistert. Een wijziging van apparaat of samplefrequentie herstart de opname van die bron wanneer u bewaart."
       },
       "quietHours": {
         "title": "Stille uren",
@@ -3785,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Audio Stream Configuratie",
-        "noStreamsConfigured": "Geen streams geconfigureerd"
+        "noStreamsConfigured": "Geen streams geconfigureerd",
+        "description": "Configureer netwerk audio streams voor audio opname op afstand. Ondersteunt RTSP, HTTP, HLS, RTMP en UDP protocollen. Een wijziging van de verbinding verbindt de stream opnieuw wanneer u bewaart."
       },
       "streams": {
         "streamLabel": "Stream",
@@ -3908,12 +3909,7 @@
           "message": "Stereostream gedetecteerd. Het downmixen van meerdere kanalen kan de detectienauwkeurigheid verminderen door faseverschillen tussen kanalen. Selecteer een specifiek kanaal (links/rechts) of gebruik de kanaaldetector voor de beste resultaten.",
           "short": "Stereo downmix actief. Detectienauwkeurigheid kan verminderd zijn. Selecteer een specifiek kanaal onder Verbinding."
         },
-        "autoSaveHelp": "Wijzigingen worden direct opgeslagen. Wijzigingen van de verbinding verbinden de stream opnieuw en wachten daarom tot u op Toepassen klikt.",
         "connectionTitle": "Verbinding",
-        "connectionApplyHint": "De stream wordt opnieuw verbonden wanneer u toepast.",
-        "connectionApplyFailed": "De verbinding is niet gewijzigd. Pas opnieuw toe of annuleer.",
-        "applyConnection": "Toepassen en opnieuw verbinden",
-        "testBeforeApply": "Test de nieuwe URL voordat u deze toepast.",
         "statsLine": "Totaal: {total} · Snelheid: {rate} · Laatst: {last}",
         "ago": {
           "seconds": "{count} s geleden",
@@ -4154,8 +4150,13 @@
         "listFailed": "De modellijst kon niet worden geladen.",
         "warningBadge": "Classificatiemodellen controleren"
       },
-      "sources": {
-        "autoSaveHelp": "Wijzigingen worden direct opgeslagen. Wijzigingen van apparaat en samplefrequentie herstarten de opname en wachten daarom tot u op Toepassen klikt."
+      "validation": {
+        "soundCards": "Herstel de geluidskaarten op het tabblad {tab} voordat u bewaart: {names}",
+        "unnamedSource": "bron {position} (zonder naam)",
+        "needsAttention": "Vereist aandacht",
+        "streams": "Herstel de streams op het tabblad {tab} voordat u bewaart: {names}",
+        "streamsUntested": "Test de nieuwe stream-URL op het tabblad {tab} voordat u bewaart: {names}",
+        "unnamedStream": "stream {position} (zonder naam)"
       }
     },
     "security": {
@@ -5094,8 +5095,8 @@
       "audioPlayback": {
         "title": "Audioweergave",
         "description": "Standaardinstellingen voor het afspelen van vogelopnames.",
-        "defaultGain": "Standaard volumeversterking",
-        "defaultGainHelpText": "Initiële versterking bij het afspelen van opnames. Vogelgeluiden zijn vaak zacht, dus een versterking van 6-12 dB wordt aanbevolen.",
+        "defaultGain": "Standaardversterking",
+        "defaultGainHelpText": "Versterking waarmee elke clip begint. Vogelgeluiden zijn vaak zacht, dus 6 tot 12 dB is een goed begin; een negatieve waarde maakt clips zachter.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Ruis uit clips verwijderen bij afspelen",
         "denoiseHelpText": "Speelt een ruisvrije kopie van elke clip af en downloadt die. Opgeslagen clips blijven ongewijzigd. Downloads worden WAV-bestanden en zijn groter. In de audio-instellingen van een clip kan een andere sterkte worden gekozen of ruisonderdrukking worden uitgeschakeld.",
@@ -5104,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Schakel hierboven ruisonderdrukking bij afspelen in om een sterkte te kiezen.",
         "denoiseExportPrecedence": "Niet toegepast zolang „Ruisonderdrukking voor opgeslagen clips” aan staat (Audio-instellingen, tabblad Verwerking). Die clips zijn al ontdaan van ruis.",
         "denoiseRedenoiseNote": "Clips die zijn opgeslagen terwijl „Ruisonderdrukking voor opgeslagen clips” aan stond, worden bij het afspelen opnieuw ontdaan van ruis. Kies Uit in de audio-instellingen van een clip om hem te horen zoals hij is opgeslagen.",
-        "denoiseLossyNote": "Ruisonderdrukking werkt het best op FLAC- of WAV-clips. Onder {minBitrate} kbps beperken codec-artefacten hoe schoon het resultaat wordt."
+        "denoiseLossyNote": "Ruisonderdrukking werkt het best op FLAC- of WAV-clips. Onder {minBitrate} kbps beperken codec-artefacten hoe schoon het resultaat wordt.",
+        "highPassLabel": "Standaard hoogdoorlaatfilter",
+        "highPassHelpText": "Verwijdert geluid onder deze frequentie terwijl een clip wordt afgespeeld, zoals wind- en verkeersgerommel. Het wordt in de browser toegepast, dus opgeslagen, gedownloade en geëxporteerde clips worden niet gefilterd.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Uit"
       }
     },
     "restartRequired": "Sommige wijzigingen vereisen een herstart van de server. Herstart BirdNET-Go."
@@ -5119,6 +5124,8 @@
     "passwordPlaceholder": "Vul je wachtwoord in",
     "enterPassword": "Voer je wachtwoord in",
     "continue": "Doorgaan",
+    "rememberBrowser": "Onthoud deze browser",
+    "rememberBrowserHelp": "Blijf ingelogd in deze browser. Laat uitgevinkt op een gedeelde computer.",
     "or": "of",
     "loginWithGoogle": "Aanmelden met Google",
     "loginWithGithub": "Aanmelden met GitHub",
@@ -5414,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "Generatie mislukt met status {status}",
         "spectrogramFailed": "Spectrogram kon niet worden gegenereerd"
+      },
+      "defaults": {
+        "open": "Standaardwaarden voor afspelen",
+        "title": "Standaardwaarden voor afspelen",
+        "description": "Elke clip begint met deze waarden. Ze worden op dit station opgeslagen en gelden voor iedereen die het gebruikt.",
+        "useCurrent": "Huidige waarden gebruiken",
+        "useCurrentHelp": "Kopieert de versterking, ruisonderdrukking en het hoogdoorlaatfilter waarop deze speler staat naar de velden hieronder. Er wordt niets opgeslagen totdat u Wijzigingen bewaren kiest.",
+        "useCurrentHelpNoDenoise": "Kopieert de versterking en het hoogdoorlaatfilter waarop deze speler staat naar de velden hieronder. Er wordt niets opgeslagen totdat u Wijzigingen bewaren kiest.",
+        "copied": "Huidige waarden gekopieerd. Kies Wijzigingen bewaren om ze te behouden.",
+        "saved": "Standaardwaarden voor afspelen opgeslagen",
+        "saveFailed": "De standaardwaarden voor afspelen zijn niet opgeslagen. Er is niets gewijzigd.",
+        "unavailable": "De instellingen konden niet worden geladen, dus de standaardwaarden kunnen hier niet worden gewijzigd."
       },
       "clipExtraction": {
         "selectRange": "Klik en sleep om een bereik te selecteren",
@@ -5963,6 +5982,8 @@
       },
       "actionInProgress": "Wacht tot de huidige installatie, herinstallatie of verwijdering van het model is voltooid",
       "installSuccess": "{name} geïnstalleerd",
+      "cancelling": "Annuleren...",
+      "cancelled": "Download van {name} geannuleerd.",
       "installedEnableOnSources": "{name} is geïnstalleerd. Schakel het in voor uw bronnen via Instellingen > Audio om het te gebruiken.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6010,7 +6031,8 @@
         "verifying": "Verifiëren...",
         "loading": "Laden...",
         "complete": "Succesvol geïnstalleerd",
-        "failed": "Mislukt"
+        "failed": "Mislukt",
+        "cancelled": "Geannuleerd"
       },
       "license": {
         "title": "Licentieovereenkomst",
@@ -6038,6 +6060,7 @@
         "removeFailed": "Kan model niet verwijderen",
         "removeHasDependents": "{name} is nodig voor {models}. Verwijder eerst die modellen.",
         "operationInProgress": "Er wordt al een model geïnstalleerd, opnieuw geïnstalleerd of verwijderd ({name}). Probeer het opnieuw wanneer dit klaar is.",
+        "cancelUnavailable": "De download van {name} kan niet meer worden geannuleerd.",
         "actionFailed": "Er is een probleem opgetreden met {name}",
         "downloadSourceHint": "Als huggingface.co geblokkeerd of traag is op uw netwerk, stel dan een spiegelserver in bij de sectie Downloadbron hieronder.",
         "goToDownloadSource": "Ga naar Downloadbron",
@@ -6067,6 +6090,19 @@
       "superseded": {
         "cardNotice": "Vervangen door {name}. Gebruik in plaats daarvan het nieuwere model.",
         "dialogNotice": "Dit model is vervangen door {name}. Overweeg in plaats daarvan {name} te installeren."
+      },
+      "update": {
+        "cardNotice": "Een nieuwere versie ({to}) vervangt de geïnstalleerde versie {from}.",
+        "cardNoticeBuild": "Build {to} van versie {version} vervangt de geïnstalleerde build {from}.",
+        "action": "Bijwerken",
+        "applying": "Bijwerken..."
+      },
+      "buildNotes": {
+        "heading": "Nieuw in build {build} van versie {version}",
+        "released": "Uitgebracht op {date}",
+        "buildLabel": "Buildnummer",
+        "buildValue": "{build}, uitgebracht op {date}",
+        "disclosure": "Nieuw in deze build"
       },
       "entryIncompatible": "Dit model is niet beschikbaar op dit systeem.",
       "regionGlobal": "Globaal",
@@ -6172,10 +6208,19 @@
       "device": {
         "label": "OpenVINO-apparaat",
         "helpText": "Gebruikt voor modellen die op OpenVINO draaien.",
+        "helpTextMultipleGpus": "Gebruikt voor modellen die op OpenVINO draaien. Dit apparaat heeft meer dan één GPU, dus kies de GPU waarop de modellen draaien.",
+        "notDetectedHint": "De gekozen GPU wordt niet gevonden. De modellen draaien op ONNX Runtime tot een ander apparaat wordt gekozen.",
         "options": {
           "auto": "Automatisch",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO-standaard: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (niet gevonden)"
+        },
+        "gpuTypes": {
+          "integrated": "geïntegreerd",
+          "discrete": "dedicated"
         }
       },
       "reloadNote": "Het wijzigen van de backend of het apparaat laadt de modellen opnieuw, waardoor de detectie enkele seconden pauzeert.",
@@ -6373,6 +6418,52 @@
       "patternNone": "Geen",
       "patternTransient": "Voorbijgaand",
       "patternSustained": "Aanhoudend"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Sneltoetsen",
+    "modal": {
+      "title": "Sneltoetsen",
+      "enable": "Sneltoetsen inschakelen",
+      "enableHelp": "Schakel dit uit als sneltoetsen met één toets problemen geven met een schermlezer, spraakbesturing of een aangepast toetsenbord.",
+      "offNote": "Sneltoetsen staan uit. De onderstaande toetsen doen niets totdat je ze inschakelt.",
+      "or": "of"
+    },
+    "scopes": {
+      "global": "Alle pagina's"
+    },
+    "groups": {
+      "navigation": "Navigatie",
+      "review": "Beoordeling",
+      "audio": "Audio",
+      "general": "Algemeen"
+    },
+    "keys": {
+      "shift": "Shift",
+      "space": "Spatiebalk",
+      "arrowLeft": "Pijl-links",
+      "arrowRight": "Pijl-rechts",
+      "comma": "Komma",
+      "period": "Punt",
+      "questionMark": "Vraagteken",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Oudere detectie van dezelfde soort",
+      "newerSpecies": "Nieuwere detectie van dezelfde soort",
+      "correct": "Markeren als juist",
+      "falsePositive": "Markeren als fout-positief",
+      "wrongSpecies": "De soort wijzigen",
+      "keep": "Deze opname bewaren of vrijgeven",
+      "playPause": "Afspelen of pauzeren",
+      "seekBack": "Een seconde terug",
+      "seekForward": "Een seconde vooruit",
+      "focusReview": "Naar de beoordelingsknoppen gaan",
+      "backToList": "Terug naar detecties"
+    },
+    "global": {
+      "help": "Sneltoetsen tonen of verbergen"
     }
   }
 }

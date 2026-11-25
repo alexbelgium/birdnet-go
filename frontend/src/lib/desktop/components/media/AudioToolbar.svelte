@@ -5,7 +5,7 @@
   and export functionality. Inspired by iZotope RX toolbar layout.
 
   The bar wraps on its own content: a transport row (play, skip, loop, time, seek) and a
-  processing row (selection, gain, denoise, normalize, export) share one line when there
+  processing row (selection, gain, denoise, normalize, export, defaults) share one line when there
   is room and stack otherwise, and each row wraps again inside a narrow host.
 -->
 <script lang="ts">
@@ -20,13 +20,20 @@
     AudioWaveform,
     Loader2,
     ChevronDown,
+    Settings,
   } from '@lucide/svelte';
   import type { Action } from 'svelte/action';
   import { dropdown } from '$lib/utils/transitions';
   import { computeAnchorPosition, type HorizontalAlign } from '$lib/utils/anchorPosition';
   import { t } from '$lib/i18n';
-  import { playButtonLabelKey } from '$lib/utils/audio';
+  import { playButtonAction, playButtonLabelKey } from '$lib/utils/audio';
+  import { shortcutTitle, type ShortcutHint } from '$lib/utils/keyboard';
   import { DENOISE_OPTIONS } from '$lib/utils/denoisePresets';
+  import {
+    PLAYBACK_GAIN_MAX_DB,
+    PLAYBACK_GAIN_MIN_DB,
+    PLAYBACK_GAIN_STEP_DB,
+  } from '$lib/utils/playbackDefaults';
   import { formatTime } from '$lib/utils/formatters';
   import {
     clampSeconds,
@@ -74,6 +81,12 @@
     onDenoiseChange: (_preset: string) => void;
     onNormalizeToggle: () => void;
     onExport: (_format: string) => void;
+
+    /** Key hint for the play button: sets aria-keyshortcuts and names the key in the title */
+    playShortcut?: ShortcutHint | null;
+
+    /** Opens the playback defaults dialog; without it the defaults button is not shown */
+    onOpenDefaults?: () => void;
   }
 
   let {
@@ -104,6 +117,8 @@
     onDenoiseChange,
     onNormalizeToggle,
     onExport,
+    playShortcut = null,
+    onOpenDefaults,
   }: Props = $props();
 
   let progressBarEl: HTMLDivElement;
@@ -172,24 +187,22 @@
 
   // Unified play handler: plays selection when selected, full audio otherwise
   function handlePlay() {
-    // If full audio is already playing, always allow pausing it
-    if (isPlaying && !isPlayingSelection) {
-      onPlayPause();
-      return;
-    }
-    if (hasSelection) {
-      if (isPlayingSelection) {
+    switch (playButtonAction({ isPlaying, isPlayingSelection, hasSelection })) {
+      case 'stopSelection':
         onStopSelection();
-      } else {
+        break;
+      case 'playSelection':
         onPlaySelection();
-      }
-    } else {
-      onPlayPause();
+        break;
+      case 'toggle':
+        onPlayPause();
+        break;
     }
   }
 
   // Unified playing state
   let isCurrentlyPlaying = $derived(isPlayingSelection || isPlaying);
+  let playLabel = $derived(t(playButtonLabelKey(isLoading, isCurrentlyPlaying)));
 
   // Gap between a menu and its dropdown wrapper, set as the menu's block margin
   const MENU_GAP_PX = 4;
@@ -310,7 +323,9 @@
         class="toolbar-btn play-btn"
         onclick={handlePlay}
         disabled={isLoading}
-        aria-label={t(playButtonLabelKey(isLoading, isCurrentlyPlaying))}
+        aria-label={playLabel}
+        aria-keyshortcuts={playShortcut?.aria}
+        title={shortcutTitle(playLabel, playShortcut)}
       >
         {#if isLoading}
           <Loader2 size={14} class="animate-spin" />
@@ -381,9 +396,9 @@
       <Volume2 size={14} />
       <input
         type="range"
-        min="-12"
-        max="24"
-        step="0.5"
+        min={PLAYBACK_GAIN_MIN_DB}
+        max={PLAYBACK_GAIN_MAX_DB}
+        step={PLAYBACK_GAIN_STEP_DB}
         value={gainDb}
         oninput={e => onGainChange(Number(e.currentTarget.value))}
         class="gain-slider"
@@ -456,44 +471,59 @@
       {/if}
     </button>
 
-    <div class="export-dropdown">
-      <button
-        class="toolbar-btn export-btn"
-        class:error={extractionError !== null}
-        disabled={isExtracting}
-        onclick={() => (showExportMenu = !showExportMenu)}
-        aria-label={t('components.audioPlayer.processing.export')}
-        title={extractionError ?? ''}
-        aria-expanded={showExportMenu}
-        aria-haspopup="true"
-      >
-        {#if isExtracting}
-          <Loader2 size={14} class="animate-spin" />
-        {:else}
-          <Download size={14} />
-        {/if}
-        <span>{t('components.audioPlayer.processing.export')}</span>
-        <ChevronDown size={12} />
-      </button>
-      {#if extractionError}
-        <span class="export-error" role="alert">{extractionError}</span>
-      {/if}
-      {#if showExportMenu}
-        <div
-          class="export-menu"
-          use:anchorMenu={'end'}
-          in:dropdown={{ y: -4, duration: 120 }}
-          out:dropdown={{ y: -4, duration: 80 }}
+    <!-- Export and the defaults button wrap as one item, so the button never sits alone on a line -->
+    <div class="toolbar-tail">
+      <div class="export-dropdown">
+        <button
+          class="toolbar-btn export-btn"
+          class:error={extractionError !== null}
+          disabled={isExtracting}
+          onclick={() => (showExportMenu = !showExportMenu)}
+          aria-label={t('components.audioPlayer.processing.export')}
+          title={extractionError ?? ''}
+          aria-expanded={showExportMenu}
+          aria-haspopup="true"
         >
-          <button class="export-option" onclick={() => handleExport('original')}>
-            {t('components.audioPlayer.processing.exportOriginal')}
-          </button>
-          {#each exportFormats as fmt (fmt.id)}
-            <button class="export-option" onclick={() => handleExport(fmt.id)}>
-              {fmt.label}
+          {#if isExtracting}
+            <Loader2 size={14} class="animate-spin" />
+          {:else}
+            <Download size={14} />
+          {/if}
+          <span>{t('components.audioPlayer.processing.export')}</span>
+          <ChevronDown size={12} />
+        </button>
+        {#if extractionError}
+          <span class="export-error" role="alert">{extractionError}</span>
+        {/if}
+        {#if showExportMenu}
+          <div
+            class="export-menu"
+            use:anchorMenu={'end'}
+            in:dropdown={{ y: -4, duration: 120 }}
+            out:dropdown={{ y: -4, duration: 80 }}
+          >
+            <button class="export-option" onclick={() => handleExport('original')}>
+              {t('components.audioPlayer.processing.exportOriginal')}
             </button>
-          {/each}
-        </div>
+            {#each exportFormats as fmt (fmt.id)}
+              <button class="export-option" onclick={() => handleExport(fmt.id)}>
+                {fmt.label}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      {#if onOpenDefaults}
+        <button
+          type="button"
+          class="toolbar-btn"
+          onclick={onOpenDefaults}
+          aria-label={t('components.audioPlayer.defaults.open')}
+          title={t('components.audioPlayer.defaults.open')}
+          aria-haspopup="dialog"
+        >
+          <Settings size={14} />
+        </button>
       {/if}
     </div>
   </div>
@@ -658,6 +688,18 @@
   .control-value {
     font-variant-numeric: tabular-nums;
     min-width: 3rem;
+  }
+
+  /* Export and the defaults button wrap as one item. Not .toolbar-group: its nowrap would
+     stop the export error text from wrapping, and flex-start keeps the button level with
+     Export when that text shows. The gap is the row gap, so the pair does not read as a
+     split button. */
+  .toolbar-tail {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: flex-start;
+    gap: 0.5rem;
+    min-width: 0;
   }
 
   .denoise-dropdown,

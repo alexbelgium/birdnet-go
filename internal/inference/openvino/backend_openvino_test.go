@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tphakala/birdnet-go/internal/errors"
 )
 
 // finiteSampleCount is how many leading output logits each round-trip test spot-
@@ -60,8 +62,8 @@ func TestOpenVINORoundTrip(t *testing.T) {
 
 // TestOpenVINOPerchRoundTrip is a hardware/lib-gated smoke test for the Perch v2
 // multi-output graph. Set OV_TEST_PERCH_MODEL to a perch_v2_no_dft ONNX path to
-// run it. OV_TEST_DEVICE selects the device ("CPU" default, or "GPU"); a GPU run
-// is skipped if no GPU is enumerated. It proves the OutputIndex selection (logits
+// run it. OV_TEST_DEVICE selects CPU (default), GPU or GPU.<n>; a GPU run
+// is skipped if the requested GPU is unavailable. It proves the OutputIndex selection (logits
 // at index 3, not the index-0 embedding) and that NumClasses reports the real
 // model output dimension.
 func TestOpenVINOPerchRoundTrip(t *testing.T) {
@@ -76,11 +78,11 @@ func TestOpenVINOPerchRoundTrip(t *testing.T) {
 	if device == "" {
 		device = DeviceCPU
 	}
-	if device == DeviceGPU {
+	if IsGPUDevice(device) {
 		devs, err := AvailableDevices()
 		require.NoError(t, err)
-		if !slices.Contains(devs, DeviceGPU) {
-			t.Skipf("no GPU device enumerated (have %v)", devs)
+		if !slices.Contains(devs, device) && !(device == DeviceGPU && slices.ContainsFunc(devs, IsGPUDevice)) {
+			t.Skipf("requested GPU %q unavailable (have %v)", device, devs)
 		}
 	}
 
@@ -119,4 +121,147 @@ func TestOpenVINOAvailableDevices(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, devs, DeviceCPU, "CPU device must always be enumerated")
 	t.Logf("OpenVINO devices: %v", devs)
+
+	// FULL_DEVICE_NAME is supported by every plugin; a failed read here means the
+	// ov_core_get_property binding is broken, not that the device lacks a name.
+	for _, dev := range devs {
+		name, err := DeviceProperty(dev, "FULL_DEVICE_NAME")
+		require.NoErrorf(t, err, "FULL_DEVICE_NAME of %s", dev)
+		assert.NotEmptyf(t, name, "FULL_DEVICE_NAME of %s", dev)
+		devType, typeErr := DeviceProperty(dev, "DEVICE_TYPE")
+		t.Logf("%s: name=%q type=%q (type error: %v)", dev, name, devType, typeErr)
+	}
+}
+
+// TestOpenVINONewClassifierDeviceNames pins which device names NewClassifier
+// accepts: CPU, the GPU alias and a concrete GPU.<n>. The model path does not
+// exist, so an accepted name fails later, at reading the model, which proves the
+// name check let it through. Lib-gated like the other tests that bind the core:
+// binding it here unconditionally would make the loader test skip itself.
+func TestOpenVINONewClassifierDeviceNames(t *testing.T) {
+	if os.Getenv("OV_TEST_MODEL") == "" && os.Getenv("OV_TEST_PERCH_MODEL") == "" {
+		t.Skip("set OV_TEST_MODEL or OV_TEST_PERCH_MODEL to run (needs libopenvino_c)")
+	}
+	require.NoError(t, InitOV(os.Getenv("OV_TEST_LIB")))
+	t.Cleanup(func() { _ = DestroyOV() })
+
+	const (
+		unsupported = "unsupported device"
+		readModelOp = "ov_core_read_model"
+	)
+	for _, device := range []string{"", DeviceCPU, DeviceGPU, "GPU.0", "GPU.12"} {
+		_, err := NewClassifier("/nonexistent/model.onnx", Options{Device: device})
+		require.Errorf(t, err, "device %q", device)
+		assert.NotContainsf(t, err.Error(), unsupported, "device %q must pass the name check", device)
+		assert.Containsf(t, err.Error(), readModelOp, "device %q must reach the model read", device)
+	}
+	for _, device := range []string{"NPU", "gpu.1", "GPU.", "GPU.x", "AUTO"} {
+		_, err := NewClassifier("/nonexistent/model.onnx", Options{Device: device})
+		require.Errorf(t, err, "device %q", device)
+		assert.Containsf(t, err.Error(), unsupported, "device %q must be rejected", device)
+		assert.Containsf(t, err.Error(), `"GPU.<n>"`, "device %q: the message must show the accepted indexed form", device)
+	}
+}
+
+// TestScrubLibraryPaths_LongestFirst pins that a resolved absolute path is
+// redacted whole even when the configured relative path is its suffix.
+func TestScrubLibraryPaths_LongestFirst(t *testing.T) {
+	t.Parallel()
+	configured := `ov\openvino_c.dll`
+	resolved := `C:\Users\someone\birdnet\ov\openvino_c.dll`
+	got := scrubLibraryPaths("cannot load "+resolved, configured, resolved)
+	assert.Equal(t, "cannot load <path>", got)
+	assert.NotContains(t, got, "someone")
+}
+
+// resetGPUFaultForTest clears the process-wide latch. Production code has no
+// reset path (only a restart clears it); this exists for tests that trip it.
+func resetGPUFaultForTest() {
+	gpuFault.tripped.Store(false)
+	gpuFault.cause.Store(nil)
+	gpuFault.streak.Store(0)
+}
+
+// TestGPUFaultLatch_RealDevice is a hardware-gated check of the glue between the
+// GPU fault latch and the native backend. It needs OV_TEST_MODEL (BirdNET v2.4
+// FP32 ONNX), OV_TEST_LIB optionally, and a GPU; it is skipped without a GPU. It
+// trips the latch directly (a real device fault cannot be provoked on demand),
+// then asserts that GPU calls fail fast with the sentinel, that the CPU device
+// keeps working, and that Close and DestroyOV return nil and leave no core
+// loaded. Whether they skip the native frees is not observable here (a known gap).
+// Not parallel: the latch is process-wide.
+func TestGPUFaultLatch_RealDevice(t *testing.T) {
+	model := os.Getenv("OV_TEST_MODEL")
+	if model == "" {
+		t.Skip("set OV_TEST_MODEL to a BirdNET v2.4 FP32 ONNX to run the GPU fault latch test")
+	}
+	// Registered first so it runs last: the DestroyOV cleanup below must still
+	// see the latch set when an assertion fails before the explicit DestroyOV.
+	t.Cleanup(resetGPUFaultForTest)
+	require.NoError(t, InitOV(os.Getenv("OV_TEST_LIB")))
+	t.Cleanup(func() { _ = DestroyOV() })
+	devs, err := AvailableDevices()
+	require.NoError(t, err)
+	if !slices.ContainsFunc(devs, IsGPUDevice) {
+		t.Skipf("no GPU device enumerated (have %v)", devs)
+	}
+
+	const birdNETLogitsOutputIndex = 0
+	gpuClassifier, err := NewClassifier(model, Options{
+		PrecisionHint: DefaultPrecisionHint,
+		Device:        DeviceGPU,
+		OutputIndices: []int{birdNETLogitsOutputIndex, birdNETLogitsOutputIndex},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = gpuClassifier.Close() })
+	multi, ok := gpuClassifier.(MultiOutputClassifier)
+	require.True(t, ok)
+	silence := make([]float32, birdNETInputSamples)
+	outputs, err := multi.PredictOutputs(silence)
+	require.NoError(t, err, "the GPU classifier works before the latch trips")
+	require.Len(t, outputs, 2)
+	assert.Len(t, outputs[0], birdNETOutputClasses)
+	assert.Len(t, outputs[1], birdNETOutputClasses)
+
+	// Unlatched Close frees and clears every field, and a second Close is a no-op.
+	spare, err := NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceGPU})
+	require.NoError(t, err)
+	require.NoError(t, spare.Close())
+	require.NoError(t, spare.Close())
+	spareImpl, ok := spare.(*classifier)
+	require.True(t, ok)
+	assert.Nil(t, spareImpl.req)
+	assert.Nil(t, spareImpl.compiled)
+	assert.Nil(t, spareImpl.inBuf)
+
+	tripErr := gpuFault.trip(errors.NewStd("simulated CL_OUT_OF_RESOURCES"))
+	require.ErrorIs(t, tripErr, ErrGPUDeviceFault)
+
+	_, err = gpuClassifier.PredictRaw(silence)
+	require.ErrorIs(t, err, ErrGPUDeviceFault, "GPU inference fails fast once latched")
+	_, err = multi.PredictOutputs(silence)
+	require.ErrorIs(t, err, ErrGPUDeviceFault, "GPU multi-output inference fails fast once latched")
+
+	_, err = NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceGPU})
+	require.ErrorIs(t, err, ErrGPUDeviceFault, "a GPU compile is refused once latched")
+
+	cpuClassifier, err := NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceCPU})
+	require.NoError(t, err, "the CPU device keeps working after a GPU trip")
+	out, err := cpuClassifier.PredictRaw(silence)
+	require.NoError(t, err)
+	assert.Len(t, out, birdNETOutputClasses)
+	require.NoError(t, cpuClassifier.Close())
+
+	require.NoError(t, gpuClassifier.Close(), "Close abandons the GPU objects and returns nil")
+	gpuImpl, ok := gpuClassifier.(*classifier)
+	require.True(t, ok)
+	assert.Nil(t, gpuImpl.req, "an abandoned classifier holds no native handle")
+	assert.Nil(t, gpuImpl.compiled)
+	assert.Nil(t, gpuImpl.inBuf)
+
+	require.NoError(t, DestroyOV(), "DestroyOV abandons the core and returns nil")
+	ovMu.Lock()
+	assert.Nil(t, ovCore)
+	assert.False(t, ovLoaded)
+	ovMu.Unlock()
 }

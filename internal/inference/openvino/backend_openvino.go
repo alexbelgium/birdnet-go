@@ -2,28 +2,26 @@
 
 // This file holds the real OpenVINO backend, compiled only under the "openvino"
 // build tag. It ports the validated Phase 0 cgo spike, swapping the spike's
-// link-time linking for a runtime dlopen + dlsym of libopenvino_c. The package
-// links against -ldl only: linking -lopenvino_c at build time would make ld.so
-// abort the process before main() when the library is absent, which would
-// defeat the graceful fallback to the ONNX Runtime backend that this feature
-// depends on. Every OpenVINO function is therefore resolved through a process
-// global symbol table (OVB) and called via fixed-arity static C wrappers so
-// that cgo never calls a C function pointer (or a C variadic function) directly
-// with Go arguments.
+// link-time linking for a runtime load of libopenvino_c. The OS-specific load,
+// symbol lookup and close primitives live in loader_unix.go (openLibrary,
+// lookupSymbol, closeLibrary); linking -lopenvino_c at build time would make the
+// dynamic loader abort the process before main() when the library is absent,
+// which would defeat the graceful fallback to the ONNX Runtime backend that this
+// feature depends on. Go resolves every symbol, then installs the addresses in
+// one C call into a process-global table (OVB). Every OpenVINO function is
+// called via fixed-arity static C wrappers so that cgo never calls a C function
+// pointer (or a C variadic function) directly with Go arguments.
 
 package openvino
 
 /*
-#cgo LDFLAGS: -ldl
+#include <stdint.h>
 #include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <dlfcn.h>
 #include <openvino/c/openvino.h>
 
 // Function-pointer typedefs for every OpenVINO C entry point we call. The C
 // header declares these symbols, but we never reference them by name at link
-// time; we resolve each one with dlsym so the binary keeps loading when
+// time; Go resolves each one at runtime so the binary keeps loading when
 // libopenvino_c is absent.
 typedef ov_status_e (*fn_core_create)(ov_core_t**);
 typedef void        (*fn_core_free)(ov_core_t*);
@@ -33,12 +31,10 @@ typedef void        (*fn_model_free)(ov_model_t*);
 typedef ov_status_e (*fn_model_const_input)(const ov_model_t*, ov_output_const_port_t**);
 typedef ov_status_e (*fn_port_get_partial_shape)(const ov_output_const_port_t*, ov_partial_shape_t*);
 typedef void        (*fn_output_const_port_free)(ov_output_const_port_t*);
-typedef ov_status_e (*fn_partial_shape_create)(const int64_t, const ov_dimension_t*, ov_partial_shape_t*);
 typedef ov_status_e (*fn_model_reshape_single_input)(const ov_model_t*, const ov_partial_shape_t);
 typedef void        (*fn_partial_shape_free)(ov_partial_shape_t*);
 typedef ov_status_e (*fn_compiled_model_create_infer_request)(const ov_compiled_model_t*, ov_infer_request_t**);
 typedef void        (*fn_compiled_model_free)(ov_compiled_model_t*);
-typedef ov_status_e (*fn_shape_create)(const int64_t, const int64_t*, ov_shape_t*);
 typedef ov_status_e (*fn_shape_free)(ov_shape_t*);
 typedef ov_status_e (*fn_tensor_create_from_host_ptr)(const ov_element_type_e, const ov_shape_t, void*, ov_tensor_t**);
 typedef ov_status_e (*fn_tensor_get_size)(const ov_tensor_t*, size_t*);
@@ -54,122 +50,87 @@ typedef ov_status_e (*fn_compiled_model_output_by_index)(const ov_compiled_model
 typedef ov_status_e (*fn_const_port_get_shape)(const ov_output_const_port_t*, ov_shape_t*);
 typedef ov_status_e (*fn_core_get_available_devices)(const ov_core_t*, ov_available_devices_t*);
 typedef void        (*fn_available_devices_free)(ov_available_devices_t*);
+typedef ov_status_e (*fn_core_get_property)(const ov_core_t*, const char*, const char*, char**);
+typedef void        (*fn_free)(const char*);
+
+// OVBIND_SYMBOLS lists every OpenVINO C entry point the backend calls, once.
+// Each field is stored as fn_<field> in the table and resolved under the
+// exported name ov_<field>. The table struct, the name list and the installer
+// all expand from this one list, so the symbol order Go resolves in cannot
+// drift from the struct fields.
+#define OVBIND_SYMBOLS(X) \
+    X(core_create) \
+    X(core_free) \
+    X(core_read_model) \
+    X(core_compile_model) \
+    X(model_free) \
+    X(model_const_input) \
+    X(port_get_partial_shape) \
+    X(output_const_port_free) \
+    X(model_reshape_single_input) \
+    X(partial_shape_free) \
+    X(compiled_model_create_infer_request) \
+    X(compiled_model_free) \
+    X(shape_free) \
+    X(tensor_create_from_host_ptr) \
+    X(tensor_get_size) \
+    X(tensor_data) \
+    X(tensor_free) \
+    X(infer_request_set_input_tensor_by_index) \
+    X(infer_request_infer) \
+    X(infer_request_get_output_tensor_by_index) \
+    X(infer_request_free) \
+    X(get_last_err_msg) \
+    X(compiled_model_outputs_size) \
+    X(compiled_model_output_by_index) \
+    X(const_port_get_shape) \
+    X(core_get_available_devices) \
+    X(available_devices_free) \
+    X(core_get_property) \
+    X(free)
 
 // ovbind_t is the process-global table of resolved OpenVINO symbols, filled by
-// ovbind_load(path).
+// ovbind_install once Go has resolved every address.
 typedef struct {
     void* handle;
-    fn_core_create                              core_create;
-    fn_core_free                                core_free;
-    fn_core_read_model                          core_read_model;
-    fn_core_compile_model                       core_compile_model;
-    fn_model_free                               model_free;
-    fn_model_const_input                        model_const_input;
-    fn_port_get_partial_shape                   port_get_partial_shape;
-    fn_output_const_port_free                   output_const_port_free;
-    fn_partial_shape_create                     partial_shape_create;
-    fn_model_reshape_single_input               model_reshape_single_input;
-    fn_partial_shape_free                       partial_shape_free;
-    fn_compiled_model_create_infer_request      compiled_model_create_infer_request;
-    fn_compiled_model_free                      compiled_model_free;
-    fn_shape_create                             shape_create;
-    fn_shape_free                               shape_free;
-    fn_tensor_create_from_host_ptr              tensor_create_from_host_ptr;
-    fn_tensor_get_size                          tensor_get_size;
-    fn_tensor_data                              tensor_data;
-    fn_tensor_free                              tensor_free;
-    fn_infer_request_set_input_tensor_by_index  infer_request_set_input_tensor_by_index;
-    fn_infer_request_infer                      infer_request_infer;
-    fn_infer_request_get_output_tensor_by_index infer_request_get_output_tensor_by_index;
-    fn_infer_request_free                       infer_request_free;
-    fn_get_last_err_msg                         get_last_err_msg;
-    fn_compiled_model_outputs_size              compiled_model_outputs_size;
-    fn_compiled_model_output_by_index           compiled_model_output_by_index;
-    fn_const_port_get_shape                     const_port_get_shape;
-    fn_core_get_available_devices               core_get_available_devices;
-    fn_available_devices_free                   available_devices_free;
+#define OVBIND_FIELD(f) fn_##f f;
+    OVBIND_SYMBOLS(OVBIND_FIELD)
+#undef OVBIND_FIELD
 } ovbind_t;
 
 static ovbind_t OVB; // process-global resolved symbol table
 
-// _ovbind_errbuf holds a COPY of the dlsym failure message. dlerror() returns a
-// pointer into libdl's own static buffer, which dlclose() overwrites, so the
-// macro copies the string bytes here before dlclose and returns this buffer.
-// memset of OVB does not touch it. It is process-static and written only on the
-// single-threaded InitOV failure path under ovMu, so it needs no locking.
-static char _ovbind_errbuf[256];
+// ovbind_is_loaded reports whether a complete symbol table is installed.
+static int ovbind_is_loaded(void) {
+    return OVB.handle != NULL;
+}
 
-// OVBIND_RESOLVE resolves one symbol into OVB. On failure it COPIES the
-// dlerror() string into _ovbind_errbuf FIRST (the pointer dlerror returns is
-// into libdl's static buffer, which dlclose overwrites), then dlcloses the
-// handle and zeroes the ENTIRE OVB table so that OVB.handle is non-NULL if and
-// only if every symbol is resolved. Without this, a partial resolution (e.g. an
-// older libopenvino_c missing a newer symbol) would leave OVB.handle set, and a
-// later InitOV retry would see the handle, skip re-resolution, and later call a
-// NULL function pointer. Returns the copied error string from ovbind_load.
-#define OVBIND_RESOLVE(field, type, name)                                     \
-    do {                                                                      \
-        OVB.field = (type)dlsym(OVB.handle, name);                            \
-        if (!OVB.field) {                                                     \
-            const char* _e = dlerror();                                       \
-            snprintf(_ovbind_errbuf, sizeof(_ovbind_errbuf), "%s",            \
-                     _e ? _e : "dlsym failed");                               \
-            dlclose(OVB.handle);                                              \
-            memset(&OVB, 0, sizeof(OVB));                                     \
-            return _ovbind_errbuf;                                            \
-        }                                                                     \
-    } while (0)
+static const char* const ovbind_symbol_names[] = {
+#define OVBIND_NAME(f) "ov_" #f,
+    OVBIND_SYMBOLS(OVBIND_NAME)
+#undef OVBIND_NAME
+};
 
-// ovbind_load dlopens libopenvino_c from path (or by soname when empty) with
-// RTLD_NOW | RTLD_GLOBAL. RTLD_GLOBAL lets the OpenVINO core find its plugin
-// shared objects (CPU plugin, tbb) through the standard loader search, exactly
-// as the Python wheel and the spike's LD_LIBRARY_PATH arrangement do. It then
-// resolves every symbol the backend calls. Returns NULL on success, or the
-// first dlerror() string on failure.
-static const char* ovbind_load(const char* path) {
-    if (OVB.handle) {
-        return NULL; // already loaded
-    }
-    OVB.handle = dlopen(path && path[0] ? path : "libopenvino_c.so", RTLD_NOW | RTLD_GLOBAL);
-    if (!OVB.handle) {
-        // POSIX allows dlerror() to return NULL; copy into the static buffer
-        // with a non-NULL fallback so the Go caller never sees a nil message
-        // and mistakes failure for success (which would call a NULL pointer).
-        const char* e = dlerror();
-        snprintf(_ovbind_errbuf, sizeof(_ovbind_errbuf), "%s",
-                 (e != NULL) ? e : "dlopen failed (no dlerror message)");
-        return _ovbind_errbuf;
-    }
-    OVBIND_RESOLVE(core_create,                              fn_core_create,                              "ov_core_create");
-    OVBIND_RESOLVE(core_free,                                fn_core_free,                                "ov_core_free");
-    OVBIND_RESOLVE(core_read_model,                          fn_core_read_model,                          "ov_core_read_model");
-    OVBIND_RESOLVE(core_compile_model,                       fn_core_compile_model,                       "ov_core_compile_model");
-    OVBIND_RESOLVE(model_free,                               fn_model_free,                               "ov_model_free");
-    OVBIND_RESOLVE(model_const_input,                        fn_model_const_input,                        "ov_model_const_input");
-    OVBIND_RESOLVE(port_get_partial_shape,                   fn_port_get_partial_shape,                   "ov_port_get_partial_shape");
-    OVBIND_RESOLVE(output_const_port_free,                   fn_output_const_port_free,                   "ov_output_const_port_free");
-    OVBIND_RESOLVE(partial_shape_create,                     fn_partial_shape_create,                     "ov_partial_shape_create");
-    OVBIND_RESOLVE(model_reshape_single_input,               fn_model_reshape_single_input,               "ov_model_reshape_single_input");
-    OVBIND_RESOLVE(partial_shape_free,                       fn_partial_shape_free,                       "ov_partial_shape_free");
-    OVBIND_RESOLVE(compiled_model_create_infer_request,      fn_compiled_model_create_infer_request,      "ov_compiled_model_create_infer_request");
-    OVBIND_RESOLVE(compiled_model_free,                      fn_compiled_model_free,                      "ov_compiled_model_free");
-    OVBIND_RESOLVE(shape_create,                             fn_shape_create,                             "ov_shape_create");
-    OVBIND_RESOLVE(shape_free,                               fn_shape_free,                               "ov_shape_free");
-    OVBIND_RESOLVE(tensor_create_from_host_ptr,              fn_tensor_create_from_host_ptr,              "ov_tensor_create_from_host_ptr");
-    OVBIND_RESOLVE(tensor_get_size,                          fn_tensor_get_size,                          "ov_tensor_get_size");
-    OVBIND_RESOLVE(tensor_data,                              fn_tensor_data,                              "ov_tensor_data");
-    OVBIND_RESOLVE(tensor_free,                              fn_tensor_free,                              "ov_tensor_free");
-    OVBIND_RESOLVE(infer_request_set_input_tensor_by_index,  fn_infer_request_set_input_tensor_by_index,  "ov_infer_request_set_input_tensor_by_index");
-    OVBIND_RESOLVE(infer_request_infer,                      fn_infer_request_infer,                      "ov_infer_request_infer");
-    OVBIND_RESOLVE(infer_request_get_output_tensor_by_index, fn_infer_request_get_output_tensor_by_index, "ov_infer_request_get_output_tensor_by_index");
-    OVBIND_RESOLVE(infer_request_free,                       fn_infer_request_free,                       "ov_infer_request_free");
-    OVBIND_RESOLVE(get_last_err_msg,                         fn_get_last_err_msg,                         "ov_get_last_err_msg");
-    OVBIND_RESOLVE(compiled_model_outputs_size,              fn_compiled_model_outputs_size,              "ov_compiled_model_outputs_size");
-    OVBIND_RESOLVE(compiled_model_output_by_index,           fn_compiled_model_output_by_index,           "ov_compiled_model_output_by_index");
-    OVBIND_RESOLVE(const_port_get_shape,                     fn_const_port_get_shape,                     "ov_const_port_get_shape");
-    OVBIND_RESOLVE(core_get_available_devices,               fn_core_get_available_devices,               "ov_core_get_available_devices");
-    OVBIND_RESOLVE(available_devices_free,                   fn_available_devices_free,                   "ov_available_devices_free");
-    return NULL;
+// ovbind_symbol_count returns the number of symbols in OVBIND_SYMBOLS.
+static size_t ovbind_symbol_count(void) {
+    return sizeof(ovbind_symbol_names) / sizeof(ovbind_symbol_names[0]);
+}
+
+// ovbind_symbol_name returns the exported name of symbol i, in list order.
+static const char* ovbind_symbol_name(size_t i) {
+    return ovbind_symbol_names[i];
+}
+
+// ovbind_install fills the table from addrs (one address per symbol, in
+// OVBIND_SYMBOLS order) and sets handle last, so OVB.handle is non-NULL if and
+// only if every symbol is installed. Go calls it only after every symbol
+// resolved; a failed load never reaches it and leaves the table untouched.
+static void ovbind_install(uintptr_t handle, const uintptr_t* addrs) {
+    size_t i = 0;
+#define OVBIND_SET(f) OVB.f = (fn_##f)addrs[i++];
+    OVBIND_SYMBOLS(OVBIND_SET)
+#undef OVBIND_SET
+    OVB.handle = (void*)handle;
 }
 
 // Fixed-arity static wrappers. Go calls these, never an OVB.<fn> pointer
@@ -289,10 +250,6 @@ static void ovbind_compiled_model_free(ov_compiled_model_t* compiled) {
     OVB.compiled_model_free(compiled);
 }
 
-static ov_status_e ovbind_shape_create(const int64_t rank, const int64_t* dims, ov_shape_t* shape) {
-    return OVB.shape_create(rank, dims, shape);
-}
-
 static ov_status_e ovbind_shape_free(ov_shape_t* shape) {
     return OVB.shape_free(shape);
 }
@@ -404,6 +361,20 @@ static void ovbind_free_available_devices(ov_available_devices_t* devices) {
     OVB.available_devices_free(devices);
 }
 
+// ovbind_get_device_property reads the string property key of device into *value.
+// The value is allocated by OpenVINO and must be released with
+// ovbind_release_ov_string, never with C.free.
+static ov_status_e ovbind_get_device_property(const ov_core_t* core, const char* device,
+                                              const char* key, char** value) {
+    return OVB.core_get_property(core, device, key, value);
+}
+
+// ovbind_release_ov_string releases a string returned by an OpenVINO call using
+// OpenVINO's own deallocator (ov_free), which is not the C library free.
+static void ovbind_release_ov_string(const char* value) {
+    OVB.free(value);
+}
+
 static size_t ovbind_devices_count(const ov_available_devices_t* devices) {
     // Guard against a NULL array with a nonzero size. The OpenVINO C API does not
     // promise this combination when the status is OK, but treat it as "no devices"
@@ -437,24 +408,39 @@ import (
 // True here (built under the "openvino" tag); false in stub_noopenvino.go.
 const Supported = true
 
-// loadedLibraryPath records the path handed to the dlopen that bound
-// libopenvino_c, set once by the first successful load. ovbind_load keeps its
-// handle for the process lifetime and reuses it on later InitOV calls, so a
-// later InitOV with a different path (after ov_core_create failed once) does
-// not change which library is in use. Never guarded by ovMu, so a reader cannot
-// block behind a model compile.
-var loadedLibraryPath atomic.Pointer[string]
+// loadedLibrary records the library that bound libopenvino_c: the path handed
+// to the loader (after resolution) and whether it came from configuration.
+type loadedLibrary struct {
+	path       string
+	configured bool
+}
 
-// LoadedLibraryPath reports the library path passed to the dlopen that bound
-// libopenvino_c; "" means the default soname (DefaultLibraryName). loaded is
-// false until a load has succeeded. It is an atomic read and never waits on a
+// loadedLib is set once by the first successful load. The bound handle is kept
+// for the process lifetime and reused on later InitOV calls, so a later InitOV
+// with a different path (after ov_core_create failed once) does not change which
+// library is in use. Never guarded by ovMu, so a reader cannot block behind a
 // model compile.
+var loadedLib atomic.Pointer[loadedLibrary]
+
+// LoadedLibraryPath reports the library path passed to the loader that bound
+// libopenvino_c: the configured path made absolute, a discovered path, or ""
+// for a load by the default library name (DefaultLibraryName). loaded is false
+// until a load has succeeded. It is an atomic read and never waits on a model
+// compile.
 func LoadedLibraryPath() (path string, loaded bool) {
-	p := loadedLibraryPath.Load()
-	if p == nil {
+	l := loadedLib.Load()
+	if l == nil {
 		return "", false
 	}
-	return *p, true
+	return l.path, true
+}
+
+// LoadedLibraryConfigured reports whether the bound library path came from
+// configuration (true) or from automatic discovery or the default library name
+// (false). It is false until a load has succeeded.
+func LoadedLibraryConfigured() bool {
+	l := loadedLib.Load()
+	return l != nil && l.configured
 }
 
 const (
@@ -487,22 +473,18 @@ var (
 // scrubPaths (e.g. the model or library path) are redacted from the OpenVINO
 // message so file paths do not leak into errors or telemetry.
 func lastErr(op string, status C.ov_status_e, scrubPaths ...string) error {
-	msg := C.GoString(C.ovbind_get_last_err_msg())
-	for _, p := range scrubPaths {
-		if p != "" {
-			msg = strings.ReplaceAll(msg, p, "<path>")
-		}
-	}
+	msg := scrubLibraryPaths(C.GoString(C.ovbind_get_last_err_msg()), scrubPaths...)
 	return errors.Newf("openvino: %s failed: status=%d: %s", op, int(status), msg).Build()
 }
 
-// InitOV dlopens libopenvino_c (libraryPath, or by soname when empty) and
-// creates the process-global core. It is idempotent and safe to retry after a
-// failure so hot-reload recovery can re-attempt with a corrected path. It
-// mirrors inference.InitONNXRuntime semantics. The core is freed only by
-// DestroyOV, never on a model reload.
+// InitOV loads libopenvino_c (libraryPath; when empty, the platform default:
+// the soname on Unix, an automatic search of the known install locations and
+// then the bare DLL name on Windows), binds its symbols and creates the
+// process-global core. It is idempotent and safe to retry after a failure so
+// hot-reload recovery can re-attempt with a corrected path. It mirrors inference.InitONNXRuntime semantics. The core is freed only
+// by DestroyOV, never on a model reload.
 func InitOV(libraryPath string) error {
-	// Pin to one OS thread so the dlopen/create call and any ov_get_last_err_msg
+	// Pin to one OS thread so the load/create call and any ov_get_last_err_msg
 	// fetch (C thread-local storage) run on the same thread.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -513,33 +495,76 @@ func InitOV(libraryPath string) error {
 		return nil
 	}
 
-	cPath := C.CString(libraryPath)
-	defer C.free(unsafe.Pointer(cPath))
-	if msg := C.ovbind_load(cPath); msg != nil {
-		errMsg := C.GoString(msg)
-		if libraryPath != "" {
-			errMsg = strings.ReplaceAll(errMsg, libraryPath, "<path>")
+	if C.ovbind_is_loaded() == 0 {
+		resolved, _ := resolveLibraryPath(libraryPath, platformDiscoveryDeps())
+		err := bindLibrary(resolved)
+		if err != nil {
+			return errors.Newf("openvino: failed to load libopenvino_c: %s",
+				scrubLibraryPaths(err.Error(), libraryPath, resolved)).Build()
 		}
-		return errors.Newf("openvino: failed to load libopenvino_c: %s", errMsg).Build()
+		// Only the first success loads the library; later ones reuse the
+		// handle (see loadedLib).
+		loadedLib.CompareAndSwap(nil, &loadedLibrary{path: resolved, configured: libraryPath != ""})
 	}
-	// ovbind_load returned success, so the handle is bound. Only the first
-	// success ran dlopen; later ones reuse the handle (see loadedLibraryPath).
-	loaded := libraryPath
-	loadedLibraryPath.CompareAndSwap(nil, &loaded)
 
 	var core *C.ov_core_t
 	if st := C.ovbind_core_create(&core); !ovOK(st) {
-		return lastErr("ov_core_create", st)
+		scrub := []string{libraryPath}
+		if l := loadedLib.Load(); l != nil {
+			scrub = append(scrub, l.path)
+		}
+		return lastErr("ov_core_create", st, scrub...)
 	}
 	ovCore = core
 	ovLoaded = true
 	return nil
 }
 
+// scrubLibraryPaths redacts each non-empty path from msg, longest first, so
+// file paths do not leak into errors or telemetry.
+func scrubLibraryPaths(msg string, paths ...string) string {
+	// Longest first: a configured relative path can be a suffix of its resolved
+	// absolute form, and replacing the suffix first would leave the directory
+	// prefix of the absolute path in the message.
+	paths = slices.Clone(paths)
+	slices.SortFunc(paths, func(a, b string) int { return len(b) - len(a) })
+	for _, p := range paths {
+		if p != "" {
+			msg = strings.ReplaceAll(msg, p, "<path>")
+		}
+	}
+	return msg
+}
+
+// bindLibrary loads the library, resolves every symbol in OVBIND_SYMBOLS order
+// and installs the table in one C call. The table is installed if and only if
+// every symbol resolved: on any failure the library is closed and the table is
+// left untouched, so a later InitOV can retry with another path. The error text
+// is the loader's own message.
+func bindLibrary(libraryPath string) error {
+	handle, err := openLibrary(libraryPath)
+	if err != nil {
+		return err
+	}
+	count := int(C.ovbind_symbol_count())
+	addrs := make([]C.uintptr_t, count)
+	for i := range addrs {
+		addr, err := lookupSymbol(handle, C.GoString(C.ovbind_symbol_name(C.size_t(i))))
+		if err != nil {
+			closeLibrary(handle)
+			return err
+		}
+		addrs[i] = C.uintptr_t(addr)
+	}
+	C.ovbind_install(C.uintptr_t(handle), &addrs[0])
+	return nil
+}
+
 // DestroyOV frees the process-global core and resets state so InitOV can run
 // again. Call it only on application shutdown or a catastrophic re-init, never
 // on a routine model reload (that path uses Classifier.Close). It returns nil
-// when nothing is loaded.
+// when nothing is loaded. When the GPU fault latch is set (see GPUFault) the core
+// is abandoned, not freed: freeing it would call into the failed GPU context.
 func DestroyOV() error {
 	ovMu.Lock()
 	defer ovMu.Unlock()
@@ -547,13 +572,18 @@ func DestroyOV() error {
 		return nil
 	}
 	if ovCore != nil {
-		C.ovbind_core_free(ovCore)
+		// After a GPU fault ov_core_free would tear down the poisoned GPU plugin and
+		// OpenCL context, and any call into it may hang. Abandon the core (a one-time
+		// leak at shutdown) instead of freeing it.
+		if !gpuFault.blocked() {
+			C.ovbind_core_free(ovCore)
+		}
 		ovCore = nil
 	}
 	ovLoaded = false
-	// The dlopen handle (OVB.handle) is intentionally NOT dlclosed here: it is
+	// The library handle (OVB.handle) is intentionally NOT closed here: it is
 	// kept open for the process lifetime so the resolved symbol table is reused
-	// if InitOV runs again. Do not add a dlclose here; that would reintroduce a
+	// if InitOV runs again. Do not close it here; that would reintroduce a
 	// partial-state inconsistency and break the load invariant.
 	return nil
 }
@@ -575,16 +605,42 @@ type classifier struct {
 	numClasses    int
 	outputIndices []int
 	outputSizes   []int
+	// gpu is true when the classifier was compiled for a GPU device. Only GPU
+	// classifiers consult and feed the GPU fault latch.
+	gpu bool
+}
+
+// gpuAbandoned reports whether native objects of a classifier on the given
+// device class must be abandoned instead of freed: the GPU fault latch is set
+// and the target is a GPU, so any call into the GPU context may hang.
+func gpuAbandoned(gpu bool) bool { return gpu && gpuFault.blocked() }
+
+// releaseSetup frees the partially built native objects of a failed
+// NewClassifier. It skips nil objects and abandons GPU objects once the
+// GPU fault latch is set.
+func releaseSetup(gpu bool, inTensor *C.ov_tensor_t, inBuf unsafe.Pointer, req *C.ov_infer_request_t, compiled *C.ov_compiled_model_t) {
+	// The latch is re-read before every free: another goroutine can trip it
+	// between two of them.
+	if inTensor != nil && !gpuAbandoned(gpu) {
+		C.ovbind_tensor_free(inTensor)
+	}
+	if req != nil && !gpuAbandoned(gpu) {
+		C.ovbind_infer_request_free(req)
+	}
+	if compiled != nil && !gpuAbandoned(gpu) {
+		C.ovbind_compiled_model_free(compiled)
+	}
+	if inBuf != nil && !gpuAbandoned(gpu) {
+		C.free(inBuf)
+	}
 }
 
 // reshapeToStaticBatch1 reshapes the model's single input to a static
 // batch-1 shape and returns the per-segment element count and tensor shape. The
 // element count is read from the model's partial input shape (non-batch axes
-// are static even though the batch dimension is dynamic), so it is derived rather than
-// hardcoded. The reshape mirrors the spike's "key" step: OpenVINO cannot
-// compile or infer a dynamic-batch model without a static input shape. The
-// read-validate-reshape sequence runs atomically in C so cgo never handles the
-// dynamically allocated partial-shape dims.
+// are static even when the batch dimension is dynamic). OpenVINO needs a
+// static input shape to compile and infer these models. The reshape runs
+// in C so cgo never accesses the dynamically allocated partial-shape dims.
 func reshapeToStaticBatch1(model *C.ov_model_t, modelPath string) (sampleCount int, shape C.ov_shape_t, err error) {
 	var count C.int64_t
 	st := C.ovbind_reshape_static_batch1(model, &count, &shape)
@@ -601,13 +657,16 @@ func reshapeToStaticBatch1(model *C.ov_model_t, modelPath string) (sampleCount i
 	return 0, shape, lastErr("ov_model_reshape_single_input", st, modelPath)
 }
 
-// NewClassifier reads modelPath, compiles it for opts.Device (CPU or GPU) at
+// NewClassifier reads modelPath, compiles it for opts.Device (CPU, GPU or GPU.<n>) at
 // opts.PrecisionHint, creates one infer request, binds a C-owned input tensor
-// sized to the model's input shape, and reads the element count of the selected
-// output port (opts.OutputIndex) from the compiled model so NumClasses reflects
-// the model rather than a label list. InitOV must have succeeded first;
-// otherwise it returns ErrOpenVINOUnavailable. The returned Classifier is not
-// goroutine-safe.
+// sized to the model's input shape, and reads the element counts of the selected
+// output ports from the compiled model. NumClasses reports the first count and
+// OutputSizes reports all selected counts. InitOV must have succeeded first;
+// otherwise it returns ErrOpenVINOUnavailable. For a GPU device it returns an
+// error wrapping ErrGPUDeviceFault, without any native call, once the GPU fault
+// latch is set; a failure carrying a fatal OpenCL marker trips the latch, and
+// the native objects built so far are then abandoned instead of freed. The
+// returned Classifier is not goroutine-safe.
 func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 	// Pin to one OS thread so every OpenVINO call here and any
 	// ov_get_last_err_msg fetch (C thread-local storage) run on the same thread.
@@ -633,8 +692,9 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 	if device == "" {
 		device = DeviceCPU
 	}
-	if device != DeviceCPU && device != DeviceGPU {
-		return nil, errors.Newf("openvino: unsupported device %q (want %q or %q)", device, DeviceCPU, DeviceGPU).
+	isGPU := IsGPUDevice(device)
+	if device != DeviceCPU && !isGPU {
+		return nil, errors.Newf("openvino: unsupported device %q (want %q, %q or %q)", device, DeviceCPU, DeviceGPU, DeviceGPU+".<n>").
 			Category(errors.CategoryModelInit).Build()
 	}
 	indices := slices.Clone(opts.OutputIndices)
@@ -646,6 +706,9 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 			return nil, errors.Newf("openvino: negative output index %d", index).
 				Category(errors.CategoryModelInit).Build()
 		}
+	}
+	if gpuAbandoned(isGPU) {
+		return nil, gpuFault.blockedErr()
 	}
 
 	threads := ""
@@ -679,64 +742,94 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 	cThreads := C.CString(threads)
 	defer C.free(unsafe.Pointer(cThreads))
 
+	// Another goroutine may have tripped the latch while the model was read:
+	// do not start a GPU compile on a poisoned context. The read model is host
+	// memory, so freeing it is safe.
+	if gpuAbandoned(isGPU) {
+		C.ovbind_model_free(model)
+		return nil, gpuFault.blockedErr()
+	}
+
 	var compiled *C.ov_compiled_model_t
 	if st := C.ovbind_compile(core, model, cDev, cPrec, cThreads, &compiled); !ovOK(st) {
+		// Build the error first: it reads ov_get_last_err_msg before another C call
+		// can overwrite it.
+		err = gpuFault.setupFailed(isGPU, lastErr("ov_core_compile_model", st, modelPath))
 		C.ovbind_model_free(model)
-		return nil, lastErr("ov_core_compile_model", st, modelPath)
+		releaseSetup(isGPU, nil, nil, nil, compiled)
+		return nil, err
 	}
 	// The compiled model is self-contained; free the read model now to avoid
 	// doubling the per-classifier memory footprint (the create_infer_request
 	// below operates on the compiled model, not the read model).
 	C.ovbind_model_free(model)
-	model = nil
 
-	// Read the real element count of the selected output port from the compiled
-	// model (static after the batch-1 reshape). NumClasses reflects the model,
-	// not the label list, so the caller can validate the label count against it
-	// (issue #1112) and a wrong OutputIndex is rejected before any inference.
+	// Read the element counts from the compiled model so callers can validate
+	// them against their labels (issue #1112). Reject invalid selections before
+	// the first inference.
 	outputSizes := make([]int, len(indices))
 	for i, index := range indices {
+		if gpuAbandoned(isGPU) {
+			return nil, gpuFault.blockedErr()
+		}
 		var count C.int64_t
 		if st := C.ovbind_output_class_count(compiled, C.size_t(index), &count); !ovOK(st) {
-			C.ovbind_compiled_model_free(compiled)
 			if int(st) == int(C.OVBIND_ERR_BAD_OUTPUT) {
+				releaseSetup(isGPU, nil, nil, nil, compiled)
 				return nil, errors.Newf("openvino: output index %d is out of range or has a non-static shape", index).
 					Category(errors.CategoryModelInit).Build()
 			}
-			return nil, lastErr("ov_compiled_model_output shape", st, modelPath)
+			err = gpuFault.setupFailed(isGPU, lastErr("ov_compiled_model_output shape", st, modelPath))
+			releaseSetup(isGPU, nil, nil, nil, compiled)
+			return nil, err
 		}
 		outputSizes[i] = int(count)
+	}
+	if gpuAbandoned(isGPU) {
+		return nil, gpuFault.blockedErr()
 	}
 
 	var req *C.ov_infer_request_t
 	if st := C.ovbind_compiled_model_create_infer_request(compiled, &req); !ovOK(st) {
-		C.ovbind_compiled_model_free(compiled)
-		return nil, lastErr("ov_compiled_model_create_infer_request", st, modelPath)
+		err = gpuFault.setupFailed(isGPU, lastErr("ov_compiled_model_create_infer_request", st, modelPath))
+		releaseSetup(isGPU, nil, nil, req, compiled)
+		return nil, err
+	}
+	if gpuAbandoned(isGPU) {
+		// Tripped by another goroutine meanwhile: abandon the request and compiled model.
+		return nil, gpuFault.blockedErr()
 	}
 
 	// Allocate the input buffer in C memory so OpenVINO may retain the pointer
 	// across infer() without violating cgo pointer-passing rules.
 	inBuf := C.malloc(C.size_t(samples) * C.size_t(float32Bytes))
 	if inBuf == nil {
-		C.ovbind_infer_request_free(req)
-		C.ovbind_compiled_model_free(compiled)
+		releaseSetup(isGPU, nil, nil, req, compiled)
 		return nil, errors.Newf("openvino: failed to allocate %d-sample input buffer", samples).Build()
 	}
 
+	if gpuAbandoned(isGPU) {
+		return nil, gpuFault.blockedErr()
+	}
 	var inTensor *C.ov_tensor_t
 	if st := C.ovbind_tensor_create_from_host_ptr(C.F32, shape, inBuf, &inTensor); !ovOK(st) {
-		C.free(inBuf)
-		C.ovbind_infer_request_free(req)
-		C.ovbind_compiled_model_free(compiled)
-		return nil, lastErr("ov_tensor_create_from_host_ptr", st)
+		err = gpuFault.setupFailed(isGPU, lastErr("ov_tensor_create_from_host_ptr", st))
+		releaseSetup(isGPU, inTensor, inBuf, req, compiled)
+		return nil, err
 	}
 
+	if gpuAbandoned(isGPU) {
+		return nil, gpuFault.blockedErr()
+	}
 	if st := C.ovbind_set_input_tensor(req, inputPortIndex, inTensor); !ovOK(st) {
-		C.ovbind_tensor_free(inTensor)
-		C.free(inBuf)
-		C.ovbind_infer_request_free(req)
-		C.ovbind_compiled_model_free(compiled)
-		return nil, lastErr("ov_infer_request_set_input_tensor_by_index", st)
+		err = gpuFault.setupFailed(isGPU, lastErr("ov_infer_request_set_input_tensor_by_index", st))
+		releaseSetup(isGPU, inTensor, inBuf, req, compiled)
+		return nil, err
+	}
+	if gpuAbandoned(isGPU) {
+		// Tripped by another goroutine meanwhile: do not hand out a dead GPU
+		// classifier; abandon everything built so far.
+		return nil, gpuFault.blockedErr()
 	}
 	// The tensor keeps a reference to inBuf; the wrapper handle itself is no
 	// longer needed once the request holds it.
@@ -751,13 +844,18 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 		numClasses:    outputSizes[0],
 		outputIndices: indices,
 		outputSizes:   outputSizes,
+		gpu:           isGPU,
 	}, nil
 }
 
 // PredictRaw copies samples into the C input buffer, runs one inference, and
 // returns a freshly allocated Go slice of the raw output logits. It returns an
-// error if the input length does not match the model's input sample count. Not
-// goroutine-safe.
+// error if the input length does not match the model's input sample count. On a
+// GPU classifier it returns an error wrapping ErrGPUDeviceFault, without any
+// native call, once the GPU fault latch is set; a native failure with a fatal
+// OpenCL marker, or a streak of consecutive failures, sets it. When another
+// goroutine sets the latch while the inference runs, it returns the same error
+// without reading the output. Not goroutine-safe.
 func (c *classifier) PredictRaw(samples []float32) ([]float32, error) {
 	// Pin to one OS thread so the infer call and any ov_get_last_err_msg fetch
 	// (C thread-local storage) run on the same thread.
@@ -767,7 +865,12 @@ func (c *classifier) PredictRaw(samples []float32) ([]float32, error) {
 	if err := c.infer(samples); err != nil {
 		return nil, err
 	}
-	return c.readOutput(c.outputIndex)
+	out, err := c.readOutput(c.outputIndex)
+	if err != nil {
+		return nil, err
+	}
+	_ = gpuFault.inferResult(c.gpu, nil)
+	return out, nil
 }
 
 // PredictOutputs returns every selected output from the same inference.
@@ -785,6 +888,8 @@ func (c *classifier) PredictOutputs(samples []float32) ([][]float32, error) {
 		}
 		outputs[i] = out
 	}
+	// Reset the streak only after every selected output has been read.
+	_ = gpuFault.inferResult(c.gpu, nil)
 	return outputs, nil
 }
 
@@ -796,6 +901,9 @@ func (c *classifier) infer(samples []float32) error {
 	if c.req == nil || c.inBuf == nil {
 		return ErrOpenVINOUnavailable
 	}
+	if gpuAbandoned(c.gpu) {
+		return gpuFault.blockedErr()
+	}
 	if len(samples) != c.samples {
 		return errors.Newf("openvino: input length %d does not match model input %d", len(samples), c.samples).Build()
 	}
@@ -803,28 +911,54 @@ func (c *classifier) infer(samples []float32) error {
 	dst := unsafe.Slice((*float32)(c.inBuf), c.samples)
 	copy(dst, samples)
 
+	if gpuAbandoned(c.gpu) {
+		return gpuFault.blockedErr()
+	}
 	if st := C.ovbind_infer(c.req); !ovOK(st) {
-		return lastErr("ov_infer_request_infer", st)
+		return gpuFault.inferResult(c.gpu, lastErr("ov_infer_request_infer", st))
+	}
+	// Another goroutine (a GPU compile in NewClassifier, or another classifier's
+	// inference) can trip the latch while this infer runs; do not read the output
+	// from a failed GPU context.
+	if gpuAbandoned(c.gpu) {
+		return gpuFault.blockedErr()
 	}
 
 	return nil
 }
 
 func (c *classifier) readOutput(index int) ([]float32, error) {
+	if gpuAbandoned(c.gpu) {
+		return nil, gpuFault.blockedErr()
+	}
 	var outTensor *C.ov_tensor_t
 	if st := C.ovbind_get_output_tensor(c.req, C.size_t(index), &outTensor); !ovOK(st) {
-		return nil, lastErr("ov_infer_request_get_output_tensor_by_index", st)
+		return nil, gpuFault.inferResult(c.gpu, lastErr("ov_infer_request_get_output_tensor_by_index", st))
 	}
-	defer C.ovbind_tensor_free(outTensor)
+	defer func() {
+		// The output tensor belongs to the GPU request: leave it once the latch is set.
+		if !gpuAbandoned(c.gpu) {
+			C.ovbind_tensor_free(outTensor)
+		}
+	}()
 
+	if gpuAbandoned(c.gpu) {
+		return nil, gpuFault.blockedErr()
+	}
 	var n C.size_t
 	if st := C.ovbind_tensor_get_size(outTensor, &n); !ovOK(st) {
-		return nil, lastErr("ov_tensor_get_size", st)
+		return nil, gpuFault.inferResult(c.gpu, lastErr("ov_tensor_get_size", st))
 	}
 
+	if gpuAbandoned(c.gpu) {
+		return nil, gpuFault.blockedErr()
+	}
 	var dataPtr unsafe.Pointer
 	if st := C.ovbind_tensor_data(outTensor, &dataPtr); !ovOK(st) {
-		return nil, lastErr("ov_tensor_data", st)
+		return nil, gpuFault.inferResult(c.gpu, lastErr("ov_tensor_data", st))
+	}
+	if gpuAbandoned(c.gpu) {
+		return nil, gpuFault.blockedErr()
 	}
 	// ov_tensor_data can return OK with a nil buffer; unsafe.Slice on a nil
 	// pointer with n > 0 is undefined behavior, so guard it.
@@ -845,28 +979,33 @@ func (c *classifier) NumClasses() int { return c.numClasses }
 // Close frees the infer request, compiled model, and the C input buffer, in
 // that order. The read model was already freed right after compile in
 // NewClassifier. Close does not touch the process-global core. Close is
-// idempotent.
+// idempotent. On a GPU classifier whose GPU fault latch is set, Close abandons
+// the native objects without freeing them (a small one-time leak): freeing them
+// would call into the failed GPU context and may hang.
 func (c *classifier) Close() error {
-	if c.req != nil {
+	// The latch is re-read before every free: another goroutine can trip it
+	// between two of them.
+	if c.req != nil && !gpuAbandoned(c.gpu) {
 		C.ovbind_infer_request_free(c.req)
-		c.req = nil
 	}
-	if c.compiled != nil {
+	c.req = nil
+	if c.compiled != nil && !gpuAbandoned(c.gpu) {
 		C.ovbind_compiled_model_free(c.compiled)
-		c.compiled = nil
 	}
-	if c.inBuf != nil {
+	c.compiled = nil
+	if c.inBuf != nil && !gpuAbandoned(c.gpu) {
 		C.free(c.inBuf)
-		c.inBuf = nil
 	}
+	c.inBuf = nil
 	return nil
 }
 
 // AvailableDevices returns the OpenVINO device names visible to the loaded core
-// (e.g. "CPU", "GPU"). "GPU" appears only when the Intel GPU plugin and a
-// supported iGPU/dGPU are present. InitOV must have succeeded first; otherwise
-// it returns ErrOpenVINOUnavailable. Used to gate the GPU path on Intel GPU
-// presence before falling back to the CPU device or ORT.
+// (e.g. "CPU", "GPU"). A GPU appears only when the Intel GPU plugin and a
+// supported iGPU/dGPU are present, as "GPU" for a single adapter or as "GPU.0",
+// "GPU.1" and so on when the host has several (see IsGPUDevice). InitOV must have
+// succeeded first; otherwise it returns ErrOpenVINOUnavailable. Used to gate the
+// GPU path on Intel GPU presence before falling back to the CPU device or ORT.
 func AvailableDevices() ([]string, error) {
 	// Pin to one OS thread so the query and any ov_get_last_err_msg fetch
 	// (C thread-local storage) run on the same thread.
@@ -897,4 +1036,40 @@ func AvailableDevices() ([]string, error) {
 		devices = append(devices, C.GoString(cName))
 	}
 	return devices, nil
+}
+
+// DeviceProperty reads the string property key (for example "FULL_DEVICE_NAME")
+// of the named device from the loaded core. A device that does not support the
+// property returns an error, which callers treat as "unknown". InitOV must have
+// succeeded. Like AvailableDevices it queries the vendor driver stack, so it is
+// meant for the probe child only, never for an in-process planning path (issue
+// #4236).
+func DeviceProperty(device, key string) (string, error) {
+	// Pin to one OS thread so the query and any ov_get_last_err_msg fetch
+	// (C thread-local storage) run on the same thread.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// Hold ovMu for the whole core-using section so a concurrent DestroyOV cannot
+	// free ovCore mid-query.
+	ovMu.Lock()
+	defer ovMu.Unlock()
+	if !ovLoaded || ovCore == nil {
+		return "", ErrOpenVINOUnavailable
+	}
+
+	cDevice := C.CString(device)
+	defer C.free(unsafe.Pointer(cDevice))
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+
+	var value *C.char
+	if st := C.ovbind_get_device_property(ovCore, cDevice, cKey, &value); !ovOK(st) {
+		return "", lastErr("ov_core_get_property", st)
+	}
+	if value == nil {
+		return "", nil
+	}
+	defer C.ovbind_release_ov_string(value)
+	return C.GoString(value), nil
 }

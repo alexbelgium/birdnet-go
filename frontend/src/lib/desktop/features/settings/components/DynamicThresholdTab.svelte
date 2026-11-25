@@ -37,6 +37,7 @@
   import { handleAppLinkClick } from '$lib/stores/navigation.svelte';
   import { formatDateTime } from '$lib/utils/formatters';
   import SettingsNote from './SettingsNote.svelte';
+  import SettingsGroupLabel from './SettingsGroupLabel.svelte';
   import ResizableContainer from '$lib/desktop/components/ui/ResizableContainer.svelte';
   import SortableHeader from '$lib/desktop/components/ui/SortableHeader.svelte';
   import { sortAnnouncement } from '$lib/utils/sortAnnouncement';
@@ -289,9 +290,9 @@
           <div class="p-1 rounded-md bg-violet-500/10">
             <Activity class="w-3.5 h-3.5 text-violet-500" />
           </div>
-          <span class="text-xs font-medium text-muted"
-            >{t('settings.species.dynamicThreshold.stats.active')}</span
-          >
+          <span class="text-xs font-medium text-muted">
+            {t('settings.species.dynamicThreshold.stats.active')}
+          </span>
         </div>
         <span class="font-mono tabular-nums text-xl font-semibold pl-0.5">{stats.activeCount}</span>
       </div>
@@ -303,13 +304,13 @@
           <div class="p-1 rounded-md bg-[color-mix(in_srgb,var(--color-warning)_10%,transparent)]">
             <TrendingDown class="w-3.5 h-3.5 text-[var(--text-warning)]" />
           </div>
-          <span class="text-xs font-medium text-muted"
-            >{t('settings.species.dynamicThreshold.stats.atMinimum')}</span
-          >
+          <span class="text-xs font-medium text-muted">
+            {t('settings.species.dynamicThreshold.stats.atMinimum')}
+          </span>
         </div>
-        <span class="font-mono tabular-nums text-xl font-semibold pl-0.5"
-          >{stats.atMinimumCount}</span
-        >
+        <span class="font-mono tabular-nums text-xl font-semibold pl-0.5">
+          {stats.atMinimumCount}
+        </span>
       </div>
 
       <div
@@ -319,13 +320,13 @@
           <div class="p-1 rounded-md bg-[color-mix(in_srgb,var(--color-success)_10%,transparent)]">
             <Gauge class="w-3.5 h-3.5 text-[var(--text-success)]" />
           </div>
-          <span class="text-xs font-medium text-muted"
-            >{t('settings.species.dynamicThreshold.stats.minThreshold')}</span
-          >
+          <span class="text-xs font-medium text-muted">
+            {t('settings.species.dynamicThreshold.stats.minThreshold')}
+          </span>
         </div>
-        <span class="font-mono tabular-nums text-xl font-semibold pl-0.5"
-          >{(stats.minThreshold * 100).toFixed(0)}%</span
-        >
+        <span class="font-mono tabular-nums text-xl font-semibold pl-0.5">
+          {(stats.minThreshold * 100).toFixed(0)}%
+        </span>
       </div>
 
       <div
@@ -335,13 +336,13 @@
           <div class="p-1 rounded-md bg-[color-mix(in_srgb,var(--color-info)_10%,transparent)]">
             <Clock class="w-3.5 h-3.5 text-[var(--text-info)]" />
           </div>
-          <span class="text-xs font-medium text-muted"
-            >{t('settings.species.dynamicThreshold.stats.validityPeriod')}</span
-          >
+          <span class="text-xs font-medium text-muted">
+            {t('settings.species.dynamicThreshold.stats.validityPeriod')}
+          </span>
         </div>
-        <span class="font-mono tabular-nums text-xl font-semibold pl-0.5"
-          >{stats.validHours}{t('common.hoursShort')}</span
-        >
+        <span class="font-mono tabular-nums text-xl font-semibold pl-0.5">
+          {stats.validHours}{t('common.hoursShort')}
+        </span>
       </div>
     </div>
   {/if}
@@ -354,9 +355,9 @@
         <div class="p-1.5 rounded-lg bg-violet-500/10">
           <Activity class="w-4 h-4 text-violet-500" />
         </div>
-        <h3 class="text-xs font-semibold uppercase tracking-wider text-muted">
+        <SettingsGroupLabel as="h3">
           {t('settings.species.dynamicThreshold.header.species')}
-        </h3>
+        </SettingsGroupLabel>
         <span
           class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-500/10 text-muted"
         >
@@ -427,12 +428,12 @@
           <caption class="sr-only">{t('settings.species.dynamicThreshold.header.species')}</caption>
           <thead class="sticky top-0 bg-[var(--surface-100)] z-10">
             <tr class="border-b border-[var(--border-100)]">
-              <th scope="col" class="w-8 py-2 px-2"
-                ><span class="sr-only">{t('common.toggle')}</span></th
-              >
-              <th scope="col" class="w-10 py-2 px-1"
-                ><span class="sr-only">{t('common.image')}</span></th
-              >
+              <th scope="col" class="w-8 py-2 px-2">
+                <span class="sr-only">{t('common.toggle')}</span>
+              </th>
+              <th scope="col" class="w-10 py-2 px-1">
+                <span class="sr-only">{t('common.image')}</span>
+              </th>
               <SortableHeader
                 label={sortHeaderLabels.species()}
                 field="species"
@@ -467,9 +468,9 @@
                 align="center"
                 className={cn(SORT_HEADER_CLASS, 'w-24')}
               />
-              <th scope="col" class="w-12"
-                ><span class="sr-only">{t('common.actionsColumn')}</span></th
-              >
+              <th scope="col" class="w-12">
+                <span class="sr-only">{t('common.actionsColumn')}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -533,9 +534,9 @@
                   {#if threshold.isActive}
                     <span class="text-xs font-medium">{getTimeRemaining(threshold.expiresAt)}</span>
                   {:else}
-                    <span class="text-xs font-medium text-[var(--text-warning)]"
-                      >{t('settings.species.dynamicThreshold.expired')}</span
-                    >
+                    <span class="text-xs font-medium text-[var(--text-warning)]">
+                      {t('settings.species.dynamicThreshold.expired')}
+                    </span>
                   {/if}
                 </td>
                 <td class="py-2 px-3 w-12 text-right">

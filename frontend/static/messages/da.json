@@ -155,6 +155,12 @@
       "confirmAction": "Bekræft handling",
       "confirmMessage": "Er du sikker på, at du vil udføre denne handling?"
     },
+    "unsavedChanges": {
+      "title": "Forlade denne side?",
+      "message": "Du har ugemte ændringer. Hvis du forlader siden, går de tabt.",
+      "leave": "Forlad siden",
+      "stay": "Bliv"
+    },
     "review": {
       "modalTitle": "Gennemgå detektion: {species}",
       "status": {
@@ -493,6 +499,12 @@
         "loadFailedTitle": "Akustisk model kunne ikke indlæses",
         "loadFailedMessage": "En aktiveret akustisk model kunne ikke indlæses, så lyd optages, men analyseres ikke. Tjek modellen på siden System > AI-modeller."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel er ikke installeret",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 er nødvendig for at filtrere registreringer efter placering for: {models}. Installer BirdNET Geomodel v3.0 fra modelgalleriet i Indstillinger > Analyse > Modeller.",
+        "loadFailedTitle": "Geomodel kunne ikke indlæses",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 kunne ikke indlæses, så filtrering efter placering er slået fra for: {models}. Tjek programmets log, og installer eller geninstaller BirdNET Geomodel v3.0 fra modelgalleriet i Indstillinger > Analyse > Modeller."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# model har en bedre version til dette system} other {# modeller har bedre versioner til dette system}}",
         "message": "En version, der passer bedre til systemets hardware eller placering, er tilgængelig for: {models}. Åbn Indstillinger > Analyse > Modeller, og vælg Optimer for at skifte."
@@ -500,6 +512,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {En installeret model har en nyere udgave} other {# installerede modeller har nyere udgaver}}",
         "message": "En installeret model er en forhåndsversion, og den endelige udgave er nu tilgængelig: {models}. Åbn Indstillinger > Analyse > Modeller, installer den endelige udgave, og fjern forhåndsversionen."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {En installeret model har en nyere version} other {# installerede modeller har nyere versioner}}",
+        "message": "En nyere version erstatter den installerede for: {models}. Den installerede version fungerer, indtil du skifter. Åbn Indstillinger > Analyse > Modeller, og vælg Opdater."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -901,7 +917,7 @@
         "changed": "Art ændret til {species}",
         "changeFailed": "Arten kunne ikke ændres. Prøv igen.",
         "conflict": "Arten kan ikke ændres nu: registreringen er bevaret (låst), eller det gamle databaseformat er i brug.",
-        "notKnownHere": "{species} er aldrig blevet registreret eller forudsagt på denne station, så den kan ikke vælges endnu.",
+        "unknownSpecies": "{species} er ikke længere på artslisten, så den kan ikke vælges. Luk dialogen og prøv igen.",
         "predictionsTitle": "Andre forudsigelser",
         "noPredictions": "Modellen gemte ingen andre forudsigelser for denne optagelse.",
         "allSpecies": "Alle arter",
@@ -2493,7 +2509,6 @@
       "loadFailed": "Kunne ikke indlæse indstillinger",
       "saveFailed": "Kunne ikke gemme indstillinger",
       "changedElsewhere": "Indstillingerne blev ændret et andet sted. Gennemgå dem, og gem igen.",
-      "databaseStatsFailed": "Kunne ikke indlæse databasestatistik",
       "csvDownloadFailed": "Kunne ikke downloade CSV"
     },
     "card": {
@@ -2700,26 +2715,15 @@
               "helpText": "MySQL-databasenavn"
             }
           },
-          "stats": {
-            "title": "Databasestatistik",
-            "description": "Kørselsinformation om din database",
-            "loading": "Indlæser databasestatistik...",
-            "retry": "Prøv igen",
-            "refresh": "Opdater",
-            "noData": "Ingen databasestatistik tilgængelig.",
-            "type": "Type",
-            "status": "Status",
-            "size": "Størrelse",
-            "totalDetections": "Detektioner i alt",
-            "location": "Placering",
-            "connected": "Forbundet",
-            "disconnected": "Afbrudt"
-          },
           "errors": {
             "backupStartFailed": "Kunne ikke starte backup",
             "backupStatusFailed": "Kunne ikke hente backupstatus",
             "backupFailed": "Backup mislykkedes",
             "backupDownloadFailed": "Kunne ikke downloade backup"
+          },
+          "statsMoved": {
+            "text": "Databasestatistikken er flyttet til sektionen System.",
+            "link": "Åbn System > Database"
           }
         },
         "interface": {
@@ -3738,12 +3742,7 @@
           "atLeastOneModel": "Mindst én model skal vælges"
         },
         "captureTitle": "Optagelse",
-        "levelTitle": "Indgangsniveau",
-        "captureApplyHint": "Optagelsen genstartes, når du anvender.",
-        "applyCapture": "Anvend og genstart optagelsen",
-        "applying": "Anvender...",
-        "adding": "Tilføjer...",
-        "captureApplyFailed": "Optagelsen blev ikke ændret. Anvend igen, eller annullér."
+        "levelTitle": "Indgangsniveau"
       },
       "audioCapture": {
         "title": "Lydkortkonfiguration",
@@ -3761,7 +3760,8 @@
         "deviceSelected": "Lydkort valgt og klar til optagelse",
         "availableDevices": "Tilgængelige lydenheder",
         "active": "Aktiv",
-        "streamsConfigured": "{count} strøm(me) konfigureret"
+        "streamsConfigured": "{count} strøm(me) konfigureret",
+        "description": "Lydkort, som BirdNET-Go lytter til. En ændring af enhed eller samplingsfrekvens genstarter optagelsen på den kilde, når du gemmer."
       },
       "quietHours": {
         "title": "Stille timer",
@@ -3785,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Konfiguration af lydstrøm",
-        "noStreamsConfigured": "Ingen strømme konfigureret"
+        "noStreamsConfigured": "Ingen strømme konfigureret",
+        "description": "Konfigurer netværkslydstrømme til fjernoptagelse af lyd. Understøtter RTSP, HTTP, HLS, RTMP og UDP-protokoller. Ændring af forbindelsen genopretter forbindelsen til strømmen, når du gemmer."
       },
       "streams": {
         "streamLabel": "Strøm",
@@ -3908,12 +3909,7 @@
           "message": "Stereostream detekteret. Downmixing af flere kanaler kan reducere detektionsnøjagtigheden på grund af faseforskelle mellem kanaler. Vælg en specifik kanal (venstre/højre) eller brug kanaldetektoren for bedste resultater.",
           "short": "Stereo downmix aktiv. Detektionsnøjagtighed kan være reduceret. Vælg en specifik kanal under Forbindelse."
         },
-        "autoSaveHelp": "Ændringer gemmes med det samme. Ændringer af forbindelsen genforbinder streamen og venter derfor, til du klikker på Anvend.",
         "connectionTitle": "Forbindelse",
-        "connectionApplyHint": "Streamen genforbindes, når du anvender.",
-        "connectionApplyFailed": "Forbindelsen blev ikke ændret. Anvend igen, eller annullér.",
-        "applyConnection": "Anvend og genforbind",
-        "testBeforeApply": "Test den nye URL, før du anvender den.",
         "statsLine": "I alt: {total} · Hastighed: {rate} · Seneste: {last}",
         "ago": {
           "seconds": "{count} s siden",
@@ -4154,8 +4150,13 @@
         "listFailed": "Modellisten kunne ikke indlæses.",
         "warningBadge": "Kontrollér klassifikatorer"
       },
-      "sources": {
-        "autoSaveHelp": "Ændringer gemmes med det samme. Ændringer af enhed og samplingsfrekvens genstarter optagelsen og venter derfor, til du klikker på Anvend."
+      "validation": {
+        "soundCards": "Ret lydkortene under fanen {tab}, før du gemmer: {names}",
+        "unnamedSource": "kilde {position} (uden navn)",
+        "needsAttention": "Kræver opmærksomhed",
+        "streams": "Ret strømmene under fanen {tab}, før du gemmer: {names}",
+        "streamsUntested": "Test den nye strøm-URL under fanen {tab}, før du gemmer: {names}",
+        "unnamedStream": "strøm {position} (uden navn)"
       }
     },
     "security": {
@@ -5094,8 +5095,8 @@
       "audioPlayback": {
         "title": "Lydafspilning",
         "description": "Standardindstillinger for afspilning af fugleoptagelser.",
-        "defaultGain": "Standard lydstyrkeforstærkning",
-        "defaultGainHelpText": "Indledende forstærkning ved afspilning af optagelser. Fuglelyde er ofte stille, så en forstærkning på 6-12 dB anbefales.",
+        "defaultGain": "Standardforstærkning",
+        "defaultGainHelpText": "Forstærkningen, som hvert klip starter med. Fuglelyde er ofte svage, så 6 til 12 dB er et godt udgangspunkt; en negativ værdi gør klip svagere.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Fjern støj fra klip ved afspilning",
         "denoiseHelpText": "Afspiller og henter en kopi af hvert klip uden støj. Gemte klip forbliver uændrede. Downloads bliver WAV-filer og er større. Et klips lydindstillinger kan vælge en anden styrke eller slå støjreduktion fra.",
@@ -5104,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Slå støjreduktion ved afspilning til ovenfor for at vælge en styrke.",
         "denoiseExportPrecedence": "Anvendes ikke, mens „Støjreduktion af gemte klip“ er slået til (Lydindstillinger, fanen Behandling). Disse klip er allerede uden støj.",
         "denoiseRedenoiseNote": "Klip, der blev gemt mens „Støjreduktion af gemte klip“ var slået til, får fjernet støj igen ved afspilning. Vælg Fra i et klips lydindstillinger for at høre det, som det blev gemt.",
-        "denoiseLossyNote": "Støjreduktion virker bedst på FLAC- eller WAV-klip. Under {minBitrate} kbps begrænser kodekartefakter, hvor rent resultatet bliver."
+        "denoiseLossyNote": "Støjreduktion virker bedst på FLAC- eller WAV-klip. Under {minBitrate} kbps begrænser kodekartefakter, hvor rent resultatet bliver.",
+        "highPassLabel": "Standard højpasfilter",
+        "highPassHelpText": "Fjerner lyd under denne frekvens, mens et klip afspilles, for eksempel vind og trafikbrum. Det anvendes i browseren, så gemte, downloadede og eksporterede klip ikke filtreres.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Fra"
       }
     },
     "restartRequired": "Nogle ændringer kræver genstart af serveren for at træde i kraft. Genstart venligst BirdNET-Go."
@@ -5119,6 +5124,8 @@
     "passwordPlaceholder": "Indtast din adgangskode",
     "enterPassword": "Indtast din adgangskode",
     "continue": "Fortsæt",
+    "rememberBrowser": "Husk denne browser",
+    "rememberBrowserHelp": "Forbliv logget ind i denne browser. Lad feltet stå uafkrydset på en delt computer.",
     "or": "eller",
     "loginWithGoogle": "Log ind med Google",
     "loginWithGithub": "Log ind med GitHub",
@@ -5414,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "Generering mislykkedes med status {status}",
         "spectrogramFailed": "Kunne ikke generere spektrogram"
+      },
+      "defaults": {
+        "open": "Standarder for afspilning",
+        "title": "Standarder for afspilning",
+        "description": "Alle klip starter med disse værdier. De gemmes på denne station og gælder for alle, der bruger den.",
+        "useCurrent": "Brug aktuelle værdier",
+        "useCurrentHelp": "Kopierer den forstærkning, støjreduktion og det højpasfilter, som denne afspiller er indstillet til, ind i felterne nedenfor. Intet gemmes, før du vælger Gem ændringer.",
+        "useCurrentHelpNoDenoise": "Kopierer den forstærkning og det højpasfilter, som denne afspiller er indstillet til, ind i felterne nedenfor. Intet gemmes, før du vælger Gem ændringer.",
+        "copied": "Aktuelle værdier kopieret. Vælg Gem ændringer for at beholde dem.",
+        "saved": "Standarder for afspilning gemt",
+        "saveFailed": "Standarderne for afspilning blev ikke gemt. Intet blev ændret.",
+        "unavailable": "Indstillingerne kunne ikke indlæses, så standarderne kan ikke ændres her."
       },
       "clipExtraction": {
         "selectRange": "Klik og træk for at vælge et interval",
@@ -5963,6 +5982,8 @@
       },
       "actionInProgress": "Vent på, at den aktuelle installation, geninstallation eller fjernelse af modellen fuldføres",
       "installSuccess": "{name} er installeret",
+      "cancelling": "Annullerer...",
+      "cancelled": "Download af {name} er annulleret.",
       "installedEnableOnSources": "{name} er installeret. Slå den til for dine kilder under Indstillinger > Lyd for at bruge den.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6010,7 +6031,8 @@
         "verifying": "Verificerer...",
         "loading": "Indlæser...",
         "complete": "Installeret succesfuldt",
-        "failed": "Fejlet"
+        "failed": "Fejlet",
+        "cancelled": "Annulleret"
       },
       "license": {
         "title": "Licensaftale",
@@ -6038,6 +6060,7 @@
         "removeFailed": "Kunne ikke fjerne model",
         "removeHasDependents": "{name} bruges af {models}. Fjern disse modeller først.",
         "operationInProgress": "En installation, geninstallation eller fjernelse af en model er allerede i gang ({name}). Prøv igen, når den er færdig.",
+        "cancelUnavailable": "Download af {name} kan ikke længere annulleres.",
         "actionFailed": "Der opstod et problem med {name}",
         "downloadSourceHint": "Hvis huggingface.co er blokeret eller langsomt på dit netværk, kan du indstille en spejlserver i sektionen Downloadkilde nedenfor.",
         "goToDownloadSource": "Gå til Downloadkilde",
@@ -6067,6 +6090,19 @@
       "superseded": {
         "cardNotice": "Afløst af {name}. Brug den nyere model i stedet.",
         "dialogNotice": "Denne model er afløst af {name}. Overvej at installere {name} i stedet."
+      },
+      "update": {
+        "cardNotice": "En nyere version ({to}) erstatter den installerede version {from}.",
+        "cardNoticeBuild": "Build {to} af version {version} erstatter det installerede build {from}.",
+        "action": "Opdater",
+        "applying": "Opdaterer..."
+      },
+      "buildNotes": {
+        "heading": "Nyt i build {build} af version {version}",
+        "released": "Udgivet {date}",
+        "buildLabel": "Buildnummer",
+        "buildValue": "{build}, udgivet {date}",
+        "disclosure": "Nyt i dette build"
       },
       "entryIncompatible": "Denne model er ikke tilgængelig på dette system.",
       "regionGlobal": "Global",
@@ -6172,10 +6208,19 @@
       "device": {
         "label": "OpenVINO-enhed",
         "helpText": "Bruges til modeller, der kører på OpenVINO.",
+        "helpTextMultipleGpus": "Bruges til modeller, der kører på OpenVINO. Denne enhed har mere end én GPU, så vælg den, modellerne skal køre på.",
+        "notDetectedHint": "Den valgte GPU blev ikke fundet. Modellerne kører på ONNX Runtime, indtil en anden enhed vælges.",
         "options": {
           "auto": "Automatisk",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "OpenVINO-standard: {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (ikke fundet)"
+        },
+        "gpuTypes": {
+          "integrated": "integreret",
+          "discrete": "dedikeret"
         }
       },
       "reloadNote": "Ændring af backend eller enhed genindlæser modellerne, så detektionen sættes på pause i et par sekunder.",
@@ -6373,6 +6418,52 @@
       "patternNone": "Ingen",
       "patternTransient": "Forbigående",
       "patternSustained": "Vedvarende"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Tastaturgenveje",
+    "modal": {
+      "title": "Tastaturgenveje",
+      "enable": "Slå tastaturgenveje til",
+      "enableHelp": "Slå dette fra, hvis genveje med én tast er i vejen for en skærmlæser, stemmestyring eller et hjælpetastatur.",
+      "offNote": "Tastaturgenveje er slået fra. Tasterne nedenfor gør ingenting, før du slår dem til.",
+      "or": "eller"
+    },
+    "scopes": {
+      "global": "Alle sider"
+    },
+    "groups": {
+      "navigation": "Navigering",
+      "review": "Gennemgang",
+      "audio": "Lyd",
+      "general": "Generelt"
+    },
+    "keys": {
+      "shift": "Skift",
+      "space": "Mellemrum",
+      "arrowLeft": "Venstrepil",
+      "arrowRight": "Højrepil",
+      "comma": "Komma",
+      "period": "Punktum",
+      "questionMark": "Spørgsmålstegn",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Ældre registrering af samme art",
+      "newerSpecies": "Nyere registrering af samme art",
+      "correct": "Markér som korrekt",
+      "falsePositive": "Markér som falsk positiv",
+      "wrongSpecies": "Skift art",
+      "keep": "Behold eller frigiv denne optagelse",
+      "playPause": "Afspil eller sæt på pause",
+      "seekBack": "Ét sekund tilbage",
+      "seekForward": "Ét sekund frem",
+      "focusReview": "Gå til gennemgangsknapperne",
+      "backToList": "Tilbage til registreringer"
+    },
+    "global": {
+      "help": "Vis eller skjul tastaturgenveje"
     }
   }
 }

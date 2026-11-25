@@ -15,6 +15,7 @@
   @component
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { generateId } from '$lib/utils/uuid';
   import {
     Plus,
@@ -44,6 +45,8 @@
     schemaOperatorLabel,
   } from '$lib/utils/alertSchema';
   import { translateField } from '$lib/utils/notifications';
+  import { useUnsavedChangesGuard } from '$lib/utils/useUnsavedChangesGuard.svelte';
+  import { samePathAndQuery } from '$lib/stores/unsavedChanges.svelte';
 
   interface Props {
     rule: AlertRule | null;
@@ -87,6 +90,30 @@
   let objDropOpen = $state(false);
   let eventDropOpen = $state(false);
 
+  // The editable fields as JSON.
+  function formSnapshot(): string {
+    return JSON.stringify({
+      name,
+      description,
+      enabled,
+      objectType,
+      triggerType,
+      eventName,
+      metricName,
+      cooldownSec,
+      conditions,
+      actions,
+    });
+  }
+
+  // The form as the last init left it; null until then.
+  let initialSnapshot = $state<string | null>(null);
+
+  // The editor lives in a tab, so a tab switch (query change) unmounts it as well.
+  useUnsavedChangesGuard(() => initialSnapshot !== null && formSnapshot() !== initialSnapshot, {
+    allows: samePathAndQuery,
+  });
+
   // Initialize form state from rule prop
   $effect(() => {
     if (rule) {
@@ -127,6 +154,8 @@
       conditions = [];
       actions = [{ target: 'bell', template_title: '', template_message: '' }];
     }
+    // untrack: reading every field here would re-run this effect on each keystroke and reset the form
+    initialSnapshot = untrack(() => formSnapshot());
   });
 
   // Schema-driven options
@@ -698,9 +727,9 @@
               <!-- Duration (metric only) -->
               {#if triggerType === 'metric'}
                 <div class="flex items-center gap-1">
-                  <span class="text-[10px] text-[var(--color-base-content)]/40"
-                    >{t('settings.alerts.editor.durationFor')}</span
-                  >
+                  <span class="text-[10px] text-[var(--color-base-content)]/40">
+                    {t('settings.alerts.editor.durationFor')}
+                  </span>
                   <input
                     type="number"
                     min="0"
@@ -713,9 +742,9 @@
                       condition.duration_sec = Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0;
                     }}
                   />
-                  <span class="text-[10px] text-[var(--color-base-content)]/40"
-                    >{t('settings.alerts.editor.durationSec')}</span
-                  >
+                  <span class="text-[10px] text-[var(--color-base-content)]/40">
+                    {t('settings.alerts.editor.durationSec')}
+                  </span>
                 </div>
               {/if}
               <!-- Remove -->
@@ -751,9 +780,9 @@
             onclick={() => toggleAction('bell')}
           >
             <Bell class="w-3.5 h-3.5 text-[var(--color-base-content)]" />
-            <span class="text-[var(--color-base-content)]"
-              >{t('settings.alerts.editor.actionBell')}</span
-            >
+            <span class="text-[var(--color-base-content)]">
+              {t('settings.alerts.editor.actionBell')}
+            </span>
             {#if isActionSelected('bell')}
               <Check class="w-3 h-3 text-[var(--text-primary)] ml-auto" />
             {/if}
@@ -768,9 +797,9 @@
             onclick={() => toggleAction('push')}
           >
             <Send class="w-3.5 h-3.5 text-[var(--color-base-content)]" />
-            <span class="text-[var(--color-base-content)]"
-              >{t('settings.alerts.editor.actionPush')}</span
-            >
+            <span class="text-[var(--color-base-content)]">
+              {t('settings.alerts.editor.actionPush')}
+            </span>
             {#if isActionSelected('push')}
               <Check class="w-3 h-3 text-[var(--text-primary)] ml-auto" />
             {/if}

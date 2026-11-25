@@ -155,6 +155,12 @@
       "confirmAction": "Confirmer l'action",
       "confirmMessage": "Êtes-vous sûr de vouloir effectuer cette action ?"
     },
+    "unsavedChanges": {
+      "title": "Quitter cette page ?",
+      "message": "Vous avez des modifications non enregistrées. Si vous quittez la page, elles seront perdues.",
+      "leave": "Quitter la page",
+      "stay": "Rester"
+    },
     "review": {
       "modalTitle": "Examiner la détection : {species}",
       "status": {
@@ -493,6 +499,12 @@
         "loadFailedTitle": "Échec du chargement du modèle acoustique",
         "loadFailedMessage": "Un modèle acoustique activé n'a pas pu être chargé, l'audio est donc capturé mais non analysé. Vérifiez le modèle sur la page Système > Modèles IA."
       },
+      "geomodel": {
+        "notInstalledTitle": "Geomodel non installé",
+        "notInstalledMessage": "BirdNET Geomodel v3.0 est nécessaire pour filtrer les détections selon l'emplacement pour : {models}. Installez BirdNET Geomodel v3.0 depuis la galerie de modèles dans Paramètres > Analyse > Modèles.",
+        "loadFailedTitle": "Geomodel : échec du chargement",
+        "loadFailedMessage": "BirdNET Geomodel v3.0 n'a pas pu être chargé, donc le filtrage selon l'emplacement est désactivé pour : {models}. Consultez le journal de l'application, puis installez ou réinstallez BirdNET Geomodel v3.0 depuis la galerie de modèles dans Paramètres > Analyse > Modèles."
+      },
       "modelOptimize": {
         "title": "{count, plural, one {# modèle dispose d'une meilleure version pour ce système} other {# modèles disposent de meilleures versions pour ce système}}",
         "message": "Une version mieux adaptée au matériel ou à l'emplacement de ce système est disponible pour : {models}. Ouvrez Paramètres > Analyse > Modèles et choisissez Optimiser pour changer."
@@ -500,6 +512,10 @@
       "modelSuperseded": {
         "title": "{count, plural, one {Un modèle installé a une version plus récente} other {# modèles installés ont une version plus récente}}",
         "message": "Un modèle installé est une version d'aperçu, et sa version finale est maintenant disponible : {models}. Ouvrez Paramètres > Analyse > Modèles, installez la version finale et supprimez la version d'aperçu."
+      },
+      "modelUpdate": {
+        "title": "{count, plural, one {Un modèle installé dispose d'une version plus récente} other {# modèles installés disposent de versions plus récentes}}",
+        "message": "Une version plus récente remplace celle qui est installée pour : {models}. La version installée continue de fonctionner jusqu'à ce que vous changiez. Ouvrez Paramètres > Analyse > Modèles et choisissez Mettre à jour."
       },
       "alert": {
         "firedTitle": "{rule_name}",
@@ -901,7 +917,7 @@
         "changed": "Espèce remplacée par {species}",
         "changeFailed": "Impossible de modifier l'espèce. Veuillez réessayer.",
         "conflict": "L'espèce ne peut pas être modifiée maintenant : la détection est conservée (verrouillée), ou l'ancien format de base de données est utilisé.",
-        "notKnownHere": "L'espèce {species} n'a jamais été détectée ni prédite à cette station et ne peut donc pas encore être sélectionnée.",
+        "unknownSpecies": "L'espèce {species} ne figure plus dans la liste des espèces et ne peut donc pas être sélectionnée. Fermez cette boîte de dialogue et réessayez.",
         "predictionsTitle": "Autres prédictions",
         "noPredictions": "Le modèle n'a enregistré aucune autre prédiction pour cet enregistrement.",
         "allSpecies": "Toutes les espèces",
@@ -2493,7 +2509,6 @@
       "loadFailed": "Échec du chargement des paramètres",
       "saveFailed": "Échec de l'enregistrement des paramètres",
       "changedElsewhere": "Les paramètres ont été modifiés ailleurs. Vérifiez-les et enregistrez à nouveau.",
-      "databaseStatsFailed": "Échec du chargement des statistiques de la base de données",
       "csvDownloadFailed": "Échec du téléchargement du CSV"
     },
     "card": {
@@ -2700,26 +2715,15 @@
               "helpText": "Nom de la base de données MySQL"
             }
           },
-          "stats": {
-            "title": "Statistiques de la base de données",
-            "description": "Informations d'exécution sur votre base de données",
-            "loading": "Chargement des statistiques de la base de données...",
-            "retry": "Réessayer",
-            "refresh": "Actualiser",
-            "noData": "Aucune statistique de base de données disponible.",
-            "type": "Type",
-            "status": "Statut",
-            "size": "Taille",
-            "totalDetections": "Détections totales",
-            "location": "Emplacement",
-            "connected": "Connecté",
-            "disconnected": "Déconnecté"
-          },
           "errors": {
             "backupStartFailed": "Échec du démarrage de la sauvegarde",
             "backupStatusFailed": "Échec de la récupération de l'état de la sauvegarde",
             "backupFailed": "Sauvegarde échouée",
             "backupDownloadFailed": "Échec du téléchargement de la sauvegarde"
+          },
+          "statsMoved": {
+            "text": "Les statistiques de la base de données ont été déplacées dans la section Système.",
+            "link": "Ouvrir Système > Base de données"
           }
         },
         "interface": {
@@ -3738,12 +3742,7 @@
           "atLeastOneModel": "Au moins un modèle doit être sélectionné"
         },
         "captureTitle": "Capture audio",
-        "levelTitle": "Niveau d'entrée",
-        "captureApplyHint": "La capture redémarre lorsque vous appliquez.",
-        "applyCapture": "Appliquer et redémarrer la capture",
-        "applying": "Application...",
-        "adding": "Ajout...",
-        "captureApplyFailed": "La capture n'a pas été modifiée. Appliquez à nouveau ou annulez."
+        "levelTitle": "Niveau d'entrée"
       },
       "audioCapture": {
         "title": "Capture audio",
@@ -3761,7 +3760,8 @@
         "deviceSelected": "Carte son sélectionnée et prête pour la capture",
         "availableDevices": "Périphériques audio disponibles",
         "active": "Actif",
-        "streamsConfigured": "{count} flux configuré(s)"
+        "streamsConfigured": "{count} flux configuré(s)",
+        "description": "Cartes son écoutées par BirdNET-Go. Modifier le périphérique ou la fréquence d'échantillonnage redémarre la capture de cette source lorsque vous enregistrez."
       },
       "quietHours": {
         "title": "Heures calmes",
@@ -3785,7 +3785,8 @@
       },
       "rtspStreams": {
         "title": "Configuration des Flux Audio",
-        "noStreamsConfigured": "Aucun flux configuré"
+        "noStreamsConfigured": "Aucun flux configuré",
+        "description": "Configurez les flux audio réseau pour la capture audio à distance. Supporte les protocoles RTSP, HTTP, HLS, RTMP et UDP. Une modification de la connexion reconnecte le flux lors de l'enregistrement."
       },
       "streams": {
         "streamLabel": "Flux",
@@ -3908,12 +3909,7 @@
           "message": "Flux stéréo détecté. Le mixage de plusieurs canaux peut réduire la précision de détection en raison des différences de phase entre les canaux. Sélectionnez un canal spécifique (gauche/droit) ou utilisez le détecteur de canaux pour de meilleurs résultats.",
           "short": "Downmix stéréo actif. La précision de détection peut être réduite. Sélectionnez un canal spécifique dans Connexion."
         },
-        "autoSaveHelp": "Les modifications sont enregistrées immédiatement. Les modifications de la connexion reconnectent le flux : elles attendent donc que vous cliquiez sur Appliquer.",
         "connectionTitle": "Connexion",
-        "connectionApplyHint": "Le flux se reconnecte lorsque vous appliquez.",
-        "connectionApplyFailed": "La connexion n'a pas été modifiée. Appliquez à nouveau ou annulez.",
-        "applyConnection": "Appliquer et reconnecter",
-        "testBeforeApply": "Testez la nouvelle URL avant de l'appliquer.",
         "statsLine": "Total : {total} · Débit : {rate} · Dernier : {last}",
         "ago": {
           "seconds": "il y a {count} s",
@@ -4154,8 +4150,13 @@
         "listFailed": "La liste des modèles n'a pas pu être chargée.",
         "warningBadge": "Vérifier les classificateurs"
       },
-      "sources": {
-        "autoSaveHelp": "Les modifications sont enregistrées immédiatement. Les modifications du périphérique et de la fréquence d'échantillonnage redémarrent la capture : elles attendent donc que vous cliquiez sur Appliquer."
+      "validation": {
+        "soundCards": "Corrigez les cartes son de l'onglet {tab} avant d'enregistrer : {names}",
+        "unnamedSource": "source {position} (sans nom)",
+        "needsAttention": "Attention requise",
+        "streams": "Corrigez les flux de l'onglet {tab} avant d'enregistrer : {names}",
+        "streamsUntested": "Testez la nouvelle URL du flux de l'onglet {tab} avant d'enregistrer : {names}",
+        "unnamedStream": "flux {position} (sans nom)"
       }
     },
     "security": {
@@ -5094,8 +5095,8 @@
       "audioPlayback": {
         "title": "Lecture audio",
         "description": "Paramètres par défaut pour la lecture des enregistrements d'oiseaux.",
-        "defaultGain": "Amplification du volume par défaut",
-        "defaultGainHelpText": "Gain initial appliqué lors de la lecture des enregistrements. Les sons d'oiseaux sont souvent faibles, une amplification de 6 à 12 dB est recommandée.",
+        "defaultGain": "Gain par défaut",
+        "defaultGainHelpText": "Gain avec lequel chaque clip démarre. Les sons d'oiseaux sont souvent faibles, donc 6 à 12 dB est un bon point de départ ; une valeur négative rend les clips plus silencieux.",
         "defaultGainUnit": "dB",
         "denoiseLabel": "Réduire le bruit des clips à la lecture",
         "denoiseHelpText": "Lit et télécharge une copie débruitée de chaque clip. Les clips enregistrés restent inchangés. Les téléchargements deviennent des fichiers WAV et sont plus volumineux. Les paramètres audio d'un clip permettent de choisir une autre intensité ou de désactiver la réduction de bruit.",
@@ -5104,7 +5105,11 @@
         "denoiseStrengthDisabledHelp": "Activez la réduction de bruit à la lecture ci-dessus pour choisir une intensité.",
         "denoiseExportPrecedence": "Non appliquée tant que « Réduction de bruit des clips enregistrés » est activée (Paramètres audio, onglet Traitement). Ces clips sont déjà débruités.",
         "denoiseRedenoiseNote": "Les clips enregistrés pendant que « Réduction de bruit des clips enregistrés » était activée sont débruités une seconde fois à la lecture. Choisissez Désactivé dans les paramètres audio d'un clip pour l'entendre tel qu'il a été enregistré.",
-        "denoiseLossyNote": "La réduction de bruit donne les meilleurs résultats sur les clips FLAC ou WAV. En dessous de {minBitrate} kbps, les artefacts du codec limitent la propreté du résultat."
+        "denoiseLossyNote": "La réduction de bruit donne les meilleurs résultats sur les clips FLAC ou WAV. En dessous de {minBitrate} kbps, les artefacts du codec limitent la propreté du résultat.",
+        "highPassLabel": "Filtre passe-haut par défaut",
+        "highPassHelpText": "Supprime le son sous cette fréquence pendant la lecture d'un clip, comme le grondement du vent et de la circulation. Il est appliqué dans le navigateur : les clips stockés, téléchargés et exportés ne sont donc pas filtrés.",
+        "highPassUnit": "Hz",
+        "highPassOff": "Désactivé"
       }
     },
     "restartRequired": "Certaines modifications nécessitent un redémarrage du serveur pour prendre effet. Veuillez redémarrer BirdNET-Go."
@@ -5119,6 +5124,8 @@
     "passwordPlaceholder": "Entrez votre mot de passe",
     "enterPassword": "Saisissez votre mot de passe",
     "continue": "Continuer",
+    "rememberBrowser": "Se souvenir de ce navigateur",
+    "rememberBrowserHelp": "Rester connecté sur ce navigateur. Laissez décoché sur un ordinateur partagé.",
     "or": "ou",
     "loginWithGoogle": "Se connecter avec Google",
     "loginWithGithub": "Se connecter avec GitHub",
@@ -5414,6 +5421,18 @@
       "errors": {
         "generationFailedStatus": "Échec de la génération avec le statut {status}",
         "spectrogramFailed": "Échec de la génération du spectrogramme"
+      },
+      "defaults": {
+        "open": "Valeurs de lecture par défaut",
+        "title": "Valeurs de lecture par défaut",
+        "description": "Chaque clip démarre avec ces valeurs. Elles sont enregistrées sur cette station et s'appliquent à toutes les personnes qui l'utilisent.",
+        "useCurrent": "Utiliser les valeurs actuelles",
+        "useCurrentHelp": "Copie dans les champs ci-dessous le gain, la réduction du bruit et le filtre passe-haut de ce lecteur. Rien n'est enregistré tant que vous n'avez pas choisi Enregistrer les modifications.",
+        "useCurrentHelpNoDenoise": "Copie dans les champs ci-dessous le gain et le filtre passe-haut de ce lecteur. Rien n'est enregistré tant que vous n'avez pas choisi Enregistrer les modifications.",
+        "copied": "Valeurs actuelles copiées. Choisissez Enregistrer les modifications pour les conserver.",
+        "saved": "Valeurs de lecture par défaut enregistrées",
+        "saveFailed": "Les valeurs de lecture par défaut n'ont pas été enregistrées. Rien n'a été modifié.",
+        "unavailable": "Les paramètres n'ont pas pu être chargés, les valeurs par défaut ne peuvent donc pas être modifiées ici."
       },
       "clipExtraction": {
         "selectRange": "Cliquez et faites glisser pour sélectionner une plage",
@@ -5963,6 +5982,8 @@
       },
       "actionInProgress": "Attendez la fin de l'installation, de la réinstallation ou de la suppression du modèle en cours",
       "installSuccess": "{name} installé",
+      "cancelling": "Annulation...",
+      "cancelled": "Téléchargement de {name} annulé.",
       "installedEnableOnSources": "{name} est installé. Pour l’utiliser, activez-le pour vos sources dans Paramètres > Audio.",
       "removeSuccess": "Removed {name}",
       "reasons": {
@@ -6010,7 +6031,8 @@
         "verifying": "Vérification...",
         "loading": "Chargement...",
         "complete": "Installé avec succès",
-        "failed": "Échoué"
+        "failed": "Échoué",
+        "cancelled": "Annulé"
       },
       "license": {
         "title": "Accord de licence",
@@ -6038,6 +6060,7 @@
         "removeFailed": "Impossible de supprimer le modèle",
         "removeHasDependents": "{name} est requis par {models}. Supprimez d'abord ces modèles.",
         "operationInProgress": "Une installation, réinstallation ou suppression de modèle est déjà en cours ({name}). Réessayez lorsqu'elle sera terminée.",
+        "cancelUnavailable": "Le téléchargement de {name} ne peut plus être annulé.",
         "actionFailed": "Un problème est survenu avec {name}",
         "downloadSourceHint": "Si huggingface.co est bloqué ou lent sur votre réseau, définissez un miroir dans la section Source de téléchargement ci-dessous.",
         "goToDownloadSource": "Aller à la source de téléchargement",
@@ -6067,6 +6090,19 @@
       "superseded": {
         "cardNotice": "Remplacé par {name}. Utilisez plutôt le modèle plus récent.",
         "dialogNotice": "Ce modèle a été remplacé par {name}. Envisagez d'installer {name} à la place."
+      },
+      "update": {
+        "cardNotice": "Une version plus récente ({to}) remplace la version installée {from}.",
+        "cardNoticeBuild": "Le build {to} de la version {version} remplace le build installé {from}.",
+        "action": "Mettre à jour",
+        "applying": "Mise à jour..."
+      },
+      "buildNotes": {
+        "heading": "Nouveautés du build {build} de la version {version}",
+        "released": "Publié le {date}",
+        "buildLabel": "Numéro de build",
+        "buildValue": "{build}, publié le {date}",
+        "disclosure": "Nouveautés de ce build"
       },
       "entryIncompatible": "Ce modèle n'est pas disponible sur ce système.",
       "regionGlobal": "Global",
@@ -6172,10 +6208,19 @@
       "device": {
         "label": "Appareil OpenVINO",
         "helpText": "Utilisé pour les modèles exécutés sur OpenVINO.",
+        "helpTextMultipleGpus": "Utilisé pour les modèles exécutés sur OpenVINO. Cet appareil a plus d'un GPU : choisissez celui sur lequel les modèles s'exécutent.",
+        "notDetectedHint": "Le GPU sélectionné n'est pas détecté. Les modèles s'exécutent sur ONNX Runtime jusqu'à ce qu'un autre appareil soit choisi.",
         "options": {
           "auto": "Automatique",
           "cpu": "CPU",
-          "gpu": "GPU"
+          "gpu": "GPU",
+          "gpuDefault": "Par défaut d'OpenVINO : {name}",
+          "gpuNamed": "{name} ({type})",
+          "notDetected": "{id} (non détecté)"
+        },
+        "gpuTypes": {
+          "integrated": "intégré",
+          "discrete": "dédié"
         }
       },
       "reloadNote": "Changer le backend ou l'appareil recharge les modèles, ce qui met la détection en pause pendant quelques secondes.",
@@ -6373,6 +6418,52 @@
       "patternNone": "Aucun",
       "patternTransient": "Transitoire",
       "patternSustained": "Persistant"
+    }
+  },
+  "shortcuts": {
+    "menuItem": "Raccourcis clavier",
+    "modal": {
+      "title": "Raccourcis clavier",
+      "enable": "Activer les raccourcis clavier",
+      "enableHelp": "Désactivez cette option si les raccourcis à une seule touche gênent un lecteur d'écran, la commande vocale ou un clavier adapté.",
+      "offNote": "Les raccourcis clavier sont désactivés. Les touches ci-dessous ne font rien tant que vous ne les activez pas.",
+      "or": "ou"
+    },
+    "scopes": {
+      "global": "Toutes les pages"
+    },
+    "groups": {
+      "navigation": "Navigation",
+      "review": "Vérification",
+      "audio": "Audio",
+      "general": "Général"
+    },
+    "keys": {
+      "shift": "Maj",
+      "space": "Espace",
+      "arrowLeft": "Flèche gauche",
+      "arrowRight": "Flèche droite",
+      "comma": "Virgule",
+      "period": "Point",
+      "questionMark": "Point d'interrogation",
+      "combination": "{first} plus {second}"
+    },
+    "withKey": "{label} ({keys})",
+    "detectionDetail": {
+      "olderSpecies": "Détection plus ancienne de la même espèce",
+      "newerSpecies": "Détection plus récente de la même espèce",
+      "correct": "Marquer comme correct",
+      "falsePositive": "Marquer comme faux positif",
+      "wrongSpecies": "Changer l'espèce",
+      "keep": "Conserver ou libérer cet enregistrement",
+      "playPause": "Lire ou mettre en pause",
+      "seekBack": "Reculer d'une seconde",
+      "seekForward": "Avancer d'une seconde",
+      "focusReview": "Aller aux boutons de vérification",
+      "backToList": "Retour aux détections"
+    },
+    "global": {
+      "help": "Afficher ou masquer les raccourcis clavier"
     }
   }
 }

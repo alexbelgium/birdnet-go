@@ -67,7 +67,7 @@ BirdNET configuration
 | `birdnet.threads` | integer | number of CPU threads to use for analysis |
 | `birdnet.locale` | string | language to use for labels |
 | `birdnet.rangefilter.debug` | boolean | true to enable debug mode |
-| `birdnet.rangefilter.model` | string | range filter model version: "legacy" for v1, "v3" for geomodel v3.0, or empty/default for v2 |
+| `birdnet.rangefilter.model` | string | range filter model version: "legacy" for v1, "v3" for geomodel v3.0, or empty/default for v2; an installed geomodel replaces the stock v1 and v2 models |
 | `birdnet.rangefilter.modelpath` | string | path to external meta model file (empty for embedded) |
 | `birdnet.rangefilter.labelspath` | string | path to geomodel labels file (required when geomodel differs from classifier labels) |
 | `birdnet.rangefilter.threshold` | number | rangefilter species occurrence threshold |
@@ -76,9 +76,9 @@ BirdNET configuration
 | `birdnet.labelpath` | string | path to external label file (empty for embedded) |
 | `birdnet.usexnnpack` | boolean | true to use XNNPACK delegate for inference acceleration |
 | `birdnet.onnxruntimepath` | string | path to ONNX Runtime shared library (required for ONNX models) |
-| `birdnet.openvinopath` | string | path to libopenvino_c shared library (OpenVINO image variants only) |
+| `birdnet.openvinopath` | string | path to the OpenVINO C runtime (libopenvino_c.so, or openvino_c.dll on Windows); empty uses the default library name, and on Windows first searches the known install locations |
 | `birdnet.backend` | string | inference backend preference: "auto" (default), "onnx", or "openvino" |
-| `birdnet.openvinodevice` | string | OpenVINO device preference: "auto" (default), "cpu", or "gpu" |
+| `birdnet.openvinodevice` | string | OpenVINO device preference: "auto" (default), "cpu", "gpu", or a concrete GPU such as "GPU.1" on a host with several GPUs |
 | `birdnet.huggingfaceendpoint` | string | model download host, e.g. "https://hf-mirror.com" where huggingface.co is blocked; empty falls back to $HF_ENDPOINT then https://huggingface.co |
 | `birdnet.modelregion` | string | regional model preference: "auto" (resolve from coordinates, default), "global" (always global models), or a region slug pin (e.g. "iberia"); empty is treated as "auto" |
 | `birdnet.alternateminconfidence` | number | AlternateMinConfidence is the lowest confidence, on the 0 to 1 scale, at which an alternate prediction of a detection is stored. Alternates below it are dropped when the detection is saved; the detected species itself is never affected. 0 stores every alternate. Rows already in the database are not changed. Not shown in the web UI. Defaults to 0.1. Hot-reloadable through the settings API; a config file edit applies at the next start. |
@@ -266,10 +266,11 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.dashboard.customcolors.accent` | string | accent hex color, e.g. "#0284c7" |
 | `realtime.dashboard.logostyle` | string | logo display style: "gradient" or "solid" |
 | `realtime.dashboard.layout.elements` | dashboard-element[] |  |
-| `realtime.dashboard.defaultaudiogain` | number | Default playback gain in dB (0-24) |
+| `realtime.dashboard.defaultaudiogain` | number | Default playback gain in dB (-12 to 24) |
 | `realtime.dashboard.livespectrogram` | boolean | auto-start live spectrogram on dashboard |
 | `realtime.dashboard.playbackdenoise.enabled` | boolean | true to apply the denoise |
 | `realtime.dashboard.playbackdenoise.strength` | string | preset name, see the DenoisePreset constants |
+| `realtime.dashboard.playback.highpasshz` | integer | high-pass cutoff in Hz applied in the browser while a clip plays; 0 is off |
 | `realtime.dynamicthreshold.enabled` | boolean | true to enable dynamic threshold |
 | `realtime.dynamicthreshold.debug` | boolean | true to enable debug mode |
 | `realtime.dynamicthreshold.trigger` | number | trigger threshold for dynamic threshold |
@@ -309,12 +310,8 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.daylightfilter.enabled` | boolean | true to enable daylight filter |
 | `realtime.daylightfilter.offset` | integer | hours to adjust daylight window; positive = shrink (lenient), negative = expand (strict) |
 | `realtime.daylightfilter.species` | string[] | species, families, orders, or genera to filter during daylight |
-| `realtime.modelconsensus.allspecies` | boolean | true to require consensus for every species; takes precedence over listedspecies |
-| `realtime.modelconsensus.listedspecies` | boolean | true to require consensus for the species in species |
-| `realtime.modelconsensus.species` | string[] | species that need consensus when listedspecies is on; scientific names keep working after a locale change |
-| `realtime.modelconsensus.minmodels` | integer | agreeing models required, 2 to 4, capped at the number of eligible models |
-| `realtime.modelconsensus.alleligible` | boolean | true to require every eligible model instead of minmodels |
-| `realtime.modelconsensus.debug` | boolean | true to log each consensus discard at info level, with the agreeing and eligible models |
+| `realtime.modelconsensus.rules` | model-consensus-rule[] | consensus rules; each has species (empty: every species), models (config IDs as in models.enabled; empty: any model, needing minmodels agreeing models or every eligible one with alleligible; non-empty: a detection heard only by these models needs a second model outside the list), and minmodels (2 to 4) and alleligible, which apply only when models is empty |
+| `realtime.modelconsensus.debug` | boolean | true to log each consensus discard at info level, with the failed rule and the agreeing and eligible models |
 | `realtime.rtsp.streams` | stream-config[] | Streams to analyze. Each entry has name (required, unique), url (required), enabled, type (rtsp, http, hls, rtmp or udp), transport (tcp or udp, RTSP and RTMP only; empty uses the global transport), mediaMode (auto, audio-only or full-stream, RTSP only; default full-stream), channelMode (downmix, left or right; default downmix) and gain (dB) |
 | `realtime.rtsp.urls` | string[] | Legacy: a urls list in an older config is converted to streams on startup and saved; not read once streams has entries |
 | `realtime.rtsp.transport` | string | Global default transport (tcp or udp): read as the engine-wide default and copied into streams that set none; kept after the urls migration |
@@ -428,7 +425,7 @@ SecurityConfig handles all security-related settings and validations for the app
 | `security.basicauth.clientsecret` | string | client secret for OAuth2 |
 | `security.basicauth.redirecturi` | string | redirect uri for OAuth2 |
 | `security.basicauth.authcodeexp` | string | duration for authorization code |
-| `security.basicauth.accesstokenexp` | string | duration for access token |
+| `security.basicauth.accesstokenexp` | string | no longer sets how long a browser stays signed in |
 | `security.oauthProviders` | o-auth-provider-config[] | OAuthProviders is the new array-based OAuth configuration. This is the preferred format for configuring OAuth providers. |
 | `security.googleAuth.enabled` | boolean | true to enable social provider |
 | `security.googleAuth.clientid` | string | client id for OAuth2 |
@@ -446,7 +443,7 @@ SecurityConfig handles all security-related settings and validations for the app
 | `security.microsoftAuth.redirecturi` | string | redirect uri for OAuth2 |
 | `security.microsoftAuth.userid` | string | valid user id for OAuth2 |
 | `security.sessionsecret` | string | secret for session cookie |
-| `security.sessionduration` | string | duration for browser session cookies |
+| `security.sessionduration` | string | lifetime of the OAuth handshake cookie; no longer sets how long a browser stays signed in |
 
 ## sentry
 

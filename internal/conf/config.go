@@ -187,9 +187,17 @@ type Dashboard struct {
 	CustomColors     *CustomColors        `yaml:"customcolors,omitempty" json:"customColors,omitempty"` // custom scheme colors (used when colorScheme is "custom")
 	LogoStyle        string               `yaml:"logostyle,omitempty" json:"logoStyle,omitempty"`       // logo display style: "gradient" or "solid"
 	Layout           DashboardLayout      `yaml:"layout" json:"layout"`                                 // configurable dashboard element layout
-	DefaultAudioGain float64              `yaml:"defaultaudiogain" json:"defaultAudioGain"`             // Default playback gain in dB (0-24)
+	DefaultAudioGain float64              `yaml:"defaultaudiogain" json:"defaultAudioGain"`             // Default playback gain in dB (-12 to 24)
 	LiveSpectrogram  bool                 `yaml:"livespectrogram" json:"liveSpectrogram"`               // auto-start live spectrogram on dashboard
 	PlaybackDenoise  DenoiseSettings      `yaml:"playbackdenoise" json:"playbackDenoise"`               // denoise clips when they are played or downloaded; stored clips stay unchanged
+	Playback         PlaybackDefaults     `yaml:"playback" json:"playback"`                             // further playback defaults
+}
+
+// PlaybackDefaults holds the values a clip player starts with. The two older
+// defaults, Dashboard.DefaultAudioGain and Dashboard.PlaybackDenoise, stay
+// where they are; new playback defaults are added here.
+type PlaybackDefaults struct {
+	HighPassHz int `yaml:"highpasshz" json:"highPassHz"` // high-pass cutoff in Hz applied in the browser while a clip plays; 0 is off
 }
 
 // DashboardLayout defines the ordered list of elements displayed on the dashboard.
@@ -549,24 +557,35 @@ type DaylightFilterSettings struct {
 	Species []string `yaml:"species" json:"species"` // species, families, orders, or genera to filter during daylight
 }
 
-// ModelConsensusSettings configures the model consensus false positive filter. A
-// detection in scope is discarded unless enough distinct models of its taxon group
-// (bird or bat) detected it within the pending window. Only models that scored the
-// audio of the detection's hits, can classify the species and pass the range filter
-// for it are eligible, and the requirement is capped at the eligible count, so a
-// species that only one model can detect always passes.
-type ModelConsensusSettings struct {
-	AllSpecies    bool     `yaml:"allspecies" json:"allSpecies"`       // true to require consensus for every species; takes precedence over listedspecies
-	ListedSpecies bool     `yaml:"listedspecies" json:"listedSpecies"` // true to require consensus for the species in species
-	Species       []string `yaml:"species" json:"species"`             // species that need consensus when listedspecies is on; scientific names keep working after a locale change
-	MinModels     int      `yaml:"minmodels" json:"minModels"`         // agreeing models required, 2 to 4, capped at the number of eligible models
-	AllEligible   bool     `yaml:"alleligible" json:"allEligible"`     // true to require every eligible model instead of minmodels
-	Debug         bool     `yaml:"debug" json:"debug"`                 // true to log each consensus discard at info level, with the agreeing and eligible models
+// ModelConsensusRule is one model consensus rule. A rule with no models behaves as
+// the original all-model filter for the species it covers: the detection is
+// discarded unless MinModels distinct models (or every eligible model, with
+// AllEligible) detected it. A rule that names models discards a detection that only
+// the listed models heard, and only when an eligible model outside the list exists:
+// the rule needs a second model from outside the list. MinModels and AllEligible
+// apply only to a rule with no models.
+type ModelConsensusRule struct {
+	Species     []string `yaml:"species" json:"species"`         // species the rule covers, scientific names keep working after a locale change; empty covers every species
+	Models      []string `yaml:"models" json:"models"`           // config model IDs as in models.enabled; empty means any model
+	MinModels   int      `yaml:"minmodels" json:"minModels"`     // agreeing models required, 2 to 4, for a rule with no models; 0 for a rule that names models
+	AllEligible bool     `yaml:"alleligible" json:"allEligible"` // true to require every eligible model instead of minmodels, for a rule with no models
 }
 
-// Enabled reports whether the filter is switched on, for every species or for the
-// listed ones.
-func (m *ModelConsensusSettings) Enabled() bool { return m.AllSpecies || m.ListedSpecies }
+// ModelConsensusSettings configures the model consensus false positive filter as a
+// list of rules. A detection is checked against every rule that covers its species
+// and is discarded when any of them fails. Only models that scored the audio of the
+// detection's hits, can classify the species and pass the range filter for it are
+// eligible, and a detection is compared only with models of its taxon group (bird
+// or bat). A rule that cannot be satisfied because too few eligible models exist,
+// for example after a model is removed, disabled or unloaded, lets the detection
+// pass. Model names in rules are config IDs, as in models.enabled.
+type ModelConsensusSettings struct {
+	Rules []ModelConsensusRule `yaml:"rules" json:"rules"` // consensus rules; each has species (empty: every species), models (config IDs as in models.enabled; empty: any model, needing minmodels agreeing models or every eligible one with alleligible; non-empty: a detection heard only by these models needs a second model outside the list), and minmodels (2 to 4) and alleligible, which apply only when models is empty
+	Debug bool                 `yaml:"debug" json:"debug"` // true to log each consensus discard at info level, with the failed rule and the agreeing and eligible models
+}
+
+// Enabled reports whether the filter is switched on, which it is when any rule exists.
+func (m *ModelConsensusSettings) Enabled() bool { return len(m.Rules) > 0 }
 
 // RTSPHealthSettings contains settings for RTSP stream health monitoring.
 type RTSPHealthSettings struct {
@@ -1348,9 +1367,9 @@ type BirdNETConfig struct {
 	Labels              []string            `yaml:"-" json:"-"`                                                         // list of available species labels, runtime value
 	UseXNNPACK          bool                `yaml:"usexnnpack" json:"useXnnpack"`                                       // true to use XNNPACK delegate for inference acceleration
 	ONNXRuntimePath     string              `yaml:"onnxruntimepath,omitempty" json:"onnxRuntimePath,omitempty"`         // path to ONNX Runtime shared library (required for ONNX models)
-	OpenVINOPath        string              `yaml:"openvinopath,omitempty" json:"openVinoPath,omitempty"`               // path to libopenvino_c shared library (OpenVINO image variants only)
+	OpenVINOPath        string              `yaml:"openvinopath,omitempty" json:"openVinoPath,omitempty"`               // path to the OpenVINO C runtime (libopenvino_c.so, or openvino_c.dll on Windows); empty uses the default library name, and on Windows first searches the known install locations
 	Backend             string              `yaml:"backend,omitempty" json:"backend,omitempty"`                         // inference backend preference: "auto" (default), "onnx", or "openvino"
-	OpenVINODevice      string              `yaml:"openvinodevice,omitempty" json:"openVinoDevice,omitempty"`           // OpenVINO device preference: "auto" (default), "cpu", or "gpu"
+	OpenVINODevice      string              `yaml:"openvinodevice,omitempty" json:"openVinoDevice,omitempty"`           // OpenVINO device preference: "auto" (default), "cpu", "gpu", or a concrete GPU such as "GPU.1" on a host with several GPUs
 	HuggingFaceEndpoint string              `yaml:"huggingfaceendpoint,omitempty" json:"huggingFaceEndpoint,omitempty"` // model download host, e.g. "https://hf-mirror.com" where huggingface.co is blocked; empty falls back to $HF_ENDPOINT then https://huggingface.co
 	ModelRegion         string              `yaml:"modelregion,omitempty" json:"modelRegion,omitempty"`                 // regional model preference: "auto" (resolve from coordinates, default), "global" (always global models), or a region slug pin (e.g. "iberia"); empty is treated as "auto"
 
@@ -1371,11 +1390,14 @@ const (
 )
 
 // OpenVINO device preferences for BirdNET.OpenVINODevice. "auto" picks the GPU
-// (Intel iGPU) when present for eligible models. On arm64 the auto backend keeps
+// (Intel iGPU) when present for eligible models. Besides these three keywords
+// the setting accepts a concrete OpenVINO GPU name "GPU.<n>" (see
+// IsOVGPUDeviceName), which selects that adapter by its index on a host with
+// several GPUs; "gpu" keeps meaning OpenVINO's own GPU alias, the first GPU. On arm64 the auto backend keeps
 // models on ONNX Runtime unless birdnet.backend is openvino (or, for BirdNET
 // v2.4, ONNX Runtime is unavailable), and then uses the CPU device on an
 // ARMv8.2+ CPU with native f16 (the precision is per model; see
-// classifier.openVINOPrecisionFor); "cpu" and "gpu" force a device, and "cpu" is
+// classifier.openVINOPrecisionFor); "cpu", "gpu" and "GPU.<n>" force a device, and "cpu" is
 // also an opt-in to the OpenVINO CPU on arm64 under the auto backend (INT8 or
 // unrecognized weights additionally need birdnet.backend openvino). An empty
 // string is treated as "auto".
@@ -1384,6 +1406,20 @@ const (
 	OVDeviceCPU  = "cpu"
 	OVDeviceGPU  = "gpu"
 )
+
+// ovGPUDevicePattern matches a concrete OpenVINO GPU device name: "GPU." and a
+// decimal index, case-sensitive like the names OpenVINO enumerates. It mirrors
+// the indexed form accepted by the inference package's OpenVINOIsGPUDevice,
+// kept as an independent pattern so this foundational config package stays free
+// of an inference dependency; a drift-guard test in the classifier package
+// asserts the two agree.
+var ovGPUDevicePattern = regexp.MustCompile(`^GPU\.\d+$`)
+
+// IsOVGPUDeviceName reports whether s is a concrete OpenVINO GPU device name
+// ("GPU.0", "GPU.12"), the form BirdNET.OpenVINODevice accepts to select one
+// adapter on a host with several GPUs. The bare "GPU" is the OVDeviceGPU keyword
+// ("gpu") in its OpenVINO spelling and is not matched.
+func IsOVGPUDeviceName(s string) bool { return ovGPUDevicePattern.MatchString(s) }
 
 // Model region preferences for BirdNET.ModelRegion. "auto" resolves the regional
 // model from the configured coordinates and falls back to the global model when
@@ -1407,7 +1443,7 @@ var ModelRegionSlugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // RangeFilterSettings contains settings for the range filter
 type RangeFilterSettings struct {
 	Debug                   bool                `yaml:"debug" json:"debug"`                               // true to enable debug mode
-	Model                   string              `yaml:"model" json:"model"`                               // range filter model version: "legacy" for v1, "v3" for geomodel v3.0, or empty/default for v2
+	Model                   string              `yaml:"model" json:"model"`                               // range filter model version: "legacy" for v1, "v3" for geomodel v3.0, or empty/default for v2; an installed geomodel replaces the stock v1 and v2 models
 	ModelPath               string              `yaml:"modelpath" json:"modelPath"`                       // path to external meta model file (empty for embedded)
 	LabelsPath              string              `yaml:"labelspath,omitempty" json:"labelsPath,omitempty"` // path to geomodel labels file (required when geomodel differs from classifier labels)
 	Threshold               float32             `yaml:"threshold" json:"threshold"`                       // rangefilter species occurrence threshold
@@ -1598,7 +1634,7 @@ type BasicAuth struct {
 	ClientSecret   string        `yaml:"clientsecret" json:"clientSecret"`     // client secret for OAuth2
 	RedirectURI    string        `yaml:"redirecturi" json:"redirectUri"`       // redirect uri for OAuth2
 	AuthCodeExp    time.Duration `yaml:"authcodeexp" json:"authCodeExp"`       // duration for authorization code
-	AccessTokenExp time.Duration `yaml:"accesstokenexp" json:"accessTokenExp"` // duration for access token
+	AccessTokenExp time.Duration `yaml:"accesstokenexp" json:"accessTokenExp"` // no longer sets how long a browser stays signed in
 }
 
 // SocialProvider holds settings for an OAuth2 identity provider
@@ -1788,7 +1824,7 @@ type Security struct {
 	MicrosoftAuth SocialProvider `yaml:"microsoftAuth,omitempty" json:"microsoftAuth,omitempty"` //nolint:modernize // Deprecated: use OAuthProviders, yaml.v3 doesn't support omitzero
 
 	SessionSecret   string        `yaml:"sessionsecret" json:"sessionSecret"`     // secret for session cookie
-	SessionDuration time.Duration `yaml:"sessionduration" json:"sessionDuration"` // duration for browser session cookies
+	SessionDuration time.Duration `yaml:"sessionduration" json:"sessionDuration"` // lifetime of the OAuth handshake cookie; no longer sets how long a browser stays signed in
 }
 
 type WebServerSettings struct {

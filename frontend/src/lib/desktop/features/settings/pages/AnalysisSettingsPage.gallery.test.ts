@@ -21,6 +21,7 @@ vi.mock('$lib/utils/modelsApi', async () => {
     ...actual,
     fetchCatalog: vi.fn(),
     fetchInstalled: vi.fn(),
+    cancelInstall: vi.fn(),
     installModel: vi.fn(),
     reinstallModel: vi.fn(),
     uninstallModel: vi.fn(),
@@ -110,12 +111,14 @@ import AnalysisSettingsPage from './AnalysisSettingsPage.svelte';
 import * as modelsApi from '$lib/utils/modelsApi';
 import {
   MODEL_AGREEMENT_REQUIRED_KEY,
+  MODEL_CANCEL_UNAVAILABLE_KEY,
   MODEL_OPERATION_IN_PROGRESS_KEY,
 } from '$lib/utils/modelsApi';
 import { settingsStore, settingsActions } from '$lib/stores/settings';
 import { getAvailableModels, refreshModels } from '$lib/stores/models.svelte';
 import { toastActions } from '$lib/stores/toast';
 import { t } from '$lib/i18n';
+import { formatDate } from '$lib/utils/formatters';
 import { navigation } from '$lib/stores/navigation.svelte';
 import { ApiError } from '$lib/utils/api';
 import { wizardState } from '$lib/desktop/features/wizard/wizardState.svelte';
@@ -349,6 +352,142 @@ describe('AnalysisSettingsPage model gallery error handling', () => {
       await screen.findByRole('button', { name: /analysis\.gallery\.license\.acceptAndInstall/ })
     );
   }
+
+  it('shows no error banner or mirror hint when a download is cancelled', async () => {
+    let cancelled: (() => void) | undefined;
+    vi.mocked(modelsApi.subscribeInstallProgress).mockImplementation(
+      (_id, onProgress, _onComplete, _onError, onCancelled) => {
+        onProgress(downloadProgress());
+        cancelled = onCancelled;
+        return () => {};
+      }
+    );
+    vi.mocked(modelsApi.cancelInstall).mockResolvedValue(undefined);
+    await startTestBirdInstall();
+
+    await fireEvent.click(await screen.findByRole('button', { name: /^Cancel Test Bird Model/ }));
+    expect(modelsApi.cancelInstall).toHaveBeenCalledWith('test-bird');
+    expect(
+      await screen.findByRole('button', { name: /analysis\.gallery\.cancelling Test Bird Model/ })
+    ).toHaveAttribute('aria-disabled', 'true');
+
+    cancelled?.();
+
+    expect(await screen.findByRole('button', { name: installButtonName })).toBeInTheDocument();
+    expect(screen.queryByText(/analysis\.gallery\.errors\.actionFailed/)).toBeNull();
+    expect(screen.queryByText(/analysis\.gallery\.errors\.downloadSourceHint/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Cancel / })).toBeNull();
+  });
+
+  it('ignores a delayed cancel rejection once the install it belonged to has ended', async () => {
+    let cancelled: (() => void) | undefined;
+    vi.mocked(modelsApi.subscribeInstallProgress).mockImplementation(
+      (_id, onProgress, _onComplete, _onError, onCancelled) => {
+        onProgress(downloadProgress());
+        cancelled = onCancelled;
+        return () => {};
+      }
+    );
+    const request = deferred();
+    vi.mocked(modelsApi.cancelInstall).mockReturnValue(request.promise);
+    await startTestBirdInstall();
+    await fireEvent.click(await screen.findByRole('button', { name: /^Cancel Test Bird Model/ }));
+    await waitFor(() => expect(modelsApi.cancelInstall).toHaveBeenCalledTimes(1));
+    cancelled?.();
+    await screen.findByRole('button', { name: installButtonName });
+    vi.mocked(toastActions.warning).mockClear();
+
+    request.reject(new Error('late failure'));
+    await tick();
+    await tick();
+
+    expect(toastActions.warning).not.toHaveBeenCalled();
+  });
+
+  it('ignores a delayed cancel rejection after the same model was restarted and cancelled again', async () => {
+    let cancelled: (() => void) | undefined;
+    vi.mocked(modelsApi.subscribeInstallProgress).mockImplementation(
+      (_id, onProgress, _onComplete, _onError, onCancelled) => {
+        onProgress(downloadProgress());
+        cancelled = onCancelled;
+        return () => {};
+      }
+    );
+    const first = deferred();
+    vi.mocked(modelsApi.cancelInstall)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    await startTestBirdInstall();
+    await fireEvent.click(await screen.findByRole('button', { name: /^Cancel Test Bird Model/ }));
+    await waitFor(() => expect(modelsApi.cancelInstall).toHaveBeenCalledTimes(1));
+    cancelled?.();
+    await fireEvent.click(await screen.findByRole('button', { name: installButtonName }));
+    await fireEvent.click(
+      await screen.findByRole('button', { name: /analysis\.gallery\.license\.acceptAndInstall/ })
+    );
+    await fireEvent.click(await screen.findByRole('button', { name: /^Cancel Test Bird Model/ }));
+    await waitFor(() => expect(modelsApi.cancelInstall).toHaveBeenCalledTimes(2));
+    vi.mocked(toastActions.warning).mockClear();
+
+    first.reject(new Error('late failure'));
+    await tick();
+    await tick();
+
+    expect(toastActions.warning).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('button', { name: /analysis\.gallery\.cancelling Test Bird Model/ })
+    ).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('ends a reinstall quietly when it is sent a retained cancelled state', async () => {
+    vi.mocked(modelsApi.fetchCatalog).mockResolvedValue({
+      catalog: [birdEntry({ id: 'inst', name: 'Installed Model', installed: true })],
+    });
+    vi.mocked(modelsApi.reinstallModel).mockResolvedValue(undefined);
+    let cancelled: (() => void) | undefined;
+    vi.mocked(modelsApi.subscribeInstallProgress).mockImplementation(
+      (_id, onProgress, _onComplete, _onError, onCancelled) => {
+        onProgress(downloadProgress({ catalogId: 'inst' }));
+        cancelled = onCancelled;
+        return () => {};
+      }
+    );
+    render(AnalysisSettingsPage);
+    await fireEvent.click(await screen.findByRole('tab', { name: /analysis\.tabs\.models/ }));
+    await fireEvent.click(
+      await screen.findByRole('button', { name: /analysis\.gallery\.reinstall.*Installed Model/ })
+    );
+    await waitFor(() => expect(cancelled).toBeDefined());
+
+    cancelled?.();
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /analysis\.gallery\.reinstall.*Installed Model/ })
+      ).not.toHaveAttribute('aria-disabled')
+    );
+    expect(screen.queryByText(/analysis\.gallery\.errors\.actionFailed/)).toBeNull();
+  });
+
+  it('keeps the download running and clears Cancelling when the cancel is refused', async () => {
+    vi.mocked(modelsApi.subscribeInstallProgress).mockImplementation((_id, onProgress) => {
+      onProgress(downloadProgress());
+      return () => {};
+    });
+    const refusal = new ApiError('too late', 409, new Response(null, { status: 409 }));
+    refusal.errorKey = MODEL_CANCEL_UNAVAILABLE_KEY;
+    vi.mocked(modelsApi.cancelInstall).mockRejectedValue(refusal);
+    await startTestBirdInstall();
+
+    await fireEvent.click(await screen.findByRole('button', { name: /^Cancel Test Bird Model/ }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Cancel Test Bird Model/ })).not.toHaveAttribute(
+        'aria-disabled'
+      )
+    );
+    expect(screen.queryByText(/analysis\.gallery\.errors\.actionFailed/)).toBeNull();
+  });
 
   it('shows the in-progress reason and keeps Retry when an install is refused because another operation runs', async () => {
     const reason = 'A model install is already in progress (Geomodel). Try again when it finishes.';
@@ -676,6 +815,45 @@ describe('AnalysisSettingsPage model gallery optimize + permanent card', () => {
     });
   }
 
+  it('stops the apply-all queue when a swap is cancelled, marking the item neither applied nor failed', async () => {
+    vi.mocked(modelsApi.fetchCatalog).mockResolvedValue({
+      catalog: [
+        v24Installed(),
+        v24Installed({ id: 'second-model', name: 'Second Model', permanent: false }),
+      ],
+    });
+    vi.mocked(modelsApi.installModel).mockResolvedValue(undefined);
+    vi.mocked(modelsApi.cancelInstall).mockResolvedValue(undefined);
+    let cancelled: (() => void) | undefined;
+    vi.mocked(modelsApi.subscribeInstallProgress).mockImplementation(
+      (id, onProgress, _onComplete, _onError, onCancelled) => {
+        onProgress(downloadProgress({ catalogId: id }));
+        cancelled = onCancelled;
+        return () => {};
+      }
+    );
+    render(AnalysisSettingsPage);
+    await fireEvent.click(await screen.findByRole('tab', { name: /analysis\.tabs\.models/ }));
+    await fireEvent.click(
+      await screen.findByRole('button', { name: /analysis\.gallery\.optimize\.review/ })
+    );
+    await fireEvent.click(
+      await screen.findByRole('button', { name: /analysis\.gallery\.optimize\.applyAll/ })
+    );
+    await waitFor(() => expect(modelsApi.installModel).toHaveBeenCalledTimes(1));
+
+    await fireEvent.click(await screen.findByRole('button', { name: /^Cancel BirdNET v2\.4/ }));
+    await waitFor(() => expect(modelsApi.cancelInstall).toHaveBeenCalledWith('birdnet-v2.4'));
+    cancelled?.();
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Cancel / })).toBeNull());
+    // Give the completion effect and the queue a chance to start the next swap
+    await tick();
+    expect(modelsApi.installModel).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('analysis.gallery.optimize.applied')).toBeNull();
+    expect(screen.queryByText(/^analysis\.gallery\.retry$/)).toBeNull();
+  });
+
   it('shows the optimize banner when an installed model has a better variant, and dismisses it', async () => {
     vi.mocked(modelsApi.fetchCatalog).mockResolvedValue({ catalog: [v24Installed()] });
     render(AnalysisSettingsPage);
@@ -720,6 +898,181 @@ describe('AnalysisSettingsPage model gallery optimize + permanent card', () => {
     await screen.findByRole('tab', { name: /analysis\.gallery\.tabs\.installed/ });
     expect(screen.queryByText('analysis.gallery.optimize.bannerTitle')).toBeNull();
     expect(screen.queryByRole('button', { name: /analysis\.gallery\.optimize\.swap/ })).toBeNull();
+  });
+
+  describe('update of an installed older release', () => {
+    // An installed 3.0 build whose 3.0.1 successor is the same global build; the host
+    // recommendation is a different (regional) variant, so Optimize would offer it
+    // if the entry were not on the update path.
+    function updatable(): CatalogEntry {
+      const variant = (id: string, installed: boolean, recommended: boolean) => ({
+        id,
+        precision: 'fp32',
+        default: false,
+        installed,
+        speciesCount: 10,
+        sizeBytes: 1,
+        compatible: true,
+        recommended,
+      });
+      return birdEntry({
+        installed: true,
+        installedVariantId: 'fp32',
+        recommendedVariantId: 'fp32-3.0.1@nordic',
+        update: {
+          variantId: 'fp32-3.0.1',
+          fromVersion: '3.0',
+          toVersion: '3.0.1',
+          fromBuild: 1,
+          toBuild: 1,
+        },
+        variants: [
+          variant('fp32', true, false),
+          variant('fp32-3.0.1', false, false),
+          variant('fp32-3.0.1@nordic', false, true),
+        ],
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(modelsApi.installModel).mockResolvedValue(undefined);
+      vi.mocked(modelsApi.subscribeInstallProgress).mockImplementation(() => () => {});
+    });
+
+    it('shows no optimize banner or Optimize button, only the update note and action', async () => {
+      vi.mocked(modelsApi.fetchCatalog).mockResolvedValue({ catalog: [updatable()] });
+      render(AnalysisSettingsPage);
+      await fireEvent.click(await screen.findByRole('tab', { name: /analysis\.tabs\.models/ }));
+
+      expect(
+        await screen.findByRole('button', { name: /analysis\.gallery\.update\.action/ })
+      ).toBeInTheDocument();
+      expect(screen.queryByText('analysis.gallery.optimize.bannerTitle')).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: /analysis\.gallery\.optimize\.swap/ })
+      ).toBeNull();
+    });
+
+    it('opens the dialog with the successor build selected, not the host recommendation', async () => {
+      vi.mocked(modelsApi.fetchCatalog).mockResolvedValue({ catalog: [updatable()] });
+      render(AnalysisSettingsPage);
+      await fireEvent.click(await screen.findByRole('tab', { name: /analysis\.tabs\.models/ }));
+
+      await fireEvent.click(
+        await screen.findByRole('button', { name: /analysis\.gallery\.update\.action/ })
+      );
+      await fireEvent.click(
+        await screen.findByRole('button', { name: /analysis\.gallery\.license\.acceptAndInstall/ })
+      );
+
+      await waitFor(() =>
+        expect(modelsApi.installModel).toHaveBeenCalledWith('test-bird', 'fp32-3.0.1')
+      );
+    });
+  });
+
+  describe('release notes of a newer build', () => {
+    // An installed build 1 whose successor is build 2 of the same release.
+    function newerBuild(builds: CatalogEntry['builds']): CatalogEntry {
+      const variant = (id: string, build: number, installed: boolean) => ({
+        id,
+        precision: 'fp32',
+        default: false,
+        installed,
+        speciesCount: 10,
+        sizeBytes: 1,
+        compatible: true,
+        recommended: false,
+        version: '2',
+        build,
+      });
+      return birdEntry({
+        version: '2',
+        installed: true,
+        installedVariantId: 'fp32@nordic',
+        update: {
+          variantId: 'fp32-b2@nordic',
+          fromVersion: '2',
+          toVersion: '2',
+          fromBuild: 1,
+          toBuild: 2,
+        },
+        builds,
+        variants: [variant('fp32-b2@nordic', 2, false), variant('fp32@nordic', 1, true)],
+      });
+    }
+
+    async function openUpdateDialog(entry: CatalogEntry): Promise<HTMLElement> {
+      vi.mocked(modelsApi.fetchCatalog).mockResolvedValue({ catalog: [entry] });
+      render(AnalysisSettingsPage);
+      await fireEvent.click(await screen.findByRole('tab', { name: /analysis\.tabs\.models/ }));
+      await fireEvent.click(
+        await screen.findByRole('button', { name: /analysis\.gallery\.update\.action/ })
+      );
+      return screen.findByRole('dialog', { name: 'analysis.gallery.license.title' });
+    }
+
+    it('places the notes after the variant picker, so a pick that adds or removes them does not push the picker down', async () => {
+      const dialog = await openUpdateDialog(
+        newerBuild([{ version: '2', build: 2, date: '2026-11-21', reason: 'Why.' }])
+      );
+      const heading = within(dialog).getByRole('heading', {
+        name: 'analysis.gallery.buildNotes.heading',
+      });
+      const lastRadio = within(dialog).getAllByRole('radio').at(-1);
+      if (!lastRadio) throw new Error('fixture: the dialog lists variants');
+      expect(
+        lastRadio.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    });
+
+    it('shows the notes of the target build in the Update dialog, as text, and none without a record', async () => {
+      const dialog = await openUpdateDialog(
+        newerBuild([
+          {
+            version: '2',
+            build: 2,
+            date: '2026-11-21',
+            reason: 'Every regional model now includes the dog.',
+            notes: ['<b>Dogs</b> are reported again.', 'Scores can differ slightly.'],
+          },
+        ])
+      );
+      expect(
+        within(dialog).getByRole('heading', { name: 'analysis.gallery.buildNotes.heading' })
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByText('Every regional model now includes the dog.')
+      ).toBeInTheDocument();
+      // Manifest text is never parsed as markup.
+      expect(within(dialog).getByText('<b>Dogs</b> are reported again.')).toBeInTheDocument();
+      expect(within(dialog).getAllByRole('listitem')).toHaveLength(2);
+      expect(vi.mocked(t)).toHaveBeenCalledWith('analysis.gallery.buildNotes.heading', {
+        build: 2,
+        version: '2',
+      });
+      expect(vi.mocked(t)).toHaveBeenCalledWith('analysis.gallery.buildNotes.released', {
+        date: formatDate('2026-11-21'),
+      });
+
+      // Picking the installed build in the dialog brings nothing new: the notes go away.
+      const installedRadio = within(dialog)
+        .getAllByRole<HTMLInputElement>('radio')
+        .find(r => !r.checked);
+      if (!installedRadio) throw new Error('fixture: the dialog lists the installed build');
+      await fireEvent.click(installedRadio);
+      await waitFor(() =>
+        expect(
+          within(dialog).queryByRole('heading', { name: 'analysis.gallery.buildNotes.heading' })
+        ).toBeNull()
+      );
+
+      cleanup();
+      const bare = await openUpdateDialog(newerBuild(undefined));
+      expect(
+        within(bare).queryByRole('heading', { name: 'analysis.gallery.buildNotes.heading' })
+      ).toBeNull();
+    });
   });
 
   it('renders the permanent card with a built-in badge, no Remove/Reinstall, and an Optimize action', async () => {
@@ -1172,6 +1525,30 @@ describe('AnalysisSettingsPage model gallery variant preselection', () => {
       0
     );
     expect(modelsApi.installModel).not.toHaveBeenCalled();
+  });
+
+  it("installs the family's own resolved tile when it lacks the page-wide detected region", async () => {
+    // The detected region is a tile this family does not ship; its own table
+    // resolves the same coordinates to the nordic tile.
+    vi.mocked(modelsApi.fetchModelRegions).mockResolvedValue({
+      ...regionsResolvingTo('lacking'),
+      regions: [regionOption('lacking'), regionOption('africa'), regionOption('nordic')],
+      families: [
+        {
+          catalogId: 'test-bird',
+          repo: 'o/test-bird',
+          installed: false,
+          installedVariantRegion: '',
+          resolved: { slug: 'nordic', source: 'auto', ambiguous: false },
+        },
+      ],
+    });
+    await openInstallDialog(true);
+    await acceptLicense();
+
+    await waitFor(() =>
+      expect(modelsApi.installModel).toHaveBeenCalledWith('test-bird', 'fp32@nordic')
+    );
   });
 
   it('installs the slice of the unsaved region picked in the form, not the auto-resolved one', async () => {
