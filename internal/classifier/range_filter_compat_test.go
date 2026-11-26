@@ -25,6 +25,7 @@ func TestModelRegistry_RangeFilterCompat(t *testing.T) {
 		RegistryIDBirdNETPlusV3: rangeFilterCompatGeomodel,
 		RegistryIDPerchV2:       rangeFilterCompatGeomodel,
 		RegistryIDBat:           rangeFilterCompatNone,
+		RegistryIDBatDetect2:    rangeFilterCompatNone,
 		RegistryIDBSGBat:        rangeFilterCompatNone,
 		RegistryIDBSG:           rangeFilterCompatNone,
 	}

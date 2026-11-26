@@ -62,8 +62,8 @@ func TestOpenVINORoundTrip(t *testing.T) {
 
 // TestOpenVINOPerchRoundTrip is a hardware/lib-gated smoke test for the Perch v2
 // multi-output graph. Set OV_TEST_PERCH_MODEL to a perch_v2_no_dft ONNX path to
-// run it. OV_TEST_DEVICE selects the device ("CPU" default, or "GPU"); a GPU run
-// is skipped if no GPU is enumerated. It proves the OutputIndex selection (logits
+// run it. OV_TEST_DEVICE selects CPU (default), GPU or GPU.<n>; a GPU run
+// is skipped if the requested GPU is unavailable. It proves the OutputIndex selection (logits
 // at index 3, not the index-0 embedding) and that NumClasses reports the real
 // model output dimension. It also requests LargeAllocations on every device: on
 // the CPU the key must never reach the plugin (the plugin would reject it, the
@@ -83,11 +83,11 @@ func TestOpenVINOPerchRoundTrip(t *testing.T) {
 	if device == "" {
 		device = DeviceCPU
 	}
-	if device == DeviceGPU {
+	if IsGPUDevice(device) {
 		devs, err := AvailableDevices()
 		require.NoError(t, err)
-		if !slices.ContainsFunc(devs, IsGPUDevice) {
-			t.Skipf("no GPU device enumerated (have %v)", devs)
+		if !slices.Contains(devs, device) && !(device == DeviceGPU && slices.ContainsFunc(devs, IsGPUDevice)) {
+			t.Skipf("requested GPU %q unavailable (have %v)", device, devs)
 		}
 	}
 
@@ -205,11 +205,22 @@ func TestGPUFaultLatch_RealDevice(t *testing.T) {
 		t.Skipf("no GPU device enumerated (have %v)", devs)
 	}
 
-	gpuClassifier, err := NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceGPU})
+	const birdNETLogitsOutputIndex = 0
+	gpuClassifier, err := NewClassifier(model, Options{
+		PrecisionHint: DefaultPrecisionHint,
+		Device:        DeviceGPU,
+		OutputIndices: []int{birdNETLogitsOutputIndex, birdNETLogitsOutputIndex},
+	})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = gpuClassifier.Close() })
+	multi, ok := gpuClassifier.(MultiOutputClassifier)
+	require.True(t, ok)
 	silence := make([]float32, birdNETInputSamples)
-	_, err = gpuClassifier.PredictRaw(silence)
+	outputs, err := multi.PredictOutputs(silence)
 	require.NoError(t, err, "the GPU classifier works before the latch trips")
+	require.Len(t, outputs, 2)
+	assert.Len(t, outputs[0], birdNETOutputClasses)
+	assert.Len(t, outputs[1], birdNETOutputClasses)
 
 	// Unlatched Close frees and clears every field, and a second Close is a no-op.
 	spare, err := NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceGPU})
@@ -227,6 +238,8 @@ func TestGPUFaultLatch_RealDevice(t *testing.T) {
 
 	_, err = gpuClassifier.PredictRaw(silence)
 	require.ErrorIs(t, err, ErrGPUDeviceFault, "GPU inference fails fast once latched")
+	_, err = multi.PredictOutputs(silence)
+	require.ErrorIs(t, err, ErrGPUDeviceFault, "GPU multi-output inference fails fast once latched")
 
 	_, err = NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceGPU})
 	require.ErrorIs(t, err, ErrGPUDeviceFault, "a GPU compile is refused once latched")

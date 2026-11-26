@@ -5849,6 +5849,9 @@
       "batThreshold": {
         "label": "Soglia di rilevamento pipistrelli (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Attiva per impostare una soglia per questo modello. Altrimenti si applica la soglia condivisa per i pipistrelli."
+      },
       "bsgBatThreshold": {
         "label": "Soglia di rilevamento pipistrelli (BSG-BAT)",
         "sampleRateWarning": "Le registrazioni a 192 kHz funzionano, ma le specie che emettono sopra i 96 kHz non possono essere identificate e i punteggi sono meno affidabili. Si consiglia una frequenza di acquisizione di 384 kHz."

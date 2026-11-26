@@ -5849,6 +5849,9 @@
       "batThreshold": {
         "label": "Próg wykrywania nietoperzy (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Włącz, aby ustawić próg dla tego modelu. W przeciwnym razie obowiązuje wspólny próg dla nietoperzy."
+      },
       "bsgBatThreshold": {
         "label": "Próg wykrywania nietoperzy (BSG-BAT)",
         "sampleRateWarning": "Nagrania przy 192 kHz działają, ale gatunków wołających powyżej 96 kHz nie można zidentyfikować, a oceny są mniej wiarygodne. Zalecana częstotliwość nagrywania to 384 kHz."

@@ -101,6 +101,10 @@ func Load() (*Settings, error) {
 		return nil, err
 	}
 
+	if settings.MigrateLegacyForkBSGBat() {
+		persistMigration(settings, "legacy fork BSG-BAT")
+	}
+
 	// Normalize species config keys to lowercase for case-insensitive matching
 	// This ensures that config keys like "American Robin" are converted to "american robin"
 	// to match the lowercase species names used in detection lookup (fixes #1701)

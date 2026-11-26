@@ -5,6 +5,9 @@ package classifier
 // catalogDocuments lists the licence and policy documents of each model repo, as
 // pinned by the vendored acoustic-models manifests.
 var catalogDocuments = map[string][]CatalogDocument{
+	"legojoey17/batdetect2-uk-same-onnx": {
+		{Kind: "license", URL: "https://creativecommons.org/licenses/by-nc/4.0/legalcode"},
+	},
 	"tphakala/BSG-BAT": {
 		{Kind: "license", URL: "https://creativecommons.org/licenses/by/4.0/legalcode"},
 	},

@@ -83,6 +83,7 @@ func TestParticipatesInRangeFilter_ExpectedPerModel(t *testing.T) {
 		RegistryIDBirdNETPlusV3: true, // mapped geomodel v3
 		RegistryIDPerchV2:       true, // mapped geomodel v3, scientific-name labels
 		RegistryIDBat:           false,
+		RegistryIDBatDetect2:    false,
 		RegistryIDBSGBat:        false,
 		RegistryIDBSG:           false,
 	}

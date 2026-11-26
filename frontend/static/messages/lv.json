@@ -5849,6 +5849,9 @@
       "batThreshold": {
         "label": "Sikspārņu noteikšanas slieksnis (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Iespējojiet, lai šim modelim iestatītu slieksni. Pretējā gadījumā tiek izmantots kopīgais sikspārņu slieksnis."
+      },
       "bsgBatThreshold": {
         "label": "Sikspārņu noteikšanas slieksnis (BSG-BAT)",
         "sampleRateWarning": "Ieraksti ar 192 kHz darbojas, taču sugas, kas izdod signālus virs 96 kHz, netiek noteiktas, un rādītāji ir mazāk ticami. Ieteicamā ierakstīšanas frekvence ir 384 kHz."

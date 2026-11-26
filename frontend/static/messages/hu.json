@@ -5849,6 +5849,9 @@
       "batThreshold": {
         "label": "Denevér-észlelési küszöb (BattyBirdNET)"
       },
+      "batThresholdOverride": {
+        "helpText": "Bekapcsolva külön küszöb állítható be ehhez a modellhez. Egyébként a denevérek közös küszöbe érvényes."
+      },
       "bsgBatThreshold": {
         "label": "Denevér-észlelési küszöb (BSG-BAT)",
         "sampleRateWarning": "A 192 kHz-es felvételek működnek, de a 96 kHz felett hívó fajok nem azonosíthatók, és a pontszámok kevésbé megbízhatók. 384 kHz-es mintavételi frekvencia ajánlott."

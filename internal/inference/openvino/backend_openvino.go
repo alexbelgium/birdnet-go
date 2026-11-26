@@ -31,12 +31,10 @@ typedef void        (*fn_model_free)(ov_model_t*);
 typedef ov_status_e (*fn_model_const_input)(const ov_model_t*, ov_output_const_port_t**);
 typedef ov_status_e (*fn_port_get_partial_shape)(const ov_output_const_port_t*, ov_partial_shape_t*);
 typedef void        (*fn_output_const_port_free)(ov_output_const_port_t*);
-typedef ov_status_e (*fn_partial_shape_create)(const int64_t, const ov_dimension_t*, ov_partial_shape_t*);
 typedef ov_status_e (*fn_model_reshape_single_input)(const ov_model_t*, const ov_partial_shape_t);
 typedef void        (*fn_partial_shape_free)(ov_partial_shape_t*);
 typedef ov_status_e (*fn_compiled_model_create_infer_request)(const ov_compiled_model_t*, ov_infer_request_t**);
 typedef void        (*fn_compiled_model_free)(ov_compiled_model_t*);
-typedef ov_status_e (*fn_shape_create)(const int64_t, const int64_t*, ov_shape_t*);
 typedef ov_status_e (*fn_shape_free)(ov_shape_t*);
 typedef ov_status_e (*fn_tensor_create_from_host_ptr)(const ov_element_type_e, const ov_shape_t, void*, ov_tensor_t**);
 typedef ov_status_e (*fn_tensor_get_size)(const ov_tensor_t*, size_t*);
@@ -69,12 +67,10 @@ typedef void        (*fn_free)(const char*);
     X(model_const_input) \
     X(port_get_partial_shape) \
     X(output_const_port_free) \
-    X(partial_shape_create) \
     X(model_reshape_single_input) \
     X(partial_shape_free) \
     X(compiled_model_create_infer_request) \
     X(compiled_model_free) \
-    X(shape_create) \
     X(shape_free) \
     X(tensor_create_from_host_ptr) \
     X(tensor_get_size) \
@@ -179,13 +175,12 @@ static void ovbind_model_free(ov_model_t* model) {
     OVB.model_free(model);
 }
 
-// OVBIND_RESHAPE_RANK is the expected input rank [batch, samples].
-#define OVBIND_RESHAPE_RANK 2
-// OVBIND_BATCH_DIM_INDEX / OVBIND_SAMPLE_DIM_INDEX index the input dimensions.
+// OVBIND_MIN_INPUT_RANK permits waveform and spectrogram inputs with a batch axis.
+#define OVBIND_MIN_INPUT_RANK 2
+// OVBIND_BATCH_DIM_INDEX indexes the batch dimension.
 #define OVBIND_BATCH_DIM_INDEX 0
-#define OVBIND_SAMPLE_DIM_INDEX 1
-// OVBIND_ERR_BAD_INPUT_SHAPE is returned when the input is not a rank-2 shape
-// with a static sample dimension. It is deliberately far outside the ov_status_e
+// OVBIND_ERR_BAD_INPUT_SHAPE is returned for dynamic or invalid non-batch
+// dimensions. It is deliberately far outside the ov_status_e
 // range (OK..-17, all small negatives) so it cannot collide with a genuine
 // OpenVINO status, letting the Go caller distinguish "bad model shape" from a
 // real reshape failure and report a clear error instead of a stale
@@ -193,12 +188,14 @@ static void ovbind_model_free(ov_model_t* model) {
 #define OVBIND_ERR_BAD_INPUT_SHAPE (-1000)
 
 // ovbind_reshape_static_batch1 reshapes the model's single input to a static
-// [1, samples] shape and writes the derived sample count to *out_samples. The
+// batch-1 shape, preserving every non-batch dimension, and writes the derived
+// element count and shape to *out_samples and *out_shape. The caller frees the
+// shape on success. This supports both waveform and mel spectrogram models. The
 // BirdNET v2.4 model has a dynamic batch dimension, so the partial input shape
 // (not the static shape) must be read; only the sample dimension is static.
 // All ov_partial_shape_t / ov_output_const_port_t handling stays in C so cgo
 // never touches the dynamically allocated dims arrays. Returns OK on success.
-static ov_status_e ovbind_reshape_static_batch1(const ov_model_t* model, int64_t* out_samples) {
+static ov_status_e ovbind_reshape_static_batch1(const ov_model_t* model, int64_t* out_samples, ov_shape_t* out_shape) {
     ov_output_const_port_t* port = NULL;
     ov_status_e st = OVB.model_const_input(model, &port);
     if (st != OK) {
@@ -212,30 +209,36 @@ static ov_status_e ovbind_reshape_static_batch1(const ov_model_t* model, int64_t
         return st;
     }
 
-    // Require a static rank of 2 and a static (min == max), positive sample
-    // dimension. ov_rank_t is an ov_dimension_t, so a static rank has min == max.
-    if (ps.rank.min != ps.rank.max || ps.rank.max != OVBIND_RESHAPE_RANK ||
-        ps.dims[OVBIND_SAMPLE_DIM_INDEX].min != ps.dims[OVBIND_SAMPLE_DIM_INDEX].max ||
-        ps.dims[OVBIND_SAMPLE_DIM_INDEX].min <= 0) {
+    // Only the batch axis may be dynamic. Reject invalid dimensions and products
+    // that would overflow the element count or the C float input allocation.
+    if (ps.rank.min != ps.rank.max || ps.rank.max < OVBIND_MIN_INPUT_RANK) {
         OVB.partial_shape_free(&ps);
         return OVBIND_ERR_BAD_INPUT_SHAPE;
     }
-    int64_t samples = ps.dims[OVBIND_SAMPLE_DIM_INDEX].max;
+    int64_t samples = 1;
+    for (int64_t i = OVBIND_BATCH_DIM_INDEX + 1; i < ps.rank.max; i++) {
+        int64_t d = ps.dims[i].max;
+        if (ps.dims[i].min != d || d <= 0 || samples > INT64_MAX / d ||
+            (uint64_t)samples > SIZE_MAX / sizeof(float) / (uint64_t)d) {
+            OVB.partial_shape_free(&ps);
+            return OVBIND_ERR_BAD_INPUT_SHAPE;
+        }
+        samples *= d;
+    }
+    ps.dims[OVBIND_BATCH_DIM_INDEX].min = 1;
+    ps.dims[OVBIND_BATCH_DIM_INDEX].max = 1;
+    st = OVB.model_reshape_single_input(model, ps);
     OVB.partial_shape_free(&ps);
-
-    ov_dimension_t nd[OVBIND_RESHAPE_RANK];
-    nd[OVBIND_BATCH_DIM_INDEX].min = 1;
-    nd[OVBIND_BATCH_DIM_INDEX].max = 1;
-    nd[OVBIND_SAMPLE_DIM_INDEX].min = samples;
-    nd[OVBIND_SAMPLE_DIM_INDEX].max = samples;
-
-    ov_partial_shape_t nps;
-    st = OVB.partial_shape_create(OVBIND_RESHAPE_RANK, nd, &nps);
     if (st != OK) {
         return st;
     }
-    st = OVB.model_reshape_single_input(model, nps);
-    OVB.partial_shape_free(&nps);
+    port = NULL;
+    st = OVB.model_const_input(model, &port);
+    if (st != OK) {
+        return st;
+    }
+    st = OVB.const_port_get_shape(port, out_shape);
+    OVB.output_const_port_free(port);
     if (st == OK) {
         *out_samples = samples;
     }
@@ -248,10 +251,6 @@ static ov_status_e ovbind_compiled_model_create_infer_request(const ov_compiled_
 
 static void ovbind_compiled_model_free(ov_compiled_model_t* compiled) {
     OVB.compiled_model_free(compiled);
-}
-
-static ov_status_e ovbind_shape_create(const int64_t rank, const int64_t* dims, ov_shape_t* shape) {
-    return OVB.shape_create(rank, dims, shape);
 }
 
 static ov_status_e ovbind_shape_free(ov_shape_t* shape) {
@@ -449,8 +448,6 @@ func LoadedLibraryConfigured() bool {
 const (
 	// inputPortIndex is the index of the single audio input tensor.
 	inputPortIndex = 0
-	// expectedInputRank is the rank of the model input shape, [batch, samples].
-	expectedInputRank = 2
 	// float32Bytes is the size in bytes of one float32 element.
 	float32Bytes = 4
 )
@@ -602,12 +599,14 @@ func DestroyOV() error {
 // callers serialize access. The process-global core is shared and is not owned
 // here.
 type classifier struct {
-	compiled    *C.ov_compiled_model_t
-	req         *C.ov_infer_request_t
-	inBuf       unsafe.Pointer
-	samples     int
-	outputIndex int
-	numClasses  int
+	compiled      *C.ov_compiled_model_t
+	req           *C.ov_infer_request_t
+	inBuf         unsafe.Pointer
+	samples       int
+	outputIndex   int
+	numClasses    int
+	outputIndices []int
+	outputSizes   []int
 	// gpu is true when the classifier was compiled for a GPU device. Only GPU
 	// classifiers consult and feed the GPU fault latch.
 	gpu bool
@@ -619,16 +618,13 @@ type classifier struct {
 func gpuAbandoned(gpu bool) bool { return gpu && gpuFault.blocked() }
 
 // releaseSetup frees the partially built native objects of a failed
-// NewClassifier, in reverse creation order, unless the GPU fault latch is set
-// for a GPU target (then they are abandoned). Nil arguments are skipped.
+// NewClassifier. It skips nil objects and abandons GPU objects once the
+// GPU fault latch is set.
 func releaseSetup(gpu bool, inTensor *C.ov_tensor_t, inBuf unsafe.Pointer, req *C.ov_infer_request_t, compiled *C.ov_compiled_model_t) {
 	// The latch is re-read before every free: another goroutine can trip it
 	// between two of them.
 	if inTensor != nil && !gpuAbandoned(gpu) {
 		C.ovbind_tensor_free(inTensor)
-	}
-	if inBuf != nil && !gpuAbandoned(gpu) {
-		C.free(inBuf)
 	}
 	if req != nil && !gpuAbandoned(gpu) {
 		C.ovbind_infer_request_free(req)
@@ -636,37 +632,38 @@ func releaseSetup(gpu bool, inTensor *C.ov_tensor_t, inBuf unsafe.Pointer, req *
 	if compiled != nil && !gpuAbandoned(gpu) {
 		C.ovbind_compiled_model_free(compiled)
 	}
+	if inBuf != nil && !gpuAbandoned(gpu) {
+		C.free(inBuf)
+	}
 }
 
 // reshapeToStaticBatch1 reshapes the model's single input to a static
-// [1, samples] shape and returns the per-segment sample count. The sample count
-// is read from the model's partial input shape (its sample dimension is static
-// even though the batch dimension is dynamic), so it is derived rather than
-// hardcoded. The reshape mirrors the spike's "key" step: OpenVINO cannot
-// compile or infer a dynamic-batch model without a static input shape. The
-// read-validate-reshape sequence runs atomically in C so cgo never handles the
-// dynamically allocated partial-shape dims.
-func reshapeToStaticBatch1(model *C.ov_model_t, modelPath string) (int, error) {
-	var samples C.int64_t
-	st := C.ovbind_reshape_static_batch1(model, &samples)
+// batch-1 shape and returns the per-segment element count and tensor shape. The
+// element count is read from the model's partial input shape (non-batch axes
+// are static even when the batch dimension is dynamic). OpenVINO needs a
+// static input shape to compile and infer these models. The reshape runs
+// in C so cgo never accesses the dynamically allocated partial-shape dims.
+func reshapeToStaticBatch1(model *C.ov_model_t, modelPath string) (sampleCount int, shape C.ov_shape_t, err error) {
+	var count C.int64_t
+	st := C.ovbind_reshape_static_batch1(model, &count, &shape)
 	if ovOK(st) {
-		return int(samples), nil
+		return int(count), shape, nil
 	}
 	// A bad input shape is signalled by a distinct out-of-range sentinel rather
 	// than a genuine ov_status_e, so report it directly: the reshape was never
 	// reached and ov_get_last_err_msg would return a stale or empty message.
 	if int(st) == int(C.OVBIND_ERR_BAD_INPUT_SHAPE) {
-		return 0, errors.Newf("openvino: model input is not a static rank-2 shape; cannot reshape for batch-1 inference").
+		return 0, shape, errors.Newf("openvino: model input requires a static rank >= 2 and positive static non-batch dimensions without overflow; cannot reshape for batch-1 inference").
 			Category(errors.CategoryModelInit).Build()
 	}
-	return 0, lastErr("ov_model_reshape_single_input", st, modelPath)
+	return 0, shape, lastErr("ov_model_reshape_single_input", st, modelPath)
 }
 
 // NewClassifier reads modelPath, compiles it for opts.Device (CPU, GPU or GPU.<n>) at
 // opts.PrecisionHint, creates one infer request, binds a C-owned input tensor
-// sized to the model's input shape, and reads the element count of the selected
-// output port (opts.OutputIndex) from the compiled model so NumClasses reflects
-// the model rather than a label list. InitOV must have succeeded first;
+// sized to the model's input shape, and reads the element counts of the selected
+// output ports from the compiled model. NumClasses reports the first count and
+// OutputSizes reports all selected counts. InitOV must have succeeded first;
 // otherwise it returns ErrOpenVINOUnavailable. For a GPU device it returns an
 // error wrapping ErrGPUDeviceFault, without any native call, once the GPU fault
 // latch is set; a failure carrying a fatal OpenCL marker trips the latch, and
@@ -699,15 +696,21 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 	if device == "" {
 		device = DeviceCPU
 	}
-	if device != DeviceCPU && !IsGPUDevice(device) {
+	isGPU := IsGPUDevice(device)
+	if device != DeviceCPU && !isGPU {
 		return nil, errors.Newf("openvino: unsupported device %q (want %q, %q or %q)", device, DeviceCPU, DeviceGPU, DeviceGPU+".<n>").
 			Category(errors.CategoryModelInit).Build()
 	}
-	if opts.OutputIndex < 0 {
-		return nil, errors.Newf("openvino: negative output index %d", opts.OutputIndex).
-			Category(errors.CategoryModelInit).Build()
+	indices := slices.Clone(opts.OutputIndices)
+	if len(indices) == 0 {
+		indices = []int{opts.OutputIndex}
 	}
-	isGPU := IsGPUDevice(device)
+	for _, index := range indices {
+		if index < 0 {
+			return nil, errors.Newf("openvino: negative output index %d", index).
+				Category(errors.CategoryModelInit).Build()
+		}
+	}
 	if gpuAbandoned(isGPU) {
 		return nil, gpuFault.blockedErr()
 	}
@@ -720,13 +723,14 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 		return nil, lastErr("ov_core_read_model", st, modelPath)
 	}
 
-	// Reshape the input to static [1, samples] before compiling. BirdNET v2.4
+	// Reshape the input to static batch 1 before compiling. BirdNET v2.4
 	// has a dynamic batch dimension, which OpenVINO cannot compile or infer.
-	samples, err := reshapeToStaticBatch1(model, modelPath)
+	samples, shape, err := reshapeToStaticBatch1(model, modelPath)
 	if err != nil {
 		C.ovbind_model_free(model)
 		return nil, err
 	}
+	defer C.ovbind_shape_free(&shape)
 
 	cDev := C.CString(device)
 	defer C.free(unsafe.Pointer(cDev))
@@ -767,6 +771,7 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 	C.ovbind_model_free(model)
 	model = nil
 	if err != nil {
+		releaseSetup(isGPU, nil, nil, nil, compiled)
 		return nil, err
 	}
 	if gpuAbandoned(isGPU) {
@@ -774,31 +779,35 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 		return nil, gpuFault.blockedErr()
 	}
 
-	// Read the real element count of the selected output port from the compiled
-	// model (static after the batch-1 reshape). NumClasses reflects the model,
-	// not the label list, so the caller can validate the label count against it
-	// (issue #1112) and a wrong OutputIndex is rejected before any inference.
-	var classCount C.int64_t
-	if st := C.ovbind_output_class_count(compiled, C.size_t(opts.OutputIndex), &classCount); !ovOK(st) {
-		if int(st) == int(C.OVBIND_ERR_BAD_OUTPUT) {
-			releaseSetup(isGPU, nil, nil, nil, compiled)
-			return nil, errors.Newf("openvino: output index %d is out of range or has a non-static shape", opts.OutputIndex).
-				Category(errors.CategoryModelInit).Build()
+	// Read the element counts from the compiled model so callers can validate
+	// them against their labels (issue #1112). Reject invalid selections before
+	// the first inference.
+	outputSizes := make([]int, len(indices))
+	for i, index := range indices {
+		if gpuAbandoned(isGPU) {
+			return nil, gpuFault.blockedErr()
 		}
-		err = gpuFault.setupFailed(isGPU, lastErr("ov_compiled_model_output shape", st, modelPath))
-		releaseSetup(isGPU, nil, nil, nil, compiled)
-		return nil, err
+		var count C.int64_t
+		if st := C.ovbind_output_class_count(compiled, C.size_t(index), &count); !ovOK(st) {
+			if int(st) == int(C.OVBIND_ERR_BAD_OUTPUT) {
+				releaseSetup(isGPU, nil, nil, nil, compiled)
+				return nil, errors.Newf("openvino: output index %d is out of range or has a non-static shape", index).
+					Category(errors.CategoryModelInit).Build()
+			}
+			err = gpuFault.setupFailed(isGPU, lastErr("ov_compiled_model_output shape", st, modelPath))
+			releaseSetup(isGPU, nil, nil, nil, compiled)
+			return nil, err
+		}
+		outputSizes[i] = int(count)
 	}
-
 	if gpuAbandoned(isGPU) {
-		// Tripped by another goroutine since the compile check: abandon the compiled model.
 		return nil, gpuFault.blockedErr()
 	}
 
 	var req *C.ov_infer_request_t
 	if st := C.ovbind_compiled_model_create_infer_request(compiled, &req); !ovOK(st) {
 		err = gpuFault.setupFailed(isGPU, lastErr("ov_compiled_model_create_infer_request", st, modelPath))
-		releaseSetup(isGPU, nil, nil, nil, compiled)
+		releaseSetup(isGPU, nil, nil, req, compiled)
 		return nil, err
 	}
 	if gpuAbandoned(isGPU) {
@@ -814,23 +823,19 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 		return nil, errors.Newf("openvino: failed to allocate %d-sample input buffer", samples).Build()
 	}
 
-	dims := []C.int64_t{1, C.int64_t(samples)}
-	var shape C.ov_shape_t
-	if st := C.ovbind_shape_create(expectedInputRank, &dims[0], &shape); !ovOK(st) {
-		err = gpuFault.setupFailed(isGPU, lastErr("ov_shape_create", st))
-		releaseSetup(isGPU, nil, inBuf, req, compiled)
-		return nil, err
+	if gpuAbandoned(isGPU) {
+		return nil, gpuFault.blockedErr()
 	}
-
 	var inTensor *C.ov_tensor_t
 	if st := C.ovbind_tensor_create_from_host_ptr(C.F32, shape, inBuf, &inTensor); !ovOK(st) {
 		err = gpuFault.setupFailed(isGPU, lastErr("ov_tensor_create_from_host_ptr", st))
-		C.ovbind_shape_free(&shape)
-		releaseSetup(isGPU, nil, inBuf, req, compiled)
+		releaseSetup(isGPU, inTensor, inBuf, req, compiled)
 		return nil, err
 	}
-	C.ovbind_shape_free(&shape)
 
+	if gpuAbandoned(isGPU) {
+		return nil, gpuFault.blockedErr()
+	}
 	if st := C.ovbind_set_input_tensor(req, inputPortIndex, inTensor); !ovOK(st) {
 		err = gpuFault.setupFailed(isGPU, lastErr("ov_infer_request_set_input_tensor_by_index", st))
 		releaseSetup(isGPU, inTensor, inBuf, req, compiled)
@@ -846,13 +851,15 @@ func NewClassifier(modelPath string, opts Options) (Classifier, error) {
 	C.ovbind_tensor_free(inTensor)
 
 	return &classifier{
-		compiled:    compiled,
-		req:         req,
-		inBuf:       inBuf,
-		samples:     samples,
-		outputIndex: opts.OutputIndex,
-		numClasses:  int(classCount),
-		gpu:         isGPU,
+		compiled:      compiled,
+		req:           req,
+		inBuf:         inBuf,
+		samples:       samples,
+		outputIndex:   indices[0],
+		numClasses:    outputSizes[0],
+		outputIndices: indices,
+		outputSizes:   outputSizes,
+		gpu:           isGPU,
 	}, nil
 }
 
@@ -870,31 +877,77 @@ func (c *classifier) PredictRaw(samples []float32) ([]float32, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	if c.req == nil || c.inBuf == nil {
-		return nil, ErrOpenVINOUnavailable
+	if err := c.infer(samples); err != nil {
+		return nil, err
 	}
-	if c.gpu && gpuFault.blocked() {
-		return nil, gpuFault.blockedErr()
+	out, err := c.readOutput(c.outputIndex)
+	if err != nil {
+		return nil, err
+	}
+	_ = gpuFault.inferResult(c.gpu, nil)
+	return out, nil
+}
+
+// PredictOutputs returns every selected output from the same inference.
+func (c *classifier) PredictOutputs(samples []float32) ([][]float32, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := c.infer(samples); err != nil {
+		return nil, err
+	}
+	outputs := make([][]float32, len(c.outputIndices))
+	for i, index := range c.outputIndices {
+		out, err := c.readOutput(index)
+		if err != nil {
+			return nil, err
+		}
+		outputs[i] = out
+	}
+	// Reset the streak only after every selected output has been read.
+	_ = gpuFault.inferResult(c.gpu, nil)
+	return outputs, nil
+}
+
+// OutputSizes returns the selected output element counts.
+func (c *classifier) OutputSizes() []int { return slices.Clone(c.outputSizes) }
+
+// infer runs while the caller is pinned to an OS thread for error retrieval.
+func (c *classifier) infer(samples []float32) error {
+	if c.req == nil || c.inBuf == nil {
+		return ErrOpenVINOUnavailable
+	}
+	if gpuAbandoned(c.gpu) {
+		return gpuFault.blockedErr()
 	}
 	if len(samples) != c.samples {
-		return nil, errors.Newf("openvino: input length %d does not match model input %d", len(samples), c.samples).Build()
+		return errors.Newf("openvino: input length %d does not match model input %d", len(samples), c.samples).Build()
 	}
 
 	dst := unsafe.Slice((*float32)(c.inBuf), c.samples)
 	copy(dst, samples)
 
+	if gpuAbandoned(c.gpu) {
+		return gpuFault.blockedErr()
+	}
 	if st := C.ovbind_infer(c.req); !ovOK(st) {
-		return nil, gpuFault.inferResult(c.gpu, lastErr("ov_infer_request_infer", st))
+		return gpuFault.inferResult(c.gpu, lastErr("ov_infer_request_infer", st))
 	}
 	// Another goroutine (a GPU compile in NewClassifier, or another classifier's
 	// inference) can trip the latch while this infer runs; do not read the output
 	// from a failed GPU context.
 	if gpuAbandoned(c.gpu) {
-		return nil, gpuFault.blockedErr()
+		return gpuFault.blockedErr()
 	}
 
+	return nil
+}
+
+func (c *classifier) readOutput(index int) ([]float32, error) {
+	if gpuAbandoned(c.gpu) {
+		return nil, gpuFault.blockedErr()
+	}
 	var outTensor *C.ov_tensor_t
-	if st := C.ovbind_get_output_tensor(c.req, C.size_t(c.outputIndex), &outTensor); !ovOK(st) {
+	if st := C.ovbind_get_output_tensor(c.req, C.size_t(index), &outTensor); !ovOK(st) {
 		return nil, gpuFault.inferResult(c.gpu, lastErr("ov_infer_request_get_output_tensor_by_index", st))
 	}
 	defer func() {
@@ -904,14 +957,23 @@ func (c *classifier) PredictRaw(samples []float32) ([]float32, error) {
 		}
 	}()
 
+	if gpuAbandoned(c.gpu) {
+		return nil, gpuFault.blockedErr()
+	}
 	var n C.size_t
 	if st := C.ovbind_tensor_get_size(outTensor, &n); !ovOK(st) {
 		return nil, gpuFault.inferResult(c.gpu, lastErr("ov_tensor_get_size", st))
 	}
 
+	if gpuAbandoned(c.gpu) {
+		return nil, gpuFault.blockedErr()
+	}
 	var dataPtr unsafe.Pointer
 	if st := C.ovbind_tensor_data(outTensor, &dataPtr); !ovOK(st) {
 		return nil, gpuFault.inferResult(c.gpu, lastErr("ov_tensor_data", st))
+	}
+	if gpuAbandoned(c.gpu) {
+		return nil, gpuFault.blockedErr()
 	}
 	// ov_tensor_data can return OK with a nil buffer; unsafe.Slice on a nil
 	// pointer with n > 0 is undefined behavior, so guard it.
@@ -922,8 +984,6 @@ func (c *classifier) PredictRaw(samples []float32) ([]float32, error) {
 	src := unsafe.Slice((*float32)(dataPtr), int(n))
 	out := make([]float32, int(n))
 	copy(out, src)
-	// A full successful inference resets the consecutive GPU failure streak.
-	_ = gpuFault.inferResult(c.gpu, nil)
 	return out, nil
 }
 

@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "repo": "legojoey17/batdetect2-uk-same-onnx",
+  "family": "batdetect2",
+  "updated": "2026-11-18",
+  "family_meta": {
+    "display_name": "BatDetect2 (UK)",
+    "description": "BatDetect2 2.0.0b3 classifier for United Kingdom bat species, converted to ONNX.",
+    "author": "Mac Aodha et al. (BatDetect2); ONNX conversion by legojoey17",
+    "license": "CC-BY-NC-4.0",
+    "commercial_use": false,
+    "documents": [
+      {"kind": "license", "requires_agreement": false, "url": "https://creativecommons.org/licenses/by-nc/4.0/legalcode"}
+    ],
+    "channel": "experimental",
+    "upstream_url": "https://github.com/macaodha/batdetect2",
+    "species_count": 17,
+    "region": "United Kingdom"
+  }
+}
