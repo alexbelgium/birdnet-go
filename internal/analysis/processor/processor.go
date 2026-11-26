@@ -209,6 +209,9 @@ type Processor struct {
 	// Periodic pipeline stats (inference activity per source/model)
 	pipelineStats *PipelineStats
 
+	// First-daily-detection consensus state (see first_daily_consensus.go).
+	firstDaily firstDailyConsensus
+
 	// Per-model recent-detection cache: a fixed-capacity, most-recent-first feed of
 	// the last lastDetectionCap detections per model, throttled per species so a
 	// continuously singing bird does not flood it. lastDetectionMu guards
@@ -1245,10 +1248,7 @@ func (p *Processor) parseAndValidateSpecies(settings *conf.Settings, result data
 	}
 
 	// Convert species to lowercase for case-insensitive comparison
-	speciesLowercase = strings.ToLower(commonName)
-	if speciesLowercase == "" && scientificName != "" {
-		speciesLowercase = strings.ToLower(scientificName)
-	}
+	speciesLowercase = dynamicThresholdKey(commonName, scientificName)
 
 	return
 }
@@ -1963,6 +1963,13 @@ func (p *Processor) shouldDiscardDetection(item *PendingDetection, settings *con
 		return true, reasonUltrasonicFilter
 	}
 
+	// Hold back the first detection of a bird species each day unless a second
+	// model confirms it (see first_daily_consensus.go). Last, so the cheaper
+	// filters above decide first.
+	if discard, reason := p.shouldDiscardFirstDailyDetection(item, settings); discard {
+		return true, reason
+	}
+
 	if cons != nil && p.discardForModelConsensus(item, settings, cons) {
 		return true, reasonModelConsensus
 	}
@@ -2149,6 +2156,11 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 	baseOverlap := p.effectiveBaseOverlap(settings)
 	visThresholds := precomputeVisibilityThresholds(settings, baseOverlap)
 
+	// Resolve first-daily-consensus datastore lookups (see first_daily_consensus.go)
+	// under their own brief read lock, before the exclusive lock below is taken, so
+	// a slow query cannot stall detection ingestion for the flush cycle's duration.
+	p.warmFirstDailyAcceptance(now, settings)
+
 	// Built before pendingMutex is taken: it may wait on the orchestrator.
 	cons := p.prepareModelConsensus(settings)
 
@@ -2233,6 +2245,7 @@ func (p *Processor) flushPendingDetections() (pendingCount, flushedCount int) {
 			logger.String("operation", "flush_detection"))
 
 		p.processApprovedDetection(&item, speciesName, settings)
+		p.noteAcceptedDetection(&item)
 		delete(p.pendingDetections, mapKey)
 		flushedCount++
 

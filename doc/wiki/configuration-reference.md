@@ -300,6 +300,10 @@ RealtimeSettings contains all settings related to realtime processing.
 | `realtime.daylightfilter.enabled` | boolean | true to enable daylight filter |
 | `realtime.daylightfilter.offset` | integer | hours to adjust daylight window; positive = shrink (lenient), negative = expand (strict) |
 | `realtime.daylightfilter.species` | string[] | species, families, orders, or genera to filter during daylight |
+| `realtime.firstdailyconsensus.enabled` | boolean | true to require a second bird model to confirm a species' first detection each day |
+| `realtime.firstdailyconsensus.whitelist` | string[] | bird species exempt from the first-daily consensus rule, by common or scientific name |
+| `realtime.firstdailyconsensus.batenabled` | boolean | true to require a second bat model to confirm a species' first detection each day |
+| `realtime.firstdailyconsensus.batwhitelist` | string[] | bat species exempt from the first-daily consensus rule, by common or scientific name |
 | `realtime.modelconsensus.rules` | model-consensus-rule[] | consensus rules; each has species (empty: every species), models (config IDs as in models.enabled; empty: any model, needing minmodels agreeing models or every eligible one with alleligible; non-empty: a detection heard only by these models needs a second model outside the list), and minmodels (2 to 4) and alleligible, which apply only when models is empty |
 | `realtime.modelconsensus.debug` | boolean | true to log each consensus discard at info level, with the failed rule and the agreeing and eligible models |
 | `realtime.rtsp.streams` | stream-config[] | Streams to analyze. Each entry has name (required, unique), url (required), enabled, type (rtsp, http, hls, rtmp or udp), transport (tcp or udp, RTSP and RTMP only; empty uses the global transport), mediaMode (auto, audio-only or full-stream, RTSP only; default full-stream), channelMode (downmix, left or right; default downmix) and gain (dB) |
