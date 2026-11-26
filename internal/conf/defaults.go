@@ -115,6 +115,9 @@ func setDefaultConfig() {
 	viper.SetDefault("bat.ultrasonicfilter.fftsize", DefaultUltrasonicFFTSize)
 	viper.SetDefault("bat.ultrasonicfilter.hopsize", DefaultUltrasonicHopSize)
 	viper.SetDefault("bat.ultrasonicfilter.frequencysplithz", DefaultUltrasonicSplitHz)
+	viper.SetDefault("bat.gate.enabled", false)
+	viper.SetDefault("bat.gate.dryrun", false)
+	viper.SetDefault("bat.gate.mainshz", 50)
 
 	// BSG-BAT model configuration. Its schedule, false positive filter and
 	// ultrasonic filter come from the bat section above.

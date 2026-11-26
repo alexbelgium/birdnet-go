@@ -608,6 +608,9 @@
       batNighttimeOnly: store.originalData.bat?.nighttimeOnly,
       batUltrasonicFilter: store.originalData.bat?.ultrasonicFilter?.enabled ?? true,
       batDiscardUnlikely: store.originalData.bat?.ultrasonicFilter?.discardUnlikely ?? false,
+      batGate: store.originalData.bat?.gate?.enabled ?? false,
+      batGateDryRun: store.originalData.bat?.gate?.dryRun ?? false,
+      batGateMainsHz: store.originalData.bat?.gate?.mainsHz ?? 50,
       batFPFilter: store.originalData.bat?.falsePositiveFilter?.level ?? 0,
       bsgBatStepFrames: hasBsgBatModel ? savedBsgBatStepFrames : undefined,
     },
@@ -615,6 +618,9 @@
       batNighttimeOnly: bat.nighttimeOnly,
       batUltrasonicFilter: bat.ultrasonicFilter?.enabled ?? true,
       batDiscardUnlikely: bat.ultrasonicFilter?.discardUnlikely ?? false,
+      batGate: bat.gate?.enabled ?? false,
+      batGateDryRun: bat.gate?.dryRun ?? false,
+      batGateMainsHz: bat.gate?.mainsHz ?? 50,
       batFPFilter: batFPLevel,
       bsgBatStepFrames: hasBsgBatModel ? bsgBatStepFrames : undefined,
     },
@@ -1556,6 +1562,17 @@
         ...bat.ultrasonicFilter,
         enabled: bat.ultrasonicFilter?.enabled ?? true,
         discardUnlikely: value,
+      },
+    });
+  }
+
+  function updateBatGate(patch: { enabled?: boolean; dryRun?: boolean; mainsHz?: number }) {
+    settingsActions.updateSection('bat', {
+      gate: {
+        enabled: bat.gate?.enabled ?? false,
+        dryRun: bat.gate?.dryRun ?? false,
+        mainsHz: bat.gate?.mainsHz ?? 50,
+        ...patch,
       },
     });
   }
@@ -3088,6 +3105,32 @@
             description={t('analysis.detection.batDiscardUnlikely.helpText')}
             disabled={store.isLoading || store.isSaving}
             onUpdate={updateBatDiscardUnlikely}
+          />
+        {/if}
+        <ToggleField
+          className="py-4"
+          value={bat.gate?.enabled ?? false}
+          label="Bat pre-filter gate"
+          description="Runs a quick signal check before every bat model. Windows with no ultrasonic event, or whose only events repeat at the mains frequency (electrical interference), are not sent to the models. Saves CPU and removes mains-noise false positives."
+          disabled={store.isLoading || store.isSaving}
+          onUpdate={(v: boolean) => updateBatGate({ enabled: v })}
+        />
+        {#if bat.gate?.enabled ?? false}
+          <ToggleField
+            className="py-4 pl-6"
+            value={bat.gate?.dryRun ?? false}
+            label="Dry run (log only)"
+            description="Log what the gate would skip, but still send every window to the models. Use it for a few nights to check that no real bat would be lost."
+            disabled={store.isLoading || store.isSaving}
+            onUpdate={(v: boolean) => updateBatGate({ dryRun: v })}
+          />
+          <ToggleField
+            className="py-4 pl-6"
+            value={(bat.gate?.mainsHz ?? 50) === 60}
+            label="60 Hz mains"
+            description="Enable where the mains frequency is 60 Hz (Americas, parts of Asia). Off means 50 Hz."
+            disabled={store.isLoading || store.isSaving}
+            onUpdate={(v: boolean) => updateBatGate({ mainsHz: v ? 60 : 50 })}
           />
         {/if}
       </div>
