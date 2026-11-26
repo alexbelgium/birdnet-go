@@ -32,6 +32,7 @@
     isExcluded?: boolean;
     onDetailsClick?: (_id: number) => void;
     onReview?: () => void;
+    onReanalyze?: () => void;
     onMarkCorrect?: () => void;
     onMarkFalsePositive?: () => void;
     onToggleSpecies?: () => void;
@@ -44,6 +45,7 @@
     isExcluded = false,
     onDetailsClick,
     onReview,
+    onReanalyze,
     onMarkCorrect,
     onMarkFalsePositive,
     onToggleSpecies,
@@ -301,6 +303,7 @@
       {onMarkCorrect}
       {onMarkFalsePositive}
       {onReview}
+      {onReanalyze}
       {isExcluded}
       {onToggleSpecies}
       {onToggleLock}

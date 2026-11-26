@@ -83,6 +83,7 @@
   import { loggers } from '$lib/utils/logger';
   import { localizeSpeciesName } from '$lib/utils/speciesDisplay';
   import { buildAppUrl } from '$lib/utils/urlHelpers';
+  import { openReanalyze } from '$lib/stores/reanalyze.svelte';
   import { useShortcuts } from '$lib/utils/useShortcuts.svelte';
 
   const logger = loggers.ui;
@@ -461,6 +462,24 @@
    * - already left: nothing to reload, a step brings its own detection.
    * Resolves false when the reload failed, so a panel can show what the page holds.
    */
+  /**
+   * Opens the reanalysis modal for the shown detection. A correction there may move the
+   * detection to another species, so it reloads like a species change; a delete leaves
+   * nothing to show, so the page goes back to the detections list.
+   */
+  function reanalyze(det: DetectionDetailData) {
+    openReanalyze(det, {
+      onChanged: () =>
+        void onSaved({
+          detectionId: det.id,
+          scientificName: det.scientificName,
+          changedTo: det.scientificName,
+          speciesStats: true,
+        }),
+      onDeleted: () => navigation.navigate('/ui/detections'),
+    });
+  }
+
   function onSaved(change: SavedChange): Promise<boolean> {
     const touched = [change.scientificName, change.changedTo];
     if (change.speciesStats && speciesDataFor && touched.includes(speciesDataFor)) {
@@ -864,6 +883,9 @@
         <RecordingCard
           {detection}
           speciesName={displayName}
+          onReanalyze={() => {
+            if (detection) reanalyze(detection);
+          }}
           onPlaybackControls={attachPlaybackControls}
           playShortcut={playHint}
         />

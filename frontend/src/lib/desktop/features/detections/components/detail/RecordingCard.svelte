@@ -10,7 +10,7 @@
   noise reduction applied when one is set.
 -->
 <script lang="ts">
-  import { Download } from '@lucide/svelte';
+  import { Download, Sparkles } from '@lucide/svelte';
   import AudioPlayer from '$lib/desktop/components/media/AudioPlayer.svelte';
   import SpectrogramImage from '$lib/desktop/components/media/SpectrogramImage.svelte';
   import { t } from '$lib/i18n';
@@ -29,13 +29,16 @@
   interface Props {
     detection: DetectionDetailData;
     speciesName: string;
+    /** Opens the reanalysis modal; the button shows only with a clip and a signed-in user. */
+    onReanalyze?: () => void;
     /** Receives the player's controls when it mounts; the function it returns detaches them. */
     onPlaybackControls?: (_controls: PlaybackControls) => () => void;
     /** The key that plays and pauses, shown on the player's play button. */
     playShortcut?: ShortcutHint | null;
   }
 
-  let { detection, speciesName, onPlaybackControls, playShortcut = null }: Props = $props();
+  let { detection, speciesName, onReanalyze, onPlaybackControls, playShortcut = null }: Props =
+    $props();
 
   const HERTZ_PER_KILOHERTZ = 1000;
 
@@ -140,10 +143,25 @@
       </div>
 
       {#if detection.clipName}
-        <a href={downloadUrl} download class="dd-rec-download focus-ring">
-          <Download class="size-4" />
-          <span>{t('media.audio.download')}<span class="sr-only">, {speciesName}</span></span>
-        </a>
+        <div class="dd-rec-actions">
+          <a href={downloadUrl} download class="dd-rec-download focus-ring">
+            <Download class="size-4" />
+            <span>{t('media.audio.download')}<span class="sr-only">, {speciesName}</span></span>
+          </a>
+          <!-- Reanalyze with the loaded models: with no clip there is nothing to re-run
+               inference over. -->
+          {#if onReanalyze && $isAuthenticated}
+            <button
+              type="button"
+              class="dd-rec-download focus-ring"
+              onclick={onReanalyze}
+              aria-label={`Reanalyze this ${speciesName} clip`}
+            >
+              <Sparkles class="size-4" />
+              <span>Reanalyze</span>
+            </button>
+          {/if}
+        </div>
       {/if}
     </div>
   {/snippet}
@@ -238,6 +256,14 @@
     margin-top: 0.375rem;
     font-size: 0.75rem;
     color: var(--text-subtle);
+  }
+
+  .dd-rec-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
   }
 
   .dd-rec-download {

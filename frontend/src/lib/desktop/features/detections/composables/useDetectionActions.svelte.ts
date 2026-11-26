@@ -20,6 +20,7 @@ import { t } from '$lib/i18n';
 import { loggers } from '$lib/utils/logger';
 import { navigation } from '$lib/stores/navigation.svelte';
 import { setDetectionVerification } from '$lib/utils/reviewDetection';
+import { openReanalyze } from '$lib/stores/reanalyze.svelte';
 
 const logger = loggers.ui;
 
@@ -50,6 +51,11 @@ export function useDetectionActions(options: DetectionActionOptions) {
 
   function handleReview(detection: Detection) {
     navigation.navigate(`/ui/detections/${detection.id}?tab=review`);
+  }
+
+  /** Open the reanalysis modal in place, refreshing the list after a change. */
+  function handleReanalyze(detection: Detection) {
+    openReanalyze(detection, { onChanged: options.onRefresh });
   }
 
   function handleToggleSpecies(detection: Detection) {
@@ -186,6 +192,7 @@ export function useDetectionActions(options: DetectionActionOptions) {
       return confirmModalConfig;
     },
     handleReview,
+    handleReanalyze,
     handleMarkCorrect,
     handleMarkFalsePositive,
     handleToggleSpecies,
