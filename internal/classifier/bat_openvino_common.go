@@ -10,7 +10,7 @@ import (
 func prepareBatOpenVINO(backend, device, modelID, libraryPath string, outputIndex int) (openVINOPlan, bool) {
 	plan, ok, reason := openVINOPlanFor(backend, device, modelID, libraryPath, outputIndex)
 	if !ok {
-		logOpenVINODeclined(modelID, backend, reason)
+		logOpenVINODeclined(modelID, backend, device, reason)
 		return plan, false
 	}
 	// Keep these graphs at f32 until parity is validated on genuine f16 hardware.

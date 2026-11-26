@@ -57,11 +57,35 @@ func OpenVINOIsGPUDevice(name string) bool { return ov.IsGPUDevice(name) }
 // false.
 func OpenVINOGPUFault() (faulted bool, cause error) { return ov.GPUFault() }
 
+// ErrOpenVINOGPUFault is the sentinel every error returned for a failed OpenVINO
+// GPU wraps: the fatal error that tripped the fault latch and every later call
+// that failed fast because of it. Match it with errors.Is.
+var ErrOpenVINOGPUFault = ov.ErrGPUDeviceFault
+
 // ovGPUFaultLogged makes the GPU fault ERROR log fire once per process.
 var ovGPUFaultLogged atomic.Bool
 
+// ovGPUFaultObserver is the registered fault observer, or nil.
+var ovGPUFaultObserver atomic.Pointer[func()]
+
+// RegisterOpenVINOGPUFaultObserver registers fn to be told that the OpenVINO GPU
+// fault latch tripped, and returns a function that unregisters it. The newest
+// registration wins; the returned function clears only its own registration, so
+// a stale unregister leaves a newer observer in place.
+//
+// fn is called at most once per process, from the goroutine whose call first
+// returned the fault, possibly while that goroutine holds inference or
+// orchestrator locks. It must not block: a leaf mutex held only for flag
+// updates is fine.
+func RegisterOpenVINOGPUFaultObserver(fn func()) (unregister func()) {
+	p := &fn
+	ovGPUFaultObserver.Store(p)
+	return func() { ovGPUFaultObserver.CompareAndSwap(p, nil) }
+}
+
 // logOVGPUFaultOnce logs one ERROR the first time an OpenVINO classifier call
-// returns an error wrapping ov.ErrGPUDeviceFault, and returns err unchanged.
+// returns an error wrapping ov.ErrGPUDeviceFault, tells the registered fault
+// observer (if any) once, and returns err unchanged.
 // Later failures of the models still on the GPU are reported by the existing
 // inference failure accounting, not logged again here.
 func logOVGPUFaultOnce(err error) error {
@@ -75,7 +99,23 @@ func logOVGPUFaultOnce(err error) error {
 	logger.Global().Module("inference").Error(
 		"OpenVINO GPU failed; GPU inference is stopped until restart, and models on the OpenVINO GPU fail until BirdNET-Go restarts or the OpenVINO device is set to CPU",
 		logger.Error(cause))
+	if obs := ovGPUFaultObserver.Load(); obs != nil && *obs != nil {
+		(*obs)()
+	}
 	return err
+}
+
+// ovLargeAllocationsLogged makes the large allocations INFO log fire once per process.
+var ovLargeAllocationsLogged atomic.Bool
+
+// logOVLargeAllocationsUnsupportedOnce logs one INFO the first time it observes
+// that the bound OpenVINO library rejected GPU_ENABLE_LARGE_ALLOCATIONS.
+func logOVLargeAllocationsUnsupportedOnce() {
+	if !ov.GPULargeAllocationsUnsupported() || !ovLargeAllocationsLogged.CompareAndSwap(false, true) {
+		return
+	}
+	logger.Global().Module("inference").Info(
+		"OpenVINO library rejects GPU_ENABLE_LARGE_ALLOCATIONS; GPU models that request it compile without it")
 }
 
 // OVPrecisionF32 is the INFERENCE_PRECISION_HINT for full f32 inference, used to
@@ -89,6 +129,9 @@ type OpenVINOClassifierOptions struct {
 	PrecisionHint string   // INFERENCE_PRECISION_HINT; "" defaults to f16
 	Device        string   // ov.DeviceCPU (default), ov.DeviceGPU or a concrete "GPU.<n>"
 	OutputIndex   int      // logits output port index; 0 default, 3 for Perch v2
+	// LargeAllocations requests GPU_ENABLE_LARGE_ALLOCATIONS on a GPU device only;
+	// see ov.Options.LargeAllocations.
+	LargeAllocations bool
 }
 
 type openvinoClassifier struct {
@@ -100,6 +143,8 @@ type openvinoClassifier struct {
 // backend. InitOpenVINO must be called first; if the OpenVINO core is not
 // initialized (or the backend is not compiled in), construction returns
 // ov.ErrOpenVINOUnavailable, which the caller treats as fall back to ORT.
+//
+//nolint:gocritic // hugeParam: options are built once per model load
 func NewOpenVINOClassifier(modelPath string, opts OpenVINOClassifierOptions) (Classifier, error) {
 	if len(opts.Labels) == 0 {
 		return nil, errors.Newf("OpenVINO classifier requires labels").Build()
@@ -110,11 +155,13 @@ func NewOpenVINOClassifier(modelPath string, opts OpenVINOClassifierOptions) (Cl
 	}
 	threads := max(opts.Threads, 0)
 	c, err := ov.NewClassifier(modelPath, ov.Options{
-		PrecisionHint: prec,
-		Threads:       threads,
-		Device:        opts.Device,
-		OutputIndex:   opts.OutputIndex,
+		PrecisionHint:    prec,
+		Threads:          threads,
+		Device:           opts.Device,
+		OutputIndex:      opts.OutputIndex,
+		LargeAllocations: opts.LargeAllocations,
 	})
+	logOVLargeAllocationsUnsupportedOnce()
 	if err != nil {
 		return nil, logOVGPUFaultOnce(err)
 	}
