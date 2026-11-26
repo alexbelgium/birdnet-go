@@ -27,6 +27,7 @@ func TestModelRegistry_RangeFilterCompat(t *testing.T) {
 		RegistryIDBat:           rangeFilterCompatNone,
 		RegistryIDBatDetect2:    rangeFilterCompatNone,
 		RegistryIDBSGBat:        rangeFilterCompatNone,
+		RegistryIDBatSpot:       rangeFilterCompatNone,
 		RegistryIDBSG:           rangeFilterCompatNone,
 	}
 	for id := range ModelRegistry {

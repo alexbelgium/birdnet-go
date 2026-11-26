@@ -1074,7 +1074,7 @@ func getSettingsSectionValue(settings *conf.Settings, section string) (any, erro
 	case "taxonomysynonyms":
 		return &settings.TaxonomySynonyms, nil
 	default:
-		return nil, fmt.Errorf("unknown settings section: %s", section)
+		return modelSettingsSectionValue(settings, section)
 	}
 }
 

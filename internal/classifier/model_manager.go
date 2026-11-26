@@ -617,6 +617,8 @@ func familyFields(s *conf.Settings, registryID string) (familyFieldSet, bool) {
 			Labels: &s.BSG.LabelPath,
 			Locale: &s.BSG.Locale,
 		}, true
+	case RegistryIDBatSpot:
+		return batSpotFamilyFields(s), true
 	case RegistryIDBSGBat:
 		return familyFieldSet{
 			Model:     &s.BSGBat.ModelPath,

@@ -1,0 +1,15 @@
+B
+Barbastella barbastellus_Western Barbastelle
+Eptesicus serotinus_Serotine
+Myotis brandtii/mystacinus_Brandt's/Whiskered Bat
+Myotis dasycneme_Pond Bat
+Myotis daubentonii_Daubenton's Bat
+Myotis nattereri_Natterer's Bat
+Nyctalus noctula_Common Noctule
+noise
+Plecotus auritus_Brown Long-eared Bat
+Pipistrellus nathusii_Nathusius' Pipistrelle
+Pipistrellus pipistrellus_Common Pipistrelle
+Pipistrellus pygmaeus_Soprano Pipistrelle
+s
+Vespertilio murinus_Parti-coloured Bat

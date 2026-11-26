@@ -201,6 +201,7 @@ func (s *Settings) normalizeModelThresholds() {
 	reset("birdnetv3", &s.BirdNETV3.Threshold)
 	reset("birdnetplus", &s.BirdNETPlus.Threshold)
 	reset("bsgbat", &s.BSGBat.Threshold)
+	reset("batspot", &s.BatSpot.Threshold)
 }
 
 // normalizeBSGBatStep resolves an unset bsgbat.stepframes (0) to the default and

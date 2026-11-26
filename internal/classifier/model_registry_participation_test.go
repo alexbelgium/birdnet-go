@@ -85,6 +85,7 @@ func TestParticipatesInRangeFilter_ExpectedPerModel(t *testing.T) {
 		RegistryIDBat:           false,
 		RegistryIDBatDetect2:    false,
 		RegistryIDBSGBat:        false,
+		RegistryIDBatSpot:       false,
 		RegistryIDBSG:           false,
 	}
 	for id, expected := range want {

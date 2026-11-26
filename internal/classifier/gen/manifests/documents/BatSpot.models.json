@@ -1,0 +1,74 @@
+{
+  "schema": 2,
+  "repo": "alexbelgium/BatSpot",
+  "family": "batspot",
+  "family_meta": {
+    "display_name": "BatSpot",
+    "description": "Search-phase call classifier for European bats. Requires ultrasonic capture at 250 kHz or higher.",
+    "author": "Smeele et al. (BatSpot), ONNX conversion by alexbelgium",
+    "license": "CC-BY-4.0",
+    "commercial_use": true,
+    "documents": [
+      {
+        "kind": "license",
+        "requires_agreement": false,
+        "url": "https://creativecommons.org/licenses/by/4.0/legalcode"
+      }
+    ],
+    "channel": "experimental",
+    "upstream_url": "https://doi.org/10.5281/zenodo.18977979",
+    "species_count": 12,
+    "region": "Europe"
+  },
+  "task": "bat-species-identification",
+  "model_type": "spectrogram-classifier",
+  "models": [
+    {
+      "path": "batspot_m09.onnx",
+      "family": "batspot",
+      "role": "classifier",
+      "upstream_version": "m09",
+      "channel": "experimental",
+      "build": 1,
+      "variant": "fp32",
+      "precision": "fp32",
+      "region": null,
+      "classes": 15,
+      "labels": "batspot_labels.txt",
+      "labels_sha256": "6cb46191a3275af74f94df9b3b7b9eb904a930345356a851292e2a164e1addb6",
+      "labels_size_bytes": 468,
+      "sha256": "65caf3931d32b7d2804c76202b9445a2614c90d20640eec5ee8278c403bf45c4",
+      "size_bytes": 44705602,
+      "opset": 17,
+      "input": {
+        "name": "spectrogram",
+        "shape": ["batch", 1, "frames", 256],
+        "dtype": "float32"
+      },
+      "outputs": [
+        {
+          "name": "logits",
+          "shape": ["batch", 15],
+          "dtype": "float32",
+          "activation": "softmax",
+          "note": "B, noise and s contribute to softmax normalization without producing species detections."
+        }
+      ],
+      "frontend": {
+        "sample_rate_hz": 250000,
+        "window_samples": 5000,
+        "n_fft": 256,
+        "hop_length": 128,
+        "pre_emphasis": 0.98,
+        "frequency_bins": 256,
+        "normalization": "Periodic Hann STFT power, crop bins 10–127, nearest resize, dB floor at -100, per-window min-max."
+      },
+      "backends": {
+        "onnxruntime-cpu": {
+          "supported": true,
+          "recommended": true
+        }
+      }
+    }
+  ]
+}

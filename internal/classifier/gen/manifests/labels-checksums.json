@@ -1,4 +1,9 @@
 {
+  "alexbelgium/BatSpot|batspot_labels.txt": {
+    "sha256": "6cb46191a3275af74f94df9b3b7b9eb904a930345356a851292e2a164e1addb6",
+    "size_bytes": 468,
+    "lines": 15
+  },
   "tphakala/BirdNET-Plus-V3.0|regional/amazonia/birdnet-plus-v3.0-amazonia-labels-b1.txt": {
     "sha256": "f7e880941f764d5e253708d1f3ca4dd6e32e5a2d7694accbb05f491b7ff16ffb",
     "size_bytes": 130096,

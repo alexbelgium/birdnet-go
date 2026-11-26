@@ -303,6 +303,7 @@ var ModelRegistry = map[string]ModelInfo{
 		scheduleGated: true,
 		taxonGroup:    TaxonGroupBat,
 	},
+	RegistryIDBatSpot: batSpotModelInfo(),
 	RegistryIDBSGBat: {
 		ID:               RegistryIDBSGBat,
 		Name:             "BSG-BAT",
@@ -555,6 +556,8 @@ var filenamePatterns = map[string]string{
 	"bsg-finland":            RegistryIDBSG,
 	"bsgbat":                 RegistryIDBSGBat,
 	"bsg-bat":                RegistryIDBSGBat,
+	"batspot-m09":            RegistryIDBatSpot,
+	"batspot_m09":            RegistryIDBatSpot,
 }
 
 // DetermineModelInfo identifies the model type from a file path or model identifier.
