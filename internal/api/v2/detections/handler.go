@@ -211,6 +211,7 @@ func (c *Handler) RegisterDetectionRoutes(g *echo.Group) {
 	detectionGroup := g.Group("/detections", c.AuthMiddleware)
 	detectionGroup.DELETE("/:id", c.DeleteDetection)
 	detectionGroup.POST("/:id/review", c.ReviewDetection)
+	detectionGroup.POST("/:id/rerun-unlikely", c.RerunUnlikely)
 	detectionGroup.PUT("/:id/species", c.ChangeDetectionSpecies)
 	detectionGroup.POST("/:id/lock", c.LockDetection)
 	detectionGroup.POST("/ignore", c.IgnoreSpecies)

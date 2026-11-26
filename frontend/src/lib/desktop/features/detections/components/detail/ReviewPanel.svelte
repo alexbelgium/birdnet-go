@@ -26,6 +26,7 @@
   import { generateId } from '$lib/utils/uuid';
   import type { ShortcutHint } from '$lib/utils/keyboard';
   import DetailCard from './DetailCard.svelte';
+  import RerunUnlikelyButton from './RerunUnlikelyButton.svelte';
   import type {
     DetectionDetailData,
     ReviewControls,
@@ -344,6 +345,14 @@
       {t('detections.detail.review.wrongSpecies')}
       {@render keyBadge(shortcutHints.wrongSpecies)}
     </Button>
+    <RerunUnlikelyButton
+      {detection}
+      {canReview}
+      blocked={verdictUnavailable}
+      {statusId}
+      {onChanged}
+      onError={fail}
+    />
   </div>
 
   {#if canReview}

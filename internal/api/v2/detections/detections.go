@@ -192,6 +192,9 @@ type DetectionResponse struct {
 	LastReviewedAt  string `json:"lastReviewedAt,omitempty"`
 	LockedAt        string `json:"lockedAt,omitempty"`
 
+	// CanRerunUnlikely is set only on detail responses for eligible bat models.
+	CanRerunUnlikely bool `json:"canRerunUnlikely,omitempty"`
+
 	// Multi-period tracking metadata
 	IsNewThisYear   bool   `json:"isNewThisYear,omitempty"`   // First time this year
 	IsNewThisSeason bool   `json:"isNewThisSeason,omitempty"` // First time this season
@@ -1322,6 +1325,7 @@ func (c *Handler) GetDetection(ctx echo.Context) error {
 	// For single detection, include weather data by default
 	weatherCache := make(map[string][]datastore.HourlyWeather)
 	resp := []DetectionResponse{c.resultToDetectionResponse(r, true, weatherCache)}
+	resp[0].CanRerunUnlikely = c.canRerunUnlikely(r)
 	resp[0].FirstReviewedAt = formatOptionalTime(r.FirstReviewedAt)
 	resp[0].LastReviewedAt = formatOptionalTime(r.LastReviewedAt)
 	resp[0].LockedAt = formatOptionalTime(r.LockedAt)
