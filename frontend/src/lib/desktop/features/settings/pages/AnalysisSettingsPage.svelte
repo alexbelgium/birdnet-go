@@ -79,6 +79,7 @@
   import {
     analysisCadence,
     invalidateAcousticModels,
+    onTopologyChanged,
     watchAcousticModels,
   } from '$lib/stores/acousticModels.svelte';
   import {
@@ -114,6 +115,7 @@
   import ModelVariantPicker from '$lib/desktop/features/settings/components/ModelVariantPicker.svelte';
   import ModelBuildNotes from '$lib/desktop/features/settings/components/ModelBuildNotes.svelte';
   import ModelRegionSelector from '$lib/desktop/features/settings/components/ModelRegionSelector.svelte';
+  import BatModelThresholds from './BatModelThresholds_fork.svelte';
   import NumberField from '$lib/desktop/components/forms/NumberField.svelte';
   import FalsePositiveFilterControl, {
     type FilterLevel,
@@ -605,6 +607,7 @@
   });
   const batChange: ChangePair = $derived({
     original: {
+      forkModels: store.originalData.forkModels,
       batNighttimeOnly: store.originalData.bat?.nighttimeOnly,
       batUltrasonicFilter: store.originalData.bat?.ultrasonicFilter?.enabled ?? true,
       batDiscardUnlikely: store.originalData.bat?.ultrasonicFilter?.discardUnlikely ?? false,
@@ -612,6 +615,7 @@
       bsgBatStepFrames: hasBsgBatModel ? savedBsgBatStepFrames : undefined,
     },
     current: {
+      forkModels: store.formData.forkModels,
       batNighttimeOnly: bat.nighttimeOnly,
       batUltrasonicFilter: bat.ultrasonicFilter?.enabled ?? true,
       batDiscardUnlikely: bat.ultrasonicFilter?.discardUnlikely ?? false,
@@ -686,9 +690,24 @@
   let inferenceBackends = $state<InferenceBackends | null>(null);
   let inferenceBackendsFailed = $state(false);
 
+  // Lookups can overlap and answer in any order, so a status publishes only when the server
+  // read it no earlier than the shown one (snapshotAtUnix). Within the same second the GPU
+  // fault wins: the server never clears it while it runs. A server restart stamps later
+  // snapshots, so its healthy status replaces a fault from the previous run.
+  let inferenceLookupRequested = false;
+  let inferenceSnapshotShown = Number.NEGATIVE_INFINITY;
+
   async function loadInferenceBackends() {
+    inferenceLookupRequested = true;
     try {
       const status = await api.get<InferenceStatusResponse>(INFERENCE_STATUS_ENDPOINT);
+      const snapshot = status.snapshotAtUnix;
+      if (snapshot < inferenceSnapshotShown) return;
+      const hidesShownFault =
+        inferenceBackends?.openvino.gpuFailed === true &&
+        status.backends.openvino.gpuFailed !== true;
+      if (snapshot === inferenceSnapshotShown && hidesShownFault) return;
+      inferenceSnapshotShown = snapshot;
       inferenceBackends = status.backends;
       inferenceBackendsFailed = false;
     } catch (e) {
@@ -701,6 +720,15 @@
   $effect(() => {
     if (pageTab === 'inference' && !inferenceBackends) untrack(() => void loadInferenceBackends());
   });
+
+  // The GPU fault latch trips while the page is open: the topology stream announces it, so
+  // refetch the status and the failed alert and labels appear without a reload.
+  $effect(() =>
+    onTopologyChanged(() => {
+      // A lookup in flight may predate the change, so refetch once the tab asked for the list.
+      if (inferenceLookupRequested) void loadInferenceBackends();
+    })
+  );
 
   // A choice the host lacks stays offered while it is selected or saved, so picking another
   // one keeps the way back to the saved choice.
@@ -3092,6 +3120,12 @@
         {/if}
       </div>
 
+      <div
+        class="mt-2 grid grid-cols-1 gap-6 border-t border-[var(--border-100)] pt-5 md:grid-cols-2"
+      >
+        <BatModelThresholds />
+      </div>
+
       <!-- Bat False Positive Filter -->
       <div class="mt-2 border-t border-[var(--border-100)] pt-5">
         <FalsePositiveFilterControl
@@ -3179,6 +3213,11 @@
             label={t('analysis.inference.backendsLoading')}
           />
         </p>
+      {/if}
+      {#if inferenceBackends?.openvino.gpuFailed}
+        <ErrorAlert type="error" className="mb-6" data-testid="inference-gpu-failed">
+          {t('analysis.inference.gpuFailed')}
+        </ErrorAlert>
       {/if}
       <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
         <SelectDropdown

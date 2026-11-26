@@ -75,6 +75,17 @@ type Classifier interface {
 	Close() error
 }
 
+// MultiOutputClassifier reads several output ports from one inference request.
+// Output slices are independent Go allocations in Options.OutputIndices order.
+// Like Classifier, it is not goroutine-safe.
+type MultiOutputClassifier interface {
+	Classifier
+	// PredictOutputs runs one inference and returns the selected output tensors.
+	PredictOutputs(samples []float32) ([][]float32, error)
+	// OutputSizes returns an independent copy of the selected output element counts.
+	OutputSizes() []int
+}
+
 // Options configures a Classifier.
 type Options struct {
 	// PrecisionHint is the OpenVINO INFERENCE_PRECISION_HINT (e.g. "f16").
@@ -82,6 +93,14 @@ type Options struct {
 	// Threads sets INFERENCE_NUM_THREADS (CPU device only; ignored for GPU).
 	// 0 lets OpenVINO auto-tune.
 	Threads int
+	// LargeAllocations requests GPU_ENABLE_LARGE_ALLOCATIONS=YES when compiling for a
+	// GPU device; it is ignored for the CPU, whose plugin rejects the key. When the
+	// loaded library rejects the key, the compile is retried once without it and later
+	// compiles in this process omit it (see GPULargeAllocationsUnsupported).
+	LargeAllocations bool
+	// largeAllocationsKey replaces the GPU property name sent for LargeAllocations.
+	// Only tests set it, to send a key the GPU plugin rejects.
+	largeAllocationsKey string
 	// Device is the OpenVINO device to compile for: DeviceCPU (default), DeviceGPU
 	// (OpenVINO's alias for the first GPU) or a concrete "GPU.<n>" name as
 	// enumerated by the probe. An empty string is treated as DeviceCPU.
@@ -90,4 +109,8 @@ type Options struct {
 	// for single-output models like BirdNET v2.4; 3 for the Perch v2 multi-output
 	// graph whose species logits are the 4th output.
 	OutputIndex int
+	// OutputIndices optionally selects multiple output ports for PredictOutputs.
+	// When set, it overrides OutputIndex; PredictRaw and NumClasses use its first
+	// port. An empty slice preserves the single-output behavior.
+	OutputIndices []int
 }

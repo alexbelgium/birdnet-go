@@ -8,6 +8,9 @@ var catalogDocuments = map[string][]CatalogDocument{
 	"alexbelgium/BatSpot": {
 		{Kind: "license", URL: "https://creativecommons.org/licenses/by/4.0/legalcode"},
 	},
+	"legojoey17/batdetect2-uk-same-onnx": {
+		{Kind: "license", URL: "https://creativecommons.org/licenses/by-nc/4.0/legalcode"},
+	},
 	"tphakala/BSG-BAT": {
 		{Kind: "license", URL: "https://creativecommons.org/licenses/by/4.0/legalcode"},
 	},

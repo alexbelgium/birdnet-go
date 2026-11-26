@@ -62,15 +62,20 @@ func TestOpenVINORoundTrip(t *testing.T) {
 
 // TestOpenVINOPerchRoundTrip is a hardware/lib-gated smoke test for the Perch v2
 // multi-output graph. Set OV_TEST_PERCH_MODEL to a perch_v2_no_dft ONNX path to
-// run it. OV_TEST_DEVICE selects the device ("CPU" default, or "GPU"); a GPU run
-// is skipped if no GPU is enumerated. It proves the OutputIndex selection (logits
+// run it. OV_TEST_DEVICE selects CPU (default), GPU or GPU.<n>; a GPU run
+// is skipped if the requested GPU is unavailable. It proves the OutputIndex selection (logits
 // at index 3, not the index-0 embedding) and that NumClasses reports the real
-// model output dimension.
+// model output dimension. It also requests LargeAllocations on every device: on
+// the CPU the key must never reach the plugin (the plugin would reject it, the
+// retry would hide that, and only the memo shows it); on a GPU it proves the key
+// is spelled as the runtime expects. The GPU assertion needs a runtime that knows
+// the key (2025.4.1 and 2026.2 measured).
 func TestOpenVINOPerchRoundTrip(t *testing.T) {
 	model := os.Getenv("OV_TEST_PERCH_MODEL")
 	if model == "" {
 		t.Skip("set OV_TEST_PERCH_MODEL to a perch_v2_no_dft ONNX to run the Perch OpenVINO round-trip")
 	}
+	t.Cleanup(func() { largeAllocationsUnsupported.Store(false) })
 	require.NoError(t, InitOV(os.Getenv("OV_TEST_LIB")))
 	t.Cleanup(func() { _ = DestroyOV() })
 
@@ -78,21 +83,23 @@ func TestOpenVINOPerchRoundTrip(t *testing.T) {
 	if device == "" {
 		device = DeviceCPU
 	}
-	if device == DeviceGPU {
+	if IsGPUDevice(device) {
 		devs, err := AvailableDevices()
 		require.NoError(t, err)
-		if !slices.ContainsFunc(devs, IsGPUDevice) {
-			t.Skipf("no GPU device enumerated (have %v)", devs)
+		if !slices.Contains(devs, device) && !(device == DeviceGPU && slices.ContainsFunc(devs, IsGPUDevice)) {
+			t.Skipf("requested GPU %q unavailable (have %v)", device, devs)
 		}
 	}
 
 	c, err := NewClassifier(model, Options{
-		PrecisionHint: DefaultPrecisionHint,
-		Device:        device,
-		OutputIndex:   perchLogitsOutputIndex,
+		PrecisionHint:    DefaultPrecisionHint,
+		Device:           device,
+		OutputIndex:      perchLogitsOutputIndex,
+		LargeAllocations: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
+	assert.False(t, GPULargeAllocationsUnsupported(), "the runtime must accept the large allocations key and the CPU must never receive it")
 
 	// NumClasses must reflect the index-3 logits output (14795), not the labels
 	// or the index-0 embedding (1536).
@@ -174,14 +181,6 @@ func TestScrubLibraryPaths_LongestFirst(t *testing.T) {
 	assert.NotContains(t, got, "someone")
 }
 
-// resetGPUFaultForTest clears the process-wide latch. Production code has no
-// reset path (only a restart clears it); this exists for tests that trip it.
-func resetGPUFaultForTest() {
-	gpuFault.tripped.Store(false)
-	gpuFault.cause.Store(nil)
-	gpuFault.streak.Store(0)
-}
-
 // TestGPUFaultLatch_RealDevice is a hardware-gated check of the glue between the
 // GPU fault latch and the native backend. It needs OV_TEST_MODEL (BirdNET v2.4
 // FP32 ONNX), OV_TEST_LIB optionally, and a GPU; it is skipped without a GPU. It
@@ -206,11 +205,22 @@ func TestGPUFaultLatch_RealDevice(t *testing.T) {
 		t.Skipf("no GPU device enumerated (have %v)", devs)
 	}
 
-	gpuClassifier, err := NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceGPU})
+	const birdNETLogitsOutputIndex = 0
+	gpuClassifier, err := NewClassifier(model, Options{
+		PrecisionHint: DefaultPrecisionHint,
+		Device:        DeviceGPU,
+		OutputIndices: []int{birdNETLogitsOutputIndex, birdNETLogitsOutputIndex},
+	})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = gpuClassifier.Close() })
+	multi, ok := gpuClassifier.(MultiOutputClassifier)
+	require.True(t, ok)
 	silence := make([]float32, birdNETInputSamples)
-	_, err = gpuClassifier.PredictRaw(silence)
+	outputs, err := multi.PredictOutputs(silence)
 	require.NoError(t, err, "the GPU classifier works before the latch trips")
+	require.Len(t, outputs, 2)
+	assert.Len(t, outputs[0], birdNETOutputClasses)
+	assert.Len(t, outputs[1], birdNETOutputClasses)
 
 	// Unlatched Close frees and clears every field, and a second Close is a no-op.
 	spare, err := NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceGPU})
@@ -228,6 +238,8 @@ func TestGPUFaultLatch_RealDevice(t *testing.T) {
 
 	_, err = gpuClassifier.PredictRaw(silence)
 	require.ErrorIs(t, err, ErrGPUDeviceFault, "GPU inference fails fast once latched")
+	_, err = multi.PredictOutputs(silence)
+	require.ErrorIs(t, err, ErrGPUDeviceFault, "GPU multi-output inference fails fast once latched")
 
 	_, err = NewClassifier(model, Options{PrecisionHint: DefaultPrecisionHint, Device: DeviceGPU})
 	require.ErrorIs(t, err, ErrGPUDeviceFault, "a GPU compile is refused once latched")
@@ -251,4 +263,54 @@ func TestGPUFaultLatch_RealDevice(t *testing.T) {
 	assert.Nil(t, ovCore)
 	assert.False(t, ovLoaded)
 	ovMu.Unlock()
+}
+
+// rejectedLargeAllocationsKey is a GPU property name no OpenVINO runtime knows, so
+// the GPU plugin rejects it with "Option not found" and the retry path runs.
+const rejectedLargeAllocationsKey = "GPU_ENABLE_LARGE_ALLOCATIONZ"
+
+// TestOpenVINOLargeAllocationsRetry_RealDevice is a hardware-gated check of the
+// retry glue: a GPU compile with a key the plugin rejects must be retried once
+// without it on the same read model and yield a working classifier. It needs
+// OV_TEST_PERCH_MODEL, optionally OV_TEST_LIB, and a GPU. Not parallel: it
+// clears the process-wide memo.
+func TestOpenVINOLargeAllocationsRetry_RealDevice(t *testing.T) {
+	model := os.Getenv("OV_TEST_PERCH_MODEL")
+	if model == "" {
+		t.Skip("set OV_TEST_PERCH_MODEL to a perch_v2_no_dft ONNX to run the large allocations retry test")
+	}
+	// Cleanups run last-in first-out: the latch reset runs last, the classifier is
+	// closed before DestroyOV frees the core.
+	t.Cleanup(resetGPUFaultForTest)
+	require.NoError(t, InitOV(os.Getenv("OV_TEST_LIB")))
+	t.Cleanup(func() { _ = DestroyOV() })
+	devs, err := AvailableDevices()
+	require.NoError(t, err)
+	if !slices.ContainsFunc(devs, IsGPUDevice) {
+		t.Skipf("no GPU device enumerated (have %v)", devs)
+	}
+
+	t.Cleanup(func() { largeAllocationsUnsupported.Store(false) })
+
+	c, err := NewClassifier(model, Options{
+		PrecisionHint:    PrecisionF32,
+		Device:           DeviceGPU,
+		OutputIndex:      perchLogitsOutputIndex,
+		LargeAllocations: true,
+
+		largeAllocationsKey: rejectedLargeAllocationsKey,
+	})
+	require.NoError(t, err, "the retry must compile the same read model without the key")
+	t.Cleanup(func() { _ = c.Close() })
+
+	assert.True(t, GPULargeAllocationsUnsupported(), "the rejected key must reach the plugin and set the memo")
+	faulted, _ := GPUFault()
+	assert.False(t, faulted, "a rejected property is not a device fault")
+
+	out, err := c.PredictRaw(make([]float32, perchInputSamples))
+	require.NoError(t, err)
+	require.Len(t, out, perchOutputClasses)
+	for i, v := range out[:finiteSampleCount] {
+		require.Falsef(t, math.IsNaN(float64(v)) || math.IsInf(float64(v), 0), "out[%d] not finite: %v", i, v)
+	}
 }
