@@ -12,15 +12,17 @@ import (
 // batGateSummaryEvery is how many gated windows pass between two summary log lines.
 const batGateSummaryEvery = 500
 
-// batGateStats counts the gate decisions of one monitor.
+// batGateStats counts the gate decisions of one monitor and keeps its sample
+// buffer, reused from window to window (a 3 s window at 256 kHz is 3 MB).
 type batGateStats struct {
 	checked, skipped, noEvent, mainsOnly int
+	samples                              []float32
 }
 
 // batGateSkips runs the pre-inference bat gate on one window and reports whether
 // the window must not be sent to the model. It does nothing for non-bat models
 // or when the gate is off. In dry-run mode it logs but never skips.
-func (m *BufferManager) batGateSkips(cfg monitorConfig, data []byte, st *batGateStats) bool {
+func (m *BufferManager) batGateSkips(cfg *monitorConfig, data []byte, st *batGateStats) bool {
 	gateCfg := conf.Setting().Bat.Gate
 	if !gateCfg.Enabled || classifier.TaxonGroupFor(cfg.modelID) != classifier.TaxonGroupBat {
 		return false
@@ -30,7 +32,11 @@ func (m *BufferManager) batGateSkips(cfg monitorConfig, data []byte, st *batGate
 	if cb, err := m.bufferMgr.CaptureBuffer(cfg.sourceID); err == nil {
 		sourceRate = cb.SampleRate()
 	}
-	samples := make([]float32, len(data)/conf.BytesPerSample)
+	n := len(data) / conf.BytesPerSample
+	if cap(st.samples) < n {
+		st.samples = make([]float32, n)
+	}
+	samples := st.samples[:n]
 	if _, err := dsppcm.BytesToFloat32(samples, data); err != nil {
 		return false
 	}
@@ -39,7 +45,7 @@ func (m *BufferManager) batGateSkips(cfg monitorConfig, data []byte, st *batGate
 	st.checked++
 	if v.Skip {
 		st.skipped++
-		if v.Reason == "mains-locked noise only" {
+		if v.Reason == batgate.ReasonMainsOnly {
 			st.mainsOnly++
 		} else {
 			st.noEvent++
