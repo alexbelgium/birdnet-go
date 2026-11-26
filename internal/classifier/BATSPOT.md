@@ -10,8 +10,9 @@ checkpoint for ONNX Runtime. [Paper](https://doi.org/10.1016/j.biocon.2026.11197
 
 Install BatSpot in the AI Models gallery. The ONNX conversion by alexbelgium
 and its labels are hosted on [Hugging Face](https://huggingface.co/alexbelgium/BatSpot).
-Enable `batspot` and select it for an ultrasonic source capturing at 256 or 384 kHz
-(resampled to the model's 250 kHz). BatSpot shares the nighttime schedule in the `bat` settings.
+Enable `batspot` and select it for an ultrasonic source capturing at 192 kHz or higher
+(resampled to the model's 250 kHz; 256 kHz or more is recommended, since a
+192 kHz capture carries nothing above 96 kHz). BatSpot shares the nighttime schedule in the `bat` settings.
 
 For a manual install, set the model and [label](testdata/batspot/batspot_labels.txt)
 paths in `config.yaml` or `/api/v2/settings/batspot` (`modelPath`, `labelPath`

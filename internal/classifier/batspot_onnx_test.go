@@ -27,7 +27,8 @@ func TestBatSpotRegistration(t *testing.T) {
 	assert.Equal(t, entities.ModelTypeBat, detection.ResolveModelType(info.DetectionName, info.DetectionVersion))
 	assert.Equal(t, TaxonGroupBat, info.taxonGroup)
 	assert.True(t, info.scheduleGated)
-	assert.Equal(t, batSpotSampleRate, info.Spec.MinRawSampleRate)
+	assert.Equal(t, batSpotMinRawSampleRate, info.Spec.MinRawSampleRate)
+	assert.Equal(t, batSpotRecommendedSampleRate, info.Spec.RecommendedSampleRate)
 	assert.Equal(t, 252500, info.Spec.ClipSampleCount())
 	assert.Equal(t, batSpotStepSamples, info.Spec.StepSamples)
 }

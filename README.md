@@ -81,7 +81,7 @@ See the [hardware recommendations](https://github.com/tphakala/birdnet-go/wiki/h
 - **BirdNET+ v3.0** via ONNX Runtime (11,709 species and 16 non-animal sound classes, global plus 44 regional models)
 - **Google Perch v2** via ONNX Runtime (14,795 species across birds, insects, amphibians, and mammals) with taxonomy-based species names
 - **BattyBirdNET** (11 regional bat models) and **BSG-BAT** (experimental, 21 European bat species; requires 192 kHz+ capture, 384 kHz recommended)
-- **BatSpot** (experimental, 12 European bat species and species complexes; requires 256 kHz+ capture)
+- **BatSpot** (experimental, 12 European bat species and species complexes; requires 192 kHz+ capture, 256 kHz recommended)
 - **BirdNET Geomodel v3.0** for location-based range filtering (12,012 species)
 - **Cross-model detection consensus**: Multi-model hit pooling strengthens valid detections, and an optional `realtime.modelconsensus` filter (config file) can require multiple models to agree
 - **Custom classifiers**: Bring your own TFLite model and label set

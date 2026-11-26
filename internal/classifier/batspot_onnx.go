@@ -47,8 +47,8 @@ func batSpotModelInfo() ModelInfo {
 		Spec: ModelSpec{
 			SampleRate:              batSpotSampleRate,
 			RawSampleRate:           batSpotSampleRate,
-			MinRawSampleRate:        batSpotSampleRate,
-			RecommendedSampleRate:   batSpotSampleRate,
+			MinRawSampleRate:        batSpotMinRawSampleRate,
+			RecommendedSampleRate:   batSpotRecommendedSampleRate,
 			ClipLength:              batSpotClipLength,
 			ClipSamples:             batSpotClipSamples,
 			StepSamples:             batSpotStepSamples,
@@ -313,3 +313,15 @@ func (b *batSpot) Close() error {
 	b.model = nil
 	return err
 }
+
+const (
+	// batSpotMinRawSampleRate is the lowest source capture rate BatSpot
+	// accepts. Like BSG-BAT, a 192 kHz capture is upsampled by the buffer
+	// consumer's resampler (here to 250 kHz); the model then sees no energy
+	// above the 96 kHz source Nyquist, so species calling above it lose cues.
+	batSpotMinRawSampleRate = 192000
+
+	// batSpotRecommendedSampleRate is the lowest standard capture rate that
+	// covers the model's full 10-125 kHz input band.
+	batSpotRecommendedSampleRate = 256000
+)
