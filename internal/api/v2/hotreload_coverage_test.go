@@ -111,6 +111,10 @@ var hotReloadRegistry = map[string]hotReloadEntry{
 	// so a change takes effect at the next detection with no recalc action.
 	"Bat.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
 
+	// BatSpot, like BSG-BAT: path changes need a restart, the threshold is live.
+	"BatSpot":           {categories: []hotReloadCategory{hotReloadRestart}},
+	"BatSpot.Threshold": {categories: []hotReloadCategory{hotReloadFresh}},
+
 	// --- BSG-BAT ---
 	// Parent is restart like Perch: model and label path changes reload the model.
 	// The threshold is read live by the processor per detection

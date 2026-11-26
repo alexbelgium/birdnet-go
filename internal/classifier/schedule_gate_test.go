@@ -23,7 +23,7 @@ func TestModelRegistry_ScheduleGatedIsExactlyBatGroup(t *testing.T) {
 			gated = append(gated, id)
 		}
 	}
-	assert.ElementsMatch(t, []string{RegistryIDBat, RegistryIDBSGBat}, gated,
+	assert.ElementsMatch(t, []string{RegistryIDBat, RegistryIDBSGBat, RegistryIDBatSpot}, gated,
 		"exactly the bat models are schedule-gated in the registry")
 
 	assert.True(t, isScheduleGated(RegistryIDBat), "bat is schedule-gated")

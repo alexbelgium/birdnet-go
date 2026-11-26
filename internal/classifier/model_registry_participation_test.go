@@ -84,6 +84,7 @@ func TestParticipatesInRangeFilter_ExpectedPerModel(t *testing.T) {
 		RegistryIDPerchV2:       true, // mapped geomodel v3, scientific-name labels
 		RegistryIDBat:           false,
 		RegistryIDBSGBat:        false,
+		RegistryIDBatSpot:       false,
 		RegistryIDBSG:           false,
 	}
 	for id, expected := range want {

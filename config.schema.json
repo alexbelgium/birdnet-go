@@ -432,6 +432,25 @@
       "type": "object",
       "description": "BatConfig holds configuration for bat detection using BirdNET v2.4 embeddings."
     },
+    "BatSpotConfig": {
+      "properties": {
+        "modelpath": {
+          "type": "string",
+          "description": "ModelPath points to the BatSpot m09 ONNX file."
+        },
+        "labelpath": {
+          "type": "string",
+          "description": "LabelPath points to the 15 labels in checkpoint order."
+        },
+        "threshold": {
+          "type": "number",
+          "description": "Threshold is the per-species confidence threshold (0 to 1, default 0.5)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "BatSpotConfig holds the local model files and confidence threshold for BatSpot m09."
+    },
     "BirdNETConfig": {
       "properties": {
         "version": {
@@ -2397,6 +2416,10 @@
         "bat": {
           "$ref": "#/$defs/BatConfig",
           "description": "Bat detection configuration"
+        },
+        "batspot": {
+          "$ref": "#/$defs/BatSpotConfig",
+          "description": "BatSpot m09 bat classifier configuration"
         },
         "bsgbat": {
           "$ref": "#/$defs/BSGBatConfig",

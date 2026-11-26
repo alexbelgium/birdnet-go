@@ -44,6 +44,7 @@ var documentManifests = []string{
 	"gen/manifests/documents/BirdNET-v2.4.models.json",
 	"gen/manifests/documents/BattyBirdNET-onnx.models.json",
 	"gen/manifests/documents/BSG-BAT.models.json",
+	batSpotManifest,
 }
 
 var (

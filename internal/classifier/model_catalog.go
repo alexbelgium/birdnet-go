@@ -672,6 +672,7 @@ var EmbeddedCatalog = []CatalogEntry{
 
 	// Bat models (BSG-BAT, then the BattyBirdNET family by rdz-oss)
 	bsgBatCatalogEntry(),
+	batSpotCatalogEntry(),
 	batCatalogEntry("battybirdnet-bavaria", "BattyBirdNET Bavaria", "Bavaria", 32, "Bavaria", false,
 		batFileChecksums{"7ee3936621d180b9fe42f3732703339662b154135ce205f711797bca7daa44ea", 131827, "ff4a3f9a351f202c8712c807c6bb8b29df0b1c75ddab48e543ec76a88a42715c", 966}),
 	batCatalogEntry("battybirdnet-bavaria-high", "BattyBirdNET Bavaria (High)", "Bavaria", 24, "Bavaria", true,

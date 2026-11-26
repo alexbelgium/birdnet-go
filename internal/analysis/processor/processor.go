@@ -1697,6 +1697,8 @@ func modelGlobalConfidenceThreshold(settings *conf.Settings, modelID string) flo
 		return float32(settings.Bat.Threshold)
 	case classifier.RegistryIDBSGBat:
 		return float32(settings.BSGBat.Threshold)
+	case classifier.RegistryIDBatSpot:
+		return float32(settings.BatSpot.Threshold)
 	case classifier.RegistryIDPerchV2:
 		if settings.Perch.OverrideThreshold {
 			return float32(settings.Perch.Threshold)

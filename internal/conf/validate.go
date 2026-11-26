@@ -75,6 +75,7 @@ var ValidAudioModels = map[string]bool{
 	ModelIDBat:           true,
 	ModelIDBSG:           true,
 	ModelIDBSGBat:        true,
+	ModelIDBatSpot:       true,
 	// Catalog-style aliases (see consts.go) so a source model set to the
 	// hyphenated catalog ID validates rather than failing startup.
 	ModelIDBirdNETCatalog:       true,
@@ -421,6 +422,7 @@ func validateModelThresholds(settings *Settings) error {
 		{"birdnetv3.threshold", settings.BirdNETV3.Threshold},
 		{"birdnetplus.threshold", settings.BirdNETPlus.Threshold},
 		{"bsgbat.threshold", settings.BSGBat.Threshold},
+		{"batspot.threshold", settings.BatSpot.Threshold},
 	}
 	for _, c := range checks {
 		if math.IsNaN(c.value) || math.IsInf(c.value, 0) || c.value < minModelThreshold || c.value > maxModelThreshold {

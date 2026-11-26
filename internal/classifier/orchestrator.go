@@ -1973,6 +1973,7 @@ var modelLoaders = map[string]func(o *Orchestrator, threads int) error{
 	RegistryIDPerchV2:       (*Orchestrator).loadPerch,
 	RegistryIDBat:           (*Orchestrator).loadBat,
 	RegistryIDBSGBat:        (*Orchestrator).loadBSGBat,
+	RegistryIDBatSpot:       (*Orchestrator).loadBatSpot,
 }
 
 // entryBuilder constructs (but does not register) a fresh model instance from a
@@ -2030,6 +2031,7 @@ var openvinoCapableSecondaryBuilders = map[string]entryBuilder{
 		}
 		return b, nil
 	},
+	RegistryIDBatSpot: (*Orchestrator).buildBatSpot,
 	RegistryIDBSGBat: func(o *Orchestrator, settings *conf.Settings, threads int) (ModelInstance, error) {
 		// Explicit nil-on-error return avoids the typed-nil interface trap (a
 		// nil *BSGBat wrapped in a non-nil ModelInstance).

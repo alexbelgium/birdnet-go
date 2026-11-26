@@ -388,6 +388,7 @@ func TestHotReloadRestartFieldsCovered(t *testing.T) {
 		"BirdNETV3":               "BirdNET v3.0 model path; not wired",
 		"BirdNETPlus":             "BirdNET+ v3.0 model path; not wired (same as BirdNET v3.0)",
 		"BSGBat":                  "BSG-BAT model path; not wired (same as Perch)",
+		"BatSpot":                 "BatSpot model path; not wired (same as BSG-BAT)",
 		"BSG":                     "BSG model path; not wired",
 		"Realtime.Audio.Watchdog": "no UI controls (project decision)",
 		"LowMemory":               "startup-only memory policy; not exposed via the live settings API",

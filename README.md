@@ -50,7 +50,7 @@ BirdNET-Go listens continuously to local microphones or network audio streams, i
 
 ## Highlights
 
-- **In-app AI model gallery**: Install BirdNET v2.4, BirdNET+ v3.0 (global and 44 regional models), Google Perch v2, BattyBirdNET, BSG-BAT, and BirdNET Geomodel v3.0 right from the web UI, with no rebuild required.
+- **In-app AI model gallery**: Install BirdNET v2.4, BirdNET+ v3.0 (global and 44 regional models), Google Perch v2, BattyBirdNET, BSG-BAT, BatSpot, and BirdNET Geomodel v3.0 right from the web UI, with no rebuild required.
 - **Multi-model, multi-source analysis**: Run several classifiers in parallel across local sound cards and RTSP streams, see per-model match scores on every detection, and optionally require cross-model consensus.
 - **Fast detection review and audio cleanup**: Review everything on one page with species correction, alternate predictions, keyboard shortcuts, and built-in clip denoising for playback or saved files.
 - **Native audio and live spectrograms**: Pure Go clip encoding, decoding, and spectrogram rendering (no SoX needed; FFmpeg is only required for RTSP streams), plus live browser spectrograms and detection heatmaps.
@@ -81,6 +81,7 @@ See the [hardware recommendations](https://github.com/tphakala/birdnet-go/wiki/h
 - **BirdNET+ v3.0** via ONNX Runtime (11,709 species and 16 non-animal sound classes, global plus 44 regional models)
 - **Google Perch v2** via ONNX Runtime (14,795 species across birds, insects, amphibians, and mammals) with taxonomy-based species names
 - **BattyBirdNET** (11 regional bat models) and **BSG-BAT** (experimental, 21 European bat species; requires 192 kHz+ capture, 384 kHz recommended)
+- **BatSpot** (experimental, 12 European bat species and species complexes; requires 256 kHz+ capture)
 - **BirdNET Geomodel v3.0** for location-based range filtering (12,012 species)
 - **Cross-model detection consensus**: Multi-model hit pooling strengthens valid detections, and an optional `realtime.modelconsensus` filter (config file) can require multiple models to agree
 - **Custom classifiers**: Bring your own TFLite model and label set
@@ -132,7 +133,7 @@ See the [hardware recommendations](https://github.com/tphakala/birdnet-go/wiki/h
 
 - Linux, Windows, and macOS
 - Single static binary with the BirdNET v2.4 TFLite model embedded
-- ONNX Runtime 1.31+ (1.32.0 bundled in Docker and release packages) for BirdNET+ v3.0, Perch v2, BattyBirdNET, BSG-BAT, and BirdNET Geomodel v3.0 ([install guide](https://github.com/tphakala/birdnet-go/wiki/ONNX-Runtime-Installation))
+- ONNX Runtime 1.31+ (1.32.0 bundled in Docker and release packages) for BirdNET+ v3.0, Perch v2, BattyBirdNET, BSG-BAT, BatSpot, and BirdNET Geomodel v3.0 ([install guide](https://github.com/tphakala/birdnet-go/wiki/ONNX-Runtime-Installation))
 - OpenVINO acceleration for Intel CPUs and GPUs on Linux and Windows
 - Multi-arch Docker images (`linux/amd64`, `linux/arm64`)
 - Runs comfortably on a Raspberry Pi 4 or equivalent 64-bit single-board computer
@@ -182,6 +183,7 @@ Join the [Discord server](https://discord.gg/gcSCFGUtsd) for support, discussion
 - [BirdNET-Go Classifiers](https://github.com/tphakala/birdnet-go-classifiers): enhanced BirdNET classifiers with additional species
 - [BattyBirdNET-Analyzer](https://github.com/rdz-oss/BattyBirdNET-Analyzer): regional bat classifier models, installable via the in-app gallery
 - [BSG-BAT](https://doi.org/10.5281/zenodo.15495676): European bat classifier covering 21 species, installable via the in-app gallery
+- [BatSpot](https://doi.org/10.5281/zenodo.18977979): European bat search-call classifier covering 12 species and species complexes, installable via the in-app gallery
 
 ### Companion tools
 
@@ -255,5 +257,7 @@ The BirdNET AI model is by the K. Lisa Yang Center for Conservation Bioacoustics
 The [BattyBirdNET](https://github.com/rdz-oss/BattyBirdNET-Analyzer) bat classifier models are by Richard D. Zinck (R.D. Zinck).
 
 The [BSG-BAT](https://doi.org/10.5281/zenodo.15495676) European bat classifier is by Katarina Meramo, Panu Somervuo, Meeri Rannisto, Patrik Lauha, Adrià López-Baucells, Fabrizio Gili, Tomas Roslin, Thomas M. Lilley, and Otso Ovaskainen ([Methods in Ecology and Evolution, 2026](https://doi.org/10.1111/2041-210x.70220)).
+
+The [BatSpot](https://doi.org/10.5281/zenodo.18977979) bat call classifier is by S.Q. Smeele, C. Hauer, C. Bergler, D.K.N. Dechmann, M.T. Dietzer, M. Elmeros, E.T. Fjederholt, A. Fogato, J.E. Kohles, E. Nöth, and S.M. Brinkløv ([Biological Conservation, 2026](https://doi.org/10.1016/j.biocon.2026.111975)), built on [ANIMAL-SPOT](https://github.com/Hauechri/BatSpot).
 
 Google Perch v2 ONNX conversion by [Justin Chuby](https://huggingface.co/justinchuby/BirdNET-onnx). BirdNET label translations by Patrick Levin for the BirdNET-Pi project by Patrick McGuire.

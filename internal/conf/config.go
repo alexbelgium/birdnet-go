@@ -2104,6 +2104,7 @@ type Settings struct {
 	BirdNETV3   BirdNETV3Config   `yaml:"birdnetv3" json:"birdnetv3"`     // BirdNET v3.0 acoustic classifier configuration
 	BirdNETPlus BirdNETPlusConfig `yaml:"birdnetplus" json:"birdnetplus"` // BirdNET+ v3.0 acoustic classifier configuration
 	Bat         BatConfig         `yaml:"bat" json:"bat"`                 // Bat detection configuration
+	BatSpot     BatSpotConfig     `yaml:"batspot" json:"batspot"`         // BatSpot m09 bat classifier configuration
 	BSGBat      BSGBatConfig      `yaml:"bsgbat" json:"bsgbat"`           // BSG-BAT bat classifier configuration
 	BSG         BSGConfig         `yaml:"bsg" json:"bsg"`                 // BSG regional bird model configuration
 	Models      ModelsConfig      `yaml:"models" json:"models"`           // Global model enablement and management

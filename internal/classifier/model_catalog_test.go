@@ -360,7 +360,7 @@ func TestCatalogByCategory(t *testing.T) {
 	assert.Len(t, grouped[CategoryWildlife], 3, "expected 3 visible wildlife catalog entries (birdnet-plus-v3.0, perch-v2, birdnet-v3.0)")
 	assert.Len(t, grouped[CategoryBird], 1, "expected 1 visible bird catalog entry (birdnet-v2.4)")
 	assert.Len(t, grouped[CategoryGeomodel], 1, "expected 1 visible geomodel catalog entry")
-	assert.Len(t, grouped[CategoryBat], 12, "expected 12 bat catalog entries (11 BattyBirdNET regions and BSG-BAT)")
+	assert.Len(t, grouped[CategoryBat], 13, "expected 13 bat catalog entries")
 }
 
 func TestEmbeddedCatalog_BatEntriesHaveEmbeddingsFile(t *testing.T) {
@@ -404,10 +404,10 @@ func TestEmbeddedCatalog_BatEntriesHaveEmbeddingsFile(t *testing.T) {
 func TestEmbeddedCatalog_EntryCount(t *testing.T) {
 	t.Parallel()
 
-	// 3 wildlife + 2 bird + 1 geomodel + 12 bat = 18 total
+	// 3 wildlife + 2 bird + 1 geomodel + 13 bat = 19 total
 	// (bird: bsg-finland + the collapsed hidden BirdNET v2.4 foundation entry;
-	// bat: 11 BattyBirdNET regions + BSG-BAT)
-	assert.Len(t, EmbeddedCatalog, 18, "expected 18 total catalog entries")
+	// bat: 11 BattyBirdNET regions + BSG-BAT + BatSpot)
+	assert.Len(t, EmbeddedCatalog, 19, "expected 19 total catalog entries")
 }
 
 // TestEmbeddedCatalog_PreviewSupersededByBirdNETPlus pins the supersession

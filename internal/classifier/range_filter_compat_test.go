@@ -26,6 +26,7 @@ func TestModelRegistry_RangeFilterCompat(t *testing.T) {
 		RegistryIDPerchV2:       rangeFilterCompatGeomodel,
 		RegistryIDBat:           rangeFilterCompatNone,
 		RegistryIDBSGBat:        rangeFilterCompatNone,
+		RegistryIDBatSpot:       rangeFilterCompatNone,
 		RegistryIDBSG:           rangeFilterCompatNone,
 	}
 	for id := range ModelRegistry {

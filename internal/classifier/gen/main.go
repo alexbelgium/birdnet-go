@@ -441,6 +441,7 @@ type manifestModel struct {
 	// equal the sidecar checksum, and a family that requires a score calibration
 	// needs it set.
 	LabelsSHA256     string                    `json:"labels_sha256"`
+	LabelsSizeBytes  int64                     `json:"labels_size_bytes"`
 	ScoreCalibration *manifestScoreCalibration `json:"score_calibration"`
 }
 
@@ -514,6 +515,9 @@ func main() {
 func run() error {
 	labels, err := loadLabelsSidecar()
 	if err != nil {
+		return err
+	}
+	if err := validateBatSpotLabels(labels); err != nil {
 		return err
 	}
 
@@ -1073,6 +1077,9 @@ func updateLabelsSidecar() error {
 				fmt.Printf("hashed %s (%d lines, %d bytes)\n", key, lc.Lines, lc.SizeBytes)
 			}
 		}
+	}
+	if err := updateBatSpotLabels(client, out); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
