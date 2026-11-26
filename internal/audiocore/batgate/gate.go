@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	bandLowHz  = 18000.0 // lowest bat call energy considered (noctules reach ~18 kHz)
+	bandLowHz  = 15000.0 // lowest bat call energy considered: noctules call down to ~17 kHz, and a faint one needs the margin
 	bandHighHz = 90000.0 // upper edge, kept under the 96 kHz Nyquist of a 192 kHz source
 
 	eventFactor   = 8.0 // a frame is an event when its band power exceeds this many times the window median (~9 dB)
