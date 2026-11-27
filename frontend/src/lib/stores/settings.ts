@@ -159,6 +159,11 @@ export interface BatSettings {
     enabled: boolean;
     discardUnlikely?: boolean;
   };
+  gate?: {
+    enabled: boolean;
+    dryRun?: boolean;
+    mainsHz?: number;
+  };
 }
 
 // BSG-BAT bat classifier. It has its own confidence threshold; the schedule, false positive

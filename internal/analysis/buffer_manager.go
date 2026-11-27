@@ -76,6 +76,9 @@ type monitorTickState struct {
 	// ProcessData and processed without error; false until then, so a window read
 	// but skipped or failed (and the first window) makes the next one report a gap.
 	lastWindowAnalyzed bool
+
+	// gate counts the pre-inference bat gate decisions for this monitor.
+	gate batGateStats
 }
 
 // windowAudio places the window just read on its source's audio timeline. Call it
@@ -682,6 +685,11 @@ func (m *BufferManager) processMonitorTick(
 	// during daytime when nighttime-only scheduling is enabled). The buffered
 	// audio data is released by the existing defer release().
 	if !m.bn.IsModelActive(cfg.modelID) {
+		return true
+	}
+
+	// Pre-inference bat gate: skip windows with no bat-like ultrasonic event.
+	if m.batGateSkips(cfg, data, &state.gate) {
 		return true
 	}
 

@@ -1490,6 +1490,16 @@ type BatConfig struct {
 	NighttimeOnly       bool                        `yaml:"nighttimeonly" json:"nighttimeOnly"`                         // restrict bat detection to nighttime (civil dusk to civil dawn)
 	FalsePositiveFilter FalsePositiveFilterSettings `yaml:"falsepositivefilter" json:"falsePositiveFilter"`             // false positive filtering for bat detections (level 0-5)
 	UltrasonicFilter    UltrasonicFilterConfig      `yaml:"ultrasonicfilter" json:"ultrasonicFilter"`                   // post-detection ultrasonic validation filter
+	Gate                BatGateConfig               `yaml:"gate" json:"gate"`                                           // pre-inference gate shared by all bat models
+}
+
+// BatGateConfig controls the signal check run before every bat model. It skips
+// windows with no ultrasonic event, or whose only events repeat at the mains
+// period (interference locked to 50/60 Hz).
+type BatGateConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"` // run the gate before the bat models
+	DryRun  bool `yaml:"dryrun" json:"dryRun"`   // log what the gate would skip but still run the models
+	MainsHz int  `yaml:"mainshz" json:"mainsHz"` // mains frequency of the interference, 50 or 60
 }
 
 // UltrasonicFilterConfig controls the post-detection ultrasonic validation filter for bat detections.
