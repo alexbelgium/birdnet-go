@@ -3111,7 +3111,7 @@
           className="py-4"
           value={bat.gate?.enabled ?? false}
           label="Bat pre-filter gate"
-          description="Runs a quick signal check before every bat model. Windows with no ultrasonic event, or whose only events repeat at the mains frequency (electrical interference), are not sent to the models. Saves CPU and removes mains-noise false positives."
+          description="Runs a quick signal check before every bat model. Windows with no ultrasonic event, whose only events are broadband clicks (rain, crackle, electrical spikes), or whose only events repeat at the mains frequency (electrical interference), are not sent to the models. Saves CPU and removes click and mains-noise false positives."
           disabled={store.isLoading || store.isSaving}
           onUpdate={(v: boolean) => updateBatGate({ enabled: v })}
         />

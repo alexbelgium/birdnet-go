@@ -15,8 +15,8 @@ const batGateSummaryEvery = 500
 // batGateStats counts the gate decisions of one monitor and keeps its sample
 // buffer, reused from window to window (a 3 s window at 256 kHz is 3 MB).
 type batGateStats struct {
-	checked, skipped, noEvent, mainsOnly int
-	samples                              []float32
+	checked, skipped, noEvent, clicksOnly, mainsOnly int
+	samples                                          []float32
 }
 
 // batGateSkips runs the pre-inference bat gate on one window and reports whether
@@ -45,9 +45,12 @@ func (m *BufferManager) batGateSkips(cfg *monitorConfig, data []byte, st *batGat
 	st.checked++
 	if v.Skip {
 		st.skipped++
-		if v.Reason == batgate.ReasonMainsOnly {
+		switch v.Reason {
+		case batgate.ReasonMainsOnly:
 			st.mainsOnly++
-		} else {
+		case batgate.ReasonClicksOnly:
+			st.clicksOnly++
+		default:
 			st.noEvent++
 		}
 	}
@@ -59,6 +62,7 @@ func (m *BufferManager) batGateSkips(cfg *monitorConfig, data []byte, st *batGat
 		logger.Bool("dry_run", gateCfg.DryRun),
 		logger.String("reason", v.Reason),
 		logger.Int("events", v.Events),
+		logger.Int("clicks", v.Clicks),
 		logger.Int("residual", v.Residual),
 		logger.Float64("lock_score", v.LockScore))
 
@@ -70,6 +74,7 @@ func (m *BufferManager) batGateSkips(cfg *monitorConfig, data []byte, st *batGat
 			logger.Int("checked", st.checked),
 			logger.Int("skipped", st.skipped),
 			logger.Int("no_event", st.noEvent),
+			logger.Int("clicks_only", st.clicksOnly),
 			logger.Int("mains_only", st.mainsOnly))
 	}
 

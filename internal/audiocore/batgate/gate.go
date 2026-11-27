@@ -1,6 +1,8 @@
 // Package batgate is a cheap signal check run before the bat models. It skips a
-// window when it holds no ultrasonic event at all, or when every ultrasonic event
-// in it repeats at the mains period (an interference pulse train locked to 50 or
+// window when it holds no ultrasonic event at all, when its only events are
+// broadband clicks (impulses that raise every ultrasonic sub-band at once, such
+// as rain, crackle or electrical spikes), or when every ultrasonic event in it
+// repeats at the mains period (an interference pulse train locked to 50 or
 // 60 Hz) with nothing left once that repeating pattern is removed. Anything else
 // is passed to the models.
 package batgate
@@ -19,6 +21,32 @@ const (
 
 	eventFactor   = 8.0 // a frame is an event when a sub-band exceeds this many times its window median (~9 dB)
 	minEventFrame = 3   // event frames needed (a 2 ms call spans about 3 frames)
+
+	// An event frame is a broadband click, and does not count, when it is an
+	// impulse spread evenly over the whole band: every sub-band at least
+	// clickSpreadFactor times its window median (~3 dB), the strongest at most
+	// clickPeakRatio times the weakest (~15 dB), and a bin-level spectral
+	// flatness of at least clickMinFlatness. A bat call or click, even one
+	// lasting a single frame, is confined to the sub-bands its sweep crosses;
+	// one loud enough to leak into every sub-band still towers over the weakest,
+	// and a call whose harmonics fill every sub-band is a few narrow peaks with
+	// a low flatness. A call that overloads the recorder is clipped, and
+	// clipping spreads it as flat as an impulse; but every clipped frame then
+	// reaches the recorder's ceiling, the loudest level of its window, so a
+	// frame whose waveform peak is at least clipPeakShare of the window peak
+	// is never taken for a click. The share leaves room for the ripple the
+	// resampler puts on a clipped plateau. So bat frames still count. And when
+	// clicks leave fewer than minEventFrame events, the window still passes if
+	// one of the events left is tonal (flatness under tonalMaxFlatness): a
+	// lone bat click or very short call among rain or crackle reaches the
+	// models.
+	clickSpreadFactor = 2.0
+	clickPeakRatio    = 30.0
+	clickMinFlatness  = 0.25
+	flatnessFloor     = 1e-30   // added to each bin power so an all-zero bin does not send the log to -Inf
+	clipPeakShare     = 0.85    // a frame peaking at this share of the window peak or more may be clipped, never a click
+	tonalMaxFlatness  = 0.1     // an event frame this little flat is a few narrow peaks: a call, not noise
+	minClickBandHz    = 50000.0 // the click test needs a band at least this wide; on a narrower band a single sweep can cross every sub-band
 
 	residualFactor = 3.0 // a residual event must also exceed this many times the template near its phase, so pulse-to-pulse level jitter is not taken for a call
 
@@ -44,6 +72,8 @@ const (
 	ReasonSTFTUnavailable   = "stft unavailable"
 	ReasonDigitalSilence    = "digital silence"
 	ReasonNoEvent           = "no ultrasonic event"
+	ReasonClicksOnly        = "broadband clicks only"
+	ReasonTonalAmongClicks  = "tonal event among clicks"
 	ReasonNotMainsLocked    = "events not mains-locked"
 	ReasonEventOverMains    = "event over mains noise"
 	ReasonMainsOnly         = "mains-locked noise only"
@@ -53,7 +83,8 @@ const (
 type Verdict struct {
 	Skip      bool    // true when the window should not be sent to the bat models
 	Reason    string  // why, one of the Reason constants
-	Events    int     // event frames in the envelope
+	Events    int     // event frames in the envelope, broadband clicks included
+	Clicks    int     // event frames that are broadband clicks, which do not count as events
 	Residual  int     // event frames left after removing the mains-period template
 	LockScore float64 // share of envelope variance explained by the mains-period template (0..1)
 }
@@ -77,55 +108,38 @@ func Check(samples []float32, sampleRate, sourceRate, mainsHz int) Verdict {
 		mainsHz = defaultMainsHz
 	}
 
-	// Envelope: sub-band power in ~1 ms frames with 50 % overlap.
-	frameSize := nextPow2(sampleRate / envFrameHz)
-	hop := frameSize / 2
-	if len(samples) < frameSize*minWindowFrames {
-		return pass(ReasonWindowTooShort)
-	}
-	plan, err := stft.New(stft.Config{FrameSize: frameSize, HopSize: hop, Window: stft.HannSymmetric})
-	if err != nil {
-		return pass(ReasonSTFTUnavailable)
-	}
-	binHz := float64(sampleRate) / float64(frameSize)
-	lo, hi := int(bandLowHz/binHz), min(int(high/binHz), plan.NumBins()-1)
-	numFrames := 1 + (len(samples)-frameSize)/hop
-	bands := make([][]float64, subBands)
-	for k := range bands {
-		bands[k] = make([]float64, numFrames)
-	}
-	frame := make([]float32, frameSize)
-	power := make([]float32, plan.NumBins())
-	span := hi - lo + 1
-	for f := range numFrames {
-		copy(frame, samples[f*hop:f*hop+frameSize])
-		plan.PowerInto(power, frame, stft.NoPad)
-		for k := range bands {
-			var s float64
-			for b := lo + span*k/subBands; b < lo+span*(k+1)/subBands; b++ {
-				s += float64(power[b])
-			}
-			bands[k][f] = s
-		}
-	}
-
-	// Each sub-band is scaled by its own median; the envelope keeps the
-	// strongest sub-band of each frame.
-	env := make([]float64, numFrames)
-	for k := range bands {
-		m := median(bands[k])
-		if m <= 0 {
-			return pass(ReasonDigitalSilence)
-		}
-		for f, x := range bands[k] {
-			env[f] = max(env[f], x/m)
-		}
+	env, floor, flat, clipped, hop, reason := envelope(samples, sampleRate, high)
+	if reason != "" {
+		return pass(reason)
 	}
 
 	limit := eventFactor * median(env)
-	v := Verdict{Events: countAbove(env, limit)}
+	var click []bool
+	if high-bandLowHz >= minClickBandHz {
+		click = markClicks(env, floor, flat, clipped, limit)
+	}
+	isClick := func(f int) bool { return click != nil && click[f] }
+	var v Verdict
+	for f, x := range env {
+		if x > limit {
+			v.Events++
+			if isClick(f) {
+				v.Clicks++
+			}
+		}
+	}
 	if v.Events < minEventFrame {
 		v.Skip, v.Reason = true, ReasonNoEvent
+		return v
+	}
+	if v.Events-v.Clicks < minEventFrame {
+		for f, x := range env {
+			if x > limit && !isClick(f) && flat[f] < tonalMaxFlatness {
+				v.Reason = ReasonTonalAmongClicks
+				return v
+			}
+		}
+		v.Skip, v.Reason = true, ReasonClicksOnly
 		return v
 	}
 
@@ -180,6 +194,104 @@ func Check(samples []float32, sampleRate, sourceRate, mainsHz int) Verdict {
 	return v
 }
 
+// envelope computes, for ~1 ms frames with 50 % overlap over bandLowHz..high,
+// the strongest (env) and weakest (floor) sub-band power of each frame, each
+// sub-band scaled by its own window median, and the spectral flatness of each
+// frame over the whole band (flat: geometric over arithmetic mean of the bin
+// powers, 1 for a flat spectrum, near 0 for a few narrow peaks), and which
+// frames peak near the window's loudest level (clipped: possibly clipped). It
+// returns the STFT hop, or a non-empty pass reason when the window cannot be
+// judged.
+func envelope(samples []float32, sampleRate int, high float64) (env, floor, flat []float64, clipped []bool, hop int, reason string) {
+	frameSize := nextPow2(sampleRate / envFrameHz)
+	hop = frameSize / 2
+	if len(samples) < frameSize*minWindowFrames {
+		return nil, nil, nil, nil, 0, ReasonWindowTooShort
+	}
+	plan, err := stft.New(stft.Config{FrameSize: frameSize, HopSize: hop, Window: stft.HannSymmetric})
+	if err != nil {
+		return nil, nil, nil, nil, 0, ReasonSTFTUnavailable
+	}
+	binHz := float64(sampleRate) / float64(frameSize)
+	lo, hi := int(bandLowHz/binHz), min(int(high/binHz), plan.NumBins()-1)
+	numFrames := 1 + (len(samples)-frameSize)/hop
+	bands := make([][]float64, subBands)
+	for k := range bands {
+		bands[k] = make([]float64, numFrames)
+	}
+	flat = make([]float64, numFrames)
+	peaks := make([]float32, numFrames)
+	var windowPeak float32
+	frame := make([]float32, frameSize)
+	power := make([]float32, plan.NumBins())
+	span := hi - lo + 1
+	for f := range numFrames {
+		copy(frame, samples[f*hop:f*hop+frameSize])
+		for _, x := range frame {
+			peaks[f] = max(peaks[f], abs32(x))
+		}
+		windowPeak = max(windowPeak, peaks[f])
+		plan.PowerInto(power, frame, stft.NoPad)
+		var logSum, sum float64
+		for b := lo; b <= hi; b++ {
+			x := float64(power[b]) + flatnessFloor
+			logSum += math.Log(x)
+			sum += x
+		}
+		flat[f] = math.Exp(logSum/float64(span)) / (sum / float64(span))
+		for k := range bands {
+			var s float64
+			for b := lo + span*k/subBands; b < lo+span*(k+1)/subBands; b++ {
+				s += float64(power[b])
+			}
+			bands[k][f] = s
+		}
+	}
+
+	env = make([]float64, numFrames)
+	floor = make([]float64, numFrames)
+	for f := range floor {
+		floor[f] = math.Inf(1)
+	}
+	for k := range bands {
+		m := median(bands[k])
+		if m <= 0 {
+			return nil, nil, nil, nil, 0, ReasonDigitalSilence
+		}
+		for f, x := range bands[k] {
+			env[f] = max(env[f], x/m)
+			floor[f] = min(floor[f], x/m)
+		}
+	}
+	clipped = make([]bool, numFrames)
+	for f, p := range peaks {
+		clipped[f] = p >= clipPeakShare*windowPeak
+	}
+	return env, floor, flat, clipped, hop, ""
+}
+
+func abs32(x float32) float32 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// markClicks reports, for each event frame above limit, whether it is a
+// broadband click: every sub-band raised (floor), no sub-band towering over the
+// rest (env against floor), a flat spectrum at bin level (flat), and a waveform
+// that is not clipped.
+func markClicks(env, floor, flat []float64, clipped []bool, limit float64) []bool {
+	click := make([]bool, len(env))
+	for f, x := range env {
+		click[f] = x > limit && !clipped[f] &&
+			floor[f] >= clickSpreadFactor &&
+			x <= clickPeakRatio*floor[f] &&
+			flat[f] >= clickMinFlatness
+	}
+	return click
+}
+
 // phaseCount is the number of phase bins of one period.
 func phaseCount(hopSec, period float64) int {
 	return max(4, int(math.Round(period/hopSec)))
@@ -222,16 +334,6 @@ func foldedVariance(env []float64, hopSec, period float64) float64 {
 	cnt := float64(len(env))
 	m := s / cnt
 	return ss/cnt - m*m
-}
-
-func countAbove(v []float64, limit float64) int {
-	n := 0
-	for _, x := range v {
-		if x > limit {
-			n++
-		}
-	}
-	return n
 }
 
 func variance(v []float64) float64 {
